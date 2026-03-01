@@ -150,7 +150,22 @@ void main()
 		vec2 velocityUv = clamp(screenUv, vec2(0.0), vec2(1.0));
 		vec2 velocity = texture(SceneVelocity, velocityUv).xy;
 		vec2 prevScreenUvFromVel = screenUv - velocity;
-		prevViewUv = (prevScreenUvFromVel * FogViewportParams.xy - FogViewParams.xy) * FogViewParams.zw;
+		/* BUG FIX (G-06): Original formula was:
+		 *   prevViewUv = (prevScreenUvFromVel * FogViewportParams.xy - FogViewParams.xy) * FogViewParams.zw
+		 * prevScreenUvFromVel is already a UV [0,1].  Multiplying by FogViewportParams.xy
+		 * gives pixel coordinates, subtracting FogViewParams.xy (also pixel-space view origin)
+		 * gives view-relative pixels, multiplying by FogViewParams.zw (inv-view-size) gives
+		 * view UV.  This is correct in halfres where FogViewParams.xy = (0,0), but WRONG in
+		 * fullres mode where view_x/view_y are non-zero — the intermediate pixel-space value
+		 * was never properly derived from prevScreenUvFromVel.
+		 *
+		 * Correct derivation:
+		 *   prevScreenPx = prevScreenUvFromVel * FogViewportParams.xy   (UV → screen pixels)
+		 *   prevViewUv   = (prevScreenPx - FogViewParams.xy) * FogViewParams.zw  (pixels → view UV)
+		 * This is identical to what Reproject() computes, just using velocity instead of
+		 * the matrix reprojection path. */
+		vec2 prevScreenPx = prevScreenUvFromVel * FogViewportParams.xy;
+		prevViewUv = (prevScreenPx - FogViewParams.xy) * FogViewParams.zw;
 		valid = all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
 	}
 	else

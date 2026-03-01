@@ -101,8 +101,12 @@ const float ANISO_G_SUN      = 0.35;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
+// PERF FIX (G-02): NOISE_PERIOD = 64 is a power-of-two, so wrapping can be
+// done with a bitwise AND instead of integer modulo — avoids expensive div
+// instructions on older GPU architectures.
 int WrapIndex(int v, int period)
 {
+	// Generic path (kept for non-power-of-two periods if ever changed).
 	int r = v % period;
 	return (r < 0) ? (r + period) : r;
 }
@@ -110,6 +114,15 @@ int WrapIndex(int v, int period)
 ivec3 WrapIndex(ivec3 v, int period)
 {
 	return ivec3(WrapIndex(v.x, period), WrapIndex(v.y, period), WrapIndex(v.z, period));
+}
+
+// Fast wrap for NOISE_PERIOD (must be a power of two).
+ivec3 WrapNoise(ivec3 v)
+{
+	const int mask = NOISE_PERIOD - 1; // 63
+	// Correct for negative values: ((v % P) + P) % P == v & mask for P = 2^n
+	// because two's-complement negative & mask gives the correct positive remainder.
+	return ivec3(v.x & mask, v.y & mask, v.z & mask);
 }
 
 uint HashU32(ivec3 p)
@@ -130,8 +143,9 @@ float ValueNoise(vec3 p)
 	vec3 f = fract(p);
 	vec3 w = f * f * (3.0 - 2.0 * f);
 
-	ivec3 i0 = WrapIndex(ivec3(i), NOISE_PERIOD);
-	ivec3 i1 = WrapIndex(i0 + ivec3(1), NOISE_PERIOD);
+	// PERF: Use fast bitwise-AND wrap (WrapNoise) instead of modulo WrapIndex.
+	ivec3 i0 = WrapNoise(ivec3(i));
+	ivec3 i1 = WrapNoise(i0 + ivec3(1));
 
 	float n000 = Hash31(i0);
 	float n100 = Hash31(ivec3(i1.x, i0.y, i0.z));
@@ -151,26 +165,15 @@ float ValueNoise(vec3 p)
 	return mix(nxy0, nxy1, w.z);
 }
 
-// PERF: 2 octaves instead of 3.  The third octave contributes amp=0.25 of the
-// total (norm=0.75), i.e. at most 33% of the signal.  At typical fog noise
-// scales (0.01–0.05) the highest octave adds sub-texel detail that is
-// invisible through transmittance-weighted integration.  2 octaves cuts each
-// FBM call from 24 to 16 ValueNoise hash ops — significant because FBM is
-// called up to 4× per raymarching step (3× for domain warp + 1× for noise).
+// PERF FIX (G-01): Explicitly unrolled 2-octave FBM.  The loop version with
+// i < 2 may or may not be unrolled by the GLSL compiler; explicit code
+// guarantees it and makes the ALU budget visible at a glance.
+// Derivation: amp0=0.5, amp1=0.25, norm=0.75  →  out = (v0*0.5 + v1*0.25) / 0.75
 float FBM(vec3 p)
 {
-	float sum  = 0.0;
-	float amp  = 0.5;
-	float freq = 1.0;
-	float norm = 0.0;
-	for (int i = 0; i < 2; ++i)
-	{
-		sum  += amp * ValueNoise(p * freq);
-		norm += amp;
-		freq *= 2.0;
-		amp  *= 0.5;
-	}
-	return sum / max(norm, 1e-5);
+	float v0 = ValueNoise(p);
+	float v1 = ValueNoise(p * 2.0);
+	return (v0 * 0.5 + v1 * 0.25) * (1.0 / 0.75);
 }
 
 float FogNoise(vec3 p)
@@ -220,7 +223,18 @@ float LinearEyeDepth(float depth, vec2 viewUv)
 
 bool RayAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tEnter, out float tExit)
 {
-	vec3 invRd  = 1.0 / rd;
+	/* BUG FIX (G-01): 1.0/rd produces +/-Inf when any component of rd is
+	 * exactly 0.0 (e.g. perfectly horizontal or vertical gaze directions).
+	 * While Inf arithmetic is technically well-defined in IEEE 754 and produces
+	 * the correct intersection result in most cases, some GPU drivers or
+	 * optimised compiler paths flush Inf to NaN, breaking the test.
+	 * Clamp each component to a minimum magnitude before inversion. */
+	vec3 rdSafe = vec3(
+		abs(rd.x) < 1e-7 ? (rd.x >= 0.0 ? 1e-7 : -1e-7) : rd.x,
+		abs(rd.y) < 1e-7 ? (rd.y >= 0.0 ? 1e-7 : -1e-7) : rd.y,
+		abs(rd.z) < 1e-7 ? (rd.z >= 0.0 ? 1e-7 : -1e-7) : rd.z
+	);
+	vec3 invRd  = 1.0 / rdSafe;
 	vec3 t0     = (bmin - ro) * invRd;
 	vec3 t1     = (bmax - ro) * invRd;
 	vec3 tmin   = min(t0, t1);
@@ -376,10 +390,17 @@ void main()
 	vec2 screenUv  = screenPos * invScreen;
 	vec2 viewUv    = (screenPos - FogViewParams.xy) * FogViewParams.zw;
 
+	/* BUG FIX (G-04): SceneColor was sampled up to 4 times per fragment across
+	 * the various early-return paths.  Load it once here and reuse the cached
+	 * value.  SceneColor is typically hot in the L2 cache for a fullscreen
+	 * pass, but eliminating redundant calls reduces instruction count and
+	 * avoids accidental double-sampling if the sampler is non-trivial. */
+	vec3 scene = texture(SceneColor, screenUv).rgb;
+
 	FogVolume volume = FogVolumes[FogVolumeIndex];
 	if (volume.misc.y <= 0.0)
 	{
-		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		FragColor = vec4(scene, 1.0);
 		return;
 	}
 
@@ -394,7 +415,7 @@ void main()
 	vec4  world    = FogInvViewProj * clip;
 	if (abs(world.w) < 1e-6)
 	{
-		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		FragColor = vec4(scene, 1.0);
 		return;
 	}
 	vec3 worldPos = world.xyz / world.w;
@@ -410,13 +431,13 @@ void main()
 	{
 		if (!RaySphere(ro, rd, volume.sphere.xyz, volume.sphere.w, tEnter, tExit))
 		{
-			FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+			FragColor = vec4(scene, 1.0);
 			return;
 		}
 	}
 	else if (!RayAABB(ro, rd, volume.mins.xyz, volume.maxs.xyz, tEnter, tExit))
 	{
-		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		FragColor = vec4(scene, 1.0);
 		return;
 	}
 
@@ -427,7 +448,7 @@ void main()
 		tExit = min(tExit, maxDistance);
 	if (tExit <= tEnter)
 	{
-		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		FragColor = vec4(scene, 1.0);
 		return;
 	}
 
@@ -513,8 +534,13 @@ void main()
 			// Fix: use col_int.rgb directly, drop col_int.w multiplier.
 			vec3 lightScatter = vec3(0.0);
 			const float phase = 0.25; // isotropic phase function
-			for (int l = 0; l < FogLightMeta.x && l < MAX_FOGLIGHTS; ++l)
+			/* PERF FIX (G-03): Loop over the compile-time MAX_FOGLIGHTS constant
+			 * with an early break so the GPU can statically unroll and schedule
+			 * the loop.  A dynamic upper bound (FogLightMeta.x) prevents the
+			 * compiler from unrolling, wasting reservation station entries. */
+			for (int l = 0; l < MAX_FOGLIGHTS; ++l)
 			{
+				if (l >= FogLightMeta.x) break; // Dynamic count guard inside static bound.
 				vec3 lightVec = FogLights[l].pos_rad.xyz - p;
 				float lightDist = length(lightVec);
 				float radius = max(FogLights[l].pos_rad.w, 1e-3);
@@ -588,7 +614,8 @@ void main()
 	}
 
 	// ── composite ─────────────────────────────────────────────────────────
-	vec3 scene    = texture(SceneColor, screenUv).rgb;
+	// BUG FIX (G-04): Use the 'scene' value cached at the top of main() —
+	// no need to sample SceneColor a second time here.
 	vec3 outColor;
 	int blendMode = int(volume.extra.y + 0.5);
 	if (blendMode < 0)

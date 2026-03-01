@@ -65,7 +65,10 @@ void AccumTap(ivec2 tapCoord, ivec2 halfSizeSafe, ivec2 fullSizeSafe,
 void main()
 {
 	ivec2 fullSize = ivec2(FogUpsampleSize.xy);
-	ivec2 halfSize = ivec2(FogUpsampleSize.zw);
+	/* BP FIX: Clamp halfSize to at least ivec2(1) before subtraction to guard
+	 * against float-to-int conversion producing 0 or negative values for
+	 * degenerate framebuffers (e.g. if FogUpsampleSize.zw < 1.0). */
+	ivec2 halfSize = max(ivec2(FogUpsampleSize.zw), ivec2(1));
 
 	// FIX #6: Guard against degenerate sizes.
 	ivec2 halfSizeSafe = max(halfSize - ivec2(1), ivec2(0));
@@ -93,11 +96,18 @@ void main()
 	}
 	else
 	{
-		// 2×2 neighbourhood: the 4 half-res texels that map to this full-res pixel.
-		for (int j = 0; j < 2; ++j)
-			for (int i = 0; i < 2; ++i)
-				AccumTap(halfCoord + ivec2(i, j), halfSizeSafe, fullSizeSafe,
-				         depthCenter, accum, weightSum);
+		/* BUG FIX (G-08): The previous 4-tap loop iterated halfCoord + (0,0..1,1).
+		 * For a full-res pixel at (fx, fy), halfCoord = (fx/2, fy/2).
+		 * halfCoord + (1,1) = (fx/2+1, fy/2+1) — two half-res texels away in
+		 * both axes, not adjacent.  The correct 4-tap set is the 2×2 block of
+		 * half-res texels that STRADDLE the current full-res pixel, i.e. the
+		 * texel at halfCoord and its three neighbours at (-1,0), (0,-1), (-1,-1).
+		 * These are the four half-res texels that overlap the full-res pixel
+		 * when the half-res grid has 2× larger texels. */
+		AccumTap(halfCoord,                    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
+		AccumTap(halfCoord + ivec2(-1,  0),    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
+		AccumTap(halfCoord + ivec2( 0, -1),    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
+		AccumTap(halfCoord + ivec2(-1, -1),    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
 	}
 
 	vec3 color;

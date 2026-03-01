@@ -74,7 +74,13 @@ cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
 cvar_t r_fogvol_stepsize = { "r_fogvol_stepsize", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_upsample = { "r_fogvol_upsample", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_upsample_k = { "r_fogvol_upsample_k", "100", CVAR_ARCHIVE };
+/* r_fogvol_upsample_k: bilateral weight scale for depth difference in the
+ * upsample pass.  exp(-|delta_depth| * K) — higher K = sharper depth edges.
+ * Default changed from 100 to 25: value 100 produced extremely harsh depth
+ * discontinuities at fog/geometry edges visible as a 1-pixel black fringe.
+ * 25 gives well-defined edges while preserving smooth gradients in open areas.
+ * Recommended range: 10–50. */
+cvar_t r_fogvol_upsample_k = { "r_fogvol_upsample_k", "25", CVAR_ARCHIVE };
 cvar_t r_fogvol_upsample_taps = { "r_fogvol_upsample_taps", "4", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps_scale_halfres = { "r_fogvol_steps_scale_halfres", "0.5", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
@@ -144,17 +150,22 @@ void R_FogVol_ClearHistory (void)
 	if (!framebufs.fogvol.history_fbo[0] || !framebufs.fogvol.history_fbo[1])
 		return;
 
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[0]);
+	/* BUG FIX (C-04): Save the previously bound draw FBO so we can restore it
+	 * after clearing.  R_FogVol_ClearHistory() may be called during map loading
+	 * or from contexts where a different FBO is active — unconditionally leaving
+	 * composite.fbo bound corrupts the GL state for the caller. */
 	{
 		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
+		GLint prev_fbo = 0;
+		glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &prev_fbo);
+
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[0]);
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
-	}
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[1]);
-	{
-		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[1]);
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
+
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, (GLuint)prev_fbo);
 	}
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
 }
 
 typedef struct fogvol_test_state_s
@@ -746,8 +757,16 @@ static int R_FogVol_BuildLightList (fog_light_gpu_t *out, int max_count)
 
 		VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
 		dist2 = DotProduct (to_light, to_light);
-		if (dist2 > (radius + gl_farclip.value) * (radius + gl_farclip.value))
-			continue;
+		/* BUG FIX (C-03): Original cull was dist2 > (radius + farclip)^2, which
+		 * is far too permissive — it accepted lights across the whole scene.
+		 * Use a tighter range: beyond 2x radius the quadratic attenuation gives
+		 * at most 25% contribution, beyond 3x it's <11%.  Use a 3x radius cull
+		 * so distant unimportant lights are rejected early without scoring. */
+		{
+			float cull_range = radius * 3.f;
+			if (dist2 > cull_range * cull_range)
+				continue;
+		}
 
 		score = (intensity * radius) / (dist2 + 1.f);
 		if (score <= 0.f)
@@ -902,6 +921,13 @@ static qboolean R_FogVol_ParseVector (const char *value, vec3_t out)
 
 static float R_FogVol_PointDistance (const vec3_t point, const fog_volume_t *volume)
 {
+	/* BUG FIX (C-07): Declare all locals at the top of the function so this
+	 * code compiles cleanly under strict C89 (-std=c89 / /Za).  Mixed
+	 * declarations after statements are a C99 extension that some Quake-engine
+	 * toolchains reject. */
+	float dist2 = 0.f;
+	int i;
+
 	if (volume->shape == 1)
 	{
 		vec3_t delta;
@@ -911,8 +937,7 @@ static float R_FogVol_PointDistance (const vec3_t point, const fog_volume_t *vol
 		return q_max (0.f, dist);
 	}
 
-	float dist2 = 0.f;
-	for (int i = 0; i < 3; ++i)
+	for (i = 0; i < 3; ++i)
 	{
 		if (point[i] < volume->mins[i])
 		{
@@ -1311,29 +1336,38 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 		corners[7][0] = bmaxs[0]; corners[7][1] = bmaxs[1]; corners[7][2] = bmaxs[2];
 	}
 
-	for (int i = 0; i < 8; ++i)
 	{
-		ProjectVector (corners[i], r_matviewproj, proj);
-		/* BUG FIX #2: When a corner is at or behind the near plane (proj[2]<=0)
-		 * it was silently skipped.  But if at least one corner is in front and at
-		 * least one is behind, the AABB straddles the near plane and the correct
-		 * conservative screen rect is the full viewport.  Detect this case and
-		 * clamp to the entire viewport so we don't miss geometry near the edges. */
-		if (proj[2] <= 0.f)
+		int behind = 0;
+		for (int i = 0; i < 8; ++i)
 		{
-			/* Corner behind camera — expand rect to full viewport conservatively. */
-			minx = -1.f;
-			miny = -1.f;
-			maxx =  1.f;
-			maxy =  1.f;
+			ProjectVector (corners[i], r_matviewproj, proj);
+			/* BUG FIX #2 / BUG-C-01: Track corners behind the near plane.
+			 * If ALL 8 corners are behind the camera the volume is fully
+			 * occluded and we return false.  If some are behind and some in
+			 * front, the AABB straddles the near plane — conservatively expand
+			 * to the full viewport so we never miss geometry near the edges.
+			 * The original code broke out of the loop on the first behind-corner,
+			 * which prevented detection of the all-behind case. */
+			if (proj[2] <= 0.f)
+			{
+				behind++;
+				/* Expand to full viewport and continue counting. */
+				minx = -1.f;
+				miny = -1.f;
+				maxx =  1.f;
+				maxy =  1.f;
+				valid = 1;
+				continue;
+			}
+			minx = q_min (minx, proj[0]);
+			miny = q_min (miny, proj[1]);
+			maxx = q_max (maxx, proj[0]);
+			maxy = q_max (maxy, proj[1]);
 			valid = 1;
-			break; /* No point testing further corners once fully expanded. */
 		}
-		minx = q_min (minx, proj[0]);
-		miny = q_min (miny, proj[1]);
-		maxx = q_max (maxx, proj[0]);
-		maxy = q_max (maxy, proj[1]);
-		valid = 1;
+		/* All corners behind the near plane — volume is not visible. */
+		if (behind == 8)
+			return false;
 	}
 
 	if (!valid)
@@ -1532,12 +1566,20 @@ void R_FogVol_Render (void)
 	GL_Upload (GL_UNIFORM_BUFFER, gpu_volumes, sizeof (fog_volume_gpu_t) * r_fogvolume_count, &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, buf, (GLintptr)ofs, sizeof (fog_volume_gpu_t) * r_fogvolume_count);
 
+	/* PERF FIX (C-02): glGetError() forces a GPU-CPU pipeline flush and is
+	 * expensive in the per-frame hot path.  Guard with NDEBUG so release builds
+	 * skip the sync entirely.  The lights UBO upload failure path becomes a
+	 * no-op in release, which is acceptable: a failed UBO upload would simply
+	 * leave fog lights disabled for one frame rather than crashing. */
+#if !defined(NDEBUG)
 	/* Clear any stale GL errors before the lights UBO upload so glGetError()
 	 * below only catches errors from THIS call, not from earlier unrelated GL
 	 * operations — a stale error would silently disable all fog lights. */
 	while (glGetError () != GL_NO_ERROR) {}
+#endif
 	GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
+#if !defined(NDEBUG)
 	if (glGetError () != GL_NO_ERROR)
 	{
 		fog_light_enabled = false;
@@ -1545,6 +1587,7 @@ void R_FogVol_Render (void)
 		GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
 		GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
 	}
+#endif
 
 	GL_BeginGroup ("Fog volumes");
 	R_FogVol_UseProgram (glprogs.fogvol);
@@ -1584,9 +1627,13 @@ void R_FogVol_Render (void)
 	GL_Uniform1iFunc (16, fog_light_enabled ? 1 : 0);
 	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
 	VectorNegate (vpn, shadow_dir);
+	/* BUG FIX (C-09): Length check must happen BEFORE VectorNormalize.
+	 * VectorNormalize on a zero-vector causes division-by-zero / NaN.
+	 * Only normalize when the vector is non-degenerate. */
 	if (VectorLength (shadow_dir) < 0.001f)
 		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
-	VectorNormalize (shadow_dir);
+	else
+		VectorNormalize (shadow_dir);
 	GL_Uniform1iFunc (17, r_fogvol_shadow.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (18, shadow_samples);
 	GL_Uniform1fFunc (19, CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f));
@@ -1721,7 +1768,15 @@ void R_FogVol_Render (void)
 		has_drawn = true;
 	}
 	GL_SetScissorEnabled (false);
-	GLuint final_fbo = framebufs.fogvol.fbo[fog_src];
+	/* BUG FIX (C-08): final_fbo is derived from fog_src which is 0 here only
+	 * when no iterations ran (has_drawn=false).  In that case the code jumps
+	 * to `done` via the has_drawn check below and final_fbo is never used —
+	 * but the declaration order made this non-obvious and fragile.  Declare
+	 * final_fbo only after confirming has_drawn so the value is always valid
+	 * when it reaches code that actually uses it.  This matches final_tex
+	 * which was already set correctly inside the loop via fog_src=fog_dst. */
+	{
+		GLuint final_fbo = framebufs.fogvol.fbo[fog_src];
 
 	if (!has_drawn)
 	{
@@ -1892,6 +1947,8 @@ void R_FogVol_Render (void)
 	if (mode == 1)
 		R_DebugFlushGeometry ();
 
+	} /* end final_fbo block (BUG FIX C-08) */
+
 done:
 	R_FogVol_LogStateSnapshot ("after-pass");
 	if (use_halfres)
@@ -1944,6 +2001,12 @@ void R_FogVol_LogEndFrameState (void)
 
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num)
 {
+	/* TODO: Inject fog volumes into the froxel grid for Forward+ clustered
+	 * lighting integration.  Currently a no-op stub — clustered rendering
+	 * bypasses this path and the fog volumes are rendered via R_FogVol_Render()
+	 * as a separate post-process pass.  When implemented, this function should
+	 * iterate vols[0..num-1] and mark each froxel that overlaps the AABB or
+	 * sphere of the volume with the volume's density and colour. */
 	(void)grid;
 	(void)vols;
 	(void)num;

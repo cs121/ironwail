@@ -42,6 +42,9 @@ extern cvar_t r_fogvol_stepsize;
 extern cvar_t r_fogvol_upsample;
 extern cvar_t r_fogvol_upsample_k;
 extern cvar_t r_fogvol_upsample_taps;
+/* BUG FIX (C-05): r_fogvol_steps_scale_halfres was defined in r_fogvol.c but
+ * not exported — violates BEST PRACTICE #11. */
+extern cvar_t r_fogvol_steps_scale_halfres;
 extern cvar_t r_fogvol_noise;
 extern cvar_t r_fogvol_noisemode;
 extern cvar_t r_fogvol_physblend;
@@ -57,6 +60,9 @@ extern cvar_t r_fogvol_debug;
 extern cvar_t r_fogvol_density_scale;
 extern cvar_t r_fogvol_sigma_max;
 extern cvar_t r_fogvol_testvolumes;
+/* BUG FIX (C-06): r_fogvol_testvolumes_dumpstate was defined in r_fogvol.c
+ * but not exported — violates BEST PRACTICE #11. */
+extern cvar_t r_fogvol_testvolumes_dumpstate;
 extern cvar_t r_fogvol_globalfog;
 extern cvar_t r_fogvol_globalfog_density_scale;
 extern cvar_t r_fogvol_globalfog_falloff;
