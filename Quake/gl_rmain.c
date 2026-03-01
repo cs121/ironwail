@@ -3154,7 +3154,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (R_DoFEnabled ())
 		return true;
 
-	if (r_fogvol.value > 0.f)
+	if (r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
 		return true;
 
 	return false;
@@ -3184,7 +3184,7 @@ qboolean GL_NeedsPostprocess (void)
 		return true;
 	if (r_godrays.value > 0.f)
 		return true;
-	if (r_fogvol.value > 0.f)
+	if (r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
 		return true;
 	return false;
 }
