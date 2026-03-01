@@ -454,6 +454,11 @@ extern int		minimum_memory;
 
 void Host_InvokeOnMainThread (void (*func) (void *param), void *param);
 
+void Jobs_Init (void);
+qboolean Host_AsyncEnabled (void);
+qboolean Host_AsyncFSEnabled (void);
+qboolean Host_AsyncAssetsEnabled (void);
+
 #endif /* RC_INVOKED */
 
 #endif	/* QUAKEDEFS_H */

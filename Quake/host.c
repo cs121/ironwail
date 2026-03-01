@@ -701,6 +701,7 @@ not reinitialize anything.
 void Host_ClearMemory (void)
 {
 	R_ClearBoundingBoxes ();
+	FS_AsyncAdvanceGeneration ();
 
 	if (cl.qcvm.extfuncs.CSQC_Shutdown)
 	{
@@ -1276,6 +1277,7 @@ void _Host_Frame (double time)
 
 // run async procs
 	AsyncQueue_Drain (&async_queue);
+	FS_PumpAsyncCompletions ();
 
 // get new key events
 	Key_UpdateForDest ();
@@ -1460,6 +1462,7 @@ void Host_Init (void)
 	COM_Init ();
 	COM_InitFilesystem ();
 	Host_InitLocal ();
+	Jobs_Init ();
 	W_LoadWadFile (); //johnfitz -- filename is now hard-coded for honesty
 	if (cls.state != ca_dedicated)
 	{
@@ -1562,6 +1565,7 @@ void Host_Shutdown(void)
 	Steam_Shutdown ();
 
 	AsyncQueue_Destroy (&async_queue);
+	Jobs_Shutdown ();
 
 	Host_ShutdownSave ();
 	Host_WriteConfiguration ();
