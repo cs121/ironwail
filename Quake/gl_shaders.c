@@ -33,8 +33,9 @@ typedef struct shader_cache_s
         char *data;
 } shader_cache_t;
 
-static shader_cache_t shader_cache[128];
+static shader_cache_t *shader_cache;
 static int shader_cache_count;
+static int shader_cache_capacity;
 
 static qboolean GL_IsShaderIncludePathSafe (const char *path, const char **reason)
 {
@@ -180,9 +181,50 @@ static qboolean GL_NormalizeShaderIncludePath (const char *basepath, const char 
 }
 
 glprogs_t glprogs;
-static GLuint gl_programs[128];
+static GLuint *gl_programs;
 static GLuint gl_current_program;
 static int gl_num_programs;
+static int gl_programs_capacity;
+
+static void GL_EnsureProgramCapacity (int needed)
+{
+	int newcapacity;
+	GLuint *newprograms;
+
+	if (needed <= gl_programs_capacity)
+		return;
+
+	newcapacity = gl_programs_capacity ? gl_programs_capacity : 64;
+	while (newcapacity < needed)
+		newcapacity *= 2;
+
+	newprograms = (GLuint *) realloc (gl_programs, newcapacity * sizeof (*gl_programs));
+	if (!newprograms)
+		Sys_Error ("GL_EnsureProgramCapacity: out of memory");
+
+	gl_programs = newprograms;
+	gl_programs_capacity = newcapacity;
+}
+
+static void GL_EnsureShaderCacheCapacity (int needed)
+{
+	int newcapacity;
+	shader_cache_t *newcache;
+
+	if (needed <= shader_cache_capacity)
+		return;
+
+	newcapacity = shader_cache_capacity ? shader_cache_capacity : 64;
+	while (newcapacity < needed)
+		newcapacity *= 2;
+
+	newcache = (shader_cache_t *) realloc (shader_cache, newcapacity * sizeof (*shader_cache));
+	if (!newcache)
+		Sys_Error ("GL_EnsureShaderCacheCapacity: out of memory");
+
+	shader_cache = newcache;
+	shader_cache_capacity = newcapacity;
+}
 
 /*
 =============
@@ -342,8 +384,7 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 		GL_InitError ("Error linking %s program:\n\n%s", name, infolog);
 	}
 
-	if (gl_num_programs == countof(gl_programs))
-		Sys_Error ("gl_programs overflow");
+	GL_EnsureProgramCapacity (gl_num_programs + 1);
 	gl_programs[gl_num_programs] = program;
 	gl_num_programs++;
 
@@ -377,8 +418,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
 
         include_stack[include_stack_size++] = path;
 
-        if (shader_cache_count == countof(shader_cache))
-                Sys_Error ("GL_LoadShaderFile: shader cache overflow");
+        GL_EnsureShaderCacheCapacity (shader_cache_count + 1);
 
         source = (char *) COM_LoadMallocFile (path, NULL);
         if (!source)
@@ -738,6 +778,8 @@ void GL_CreateShaders (void)
         for (mode = 0; mode < 3; mode++)
                 glprogs.palette_init[mode] = GL_CreateComputeProgram (GLSL_PATH("palette_init.comp"), "palette init|MODE %d", mode);
         glprogs.palette_postprocess = GL_CreateComputeProgram (GLSL_PATH("palette_postprocess.comp"), "palette postprocess");
+
+	Con_Printf ("Loaded %d GLSL programs (%d shader cache entries)\n", gl_num_programs, shader_cache_count);
 }
 
 /*
@@ -751,9 +793,11 @@ void GL_DeleteShaders (void)
         for (i = 0; i < gl_num_programs; i++)
         {
                 GL_DeleteProgramFunc (gl_programs[i]);
-                gl_programs[i] = 0;
         }
+        free (gl_programs);
+        gl_programs = NULL;
         gl_num_programs = 0;
+        gl_programs_capacity = 0;
 
         GL_UseProgramFunc (0);
         gl_current_program = 0;
@@ -763,8 +807,9 @@ void GL_DeleteShaders (void)
         for (i = 0; i < shader_cache_count; i++)
         {
                 free (shader_cache[i].data);
-                shader_cache[i].data = NULL;
-                shader_cache[i].path[0] = '\0';
         }
+        free (shader_cache);
+        shader_cache = NULL;
         shader_cache_count = 0;
+        shader_cache_capacity = 0;
 }
