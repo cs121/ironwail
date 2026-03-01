@@ -355,7 +355,7 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 GL_CreateProgramFromSources
 ====================
 */
-static char *GL_LoadShaderFile_Internal (const char *path, int depth)
+static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char **include_stack, int include_stack_size)
 {
         size_t capacity, result_len;
         char *result;
@@ -371,6 +371,11 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
 
         if (depth >= 32)
                 Sys_Error ("GL_LoadShaderFile: include depth overflow for %s", path);
+
+        if (include_stack_size >= 32)
+                Sys_Error ("GL_LoadShaderFile: include stack overflow for %s", path);
+
+        include_stack[include_stack_size++] = path;
 
         if (shader_cache_count == countof(shader_cache))
                 Sys_Error ("GL_LoadShaderFile: shader cache overflow");
@@ -465,7 +470,34 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
 										path, include_path, reason ? reason : "invalid path");
 								}
 
-                                        included = GL_LoadShaderFile_Internal (full_path, depth + 1);
+                                        for (i = 0; i < include_stack_size; i++)
+                                        {
+                                                if (!strcmp (include_stack[i], full_path))
+                                                {
+                                                        char cycle[4096];
+                                                        char *dst = cycle;
+                                                        size_t remaining = sizeof (cycle);
+                                                        int j;
+
+                                                        cycle[0] = '\0';
+                                                        for (j = i; j < include_stack_size; j++)
+                                                        {
+                                                                int written = q_snprintf (dst, remaining, "%s -> ", include_stack[j]);
+                                                                if (written < 0 || (size_t) written >= remaining)
+                                                                        break;
+                                                                dst += written;
+                                                                remaining -= (size_t) written;
+                                                        }
+                                                        if (remaining > 0)
+                                                                q_snprintf (dst, remaining, "%s", full_path);
+
+                                                        free (result);
+                                                        free (source);
+                                                        GL_InitError ("Shader include cycle detected: %s", cycle);
+                                                }
+                                        }
+
+                                        included = GL_LoadShaderFile_Internal (full_path, depth + 1, include_stack, include_stack_size);
                                         if (included)
                                         {
                                                 APPEND_STR (included, strlen (included));
@@ -496,7 +528,8 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
 
 static char *GL_LoadShaderFile (const char *path)
 {
-        return GL_LoadShaderFile_Internal (path, 0);
+        const char *include_stack[32];
+        return GL_LoadShaderFile_Internal (path, 0, include_stack, 0);
 }
 
 static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GLenum *types, const char *name, va_list argptr)
