@@ -250,6 +250,42 @@ static qboolean AppendString (char **dst, const char *dstend, const char *str, i
 	return true;
 }
 
+static qboolean GL_IsValidMacroIdentifier (const char *name, size_t len)
+{
+	size_t i;
+
+	if (!len)
+		return false;
+
+	if (!(q_isalpha ((unsigned char)name[0]) || name[0] == '_'))
+		return false;
+
+	for (i = 1; i < len; i++)
+	{
+		if (!(q_isalnum ((unsigned char)name[i]) || name[i] == '_'))
+			return false;
+	}
+
+	return true;
+}
+
+#ifndef NDEBUG
+static void GL_DebugTestMacroIdentifierParser (void)
+{
+	static qboolean ran;
+
+	if (ran)
+		return;
+	ran = true;
+
+	assert (GL_IsValidMacroIdentifier ("FOO", 3));
+	assert (GL_IsValidMacroIdentifier ("_BAR9", 5));
+	assert (!GL_IsValidMacroIdentifier ("", 0));
+	assert (!GL_IsValidMacroIdentifier ("9BAD", 4));
+	assert (!GL_IsValidMacroIdentifier ("BAD-NAME", 8));
+}
+#endif
+
 /*
 =============
 GL_CreateShader
@@ -563,23 +599,61 @@ static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GL
 		char *dstend = macros + sizeof (macros);
 		char *src = eval + 1 + (pipe - name);
 
+#ifndef NDEBUG
+		GL_DebugTestMacroIdentifierParser ();
+#endif
+
 		while (*src == ' ')
 			src++;
 
 		while (*src)
 		{
-			char *srcend = src + 1;
+			char *srcend = src;
+			char *tokstart, *tokend;
+			char *namestart, *nameend;
+			char *valuestart;
 			while (*srcend && *srcend != ';')
 				srcend++;
 
+			tokstart = src;
+			while (tokstart < srcend && q_isspace ((unsigned char)*tokstart))
+				tokstart++;
+			tokend = srcend;
+			while (tokend > tokstart && q_isspace ((unsigned char)tokend[-1]))
+				tokend--;
+
+			if (tokstart == tokend)
+				GL_InitError ("GL_CreateProgram '%s': empty macro token in '%s'", name, eval);
+
+			namestart = tokstart;
+			nameend = namestart;
+			while (nameend < tokend && !q_isspace ((unsigned char)*nameend))
+				nameend++;
+
+			if (!GL_IsValidMacroIdentifier (namestart, nameend - namestart))
+				GL_InitError ("GL_CreateProgram '%s': invalid macro identifier '%.*s' in '%s'",
+					name, (int)(nameend - namestart), namestart, eval);
+
+			valuestart = nameend;
+			while (valuestart < tokend && q_isspace ((unsigned char)*valuestart))
+				valuestart++;
+
 			if (!AppendString (&dst, dstend, "#define ", 8) ||
-				!AppendString (&dst, dstend, src, srcend - src) ||
+				!AppendString (&dst, dstend, namestart, nameend - namestart) ||
+				(valuestart < tokend && (!AppendString (&dst, dstend, " ", 1) ||
+					!AppendString (&dst, dstend, valuestart, tokend - valuestart))) ||
 				!AppendString (&dst, dstend, "\n", 1))
 				Sys_Error ("GL_CreateProgram: symbol overflow for %s", eval);
 
 			src = srcend;
-			while (*src == ';' || *src == ' ')
+			if (*src == ';')
+			{
 				src++;
+				while (*src == ' ')
+					src++;
+				if (!*src)
+					GL_InitError ("GL_CreateProgram '%s': empty trailing macro token in '%s'", name, eval);
+			}
 		}
 
 		AppendString (&dst, dstend, "\n", 1);
