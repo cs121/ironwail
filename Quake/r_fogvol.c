@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "draw.h"
 #include "r_fogvol.h"
+#include "r_dlight_pool.h"
 #include <math.h>
 
 typedef struct fog_volume_gpu_s
@@ -39,6 +40,28 @@ typedef struct fog_volume_gpu_s
 } fog_volume_gpu_t;
 
 COMPILE_TIME_ASSERT (fog_volume_gpu_align16, (sizeof (fog_volume_gpu_t) % 16) == 0);
+
+typedef struct fog_light_gpu_s
+{
+	float pos_rad[4];
+	float col_int[4];
+} fog_light_gpu_t;
+
+typedef struct fog_light_list_gpu_s
+{
+	int light_count[4];
+	fog_light_gpu_t lights[32];
+} fog_light_list_gpu_t;
+
+COMPILE_TIME_ASSERT (fog_light_gpu_align16, (sizeof (fog_light_gpu_t) % 16) == 0);
+COMPILE_TIME_ASSERT (fog_light_list_gpu_align16, (sizeof (fog_light_list_gpu_t) % 16) == 0);
+
+typedef struct fogvol_light_candidate_s
+{
+	int index;
+	float score;
+	fog_light_gpu_t light;
+} fogvol_light_candidate_t;
 
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
 static int r_fogvolume_count = 0;
@@ -95,6 +118,8 @@ cvar_t r_fogvol_globalfog_velocity_z = { "r_fogvol_globalfog_velocity_z", "0", C
 cvar_t r_fogvol_globalfog_height = { "r_fogvol_globalfog_height", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_height_scale = { "r_fogvol_globalfog_height_scale", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_priority = { "r_fogvol_globalfog_priority", "-1", CVAR_ARCHIVE };
+cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
 
 extern cvar_t gl_farclip;
 
@@ -661,6 +686,89 @@ static int R_FogVol_ComparePriority (const void *a, const void *b)
 	return 0;
 }
 
+static int R_FogVol_CompareLightCandidate (const void *a, const void *b)
+{
+	const fogvol_light_candidate_t *la = (const fogvol_light_candidate_t *)a;
+	const fogvol_light_candidate_t *lb = (const fogvol_light_candidate_t *)b;
+
+	if (la->score > lb->score)
+		return -1;
+	if (la->score < lb->score)
+		return 1;
+	if (la->index < lb->index)
+		return -1;
+	if (la->index > lb->index)
+		return 1;
+	return 0;
+}
+
+static int R_FogVol_BuildLightList (fog_light_gpu_t *out, int max_count)
+{
+	const dlight_t *const *active;
+	fogvol_light_candidate_t candidates[256];
+	int active_count = 0;
+	int candidate_count = 0;
+	int copy_count;
+
+	if (!out || max_count <= 0)
+		return 0;
+
+	active = DLightPool_GetActiveList (&active_count);
+	if (!active || active_count <= 0)
+		return 0;
+
+	for (int i = 0; i < active_count && candidate_count < countof (candidates); ++i)
+	{
+		const dlight_t *dl = active[i];
+		vec3_t to_light;
+		float dist2;
+		float intensity;
+		float radius;
+		float score;
+
+		if (!dl || !CL_DlightIsActive (dl))
+			continue;
+
+		radius = dl->radius;
+		if (radius <= 0.f)
+			continue;
+
+		intensity = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
+		if (intensity <= 0.f)
+			continue;
+
+		VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
+		dist2 = DotProduct (to_light, to_light);
+		if (dist2 > (radius + gl_farclip.value) * (radius + gl_farclip.value))
+			continue;
+
+		score = (intensity * radius) / (dist2 + 1.f);
+		if (score <= 0.f)
+			continue;
+
+		candidates[candidate_count].index = (dl->id != 0) ? dl->id : i;
+		candidates[candidate_count].score = score;
+		candidates[candidate_count].light.pos_rad[0] = dl->origin[0];
+		candidates[candidate_count].light.pos_rad[1] = dl->origin[1];
+		candidates[candidate_count].light.pos_rad[2] = dl->origin[2];
+		candidates[candidate_count].light.pos_rad[3] = radius;
+		candidates[candidate_count].light.col_int[0] = dl->color[0];
+		candidates[candidate_count].light.col_int[1] = dl->color[1];
+		candidates[candidate_count].light.col_int[2] = dl->color[2];
+		candidates[candidate_count].light.col_int[3] = intensity;
+		candidate_count++;
+	}
+
+	if (candidate_count <= 0)
+		return 0;
+
+	qsort (candidates, candidate_count, sizeof (candidates[0]), R_FogVol_CompareLightCandidate);
+	copy_count = q_min (candidate_count, max_count);
+	for (int i = 0; i < copy_count; ++i)
+		out[i] = candidates[i].light;
+	return copy_count;
+}
+
 void R_FogVol_Init (void)
 {
 	Cvar_RegisterVariable (&r_fogvol);
@@ -697,6 +805,8 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_globalfog_height);
 	Cvar_RegisterVariable (&r_fogvol_globalfog_height_scale);
 	Cvar_RegisterVariable (&r_fogvol_globalfog_priority);
+	Cvar_RegisterVariable (&r_fogvol_light);
+	Cvar_RegisterVariable (&r_fogvol_light_max);
 }
 
 void R_FogVol_Clear (void)
@@ -1251,6 +1361,7 @@ void R_FogVol_Render (void)
 	GLuint buf;
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
+	fog_light_list_gpu_t fog_lights;
 	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 7);
 	float inv_viewproj[16];
 	GLuint src_tex;
@@ -1282,6 +1393,7 @@ void R_FogVol_Render (void)
 	qboolean use_test_guard;
 	qboolean dumpstate_always;
 	fogvol_restore_state_t restore_state;
+	qboolean fog_light_enabled = false;
 
 	if (!glprogs.fogvol)
 		return;
@@ -1337,6 +1449,15 @@ void R_FogVol_Render (void)
 	}
 	steps = CLAMP (8, steps, q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
 
+	memset (&fog_lights, 0, sizeof (fog_lights));
+	if (r_fogvol_light.value > 0.f)
+	{
+		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), (int)countof (fog_lights.lights));
+		int light_count = R_FogVol_BuildLightList (fog_lights.lights, max_lights);
+		fog_lights.light_count[0] = light_count;
+		fog_light_enabled = (light_count > 0);
+	}
+
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
 		fog_volume_t *v = &r_fogvolumes[i];
@@ -1391,6 +1512,16 @@ void R_FogVol_Render (void)
 	GL_Upload (GL_UNIFORM_BUFFER, gpu_volumes, sizeof (fog_volume_gpu_t) * r_fogvolume_count, &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, buf, (GLintptr)ofs, sizeof (fog_volume_gpu_t) * r_fogvolume_count);
 
+	GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
+	GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
+	if (glGetError () != GL_NO_ERROR)
+	{
+		fog_light_enabled = false;
+		fog_lights.light_count[0] = 0;
+		GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
+		GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
+	}
+
 	GL_BeginGroup ("Fog volumes");
 	R_FogVol_UseProgram (glprogs.fogvol);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
@@ -1426,6 +1557,7 @@ void R_FogVol_Render (void)
 	GL_Uniform2fFunc (13, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
 	GL_Uniform1iFunc (14, r_fogvol_emissive.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (15, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
+	GL_Uniform1iFunc (16, fog_light_enabled ? 1 : 0);
 
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);
