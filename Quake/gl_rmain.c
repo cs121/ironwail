@@ -1265,8 +1265,9 @@ static void R_CompositeDlightBuffer (void)
 		return;
 
 	float scale = q_max (0.f, r_dlight_scale.value);
-	float bloom_enabled = q_max (0.f, r_dlight_bloom.value);
-	float bloom_scale = q_max (0.f, r_dlight_bloom_scale.value);
+	float bloom_master = q_max (0.f, r_bloom.value);
+	float bloom_enabled = (bloom_master > 0.f) ? q_max (0.f, r_dlight_bloom.value) : 0.f;
+	float bloom_scale = q_max (0.f, r_dlight_bloom_scale.value) * bloom_master;
 	float bloom_radius = q_max (0.f, r_dlight_bloom_radius.value);
 	float bloom_threshold = q_max (0.f, r_dlight_bloom_threshold.value);
 
@@ -2330,10 +2331,18 @@ void GL_PostProcess (void)
 			exposure *= auto_exposure;
 	}
 	r_autoexposure_debug_exposure = exposure;
-	if (r_postfx_bloom_mode.value > 0.f)
-		bloom_intensity_effective = q_max (bloom_intensity, postfx_bloom_boost);
+	if (bloom_intensity > 0.f)
+	{
+		if (r_postfx_bloom_mode.value > 0.f)
+			bloom_intensity_effective = q_max (bloom_intensity, postfx_bloom_boost);
+		else
+			bloom_intensity_effective = bloom_intensity + postfx_bloom_boost;
+	}
 	else
-		bloom_intensity_effective = bloom_intensity + postfx_bloom_boost;
+	{
+		bloom_intensity_effective = 0.f;
+		postfx_bloom_boost = 0.f;
+	}
 	bloom_intensity_effective = q_max (0.f, bloom_intensity_effective);
 
 	if (r_postfx_lut_debug_id.value > 0.f)
