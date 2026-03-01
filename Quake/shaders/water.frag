@@ -127,6 +127,7 @@ layout(location=7) noperspective in vec4 in_prev_clip;
         layout(location=1) out vec4 out_velocity;
 #endif // OIT
 
+// Fog.w is treated as a signed-friendly density; use abs(Fog.w) so negative CPU values do not invert attenuation.
 void main()
 {
         vec3 fullbright = vec3(0.0);
@@ -163,7 +164,7 @@ void main()
         result.rgb += fullbright;
         result.rgb += emissive;
         result.rgb = clamp(result.rgb, 0.0, 1.0);
-        float fog = exp2(-Fog.w * dot(in_pos - EyePos, in_pos - EyePos));
+        float fog = exp2(-abs(Fog.w) * dot(in_pos - EyePos, in_pos - EyePos));
         fog = clamp(fog, 0.0, 1.0);
 
         result.rgb = mix(Fog.rgb, result.rgb, fog);
@@ -180,7 +181,7 @@ void main()
         out_velocity = vec4(velocityOut, 0.0, materialMask);
 #endif
 #if DITHER
-	if (Fog.w > 0.)
+	if (abs(Fog.w) > 0.)
 	{
 		out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
 		out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;

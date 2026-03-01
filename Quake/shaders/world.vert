@@ -8,12 +8,10 @@
 
 #include "frame_uniforms.glsl"
 
-// NOTE: world.vert and world.frag both define ApplyFog but with a subtle difference:
-// vert uses exp2(-Fog.w * ...) while frag uses exp2(-abs(Fog.w) * ...).
-// frag version is safer (handles negative Fog.w). Keep them consistent if you unify.
+// Fog.w is treated as a signed-friendly density; use abs(Fog.w) so negative CPU values do not invert attenuation.
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
-	float fog = exp2(-Fog.w * dot(p, p));
+	float fog = exp2(-abs(Fog.w) * dot(p, p));
 	fog = clamp(fog, 0.0, 1.0);
 	return mix(Fog.rgb, clr, fog);
 }
