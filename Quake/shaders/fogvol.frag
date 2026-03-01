@@ -96,6 +96,8 @@ const int   NOISE_PERIOD     = 64;
 const float NOISE_SCALE_MIN  = 0.005;
 const float NOISE_SCALE_MAX  = 0.5;
 const float LUT_PERIOD       = 64.0;
+const float ANISO_G_LOCAL    = 0.5;
+const float ANISO_G_SUN      = 0.35;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -240,6 +242,17 @@ float Dither(vec2 pixel)
 float InterleavedGradientNoise(vec2 p)
 {
 	return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
+}
+
+// Henyey-Greenstein phase scaled so isotropic (g=0) evaluates to 1.0.
+// This lets us modulate existing scattering terms without changing their
+// baseline energy when anisotropy is disabled.
+float AnisotropicPhase(float cosTheta, float g)
+{
+	g = clamp(g, -0.95, 0.95);
+	float gg = g * g;
+	float denom = max(1.0 + gg - 2.0 * g * cosTheta, 1e-4);
+	return (1.0 - gg) / (denom * sqrt(denom));
 }
 
 vec3 DebugVolumeColor(float id, float priority)
@@ -446,6 +459,9 @@ void main()
 	float tau           = 0.0;
 	float shadowVisAccum = 0.0;
 	float shadowWeightAccum = 0.0;
+	vec3  viewDir       = -rd;
+	vec3  sunDir        = normalize(FogShadowDir);
+	float sunDirLenSq   = dot(sunDir, sunDir);
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated — they were
 	// accumulated but never consumed, silently wasting ALU every iteration.
@@ -480,7 +496,10 @@ void main()
 		float opticalDepth = min(rawSigma * stepLen, FogDensityParams.y);
 		float att        = exp(-opticalDepth);
 		float shadowVisibility = EstimateShadowVisibility(p, volume, density, falloff, noiseScalePre, flowPre, stepLen);
-		vec3  stepScatter = (1.0 - att) * scatterColor;
+		float phaseSun = 1.0;
+		if (sunDirLenSq > 1e-6)
+			phaseSun = AnisotropicPhase(clamp(dot(viewDir, sunDir), -1.0, 1.0), ANISO_G_SUN);
+		vec3  stepScatter = (1.0 - att) * scatterColor * phaseSun;
 		if (FogLightEnabled != 0 && FogLightMeta.x > 0)
 		{
 			// BUG FIX 1: Was `lightScatter * opticalDepth` — opticalDepth is
@@ -501,7 +520,9 @@ void main()
 				float radius = max(FogLights[l].pos_rad.w, 1e-3);
 				float atten = clamp(1.0 - lightDist / radius, 0.0, 1.0);
 				atten *= atten; // quadratic falloff
-				lightScatter += FogLights[l].col_int.rgb * (atten * phase);
+				vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
+				float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
+				lightScatter += FogLights[l].col_int.rgb * (atten * phase * phaseLocal);
 			}
 			stepScatter += lightScatter * (1.0 - att);
 		}
