@@ -419,8 +419,15 @@ void COM_CloseFile (int h);
 
 typedef struct jobhandle_s
 {
-	volatile int done;
+	SDL_mutex *mutex;
+	SDL_cond *cond;
+	qboolean done;
 } JobHandle;
+
+// Thread-safety contract:
+// - completion is published while holding handle->mutex and signaled via handle->cond.
+// - Jobs_Wait may be called from any thread, but at most once per handle.
+// - ownership of the handle transfers to Jobs_Wait, which frees it.
 
 typedef void (*jobs_func_t)(void *userdata);
 

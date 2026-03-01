@@ -54,7 +54,10 @@ static int Jobs_Worker (void *unused)
 		SDL_UnlockMutex (jobs_mutex);
 
 		node->func (node->userdata);
-		node->handle->done = 1;
+		SDL_LockMutex (node->handle->mutex);
+		node->handle->done = true;
+		SDL_CondSignal (node->handle->cond);
+		SDL_UnlockMutex (node->handle->mutex);
 		free (node);
 	}
 	return 0;
@@ -68,11 +71,18 @@ JobHandle *Jobs_Submit (jobs_func_t func, void *userdata)
 	handle = (JobHandle *) calloc (1, sizeof (*handle));
 	if (!handle)
 		Sys_Error ("Jobs_Submit: out of memory");
+	handle->mutex = SDL_CreateMutex ();
+	handle->cond = SDL_CreateCond ();
+	if (!handle->mutex || !handle->cond)
+		Sys_Error ("Jobs_Submit: failed to create handle sync primitives");
 
 	if (!Host_AsyncEnabled () || !jobs_thread)
 	{
 		func (userdata);
-		handle->done = 1;
+		SDL_LockMutex (handle->mutex);
+		handle->done = true;
+		SDL_CondSignal (handle->cond);
+		SDL_UnlockMutex (handle->mutex);
 		return handle;
 	}
 
@@ -99,8 +109,12 @@ void Jobs_Wait (JobHandle *handle)
 {
 	if (!handle)
 		return;
+	SDL_LockMutex (handle->mutex);
 	while (!handle->done)
-		SDL_Delay (1);
+		SDL_CondWait (handle->cond, handle->mutex);
+	SDL_UnlockMutex (handle->mutex);
+	SDL_DestroyCond (handle->cond);
+	SDL_DestroyMutex (handle->mutex);
 	free (handle);
 }
 
@@ -284,7 +298,10 @@ void Jobs_Shutdown (void)
 	while ((node = jobs_head) != NULL)
 	{
 		jobs_head = node->next;
-		node->handle->done = 1;
+		SDL_LockMutex (node->handle->mutex);
+		node->handle->done = true;
+		SDL_CondSignal (node->handle->cond);
+		SDL_UnlockMutex (node->handle->mutex);
 		free (node);
 	}
 	jobs_tail = NULL;
