@@ -66,6 +66,7 @@ static int num_decal_defs;
 
 static decalinst_t decal_instances[MAX_DECAL_INSTANCES];
 static decalvert_t decal_verts[MAX_DECAL_VERTS];
+static decalvert_t decal_draw_verts[MAX_DECAL_VERTS];
 static GLushort decal_indexes[MAX_DECAL_INDEXES];
 static int decal_vert_cursor;
 static int decal_inst_count;
@@ -538,6 +539,17 @@ static int R_DecalSortCmp (const void *a, const void *b)
 	return ia->priority - ib->priority;
 }
 
+static float R_DecalFadeAlpha (const decalinst_t *inst, const decaldef_t *def)
+{
+	if (def->fade <= 0.f)
+		return 1.f;
+
+	if (cl.time <= inst->die_time - def->fade)
+		return 1.f;
+
+	return CLAMP (0.f, (float)((inst->die_time - cl.time) / def->fade), 1.f);
+}
+
 void R_DrawDecals (void)
 {
 	decalinst_t *draw[MAX_DECAL_INSTANCES];
@@ -551,17 +563,10 @@ void R_DrawDecals (void)
 	{
 		decalinst_t *inst = &decal_instances[i];
 		decaldef_t *def;
-		float a = 1.f;
-		int v;
 
 		if (!inst->active || !inst->texture)
 			continue;
 		def = &decal_defs[inst->def_index];
-		if (def->fade > 0.f && cl.time > inst->die_time - def->fade)
-			a = (float)((inst->die_time - cl.time) / def->fade);
-		a = CLAMP (0.f, a, 1.f);
-		for (v = 0; v < inst->num_verts; ++v)
-			decal_verts[inst->first_vert + v].color[3] = (byte)((decal_verts[inst->first_vert + v].color[3] * a));
 		draw[draw_count++] = inst;
 	}
 
@@ -580,6 +585,7 @@ void R_DrawDecals (void)
 		GLbyte *ofs;
 		int vcount = draw[i]->num_verts;
 		int j, icount = 0;
+		float fade_alpha = R_DecalFadeAlpha (draw[i], &decal_defs[draw[i]->def_index]);
 		unsigned blendstate = GLS_BLEND_ALPHA;
 
 		if (draw[i]->blend == DECAL_BLEND_ADD)
@@ -597,7 +603,15 @@ void R_DrawDecals (void)
 			decal_indexes[icount++] = (GLushort)j;
 		}
 
-		GL_Upload (GL_ARRAY_BUFFER, &decal_verts[draw[i]->first_vert], sizeof (decalvert_t) * vcount, &vbo, &ofs);
+		for (j = 0; j < vcount; ++j)
+		{
+			const decalvert_t *src = &decal_verts[draw[i]->first_vert + j];
+			decalvert_t *dst = &decal_draw_verts[draw[i]->first_vert + j];
+			*dst = *src;
+			dst->color[3] = (byte) (src->color[3] * fade_alpha);
+		}
+
+		GL_Upload (GL_ARRAY_BUFFER, &decal_draw_verts[draw[i]->first_vert], sizeof (decalvert_t) * vcount, &vbo, &ofs);
 		GL_BindBuffer (GL_ARRAY_BUFFER, vbo);
 		GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (decalvert_t), ofs + offsetof (decalvert_t, pos));
 		GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof (decalvert_t), ofs + offsetof (decalvert_t, uv));
