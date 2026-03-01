@@ -282,6 +282,7 @@ void FS_PumpAsyncCompletions (void)
 void Jobs_Shutdown (void)
 {
 	jobnode_t *node;
+	fs_completion_t *comp;
 
 	if (!jobs_mutex)
 		return;
@@ -294,6 +295,20 @@ void Jobs_Shutdown (void)
 	if (jobs_thread)
 		SDL_WaitThread (jobs_thread, NULL);
 	jobs_thread = NULL;
+
+	SDL_LockMutex (fs_mutex);
+	comp = fs_comp_head;
+	fs_comp_head = fs_comp_tail = NULL;
+	SDL_UnlockMutex (fs_mutex);
+
+	while (comp)
+	{
+		fs_completion_t *next = comp->next;
+		if (comp->data)
+			free (comp->data);
+		free (comp);
+		comp = next;
+	}
 
 	while ((node = jobs_head) != NULL)
 	{
