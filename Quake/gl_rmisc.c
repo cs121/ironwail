@@ -951,7 +951,7 @@ static void R_ParseSunData (void)
 	}
 }
 
-static void R_ApplyDefaultSunIfMissing (model_t *world)
+static void R_ApplyDefaultSunIfMissing (qmodel_t *world)
 {
 	vec3_t center;
 	vec3_t ang;
