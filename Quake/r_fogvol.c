@@ -755,7 +755,10 @@ static int R_FogVol_BuildLightList (fog_light_gpu_t *out, int max_count)
 		candidates[candidate_count].light.col_int[0] = dl->color[0];
 		candidates[candidate_count].light.col_int[1] = dl->color[1];
 		candidates[candidate_count].light.col_int[2] = dl->color[2];
-		candidates[candidate_count].light.col_int[3] = intensity;
+		/* col_int.w was intensity=max(r,g,b), used as extra shader multiplier
+		 * on top of col_int.rgb — double-counting brightness. Shader now uses
+		 * col_int.rgb directly, so set .w=1.0 for forward compatibility. */
+		candidates[candidate_count].light.col_int[3] = 1.f;
 		candidate_count++;
 	}
 
@@ -1512,6 +1515,10 @@ void R_FogVol_Render (void)
 	GL_Upload (GL_UNIFORM_BUFFER, gpu_volumes, sizeof (fog_volume_gpu_t) * r_fogvolume_count, &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, buf, (GLintptr)ofs, sizeof (fog_volume_gpu_t) * r_fogvolume_count);
 
+	/* Clear any stale GL errors before the lights UBO upload so glGetError()
+	 * below only catches errors from THIS call, not from earlier unrelated GL
+	 * operations — a stale error would silently disable all fog lights. */
+	while (glGetError () != GL_NO_ERROR) {}
 	GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
 	if (glGetError () != GL_NO_ERROR)

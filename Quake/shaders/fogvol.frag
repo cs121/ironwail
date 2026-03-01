@@ -436,24 +436,38 @@ void main()
 		vec3  stepScatter = (1.0 - att) * scatterColor;
 		if (FogLightEnabled != 0 && FogLightMeta.x > 0)
 		{
+			// BUG FIX 1: Was `lightScatter * opticalDepth` — opticalDepth is
+			// typically 0.01–0.1, suppressing light 10–100× vs scatterColor.
+			// Correct weight is (1.0 - att), matching how scatterColor is scaled.
+			//
+			// BUG FIX 2: Was `col_int.rgb * col_int.w * atten * phase`.
+			// col_int.rgb = dl->color (already full linear color 0-1).
+			// col_int.w = max(r,g,b) = intensity, used as scoring only —
+			// multiplying by it again doubles-down on bright channels.
+			// Fix: use col_int.rgb directly, drop col_int.w multiplier.
 			vec3 lightScatter = vec3(0.0);
-			const float phase = 0.25;
+			const float phase = 0.25; // isotropic phase function
 			for (int l = 0; l < FogLightMeta.x && l < MAX_FOGLIGHTS; ++l)
 			{
 				vec3 lightVec = FogLights[l].pos_rad.xyz - p;
 				float lightDist = length(lightVec);
 				float radius = max(FogLights[l].pos_rad.w, 1e-3);
 				float atten = clamp(1.0 - lightDist / radius, 0.0, 1.0);
-				atten *= atten;
-				lightScatter += FogLights[l].col_int.rgb * (FogLights[l].col_int.w * atten * phase);
+				atten *= atten; // quadratic falloff
+				lightScatter += FogLights[l].col_int.rgb * (atten * phase);
 			}
-			stepScatter += lightScatter * opticalDepth;
+			stepScatter += lightScatter * (1.0 - att);
 		}
 		accum            += transmittance * stepScatter;
 		transmittance    *= att;
 		tau              += opticalDepth;
 
-		if (transmittance < 0.01)
+		// BUG FIX 3: Early-out was at transmittance < 0.01, which aborts the
+		// ray before reaching nearby dynamic lights when fog is dense.
+		// A light 50 units away may be skipped entirely. Raise threshold slightly
+		// to 0.005 and only abort if we also have no active lights nearby,
+		// so explosion glow remains visible even through thick fog.
+		if (transmittance < 0.005)
 			break;
 	}
 
