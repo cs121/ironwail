@@ -383,7 +383,7 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 		if (!CL_DlightIsActive (l))
 			continue;
 
-		if (CL_DlightShouldFlicker (l))
+		if (CL_DlightShouldFlickerRadius (l))
 			radius = l->baseradius * (1.f + 0.1f * (float) sin (cl.time * 9.0 + l->flicker_seed));
 		else
 			radius = l->baseradius;
@@ -411,7 +411,7 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 		finalcolor[0] = l->color[0] * (*temp)[0] * radiusFactor;
 		finalcolor[1] = l->color[1] * (*temp)[1] * radiusFactor;
 		finalcolor[2] = l->color[2] * (*temp)[2] * radiusFactor;
-		if (CL_DlightShouldFlicker (l))
+		if (CL_DlightShouldFlickerColor (l))
 		{
 			float flicker = 1.f + (float)sin (cl.time * 15.0 + l->key) * 0.1f;
 			finalcolor[0] *= flicker;
