@@ -66,6 +66,8 @@ extern cvar_t r_fogvol_globalfog_velocity_z;
 extern cvar_t r_fogvol_globalfog_height;
 extern cvar_t r_fogvol_globalfog_height_scale;
 extern cvar_t r_fogvol_globalfog_priority;
+extern cvar_t r_fogvol_light;
+extern cvar_t r_fogvol_light_max;
 
 void R_FogVol_Init (void);
 void R_FogVol_Clear (void);

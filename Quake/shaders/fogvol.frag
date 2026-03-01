@@ -31,6 +31,7 @@
 #include "frame_uniforms.glsl"
 
 #define MAX_FOGVOLUMES 64
+#define MAX_FOGLIGHTS 32
 
 layout(binding=0) uniform sampler2D SceneColor;
 layout(binding=1) uniform sampler2D SceneDepth;
@@ -54,6 +55,18 @@ layout(std140, binding=2) uniform FogVolumeUBO
 	FogVolume FogVolumes[MAX_FOGVOLUMES];
 };
 
+struct FogLight
+{
+	vec4 pos_rad;
+	vec4 col_int;
+};
+
+layout(std140, binding=4) uniform FogLightsUBO
+{
+	ivec4 FogLightMeta; // x = light count
+	FogLight FogLights[MAX_FOGLIGHTS];
+};
+
 layout(location=0)  uniform int   FogSteps;
 layout(location=1)  uniform int   FogNoiseEnabled;
 layout(location=2)  uniform int   FogDebugMode;
@@ -70,6 +83,7 @@ layout(location=12) uniform vec4  FogDepthParams;    // x: near, y: far, z: reve
 layout(location=13) uniform vec2  FogDensityParams;  // x: density scale, y: sigma clamp
 layout(location=14) uniform int   FogEmissiveEnabled;
 layout(location=15) uniform int   FogBlendModeDefault;
+layout(location=16) uniform int   FogLightEnabled;
 
 layout(location=0) out vec4 FragColor;
 
@@ -420,6 +434,21 @@ void main()
 		float opticalDepth = min(rawSigma * stepLen, FogDensityParams.y);
 		float att        = exp(-opticalDepth);
 		vec3  stepScatter = (1.0 - att) * scatterColor;
+		if (FogLightEnabled != 0 && FogLightMeta.x > 0)
+		{
+			vec3 lightScatter = vec3(0.0);
+			const float phase = 0.25;
+			for (int l = 0; l < FogLightMeta.x && l < MAX_FOGLIGHTS; ++l)
+			{
+				vec3 lightVec = FogLights[l].pos_rad.xyz - p;
+				float lightDist = length(lightVec);
+				float radius = max(FogLights[l].pos_rad.w, 1e-3);
+				float atten = clamp(1.0 - lightDist / radius, 0.0, 1.0);
+				atten *= atten;
+				lightScatter += FogLights[l].col_int.rgb * (FogLights[l].col_int.w * atten * phase);
+			}
+			stepScatter += lightScatter * opticalDepth;
+		}
 		accum            += transmittance * stepScatter;
 		transmittance    *= att;
 		tau              += opticalDepth;
