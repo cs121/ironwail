@@ -4057,8 +4057,6 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
                          * Extended BSPX lighting variants are selected by Mod_LoadLighting
                          * with explicit precedence.
                          */
-                        BSPX_ApplyLumpOverride("LIGHTING", &header.lumps[LUMP_LIGHTING]);
-
                         BSPX_ApplyLumpOverride(mod, "BSPX_ENTITYSTRING", &header.lumps[LUMP_ENTITIES], (size_t)com_filesize);
 
                         BSPX_ApplyLumpOverride(mod, "BSPX_MODELS", &header.lumps[LUMP_MODELS], (size_t)com_filesize);
