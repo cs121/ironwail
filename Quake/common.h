@@ -419,8 +419,8 @@ void COM_CloseFile (int h);
 
 typedef struct jobhandle_s
 {
-	SDL_mutex *mutex;
-	SDL_cond *cond;
+	struct SDL_mutex *mutex;
+	struct SDL_cond *cond;
 	qboolean done;
 } JobHandle;
 
