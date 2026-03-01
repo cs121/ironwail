@@ -582,6 +582,7 @@ typedef struct
         qboolean used;
         qboolean unsupported;
 } bspx_lump_usage_t;
+#define MAX_BSPX_LUMPS 1024
 #define MAX_BSPX_LUMP_USAGE 256
 static bspx_lump_usage_t bspx_lump_usage[MAX_BSPX_LUMP_USAGE];
 static int bspx_lump_usage_count;
@@ -946,8 +947,11 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
                 return false;
 
         numlumps = LittleLong(h->numlumps);
-        if (numlumps <= 0)
+        if (numlumps <= 0 || numlumps > MAX_BSPX_LUMPS)
+        {
+                Con_Warning("%s has invalid BSPX lump count %d (allowed 1..%d)\n", mod->name, numlumps, MAX_BSPX_LUMPS);
                 return false;
+        }
 
         if (header_offset + sizeof(*h) + sizeof(h->lumps[0]) * (numlumps - 1) > filelen)
                 return false;
