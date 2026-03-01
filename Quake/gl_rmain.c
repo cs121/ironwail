@@ -128,6 +128,12 @@ static float GL_ConsoleVisibility (void)
 	return CLAMP (0.f, scr_con_current / height, 1.f);
 }
 
+
+static qboolean R_IsUnderwaterContents (int contents)
+{
+	return contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA;
+}
+
 static float GL_TemperedOverbright (float overbright)
 {
 	if (overbright <= 1.f)
@@ -2450,7 +2456,11 @@ void GL_PostProcess (void)
 		GL_Uniform4fFunc (27, black_lift, black_lift_strength, 0.f, 0.f);
 	}
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
-	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
+	GL_Uniform4fFunc (22,
+		postfx_lut_strength,
+		postfx_state.underwater_postfx_active ? postfx_state.underwater_grade_strength : 0.f,
+		postfx_state.underwater_postfx_active ? postfx_state.underwater_fog_strength : 0.f,
+		postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
 	/* BUG FIX #1: uniform 24 .w was unused (0). Now carries scene fog density from
 	 * r_ssao_saved_fog[3] so postprocess.frag SampleSSAO fog-damping works correctly.
@@ -3457,27 +3467,32 @@ void R_SetupView (void)
 	water_warp = false;
 	{
 		int contents = r_viewleaf->contents;
-		qboolean forced = M_ForcedUnderwater ();
-		qboolean underwater_active = (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA || cl.forceunderwater || forced);
-	if (r_waterwarp.value)
-	{
-		if (underwater_active)
+		qboolean submerged = R_IsUnderwaterContents (contents);
+		qboolean forced = (cl.forceunderwater || M_ForcedUnderwater ());
+		qboolean underwater_active = (submerged || forced);
+		qboolean underwater_postfx_active = underwater_active;
+
+		if (r_waterwarp.value && underwater_active)
 		{
 			double t = forced ? realtime : cl.time;
+
 			if (r_waterwarp.value > 1.f)
 			{
-				//variance is a percentage of width, where width = 2 * tan(fov / 2) otherwise the effect is too dramatic at high FOV and too subtle at low FOV.  what a mess!
+				// Legacy warp has priority over postfx underwater treatment when animated FOV warp is active.
+				// variance is a percentage of width, where width = 2 * tan(fov / 2) otherwise the effect is too dramatic at high FOV and too subtle at low FOV. what a mess!
 				r_fovx = atan (tan (DEG2RAD (r_refdef.fov_x) / 2) * (0.97 + sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
 				r_fovy = atan (tan (DEG2RAD (r_refdef.fov_y) / 2) * (1.03 - sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
+				underwater_postfx_active = false;
 			}
 			else
 			{
 				water_warp = true;
 			}
 		}
-	}
-	// TODO(postfx): hook underwater contents for postfx stack here.
-	CL_PostFX_SetContents (contents, underwater_active);
+
+		// Postfx stack consumes deterministic underwater state here.
+		// CL_PostFX_Frame aggregates it and GL_PostProcess applies the resulting uniforms/LUT selection.
+		CL_PostFX_SetContents (contents, underwater_active, underwater_postfx_active);
 	}
 	//johnfitz
 

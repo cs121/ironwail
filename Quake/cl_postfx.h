@@ -54,6 +54,7 @@ typedef struct postfx_state_s
 	float	underwater_grade_strength;
 	float	underwater_fog_strength;
 	float	underwater_fog_color[3];
+	qboolean	underwater_postfx_active;
 	float	emissive_boost;
 	float	damage_trauma;
 } postfx_state_t;
@@ -63,7 +64,7 @@ void CL_PostFX_Reset (void);
 void CL_PostFX_Frame (void);
 void CL_PostFX_PushPickup (void);
 void CL_PostFX_PushDamage (float damage_amount);
-void CL_PostFX_SetContents (int contents, qboolean underwater_active);
+void CL_PostFX_SetContents (int contents, qboolean underwater_active, qboolean underwater_postfx_active);
 void CL_PostFX_GetState (postfx_state_t *out_state);
 
 #endif
