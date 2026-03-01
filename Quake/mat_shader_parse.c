@@ -1839,7 +1839,7 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		if (!q_strcasecmp (com_token, "bloom"))
 		{
 			Mat_Shader_MarkKeywordSeen ("bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
-			cursor = Mat_Shader_ParseToken (data, NULL);
+			const char *cursor = Mat_Shader_ParseToken (data, NULL);
 			if (cursor && com_token[0] && Mat_Shader_IsNumericToken (com_token))
 			{
 				float validated_scale = 1.f;
