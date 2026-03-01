@@ -439,9 +439,12 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fu
 {
 	int		temp;
 	Uint32	flags;
+	Uint32	fullscreen_flag;
 	char		caption[50];
 	int		depthbits, stencilbits;
 	int		previous_display;
+	int		expected_width, expected_height;
+	int		actual_width, actual_height;
 
 	// so Con_Printfs don't mess us up by forcing vid and snd updates
 	temp = scr_disabled_for_loading;
@@ -509,10 +512,34 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fu
 	/* Make window fullscreen if needed, and show the window */
 
 	if (fullscreen) {
-		const Uint32 flag = vid_desktopfullscreen.value ?
+		fullscreen_flag = vid_desktopfullscreen.value ?
 				SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN;
-		if (SDL_SetWindowFullscreen (draw_context, flag) != 0)
+		if (SDL_SetWindowFullscreen (draw_context, fullscreen_flag) != 0)
 			Sys_Error ("Couldn't set fullscreen state mode");
+
+		expected_width = width;
+		expected_height = height;
+		if (fullscreen_flag == SDL_WINDOW_FULLSCREEN_DESKTOP)
+		{
+			SDL_DisplayMode desktop_mode;
+			if (SDL_GetDesktopDisplayMode (SDL_GetWindowDisplayIndex (draw_context), &desktop_mode) == 0)
+			{
+				expected_width = desktop_mode.w;
+				expected_height = desktop_mode.h;
+			}
+		}
+
+		SDL_GetWindowSize (draw_context, &actual_width, &actual_height);
+		if (actual_width != expected_width || actual_height != expected_height)
+		{
+			// SDL2 on WinXP could report the wrong fullscreen size here.
+			// Keep the toggle path authoritative by rejecting this and
+			// letting callers fall back to the safe vid_restart route.
+			Con_DPrintf (
+				"SDL_SetWindowFullscreen produced %dx%d, expected %dx%d\n",
+				actual_width, actual_height, expected_width, expected_height);
+			return false;
+		}
 	}
 
 	SDL_ShowWindow (draw_context);
@@ -1801,33 +1828,19 @@ void	VID_Init (void)
 // new proc by S.A., called by alt-return key binding.
 void	VID_Toggle (void)
 {
-	// disabling the fast path completely because SDL_SetWindowFullscreen was changing
-	// the window size on SDL2/WinXP and we weren't set up to handle it. --ericw
-	//
-	// TODO: Clear out the dead code, reinstate the fast path using SDL_SetWindowFullscreen
-	// inside VID_SetMode, check window size to fix WinXP issue. This will
-	// keep all the mode changing code in one place.
-	static qboolean vid_toggle_works = false;
-	qboolean toggleWorked;
-	Uint32 flags = 0;
+	int width, height, refreshrate;
+	qboolean fullscreen;
 
 	S_ClearBuffer ();
 
-	if (!vid_toggle_works)
-		goto vrestart;
+	width = VID_GetCurrentWidth();
+	height = VID_GetCurrentHeight();
+	refreshrate = VID_GetCurrentRefreshRate();
+	fullscreen = VID_GetFullscreen() ? false : true;
 
-	if (!VID_GetFullscreen()) {
-		flags = vid_desktopfullscreen.value ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN;
-	}
-
-	toggleWorked = SDL_SetWindowFullscreen(draw_context, flags) == 0;
-
-	if (toggleWorked)
+	if (VID_SetMode (width, height, refreshrate, fullscreen))
 	{
 		Sbar_Changed ();	// Sbar seems to need refreshing
-
-		modestate = VID_GetFullscreen() ? MS_FULLSCREEN : MS_WINDOWED;
-
 		VID_SyncCvars();
 
 		// update mouse grab
@@ -1838,9 +1851,7 @@ void	VID_Toggle (void)
 	}
 	else
 	{
-		vid_toggle_works = false;
-		Con_DPrintf ("SDL_WM_ToggleFullScreen failed, attempting VID_Restart\n");
-	vrestart:
+		Con_DPrintf ("VID_SetMode fullscreen toggle failed, attempting VID_Restart\n");
 		Cvar_SetQuick (&vid_fullscreen, VID_GetFullscreen() ? "0" : "1");
 		Cbuf_AddText ("vid_restart\n");
 	}
