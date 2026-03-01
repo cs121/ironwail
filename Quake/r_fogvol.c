@@ -120,6 +120,10 @@ cvar_t r_fogvol_globalfog_height_scale = { "r_fogvol_globalfog_height_scale", "0
 cvar_t r_fogvol_globalfog_priority = { "r_fogvol_globalfog_priority", "-1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
 
 extern cvar_t gl_farclip;
 
@@ -810,6 +814,10 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_globalfog_priority);
 	Cvar_RegisterVariable (&r_fogvol_light);
 	Cvar_RegisterVariable (&r_fogvol_light_max);
+	Cvar_RegisterVariable (&r_fogvol_shadow);
+	Cvar_RegisterVariable (&r_fogvol_shadow_samples);
+	Cvar_RegisterVariable (&r_fogvol_shadow_strength);
+	Cvar_RegisterVariable (&r_fogvol_shadow_jitter);
 }
 
 void R_FogVol_Clear (void)
@@ -1365,7 +1373,7 @@ void R_FogVol_Render (void)
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
 	fog_light_list_gpu_t fog_lights;
-	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 7);
+	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 8);
 	float inv_viewproj[16];
 	GLuint src_tex;
 	GLuint dst_tex;
@@ -1397,6 +1405,8 @@ void R_FogVol_Render (void)
 	qboolean dumpstate_always;
 	fogvol_restore_state_t restore_state;
 	qboolean fog_light_enabled = false;
+	vec3_t shadow_dir;
+	int shadow_samples;
 
 	if (!glprogs.fogvol)
 		return;
@@ -1565,6 +1575,16 @@ void R_FogVol_Render (void)
 	GL_Uniform1iFunc (14, r_fogvol_emissive.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (15, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
 	GL_Uniform1iFunc (16, fog_light_enabled ? 1 : 0);
+	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
+	VectorNegate (vpn, shadow_dir);
+	if (VectorLength (shadow_dir) < 0.001f)
+		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
+	VectorNormalize (shadow_dir);
+	GL_Uniform1iFunc (17, r_fogvol_shadow.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (18, shadow_samples);
+	GL_Uniform1fFunc (19, CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f));
+	GL_Uniform1fFunc (20, r_fogvol_shadow_jitter.value > 0.f ? 1.f : 0.f);
+	GL_Uniform3fFunc (21, shadow_dir[0], shadow_dir[1], shadow_dir[2]);
 
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);

@@ -84,6 +84,11 @@ layout(location=13) uniform vec2  FogDensityParams;  // x: density scale, y: sig
 layout(location=14) uniform int   FogEmissiveEnabled;
 layout(location=15) uniform int   FogBlendModeDefault;
 layout(location=16) uniform int   FogLightEnabled;
+layout(location=17) uniform int   FogShadowEnabled;
+layout(location=18) uniform int   FogShadowSamples;
+layout(location=19) uniform float FogShadowStrength;
+layout(location=20) uniform float FogShadowJitter;
+layout(location=21) uniform vec3  FogShadowDir;
 
 layout(location=0) out vec4 FragColor;
 
@@ -284,6 +289,71 @@ float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
 	return smoothstep(0.0, edgeThickness, edgeDist);
 }
 
+bool PointInsideVolume(vec3 p, FogVolume volume)
+{
+	if (volume.extra.x > 0.5)
+		return length(p - volume.sphere.xyz) <= volume.sphere.w;
+	return all(greaterThanEqual(p, volume.mins.xyz)) && all(lessThanEqual(p, volume.maxs.xyz));
+}
+
+float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, float noiseScalePre, vec3 flowPre)
+{
+	float edgeFade;
+	if (volume.extra.x > 0.5)
+	{
+		float d = volume.sphere.w - length(p - volume.sphere.xyz);
+		edgeFade = (falloff <= 0.0) ? 1.0 : smoothstep(0.0, falloff, d);
+	}
+	else
+	{
+		edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
+	}
+
+	float noiseFactor = 1.0;
+	if (FogNoiseEnabled != 0)
+	{
+		vec3 noisePos = p * noiseScalePre + flowPre * Time * noiseScalePre;
+		if (volume.wind_turbulence.w > 1e-4)
+			noisePos += vec3(FBM(p * noiseScalePre * 2.03), FBM(p.yzx * noiseScalePre * 2.71), FBM(p.zxy * noiseScalePre * 1.91)) * volume.wind_turbulence.w * 0.35;
+		float n = FogNoise(noisePos);
+		float noiseBias = clamp(volume.noise_params.z, 0.0, 1.0);
+		if (noiseBias > 0.0)
+			n = smoothstep(noiseBias, 1.0, n);
+		float amt = clamp(volume.noise_params.y, 0.0, 1.0);
+		noiseFactor = mix(1.0, clamp(2.0 * n, 0.0, 2.0), amt);
+	}
+
+	float sigma = density * noiseFactor * edgeFade * HeightFactor(p, volume);
+	return IsFiniteFloat(sigma) ? max(sigma, 0.0) : 0.0;
+}
+
+float EstimateShadowVisibility(vec3 p, FogVolume volume, float density, float falloff, float noiseScalePre, vec3 flowPre, float stepLen)
+{
+	if (FogShadowEnabled == 0 || FogShadowSamples <= 0)
+		return 1.0;
+
+	vec3 lightDir = normalize(FogShadowDir);
+	if (dot(lightDir, lightDir) < 1e-6)
+		return 1.0;
+
+	int sampleCount = min(FogShadowSamples, 8);
+	float jitter = (FogShadowJitter > 0.0) ? (InterleavedGradientNoise(gl_FragCoord.xy + p.xy * 0.03125 + Time * 13.37) - 0.5) : 0.0;
+	float shadowStep = max(stepLen * 2.0, 8.0);
+	float tauLight = 0.0;
+
+	for (int s = 0; s < sampleCount; ++s)
+	{
+		float sampleDist = (float(s) + 1.0 + jitter) * shadowStep;
+		vec3 sp = p + lightDir * sampleDist;
+		if (!PointInsideVolume(sp, volume))
+			break;
+		float sigma = EvaluateFogSigma(sp, volume, density, falloff, noiseScalePre, flowPre);
+		tauLight += sigma * shadowStep;
+	}
+
+	return exp(-max(FogShadowStrength, 0.0) * tauLight);
+}
+
 // ── main ───────────────────────────────────────────────────────────────────
 
 void main()
@@ -374,6 +444,8 @@ void main()
 	vec3  accum        = vec3(0.0);
 	float transmittance = 1.0;
 	float tau           = 0.0;
+	float shadowVisAccum = 0.0;
+	float shadowWeightAccum = 0.0;
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated — they were
 	// accumulated but never consumed, silently wasting ALU every iteration.
@@ -401,38 +473,13 @@ void main()
 			break;
 
 		vec3  p        = ro + rd * t;
-		float edgeFade;
-		if (volume.extra.x > 0.5)
-		{
-			float d = volume.sphere.w - length(p - volume.sphere.xyz);
-			edgeFade = (falloff <= 0.0) ? 1.0 : smoothstep(0.0, falloff, d);
-		}
-		else
-		{
-			edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
-		}
-
 		// BUG FIX: Cap optical depth per step (sigma*stepLen), not sigma itself.
 		// FogDensityParams.y is sigma_max; capping sigma ignores stepLen and
 		// causes instant opacity at any step count > ~10. See r_fogvol.c comment.
-		float noiseFactor = 1.0;
-		if (FogNoiseEnabled != 0)
-		{
-			vec3 noisePos = p * noiseScalePre + flowPre * Time * noiseScalePre;
-			// PERF: Domain warp only when turbulence > 0 (global fog always skips).
-			if (volume.wind_turbulence.w > 1e-4)
-				noisePos += vec3(FBM(p * noiseScalePre * 2.03), FBM(p.yzx * noiseScalePre * 2.71), FBM(p.zxy * noiseScalePre * 1.91)) * volume.wind_turbulence.w * 0.35;
-			float n = FogNoise(noisePos);
-			float noiseBias = clamp(volume.noise_params.z, 0.0, 1.0);
-			if (noiseBias > 0.0)
-				n = smoothstep(noiseBias, 1.0, n);
-			float amt = clamp(volume.noise_params.y, 0.0, 1.0);
-			noiseFactor = mix(1.0, clamp(2.0 * n, 0.0, 2.0), amt);
-		}
-		float rawSigma = density * noiseFactor * edgeFade * HeightFactor(p, volume);
-		if (!IsFiniteFloat(rawSigma)) rawSigma = 0.0;
+		float rawSigma = EvaluateFogSigma(p, volume, density, falloff, noiseScalePre, flowPre);
 		float opticalDepth = min(rawSigma * stepLen, FogDensityParams.y);
 		float att        = exp(-opticalDepth);
+		float shadowVisibility = EstimateShadowVisibility(p, volume, density, falloff, noiseScalePre, flowPre, stepLen);
 		vec3  stepScatter = (1.0 - att) * scatterColor;
 		if (FogLightEnabled != 0 && FogLightMeta.x > 0)
 		{
@@ -458,9 +505,12 @@ void main()
 			}
 			stepScatter += lightScatter * (1.0 - att);
 		}
+		stepScatter *= shadowVisibility;
 		accum            += transmittance * stepScatter;
 		transmittance    *= att;
 		tau              += opticalDepth;
+		shadowVisAccum += shadowVisibility * (1.0 - att);
+		shadowWeightAccum += (1.0 - att);
 
 		// BUG FIX 3: Early-out was at transmittance < 0.01, which aborts the
 		// ray before reaching nearby dynamic lights when fog is dense.
@@ -504,6 +554,15 @@ void main()
 	if (FogDebugMode == 6)
 	{
 		FragColor = vec4(vec3(clamp(transmittance, 0.0, 1.0)), 1.0);
+		return;
+	}
+	if (FogDebugMode == 8)
+	{
+		float avgShadow = (shadowWeightAccum > 1e-6) ? (shadowVisAccum / shadowWeightAccum) : 1.0;
+		float shadowedLum = dot(accum, vec3(0.299, 0.587, 0.114));
+		float unshadowedLum = shadowedLum / max(avgShadow, 1e-3);
+		float ratio = clamp(shadowedLum / max(unshadowedLum, 1e-3), 0.0, 1.0);
+		FragColor = vec4(clamp(shadowedLum * 2.0, 0.0, 1.0), clamp(unshadowedLum * 2.0, 0.0, 1.0), ratio, 1.0);
 		return;
 	}
 
