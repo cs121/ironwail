@@ -51,14 +51,15 @@ layout(location=0) out vec4 outColor;
 //         sample always corresponds to the correct representative pixel.
 // FIX #6: halfSizeSafe ensures clamp bounds are never negative.
 void AccumTap(ivec2 tapCoord, ivec2 halfSizeSafe, ivec2 fullSizeSafe,
-              float depthCenter, inout vec3 accum, inout float weightSum)
+              float depthCenter, inout vec4 accum, inout float weightSum)
 {
 	ivec2 clampedTap = clamp(tapCoord, ivec2(0), halfSizeSafe);
 	// FIX #2: representative full-res texel = top-left of the 2×2 block.
 	ivec2 fullTap    = clamp(clampedTap * 2, ivec2(0), fullSizeSafe);
 	float depthTap   = texelFetch(SceneDepth, fullTap, 0).r;
 	float weight     = exp(-abs(depthTap - depthCenter) * FogUpsampleK);
-	accum     += texelFetch(FogColor, clampedTap, 0).rgb * weight;
+	// Accumulate RGBA: RGB=fog color, A=fog density (1-transmittance).
+	accum     += texelFetch(FogColor, clampedTap, 0) * weight;
 	weightSum += weight;
 }
 
@@ -83,7 +84,7 @@ void main()
 	ivec2 halfCoord  = clamp(ivec2(gl_FragCoord.xy) / 2, ivec2(0), halfSizeSafe);
 
 	float depthCenter = texelFetch(SceneDepth, fullCoord, 0).r;
-	vec3  accum       = vec3(0.0);
+	vec4  accum       = vec4(0.0); // RGB=fog color, A=fog density (1-transmittance)
 	float weightSum   = 0.0;
 
 	if (FogUpsampleTaps == 9)
@@ -110,16 +111,19 @@ void main()
 		AccumTap(halfCoord + ivec2(-1, -1),    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
 	}
 
-	vec3 color;
+	vec4 result;
 	if (weightSum > 0.0)
 	{
-		color = accum / weightSum;
+		result = accum / weightSum;
 	}
 	else
 	{
 		// FIX #4: Fallback to nearest half-res texel instead of black.
-		color = texelFetch(FogColor, halfCoord, 0).rgb;
+		// texelFetch returns RGBA — includes fog density in alpha.
+		result = texelFetch(FogColor, halfCoord, 0);
 	}
 
-	outColor = vec4(color, 1.0);
+	// Pass RGBA: RGB=upsampled fog color, A=upsampled fog density.
+	// glColorMask(A=false) in the final blit prevents this reaching composite.fbo.
+	outColor = result;
 }

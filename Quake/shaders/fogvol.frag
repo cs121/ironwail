@@ -702,14 +702,16 @@ void main()
 
 	if (FogEmissiveEnabled != 0 && volume.extra.z > 0.0)
 		outColor += scatterColor * volume.extra.z * (1.0 - transmittance);
-	// BUG FIX (white screen): FragColor.a must NOT be transmittance here.
-	// The final blit copies this texture into composite.fbo via
-	// GL_BlitFramebufferFunc, overwriting the alpha channel.  A transmittance
-	// near 0 (dense fog) would set composite alpha≈0, which downstream passes
-	// and the display compositor interpret as fully transparent → white/clear.
-	// RGB is already correctly composited (scene * transmittance + accum), so
-	// alpha = 1.0 signals "opaque, use RGB as-is".
-	// The temporal pass (fogvol_temporal.frag) reads this alpha and blends it;
-	// it must also output alpha=1.0 (see corresponding fix there).
-	FragColor = vec4(outColor, 1.0);
+	// Alpha = fog density (1.0 - transmittance) for SSAO suppression:
+	//   alpha=0.0 → transparent/no fog → SSAO unchanged
+	//   alpha=1.0 → fully opaque fog → SSAO suppressed
+	// This is SAFE: the final blit into composite.fbo uses
+	// glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE) so this alpha never
+	// reaches composite.fbo, the display compositor, or any blending path
+	// that previously caused the white-screen bug. The alpha stays exclusively
+	// in the internal fogvol ping-pong composite_tex buffers where postprocess
+	// reads it. The temporal pass blends alpha like RGB (see fogvol_temporal.frag).
+	// Using alpha instead of RGB luminance correctly detects dark-colored fog
+	// (purple, red, brown) where lum≈0 even at full density.
+	FragColor = vec4(outColor, 1.0 - transmittance);
 }

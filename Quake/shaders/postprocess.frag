@@ -241,23 +241,19 @@ float FogTransmittanceFromGlobalFog(float depth)
 }
 
 // Returns volumetric fog transmittance [0..1] for the current pixel from the
-// fogvol composite buffer. transmittance=1 means no fog, 0 means fully occluded.
-// The fogvol composite RGB is the fog color contribution already blended into the
-// scene — high luminance means dense fog, so transmittance ≈ 1 - luminance.
-// We clamp aggressively: even moderate fog (lum≥0.15) should fully suppress SSAO.
+// Returns volumetric fog transmittance [0..1] for SSAO suppression.
+// fogvol.frag writes alpha = (1.0 - transmittance) into composite_tex.
+// The temporal and upsample passes propagate this alpha unchanged.
+// transmittance=1.0 (alpha=0) → no fog → full SSAO.
+// transmittance=0.0 (alpha=1) → fully dense fog → SSAO completely suppressed.
+// Reading alpha is correct for ALL fog colors including dark ones (purple,
+// red, brown) where RGB luminance was near-zero even at full opacity.
 float FogVolTransmittance(vec2 uv)
 {
         if (FogVolParams.x < 0.5)
                 return 1.0; // fogvol inactive — no suppression
-        vec3 fogColor = texture(FogVolTexture, uv).rgb;
-        float lum = dot(fogColor, vec3(0.299, 0.587, 0.114));
-        float peak = max(fogColor.r, max(fogColor.g, fogColor.b));
-        // The fog buffer contains composited scene color, so raw luminance alone
-        // underestimates colored/dark fog. Use the stronger of luma and peak
-        // channel and map aggressively so visible fog quickly suppresses AO.
-        float fogSignal = max(lum, peak);
-        float fogAmount = smoothstep(0.02, 0.12, fogSignal);
-        return 1.0 - fogAmount;
+        float fogDensity = texture(FogVolTexture, uv).a; // 0=no fog, 1=full fog
+        return clamp(1.0 - fogDensity, 0.0, 1.0);
 }
 
 float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)

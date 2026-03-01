@@ -228,11 +228,11 @@ void main()
 		return;
 	}
 
-	vec3  blended      = mix(current.rgb, history.rgb, alpha);
-	// BUG FIX (white screen): fogvol.frag now writes alpha=1.0 (scene is
-	// already composited in RGB).  Mirror that here so the temporal output
-	// never writes a sub-1 alpha into the history / composite FBO, which
-	// would cause the display to treat fog pixels as semi-transparent and
-	// blend them against the window clear colour (typically white).
-	OutColor = vec4(blended, 1.0);
+	vec3  blended  = mix(current.rgb, history.rgb, alpha);
+	// Blend fog density alpha like RGB so postprocess.frag gets a temporally-
+	// smoothed per-pixel density estimate for SSAO suppression.
+	// history.a carries the accumulated density from prior frames.
+	// glColorMask(A=false) in the final blit ensures this never corrupts composite.fbo.
+	float blendedA = mix(current.a, history.a, alpha);
+	OutColor = vec4(blended, blendedA);
 }
