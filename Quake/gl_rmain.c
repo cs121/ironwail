@@ -2159,6 +2159,7 @@ static float GL_UpdateAutoExposure (void)
 void GL_PostProcess (void)
 {
 	int palidx, variant;
+	float saturation;
 	float dither;
 	qboolean dof_enabled;
 	float dof_focus, dof_range, dof_strength;
@@ -2214,7 +2215,7 @@ void GL_PostProcess (void)
 	float dv_quality;
 	float dv_debug;
 	float dv_time;
-	r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
+	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (!GL_NeedsPostprocess ())
 		return;
 	if (framebufs.composite.fbo == 0 || framebufs.composite.color_tex == 0)
@@ -2459,7 +2460,7 @@ void GL_PostProcess (void)
 	0.f,
 	0.f);
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
-	GL_Uniform1fFunc (12, CLAMP (0.9f, r_color_saturation.value, 1.2f));
+	GL_Uniform1fFunc (12, saturation);
 	GL_Uniform1fFunc (20, q_max (0.1f, r_color_midtone.value));
 	{
 		float black_lift = CLAMP (0.f, r_tonemap_black_lift.value, 0.05f);
@@ -3148,11 +3149,12 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
+	float saturation;
+
 	if (r_postfx.value <= 0.f)
 		return false;
 
-        float saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
-	r_color_saturation.value = saturation;
+	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
 		return true;
 	if (r_debug_colorspace.value > 0.f)
