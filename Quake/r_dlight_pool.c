@@ -101,22 +101,31 @@ void DLightPool_ClearPersistent (void)
 	}
 }
 
-static void DLightPool_EnsureScratch (int needed)
+static qboolean DLightPool_EnsureScratch (int needed)
 {
 	if (needed <= dlight_pool.scratch_capacity)
-		return;
+		return true;
 
-	dlight_pool.scratch = (dlight_t **)realloc (dlight_pool.scratch, sizeof (dlight_pool.scratch[0]) * needed);
+	dlight_t **new_scratch = (dlight_t **)realloc (dlight_pool.scratch, sizeof (dlight_pool.scratch[0]) * needed);
+	if (!new_scratch)
+	{
+		Con_DPrintf ("DLightPool_EnsureScratch: allocation failed for %d entries (capacity stays %d)\n",
+				needed, dlight_pool.scratch_capacity);
+		return false;
+	}
+
+	dlight_pool.scratch = new_scratch;
 	dlight_pool.scratch_capacity = needed;
+	return true;
 }
 
-static void DLightPool_EnsureCapacity (int desired)
+static qboolean DLightPool_EnsureCapacity (int desired)
 {
 	const int pool_max = DLightPool_GetPoolMax ();
 	if (desired > pool_max)
 		desired = pool_max;
 	if (desired <= dlight_pool.capacity)
-		return;
+		return true;
 
 	int new_capacity = dlight_pool.capacity ? dlight_pool.capacity * 2 : 64;
 	if (new_capacity < desired)
@@ -124,11 +133,20 @@ static void DLightPool_EnsureCapacity (int desired)
 	if (new_capacity > pool_max)
 		new_capacity = pool_max;
 	if (new_capacity <= dlight_pool.capacity)
-		return;
+		return true;
 
-	dlight_pool.items = (dlight_t *)realloc (dlight_pool.items, sizeof (dlight_pool.items[0]) * new_capacity);
+	dlight_t *new_items = (dlight_t *)realloc (dlight_pool.items, sizeof (dlight_pool.items[0]) * new_capacity);
+	if (!new_items)
+	{
+		Con_Warning ("DLightPool_EnsureCapacity: allocation failed for %d lights (capacity stays %d)\n",
+				new_capacity, dlight_pool.capacity);
+		return false;
+	}
+
+	dlight_pool.items = new_items;
 	memset (dlight_pool.items + dlight_pool.capacity, 0, sizeof (dlight_pool.items[0]) * (new_capacity - dlight_pool.capacity));
 	dlight_pool.capacity = new_capacity;
+	return true;
 }
 
 static void DLightPool_ResetLight (dlight_t *dl, dlight_kind_t kind, double time)
@@ -409,12 +427,18 @@ const dlight_t *const *DLightPool_GetActiveList (int *count)
 
 	DLightPool_EnsureScratch (dlight_pool.capacity);
 
+	const int max_scratch = q_min (dlight_pool.capacity, dlight_pool.scratch_capacity);
+	if (!dlight_pool.scratch || max_scratch <= 0)
+		return NULL;
+
 	int found = 0;
 	for (int i = 0; i < dlight_pool.capacity; i++)
 	{
 		dlight_t *dl = &dlight_pool.items[i];
 		if (!CL_DlightIsActive (dl))
 			continue;
+		if (found >= max_scratch)
+			break;
 		dlight_pool.scratch[found++] = dl;
 	}
 
@@ -447,9 +471,20 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 	const int selection_max = q_min (out_max, dlight_pool.capacity);
 	DLightPool_EnsureScratch (selection_max);
 
-	int selected = 0;
+	const int max_scratch = q_min (dlight_pool.capacity, dlight_pool.scratch_capacity);
+	if (!dlight_pool.scratch || max_scratch <= 0)
+	{
+		dlight_pool.stats.submitted = 0;
+		DLightPool_UpdateStats ();
+		return 0;
+	}
+
+	int found = 0;
 	for (int i = 0; i < dlight_pool.capacity; i++)
 	{
+		if (found >= max_scratch)
+			break;
+
 		dlight_t *dl = &dlight_pool.items[i];
 		if (!dl->active)
 			continue;
