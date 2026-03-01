@@ -4,6 +4,7 @@ typedef struct jobnode_s {
 	jobs_func_t func;
 	void *userdata;
 	JobHandle *handle;
+	qboolean detached;
 	struct jobnode_s *next;
 } jobnode_t;
 
@@ -13,6 +14,8 @@ static SDL_cond *jobs_cond;
 static jobnode_t *jobs_head;
 static jobnode_t *jobs_tail;
 static qboolean jobs_shutdown;
+
+static void Jobs_SubmitNode (jobnode_t *node);
 
 static cvar_t host_async = {"host_async", "0", CVAR_ARCHIVE};
 static cvar_t host_async_fs = {"host_async_fs", "0", CVAR_ARCHIVE};
@@ -54,6 +57,11 @@ static int Jobs_Worker (void *unused)
 		SDL_UnlockMutex (jobs_mutex);
 
 		node->func (node->userdata);
+		if (node->detached)
+		{
+			free (node);
+			continue;
+		}
 		SDL_LockMutex (node->handle->mutex);
 		node->handle->done = true;
 		SDL_CondSignal (node->handle->cond);
@@ -93,6 +101,13 @@ JobHandle *Jobs_Submit (jobs_func_t func, void *userdata)
 	node->userdata = userdata;
 	node->handle = handle;
 
+	Jobs_SubmitNode (node);
+
+	return handle;
+}
+
+static void Jobs_SubmitNode (jobnode_t *node)
+{
 	SDL_LockMutex (jobs_mutex);
 	if (jobs_tail)
 		jobs_tail->next = node;
@@ -101,8 +116,26 @@ JobHandle *Jobs_Submit (jobs_func_t func, void *userdata)
 	jobs_tail = node;
 	SDL_CondSignal (jobs_cond);
 	SDL_UnlockMutex (jobs_mutex);
+}
 
-	return handle;
+void Jobs_SubmitDetached (jobs_func_t func, void *userdata)
+{
+	jobnode_t *node;
+
+	if (!Host_AsyncEnabled () || !jobs_thread)
+	{
+		func (userdata);
+		return;
+	}
+
+	node = (jobnode_t *) calloc (1, sizeof (*node));
+	if (!node)
+		Sys_Error ("Jobs_SubmitDetached: out of memory");
+	node->func = func;
+	node->userdata = userdata;
+	node->detached = true;
+
+	Jobs_SubmitNode (node);
 }
 
 void Jobs_Wait (JobHandle *handle)
@@ -231,7 +264,7 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 	SDL_UnlockMutex (fs_mutex);
 
 	handle.id = job->id;
-	Jobs_Submit (FS_AsyncReadJob, job);
+	Jobs_SubmitDetached (FS_AsyncReadJob, job);
 	return handle;
 }
 
@@ -313,10 +346,13 @@ void Jobs_Shutdown (void)
 	while ((node = jobs_head) != NULL)
 	{
 		jobs_head = node->next;
-		SDL_LockMutex (node->handle->mutex);
-		node->handle->done = true;
-		SDL_CondSignal (node->handle->cond);
-		SDL_UnlockMutex (node->handle->mutex);
+		if (!node->detached)
+		{
+			SDL_LockMutex (node->handle->mutex);
+			node->handle->done = true;
+			SDL_CondSignal (node->handle->cond);
+			SDL_UnlockMutex (node->handle->mutex);
+		}
 		free (node);
 	}
 	jobs_tail = NULL;
