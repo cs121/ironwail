@@ -3060,9 +3060,11 @@ R_SetFrustum
 */
 void R_SetFrustum (void)
 {
+	static qboolean warned_invalid_farclip = false;
 	float w, h, d;
 	float znear, zfar;
 	float logznear, logzfar;
+	float logrange;
 	float translation[16];
 	float rotation[16];
 	int i;
@@ -3073,6 +3075,19 @@ void R_SetFrustum (void)
 	d = 12.f * q_min (w, h);
 	znear = CLAMP (0.5f, d, 4.f);
 	zfar = gl_farclip.value;
+	if (zfar <= znear || zfar <= 0.f)
+	{
+		const float sanitized_zfar = q_max (znear + 1.f, 1.f);
+
+		if (!warned_invalid_farclip)
+		{
+			Con_DPrintf ("gl_farclip %0.4f is invalid for znear %0.4f; clamping to %0.4f\n",
+				zfar, znear, sanitized_zfar);
+			warned_invalid_farclip = true;
+		}
+
+		zfar = sanitized_zfar;
+	}
 
 	view_znear = znear;
 	view_zfar = zfar;
@@ -3109,10 +3124,14 @@ void R_SetFrustum (void)
 
 	logznear = log2f (znear);
 	logzfar = log2f (zfar);
-        memcpy (r_framedata.viewproj, r_matviewproj, 16 * sizeof (float));
-        memcpy (r_framedata.view, r_matview, 16 * sizeof (float));
-        r_framedata.zparams[0] = LIGHT_TILES_Z / (logzfar - logznear);
-        r_framedata.zparams[1] = -r_framedata.zparams[0] * logznear;
+	logrange = logzfar - logznear;
+	if (fabsf (logrange) < 1e-6f)
+		logrange = (logrange < 0.f) ? -1e-6f : 1e-6f;
+
+	memcpy (r_framedata.viewproj, r_matviewproj, 16 * sizeof (float));
+	memcpy (r_framedata.view, r_matview, 16 * sizeof (float));
+	r_framedata.zparams[0] = LIGHT_TILES_Z / logrange;
+	r_framedata.zparams[1] = -r_framedata.zparams[0] * logznear;
 }
 
 /*
