@@ -2640,20 +2640,61 @@ void M_Net_Mousemove (float cx, float cy)
 //=============================================================================
 /* VIDEO MENU */
 
-//TODO: replace these fixed-length arrays with hunk_allocated buffers
-#define MAX_BPPS_LIST	5
-#define MAX_RATES_LIST	20
+/*
+Video mode and refresh-rate lists are built from runtime display probing.
+Use Zone allocations sized from nummodes so we never silently truncate lists
+when SDL reports more options than old fixed-size menu buffers could hold.
+*/
 
 typedef struct
 {
 	int width,height;
 } vid_menu_mode;
 
-static vid_menu_mode vid_menu_modes[MAX_MODE_LIST];
+static vid_menu_mode *vid_menu_modes;
 static int vid_menu_nummodes = 0;
+static int vid_menu_modes_capacity = 0;
 
-static int vid_menu_rates[MAX_RATES_LIST];
+static int *vid_menu_rates;
 static int vid_menu_numrates=0;
+static int vid_menu_rates_capacity = 0;
+
+static void VID_Menu_FreeLists (void)
+{
+	if (vid_menu_modes)
+		Z_Free (vid_menu_modes);
+	if (vid_menu_rates)
+		Z_Free (vid_menu_rates);
+
+	vid_menu_modes = NULL;
+	vid_menu_rates = NULL;
+	vid_menu_nummodes = 0;
+	vid_menu_numrates = 0;
+	vid_menu_modes_capacity = 0;
+	vid_menu_rates_capacity = 0;
+}
+
+static void VID_Menu_EnsureModeCapacity (int capacity)
+{
+	if (capacity <= vid_menu_modes_capacity)
+		return;
+
+	vid_menu_modes = vid_menu_modes ?
+		(vid_menu_mode *) Z_Realloc (vid_menu_modes, capacity * sizeof (*vid_menu_modes)) :
+		(vid_menu_mode *) Z_Malloc (capacity * sizeof (*vid_menu_modes));
+	vid_menu_modes_capacity = capacity;
+}
+
+static void VID_Menu_EnsureRateCapacity (int capacity)
+{
+	if (capacity <= vid_menu_rates_capacity)
+		return;
+
+	vid_menu_rates = vid_menu_rates ?
+		(int *) Z_Realloc (vid_menu_rates, capacity * sizeof (*vid_menu_rates)) :
+		(int *) Z_Malloc (capacity * sizeof (*vid_menu_rates));
+	vid_menu_rates_capacity = capacity;
+}
 
 /*
 ================
@@ -2663,6 +2704,14 @@ VID_Menu_Init
 void VID_Menu_Init (void)
 {
 	int i, j, h, w;
+
+	VID_Menu_FreeLists ();
+
+	if (nummodes > 0)
+	{
+		VID_Menu_EnsureModeCapacity (nummodes);
+		VID_Menu_EnsureRateCapacity (nummodes);
+	}
 
 	for (i = 0; i < nummodes; i++)
 	{
@@ -2678,6 +2727,7 @@ void VID_Menu_Init (void)
 
 		if (j == vid_menu_nummodes)
 		{
+			VID_Menu_EnsureModeCapacity (vid_menu_nummodes + 1);
 			vid_menu_modes[j].width = w;
 			vid_menu_modes[j].height = h;
 			vid_menu_nummodes++;
@@ -2716,6 +2766,7 @@ static void VID_Menu_RebuildRateList (void)
 
 		if (j == vid_menu_numrates)
 		{
+			VID_Menu_EnsureRateCapacity (vid_menu_numrates + 1);
 			vid_menu_rates[j] = r;
 			vid_menu_numrates++;
 		}
@@ -7626,4 +7677,3 @@ void M_CheckMods (void)
 	m_skill_usecustomtitle = M_CheckCustomGfx ("gfx/p_skill.lmp",
 		"gfx/ttl_sgl.lmp", 6728, sgl_hashes, countof (sgl_hashes));
 }
-
