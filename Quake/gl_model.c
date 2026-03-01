@@ -605,7 +605,29 @@ typedef struct
 #define MAX_BSPX_LUMPS 1024
 #define MAX_BSPX_LUMP_USAGE 256
 static bspx_lump_usage_t bspx_lump_usage[MAX_BSPX_LUMP_USAGE];
+static int bspx_lump_usage_index[MAX_BSPX_LUMP_USAGE];
 static int bspx_lump_usage_count;
+
+static int Q1BSPX_UsageIndexCompare(const void *a, const void *b)
+{
+	const int index_a = *(const int *)a;
+	const int index_b = *(const int *)b;
+	const int cmp = strncmp(
+		bspx_lump_usage[index_a].lumpname,
+		bspx_lump_usage[index_b].lumpname,
+		sizeof(((bspx_lump_disk_t *)0)->lumpname));
+
+	if (cmp)
+		return cmp;
+
+	/* Keep deterministic order for duplicate lump names. */
+	if (index_a < index_b)
+		return -1;
+	if (index_a > index_b)
+		return 1;
+
+	return 0;
+}
 //supported lumps:
 //RGBLIGHTING (.lit)
 //LIGHTING_E5BGR9 (hdr lighting)
@@ -621,6 +643,7 @@ static void Q1BSPX_ResetUsage(void)
 {
         bspx_lump_usage_count = 0;
         memset(bspx_lump_usage, 0, sizeof(bspx_lump_usage));
+	memset(bspx_lump_usage_index, 0, sizeof(bspx_lump_usage_index));
 }
 static void Q1BSPX_RecordEntries(qmodel_t *mod)
 {
@@ -630,18 +653,41 @@ static void Q1BSPX_RecordEntries(qmodel_t *mod)
         for (i = 0; i < bspx_lump_usage_count; i++)
         {
                 q_strlcpy(bspx_lump_usage[i].lumpname, mod->bspx_entries[i].name, sizeof(bspx_lump_usage[i].lumpname));
+		bspx_lump_usage_index[i] = i;
         }
+
+	qsort(bspx_lump_usage_index, bspx_lump_usage_count, sizeof(bspx_lump_usage_index[0]), Q1BSPX_UsageIndexCompare);
 }
 static bspx_lump_usage_t *Q1BSPX_FindUsage(const char *lumpname)
 {
-        int i;
+	int low = 0;
+	int high = bspx_lump_usage_count - 1;
+	int hit = -1;
 
-        for (i = 0; i < bspx_lump_usage_count; i++)
-        {
-                if (!strncmp(bspx_lump_usage[i].lumpname, lumpname, sizeof(((bspx_lump_disk_t *)0)->lumpname)))
-                        return &bspx_lump_usage[i];
-        }
-        return NULL;
+	while (low <= high)
+	{
+		const int mid = low + (high - low) / 2;
+		const int usage_index = bspx_lump_usage_index[mid];
+		const int cmp = strncmp(
+			bspx_lump_usage[usage_index].lumpname,
+			lumpname,
+			sizeof(((bspx_lump_disk_t *)0)->lumpname));
+
+		if (cmp < 0)
+			low = mid + 1;
+		else if (cmp > 0)
+			high = mid - 1;
+		else
+		{
+			hit = mid;
+			high = mid - 1;
+		}
+	}
+
+	if (hit < 0)
+		return NULL;
+
+	return &bspx_lump_usage[bspx_lump_usage_index[hit]];
 }
 
 static qboolean Q1BSPX_IsProcessed(const char *lumpname)
