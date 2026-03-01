@@ -704,6 +704,7 @@ typedef struct glframebufs_s {
 		GLuint		blur_fbo[2];
 		int			width[2];
 		int			height[2];
+		qboolean	valid;
 	}				ssao;
 
 	struct {
