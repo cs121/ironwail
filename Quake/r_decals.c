@@ -428,7 +428,7 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 
 		VectorCopy (surf->plane->normal, surf_normal);
 		if (surf->flags & SURF_PLANEBACK)
-			VectorNegate (surf_normal, surf_normal);
+			VectorInverse (surf_normal);
 		d = fabsf (DotProduct (origin, surf_normal) - (surf->flags & SURF_PLANEBACK ? -surf->plane->dist : surf->plane->dist));
 		if (d > radius + 2.f)
 			continue;
