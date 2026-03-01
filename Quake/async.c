@@ -8,7 +8,8 @@ typedef struct jobnode_s {
 	struct jobnode_s *next;
 } jobnode_t;
 
-static SDL_Thread *jobs_thread;
+static SDL_Thread **jobs_threads;
+static int jobs_num_threads;
 static SDL_mutex *jobs_mutex;
 static SDL_cond *jobs_cond;
 static jobnode_t *jobs_head;
@@ -25,6 +26,7 @@ static void Jobs_LogQueueStats (const char *reason);
 static cvar_t host_async = {"host_async", "0", CVAR_ARCHIVE};
 static cvar_t host_async_fs = {"host_async_fs", "0", CVAR_ARCHIVE};
 static cvar_t host_async_assets = {"host_async_assets", "0", CVAR_ARCHIVE};
+static cvar_t host_async_workers = {"host_async_workers", "1", CVAR_ARCHIVE};
 static cvar_t host_async_max_pending = {"host_async_max_pending", "128", CVAR_ARCHIVE};
 
 qboolean Host_AsyncEnabled (void)
@@ -92,7 +94,7 @@ JobHandle *Jobs_Submit (jobs_func_t func, void *userdata)
 	if (!handle->mutex || !handle->cond)
 		Sys_Error ("Jobs_Submit: failed to create handle sync primitives");
 
-	if (!Host_AsyncEnabled () || !jobs_thread)
+	if (!Host_AsyncEnabled () || jobs_num_threads <= 0)
 	{
 		func (userdata);
 		SDL_LockMutex (handle->mutex);
@@ -145,7 +147,7 @@ static qboolean Jobs_SubmitNode (jobnode_t *node)
 	jobs_pending++;
 	if (jobs_pending > jobs_peak_pending)
 		jobs_peak_pending = jobs_pending;
-	SDL_CondSignal (jobs_cond);
+	SDL_CondBroadcast (jobs_cond);
 	SDL_UnlockMutex (jobs_mutex);
 	Jobs_LogQueueStats ("enqueue");
 	return true;
@@ -168,7 +170,7 @@ void Jobs_SubmitDetached (jobs_func_t func, void *userdata)
 {
 	jobnode_t *node;
 
-	if (!Host_AsyncEnabled () || !jobs_thread)
+	if (!Host_AsyncEnabled () || jobs_num_threads <= 0)
 	{
 		func (userdata);
 		return;
@@ -376,9 +378,19 @@ void Jobs_Shutdown (void)
 	SDL_CondBroadcast (jobs_cond);
 	SDL_UnlockMutex (jobs_mutex);
 
-	if (jobs_thread)
-		SDL_WaitThread (jobs_thread, NULL);
-	jobs_thread = NULL;
+	if (jobs_threads)
+	{
+		int i;
+
+		for (i = 0; i < jobs_num_threads; ++i)
+		{
+			if (jobs_threads[i])
+				SDL_WaitThread (jobs_threads[i], NULL);
+		}
+		free (jobs_threads);
+		jobs_threads = NULL;
+	}
+	jobs_num_threads = 0;
 
 	SDL_LockMutex (fs_mutex);
 	comp = fs_comp_head;
@@ -422,6 +434,7 @@ void Jobs_Init (void)
 	Cvar_RegisterVariable (&host_async);
 	Cvar_RegisterVariable (&host_async_fs);
 	Cvar_RegisterVariable (&host_async_assets);
+	Cvar_RegisterVariable (&host_async_workers);
 	Cvar_RegisterVariable (&host_async_max_pending);
 
 	jobs_mutex = SDL_CreateMutex ();
@@ -430,7 +443,25 @@ void Jobs_Init (void)
 	if (!jobs_mutex || !jobs_cond || !fs_mutex)
 		Sys_Error ("Jobs_Init: failed to initialize async primitives");
 
-	jobs_thread = SDL_CreateThread (Jobs_Worker, "jobs", NULL);
-	if (!jobs_thread)
-		Sys_Error ("Jobs_Init: failed to create worker thread");
+	{
+		int i;
+		int cpu_count;
+		int worker_count;
+
+		cpu_count = SDL_GetCPUCount ();
+		if (cpu_count < 1)
+			cpu_count = 1;
+		worker_count = CLAMP (1, (int) host_async_workers.value, cpu_count);
+		jobs_threads = (SDL_Thread **) calloc ((size_t) worker_count, sizeof (*jobs_threads));
+		if (!jobs_threads)
+			Sys_Error ("Jobs_Init: out of memory");
+
+		for (i = 0; i < worker_count; ++i)
+		{
+			jobs_threads[i] = SDL_CreateThread (Jobs_Worker, "jobs", NULL);
+			if (!jobs_threads[i])
+				Sys_Error ("Jobs_Init: failed to create worker thread");
+		}
+		jobs_num_threads = worker_count;
+	}
 }
