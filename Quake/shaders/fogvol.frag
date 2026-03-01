@@ -364,50 +364,20 @@ void main()
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated — they were
 	// accumulated but never consumed, silently wasting ALU every iteration.
 
-	// PERF: Compute noise ONCE per ray, not per step.
-	// Fog noise varies at world scale (feature size ≈ 1/noiseScale ≈ 50–200 qu).
-	// Raymarching steps are len/FogSteps — noise barely changes between steps.
-	float noiseFactor = 1.0;
+	// Precompute noise flow parameters once (used per step inside loop).
+	// Per-step world-space sampling is required for correct world-fixed noise
+	// — any single-sample-per-ray approach is inherently camera-relative and
+	// causes warp artifacts on forward/backward movement.
+	// Perf is managed by: 2-octave FBM, turbulence guard (skips 3 FBM calls
+	// when turbulence=0, which is always true for global fog).
+	float noiseScalePre = 0.0;
+	vec3  flowPre       = vec3(0.0);
 	if (FogNoiseEnabled != 0)
 	{
-		float noiseScale = clamp(volume.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
+		noiseScalePre = clamp(volume.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
 		float windDirLen = length(volume.wind_turbulence.xyz);
 		vec3 flowDir = (windDirLen > 1e-6) ? (volume.wind_turbulence.xyz / windDirLen) : vec3(0.0);
-		vec3 flow = volume.velocity_windspeed.xyz + flowDir * volume.velocity_windspeed.w;
-
-		// BUG FIX (noise warp on forward/backward movement):
-		// Previous code: pNoise = ro + rd * (tEnter + len*0.5)
-		// This is camera-relative. When the player moves forward, ro shifts
-		// but tEnter shrinks, so pNoise jumps erratically → fog "warps".
-		// Lateral movement was fine because it moves perpendicular to rd, so
-		// the along-ray component cancels; forward/back movement is exactly
-		// along rd so both ro and tEnter change together with no cancellation.
-		//
-		// Fix: use the world-fixed closest point on the ray to the volume
-		// center. This point is purely a function of the volume geometry and
-		// the ray direction — not of where along the ray we entered the volume.
-		// t_closest = dot(volumeCenter - ro, rd), clamped to [tEnter, tExit].
-		// For a sphere this is just the sphere center projected onto the ray.
-		// For an AABB we use the AABB center. Both are world-fixed and stable.
-		vec3 volCenter;
-		if (volume.extra.x > 0.5)
-			volCenter = volume.sphere.xyz;                    // sphere center
-		else
-			volCenter = (volume.mins.xyz + volume.maxs.xyz) * 0.5; // AABB center
-		float tClosest = clamp(dot(volCenter - ro, rd), tEnter, tExit);
-		vec3 pNoise = ro + rd * tClosest;
-
-		vec3 noisePos = pNoise * noiseScale + flow * Time * noiseScale;
-		// PERF: Domain warp only when turbulence > 0 (3 FBM calls otherwise skipped).
-		if (volume.wind_turbulence.w > 1e-4)
-			noisePos += vec3(FBM(pNoise * noiseScale * 2.03), FBM(pNoise.yzx * noiseScale * 2.71), FBM(pNoise.zxy * noiseScale * 1.91)) * volume.wind_turbulence.w * 0.35;
-		float n = FogNoise(noisePos);
-		float noiseBias = clamp(volume.noise_params.z, 0.0, 1.0);
-		if (noiseBias > 0.0)
-			n = smoothstep(noiseBias, 1.0, n);
-		float amt = clamp(volume.noise_params.y, 0.0, 1.0);
-		float modulation = clamp(2.0 * n, 0.0, 2.0);
-		noiseFactor = mix(1.0, modulation, amt);
+		flowPre = volume.velocity_windspeed.xyz + flowDir * volume.velocity_windspeed.w;
 	}
 
 	for (int i = 0; i < FogSteps; ++i)
@@ -431,6 +401,20 @@ void main()
 		// BUG FIX: Cap optical depth per step (sigma*stepLen), not sigma itself.
 		// FogDensityParams.y is sigma_max; capping sigma ignores stepLen and
 		// causes instant opacity at any step count > ~10. See r_fogvol.c comment.
+		float noiseFactor = 1.0;
+		if (FogNoiseEnabled != 0)
+		{
+			vec3 noisePos = p * noiseScalePre + flowPre * Time * noiseScalePre;
+			// PERF: Domain warp only when turbulence > 0 (global fog always skips).
+			if (volume.wind_turbulence.w > 1e-4)
+				noisePos += vec3(FBM(p * noiseScalePre * 2.03), FBM(p.yzx * noiseScalePre * 2.71), FBM(p.zxy * noiseScalePre * 1.91)) * volume.wind_turbulence.w * 0.35;
+			float n = FogNoise(noisePos);
+			float noiseBias = clamp(volume.noise_params.z, 0.0, 1.0);
+			if (noiseBias > 0.0)
+				n = smoothstep(noiseBias, 1.0, n);
+			float amt = clamp(volume.noise_params.y, 0.0, 1.0);
+			noiseFactor = mix(1.0, clamp(2.0 * n, 0.0, 2.0), amt);
+		}
 		float rawSigma = density * noiseFactor * edgeFade * HeightFactor(p, volume);
 		if (!IsFiniteFloat(rawSigma)) rawSigma = 0.0;
 		float opticalDepth = min(rawSigma * stepLen, FogDensityParams.y);
