@@ -251,10 +251,13 @@ float FogVolTransmittance(vec2 uv)
                 return 1.0; // fogvol inactive — no suppression
         vec3 fogColor = texture(FogVolTexture, uv).rgb;
         float lum = dot(fogColor, vec3(0.299, 0.587, 0.114));
-        // Scale: lum=0.0 → transmittance=1.0 (no fog)
-        //        lum≥0.2 → transmittance=0.0 (full suppression)
-        // The *5.0 factor means 20% fog luminance = fully suppressed AO.
-        return clamp(1.0 - lum * 5.0, 0.0, 1.0);
+        float peak = max(fogColor.r, max(fogColor.g, fogColor.b));
+        // The fog buffer contains composited scene color, so raw luminance alone
+        // underestimates colored/dark fog. Use the stronger of luma and peak
+        // channel and map aggressively so visible fog quickly suppresses AO.
+        float fogSignal = max(lum, peak);
+        float fogAmount = smoothstep(0.02, 0.12, fogSignal);
+        return 1.0 - fogAmount;
 }
 
 float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)
