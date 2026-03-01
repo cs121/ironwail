@@ -1131,6 +1131,12 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					continue;
 
 				R_EvalStageColorAlpha (stage, cl.time, stage_color);
+				if (stage->outputs & MAT_STAGE_OUT_BLOOM)
+				{
+					stage_color[0] *= stage->bloom_scale;
+					stage_color[1] *= stage->bloom_scale;
+					stage_color[2] *= stage->bloom_scale;
+				}
 
 				if (stage_index == 0 && stage_tex == t->gltexture)
 				{
