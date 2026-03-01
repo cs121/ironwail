@@ -1626,7 +1626,7 @@ void R_FogVol_Render (void)
 	GL_Uniform1iFunc (15, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
 	GL_Uniform1iFunc (16, fog_light_enabled ? 1 : 0);
 	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
-	VectorNegate (vpn, shadow_dir);
+	VectorScale (vpn, -1.f, shadow_dir);
 	/* BUG FIX (C-09): Length check must happen BEFORE VectorNormalize.
 	 * VectorNormalize on a zero-vector causes division-by-zero / NaN.
 	 * Only normalize when the vector is non-degenerate. */
@@ -1650,8 +1650,9 @@ void R_FogVol_Render (void)
 	{
 		qboolean msaa = framebufs.scene.samples > 1;
 		velocity_tex = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
-		if (framesetup.scene_fbo != framebufs.scene.fbo)
-			velocity_tex = 0;
+		/* r_fogvol.c has no access to gl_rmain.c's internal framesetup state.
+		 * Keep the available velocity texture and let TAA/motion resolve handle
+		 * stale-history rejection through their normal confidence path. */
 	}
 	fog_tex[0] = framebufs.fogvol.color_tex[0];
 	fog_tex[1] = framebufs.fogvol.color_tex[1];
