@@ -456,6 +456,12 @@ typedef struct gpuframedata_s {
         unsigned int    _padding2;
 } gpuframedata_t;
 
+typedef struct r_sun_s {
+	qboolean enabled;
+	vec3_t origin;
+	vec3_t dir;
+} r_sun_t;
+
 COMPILE_TIME_ASSERT (gpuframedata_std140_size, sizeof (gpuframedata_t) == 400);
 
 typedef enum
@@ -469,6 +475,7 @@ extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
 extern float r_lightstyle_framefrac;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
+extern r_sun_t r_sun;
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);

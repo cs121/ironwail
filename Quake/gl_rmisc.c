@@ -890,6 +890,95 @@ void R_TranslateNewPlayerSkin (int playernum)
 R_NewGame -- johnfitz -- handle a game switch
 ===============
 */
+
+static qboolean r_map_has_sun = false;
+r_sun_t r_sun;
+
+static void R_ParseSunData (void)
+{
+	const char *data;
+
+	r_map_has_sun = false;
+	r_sun.enabled = false;
+	VectorClear (r_sun.origin);
+	VectorClear (r_sun.dir);
+
+	if (!cl.worldmodel || !cl.worldmodel->entities)
+		return;
+
+	data = cl.worldmodel->entities;
+	data = COM_Parse (data);
+	while (data && com_token[0])
+	{
+		qboolean is_sun_entity = false;
+
+		if (com_token[0] != '{')
+			break;
+
+		while (1)
+		{
+			char key[128], value[4096];
+
+			data = COM_Parse (data);
+			if (!data || !com_token[0])
+				return;
+			if (com_token[0] == '}')
+				break;
+
+			if (com_token[0] == '_')
+				q_strlcpy (key, com_token + 1, sizeof (key));
+			else
+				q_strlcpy (key, com_token, sizeof (key));
+			while (key[0] && key[strlen (key) - 1] == ' ')
+				key[strlen (key) - 1] = 0;
+
+			data = COM_ParseEx (data, CPE_ALLOWTRUNC);
+			if (!data)
+				return;
+			q_strlcpy (value, com_token, sizeof (value));
+
+			if (!strcmp (key, "sunlight") || !strcmp (key, "sun_mangle"))
+				r_map_has_sun = true;
+
+			if (!strcmp (key, "classname") && !strcmp (value, "sun"))
+				is_sun_entity = true;
+		}
+
+		if (is_sun_entity)
+			r_map_has_sun = true;
+
+		data = COM_Parse (data);
+	}
+}
+
+static void R_ApplyDefaultSunIfMissing (model_t *world)
+{
+	vec3_t center;
+	vec3_t ang;
+
+	if (!world)
+		return;
+
+	if (r_map_has_sun)
+		return;
+
+	center[0] = 0.5f * (world->mins[0] + world->maxs[0]);
+	center[1] = 0.5f * (world->mins[1] + world->maxs[1]);
+	center[2] = 0.5f * (world->mins[2] + world->maxs[2]);
+
+	VectorCopy (center, r_sun.origin);
+	r_sun.origin[2] += 128.0f;
+
+	ang[PITCH] = 45.0f;
+	ang[YAW] = 225.0f;
+	ang[ROLL] = 0.0f;
+
+	AngleVectors (ang, r_sun.dir, NULL, NULL);
+	VectorNormalize (r_sun.dir);
+
+	r_sun.enabled = true;
+}
+
 void R_NewGame (void)
 {
 	int i;
@@ -981,6 +1070,8 @@ void R_NewMap (void)
 	R_ResetGodraysStabilization ();
 	R_FogVol_ClearHistory ();
 
+	r_map_has_sun = false;
+
 	GL_BuildLightmaps ();
         GL_BuildBModelVertexBuffer ();
         GL_BuildBModelMarkBuffers ();
@@ -993,6 +1084,8 @@ void R_NewMap (void)
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
         R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
+        R_ParseSunData ();
+        R_ApplyDefaultSunIfMissing (cl.worldmodel);
         R_ParseDlightEntities (); // persistent dlights from BSP entities
         R_FogVol_ParseEntities (); // fog volume entities from BSP
 
