@@ -576,6 +576,26 @@ typedef struct
 } bsp_header_info_t;
 static bspx_header_t *BSPX_Setup(qmodel_t *mod, const bsp_header_info_t *header, size_t filelen);
 static void *BSPX_FindLump(bspx_header_t *bspxheader, void *base, const char *lumpname, size_t *lumpsize);
+
+/*
+ * BSPX lump names are fixed 24-byte, zero-padded fields (max 23 chars + NUL).
+ * Compare against the full field so handler aliases never match by prefix.
+ */
+static qboolean BSPX_LumpNameEquals(const char entry_name[24], const char *name)
+{
+	char expected_name[24];
+	size_t len;
+
+	len = strlen(name);
+	if (len >= sizeof(expected_name))
+		return false;
+
+	memset(expected_name, 0, sizeof(expected_name));
+	memcpy(expected_name, name, len);
+
+	return !memcmp(entry_name, expected_name, sizeof(expected_name));
+}
+
 typedef struct
 {
         char lumpname[sizeof(((bspx_lump_disk_t *)0)->lumpname) + 1];
@@ -1089,7 +1109,11 @@ static void Mod_DispatchBSPXLumps(qmodel_t *mod)
 
                 for (handler = bspx_handlers; handler->handler; handler++)
                 {
-                        if (!strncmp(entry->name, handler->name, strlen(handler->name)))
+                        /*
+                         * Must be exact BSPX name equality (24-byte field semantics),
+                         * not prefix matching.
+                         */
+                        if (BSPX_LumpNameEquals(entry->name, handler->name))
                         {
                                 handled = true;
                                 if (handler->handler(mod, mod_base + entry->offset, entry->size))
