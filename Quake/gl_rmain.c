@@ -33,6 +33,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define NOISESCALE     (1.0f / 127.0f)
 
 extern gltexture_t *lightmap_dir_texture;
+extern cvar_t r_sun_light;
 
 qboolean	r_cache_thrash;		// compatability
 
