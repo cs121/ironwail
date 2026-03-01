@@ -361,6 +361,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
         char *result;
         char *source;
         const char *cursor;
+        int parent_line;
         int i;
 
         for (i = 0; i < shader_cache_count; i++)
@@ -416,6 +417,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
         } while (0)
 
         cursor = source;
+        parent_line = 1;
         while (*cursor)
         {
                 const char *line_start = cursor;
@@ -446,11 +448,12 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
                                         end++;
                                 if (end < line_start + line_len)
                                 {
-								char include_path[MAX_QPATH];
-								char full_path[MAX_QPATH];
-								size_t include_len = (size_t) (end - ptr);
-								const char *reason = NULL;
-								char *included;
+                                        char include_path[MAX_QPATH];
+                                        char full_path[MAX_QPATH];
+                                        char linebuf[2 * MAX_QPATH + 64];
+                                        size_t include_len = (size_t) (end - ptr);
+                                        const char *reason = NULL;
+                                        char *included;
 
                                         if (include_len >= sizeof (include_path))
                                         {
@@ -500,12 +503,17 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
                                         included = GL_LoadShaderFile_Internal (full_path, depth + 1, include_stack, include_stack_size);
                                         if (included)
                                         {
+                                                q_snprintf (linebuf, sizeof (linebuf), "#line 1 \"%s\"\n", full_path);
+                                                APPEND_STR (linebuf, strlen (linebuf));
                                                 APPEND_STR (included, strlen (included));
                                                 if (line_end && (result_len == 0 || result[result_len - 1] != '\n'))
                                                         APPEND_STR ("\n", 1);
+                                                q_snprintf (linebuf, sizeof (linebuf), "#line %d \"%s\"\n", parent_line + 1, path);
+                                                APPEND_STR (linebuf, strlen (linebuf));
                                         }
 
                                         cursor = line_end ? line_end + 1 : cursor + line_len;
+                                        parent_line++;
                                         continue;
                                 }
                         }
@@ -513,6 +521,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
 
                 APPEND_STR (line_start, line_len);
                 cursor = line_end ? line_end + 1 : cursor + line_len;
+                parent_line++;
         }
 
 #undef APPEND_STR
