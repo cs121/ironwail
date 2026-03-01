@@ -4704,6 +4704,7 @@ void R_RenderScene (void)
 	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
+	R_DrawDecals ();
 	R_DrawDLightPass ();
 	R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
@@ -4891,6 +4892,7 @@ void R_RenderView (void)
                 glFinish ();
 
 	R_SetupView (); //johnfitz -- this does everything that should be done once per frame
+	R_UpdateDecals ();
         Fog_EnableGFog ();
         R_RenderScene ();
         R_WarpScaleView ();

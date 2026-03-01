@@ -115,10 +115,22 @@ void CL_ParseBeam (qmodel_t *m)
 CL_ParseTEnt
 =================
 */
+static qboolean CL_DecalNormalFromView (const vec3_t impact, vec3_t out_normal)
+{
+	vec3_t from;
+	VectorCopy (cl_entities[cl.viewentity].origin, from);
+	VectorSubtract (from, impact, out_normal);
+	if (VectorLengthSquared (out_normal) < 0.0001f)
+		return false;
+	VectorNormalizeFast (out_normal);
+	return true;
+}
+
 void CL_ParseTEnt (void)
 {
 	int		type;
 	vec3_t	pos;
+	vec3_t	decal_normal;
 	dlight_t	*dl;
 	int		rnd;
 	int		colorStart, colorLength;
@@ -147,6 +159,8 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 10);
+		if (CL_DecalNormalFromView (pos, decal_normal))
+			R_SpawnImpactDecal ("bullet", pos, decal_normal);
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
@@ -165,6 +179,8 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		if (CL_DecalNormalFromView (pos, decal_normal))
+			R_SpawnImpactDecal ("bullet", pos, decal_normal);
 
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
@@ -185,6 +201,8 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		if (CL_DecalNormalFromView (pos, decal_normal))
+			R_SpawnImpactDecal ("bullet", pos, decal_normal);
 		break;
 
 	case TE_EXPLOSION:                      // rocket explosion
@@ -193,6 +211,8 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		V_AddExplosionVibration (pos);
 		R_ParticleExplosion (pos);
+		if (CL_DecalNormalFromView (pos, decal_normal))
+			R_SpawnImpactDecal ("scorch", pos, decal_normal);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
@@ -210,6 +230,8 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		V_AddExplosionVibration (pos);
 		R_BlobExplosion (pos);
+		if (CL_DecalNormalFromView (pos, decal_normal))
+			R_SpawnImpactDecal ("scorch", pos, decal_normal);
 
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
@@ -254,6 +276,8 @@ void CL_ParseTEnt (void)
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
                 R_ParticleExplosion2 (pos, colorStart, colorLength);
+		if (CL_DecalNormalFromView (pos, decal_normal))
+			R_SpawnImpactDecal ("scorch", pos, decal_normal);
                 dl = CL_AllocDlight (0);
                 VectorCopy (pos, dl->origin);
                 dl->radius = 350;
