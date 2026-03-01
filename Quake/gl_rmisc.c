@@ -818,6 +818,7 @@ Cvar_RegisterVariable (&r_vignette);
 	R_FogVol_Init ();
 
 	R_InitParticles ();
+	R_InitDecals ();
 	R_SetClearColor_f (&r_clearcolor); //johnfitz
 
 	Sky_Init (); //johnfitz
@@ -1060,6 +1061,8 @@ void R_NewMap (void)
 
 	R_ResetGodraysStabilization ();
 	R_FogVol_ClearHistory ();
+	R_ReloadDecals ();
+	R_ClearDecals ();
 
 	R_ResetSunState ();
 

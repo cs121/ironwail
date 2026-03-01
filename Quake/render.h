@@ -166,6 +166,13 @@ void R_TeleportSplash (vec3_t org);
 const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos);
 
 
+void R_InitDecals (void);
+void R_ClearDecals (void);
+void R_ReloadDecals (void);
+void R_UpdateDecals (void);
+void R_DrawDecals (void);
+void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t normal);
+
 void R_PushDlights (void);
 
 #endif	/* _QUAKE_RENDER_H */
