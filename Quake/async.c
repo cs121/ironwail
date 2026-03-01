@@ -227,8 +227,45 @@ static SDL_mutex *fs_mutex;
 static fs_completion_t *fs_comp_head;
 static fs_completion_t *fs_comp_tail;
 static unsigned int fs_next_id = 1;
-static unsigned int fs_cancel_before;
 static unsigned int fs_generation;
+
+typedef struct fs_canceled_id_s {
+	unsigned int id;
+	struct fs_canceled_id_s *next;
+} fs_canceled_id_t;
+
+static fs_canceled_id_t *fs_canceled_ids;
+
+static qboolean FS_HasCanceledIdLocked (unsigned int id)
+{
+	fs_canceled_id_t *entry = fs_canceled_ids;
+	while (entry)
+	{
+		if (entry->id == id)
+			return true;
+		entry = entry->next;
+	}
+
+	return false;
+}
+
+static qboolean FS_TakeCanceledIdLocked (unsigned int id)
+{
+	fs_canceled_id_t **cursor = &fs_canceled_ids;
+	while (*cursor)
+	{
+		fs_canceled_id_t *entry = *cursor;
+		if (entry->id == id)
+		{
+			*cursor = entry->next;
+			free (entry);
+			return true;
+		}
+		cursor = &entry->next;
+	}
+
+	return false;
+}
 
 static uint8_t *FS_LoadMallocThread (const char *path, size_t *len_out)
 {
@@ -323,11 +360,31 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 
 void FS_AsyncReadCancel (fs_asyncread_handle_t handle)
 {
+	fs_canceled_id_t *entry;
+
 	if (!handle.id)
 		return;
+
+	entry = (fs_canceled_id_t *) calloc (1, sizeof (*entry));
+	if (!entry)
+		Sys_Error ("FS_AsyncReadCancel: out of memory");
+	entry->id = handle.id;
+
 	SDL_LockMutex (fs_mutex);
-	if (handle.id > fs_cancel_before)
-		fs_cancel_before = handle.id;
+	if (FS_HasCanceledIdLocked (handle.id))
+	{
+		SDL_UnlockMutex (fs_mutex);
+		free (entry);
+		return;
+	}
+
+	/*
+	 * Track cancellations by exact async handle id. This avoids the old
+	 * "cancel-before" behavior where canceling one request could
+	 * unintentionally suppress unrelated lower-id completions.
+	 */
+	entry->next = fs_canceled_ids;
+	fs_canceled_ids = entry;
 	SDL_UnlockMutex (fs_mutex);
 }
 
@@ -353,7 +410,11 @@ void FS_PumpAsyncCompletions (void)
 		qboolean canceled;
 
 		SDL_LockMutex (fs_mutex);
-		canceled = list->id <= fs_cancel_before || list->generation != fs_generation;
+		/*
+		 * A completion is canceled only if its exact handle id was canceled.
+		 * Generation mismatches are still treated as stale and dropped.
+		 */
+		canceled = FS_TakeCanceledIdLocked (list->id) || list->generation != fs_generation;
 		SDL_UnlockMutex (fs_mutex);
 
 		if (!canceled)
@@ -369,6 +430,7 @@ void Jobs_Shutdown (void)
 {
 	jobnode_t *node;
 	fs_completion_t *comp;
+	fs_canceled_id_t *canceled;
 
 	if (!jobs_mutex)
 		return;
@@ -404,6 +466,18 @@ void Jobs_Shutdown (void)
 			free (comp->data);
 		free (comp);
 		comp = next;
+	}
+
+	SDL_LockMutex (fs_mutex);
+	canceled = fs_canceled_ids;
+	fs_canceled_ids = NULL;
+	SDL_UnlockMutex (fs_mutex);
+
+	while (canceled)
+	{
+		fs_canceled_id_t *next = canceled->next;
+		free (canceled);
+		canceled = next;
 	}
 
 	while ((node = jobs_head) != NULL)
