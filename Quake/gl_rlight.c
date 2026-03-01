@@ -377,11 +377,8 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 		qboolean cull = false;
 		float radius;
 
-		if (l->spawn > cl.time)
-		{
-			l->die = 0.f;
+		if (!CL_DlightTransientIsLiveAtTime (l, cl.time, NULL))
 			continue;
-		}
 
 		if (!CL_DlightIsActive (l))
 			continue;
