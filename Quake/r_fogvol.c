@@ -133,6 +133,7 @@ cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_sun_dir = { "r_fogvol_sun_dir", "1", CVAR_ARCHIVE };
 
 extern cvar_t gl_farclip;
 
@@ -843,6 +844,7 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_shadow_samples);
 	Cvar_RegisterVariable (&r_fogvol_shadow_strength);
 	Cvar_RegisterVariable (&r_fogvol_shadow_jitter);
+	Cvar_RegisterVariable (&r_fogvol_sun_dir);
 }
 
 void R_FogVol_Clear (void)
@@ -1636,7 +1638,16 @@ void R_FogVol_Render (void)
 	GL_Uniform1iFunc (15, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
 	GL_Uniform1iFunc (16, fog_light_enabled ? 1 : 0);
 	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
-	VectorScale (vpn, -1.f, shadow_dir);
+	if (r_fogvol_sun_dir.value > 0.f && R_GetSun (shadow_dir, NULL, NULL, NULL))
+	{
+		/* Convention: r_sun.dir points from scene toward the sun (light source).
+		 * Fog shadow marching moves from sample point toward the blocker, so use
+		 * the same direction without flipping to keep shader/CPU conventions aligned. */
+	}
+	else
+	{
+		VectorScale (vpn, -1.f, shadow_dir);
+	}
 	/* BUG FIX (C-09): Length check must happen BEFORE VectorNormalize.
 	 * VectorNormalize on a zero-vector causes division-by-zero / NaN.
 	 * Only normalize when the vector is non-degenerate. */
