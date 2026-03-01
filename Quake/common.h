@@ -432,6 +432,7 @@ typedef struct jobhandle_s
 typedef void (*jobs_func_t)(void *userdata);
 
 JobHandle *Jobs_Submit (jobs_func_t func, void *userdata);
+void Jobs_SubmitDetached (jobs_func_t func, void *userdata);
 void Jobs_Wait (JobHandle *handle);
 void Jobs_Shutdown (void);
 
