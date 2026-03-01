@@ -3412,6 +3412,30 @@ void R_SetupView (void)
         r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
 
+	{
+		vec3_t sun_dir;
+		vec3_t sun_color;
+		float sun_intensity = 1.f;
+		qboolean sun_enabled = (r_sun_light.value > 0.f) && R_GetSun (sun_dir, NULL, sun_color, &sun_intensity);
+
+		if (!sun_enabled)
+		{
+			VectorSet (sun_dir, 0.f, 0.f, -1.f);
+			VectorSet (sun_color, 1.f, 1.f, 1.f);
+			sun_intensity = 1.f;
+		}
+
+		r_framedata.sun_dir_enabled[0] = sun_dir[0];
+		r_framedata.sun_dir_enabled[1] = sun_dir[1];
+		r_framedata.sun_dir_enabled[2] = sun_dir[2];
+		r_framedata.sun_dir_enabled[3] = sun_enabled ? 1.f : 0.f;
+
+		r_framedata.sun_color_intensity[0] = sun_color[0];
+		r_framedata.sun_color_intensity[1] = sun_color[1];
+		r_framedata.sun_color_intensity[2] = sun_color[2];
+		r_framedata.sun_color_intensity[3] = q_max (0.f, sun_intensity);
+	}
+
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
 

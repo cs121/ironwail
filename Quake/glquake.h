@@ -450,6 +450,8 @@ typedef struct gpuframedata_s {
         vec4_t          dlight_params;  // x: style, y: debug view, z: pass selector, w: padding
         vec4_t          colorspace_params; // x: debug mode, y: manual gamma, z: output sRGB, w: unused
         vec4_t          shader_params;  // x: shader debug, y: tcgen debug, zw: unused
+        vec4_t          sun_dir_enabled; // xyz: sun dir (scene->sun), w: enabled
+        vec4_t          sun_color_intensity; // rgb: sun color, w: intensity
         unsigned int    numlights;
         unsigned int    prev_frame_valid;
         unsigned int    _padding1;
@@ -460,9 +462,11 @@ typedef struct r_sun_s {
 	qboolean enabled;
 	vec3_t origin;
 	vec3_t dir;
+	vec3_t color;
+	float intensity;
 } r_sun_t;
 
-COMPILE_TIME_ASSERT (gpuframedata_std140_size, sizeof (gpuframedata_t) == 400);
+COMPILE_TIME_ASSERT (gpuframedata_std140_size, sizeof (gpuframedata_t) == 432);
 
 typedef enum
 {
@@ -476,6 +480,9 @@ extern gpuframedata_t r_framedata;
 extern float r_lightstyle_framefrac;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
 extern r_sun_t r_sun;
+
+qboolean R_WorldHasSun (void);
+qboolean R_GetSun (vec3_t dir, vec3_t origin, vec3_t color, float *intensity);
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);

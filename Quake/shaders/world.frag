@@ -514,6 +514,18 @@ void main()
 		}
 
 		// Sun light
+		if (SunDirEnabled.w > 0.5)
+		{
+			/* SunDirEnabled.xyz stores scene->sun direction. Surface lighting needs
+			 * incoming-light direction (sun->scene), therefore we negate it. */
+			vec3 sun_to_surface = -SunDirEnabled.xyz;
+			float ndotl = max(dot(surface_normal, sun_to_surface), 0.0);
+			if (ndotl > 0.0)
+			{
+				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl;
+				total_light += max(min(sun_contrib, 1.0 - total_light), 0.0);
+			}
+		}
 
 		// Apply lighting
 #if DITHER >= 2

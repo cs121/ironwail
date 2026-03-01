@@ -281,6 +281,7 @@ extern cvar_t r_godrays_max_shift;
 extern cvar_t r_godrays_reset_on_teleport;
 extern cvar_t r_godrays_debug;
 extern cvar_t r_godrays_debug_source;
+extern cvar_t r_sun_light;
 extern cvar_t r_vignette;
 extern cvar_t r_vignette_radius_inner;
 extern cvar_t r_vignette_radius_outer;
@@ -809,6 +810,7 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_telealpha);
 	Cvar_RegisterVariable (&r_slimealpha);
 	Cvar_RegisterVariable (&r_scale);
+	Cvar_RegisterVariable (&r_sun_light);
 	Cvar_SetCallback (&r_telealpha, R_SetTelealpha_f);
 	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
 
@@ -893,16 +895,50 @@ R_NewGame -- johnfitz -- handle a game switch
 
 static qboolean r_worldspawn_has_sun = false;
 r_sun_t r_sun;
+cvar_t r_sun_light = { "r_sun_light", "0", CVAR_ARCHIVE };
+
+static void R_ResetSunState (void)
+{
+	r_worldspawn_has_sun = false;
+	r_sun.enabled = false;
+	VectorClear (r_sun.origin);
+	VectorClear (r_sun.dir);
+	VectorSet (r_sun.color, 1.f, 1.f, 1.f);
+	r_sun.intensity = 1.f;
+}
+
+qboolean R_WorldHasSun (void)
+{
+	return r_sun.enabled;
+}
+
+qboolean R_GetSun (vec3_t dir, vec3_t origin, vec3_t color, float *intensity)
+{
+	if (!r_sun.enabled)
+		return false;
+
+	if (dir)
+	{
+		if (DotProduct (r_sun.dir, r_sun.dir) > 1e-6f)
+			VectorCopy (r_sun.dir, dir);
+		else
+			VectorSet (dir, 0.f, 0.f, -1.f);
+	}
+	if (origin)
+		VectorCopy (r_sun.origin, origin);
+	if (color)
+		VectorCopy (r_sun.color, color);
+	if (intensity)
+		*intensity = r_sun.intensity;
+	return true;
+}
 
 static void R_ApplyDefaultSunIfMissing (qmodel_t *world)
 {
 	vec3_t center;
 	vec3_t ang;
 
-	if (!world)
-		return;
-
-	if (r_worldspawn_has_sun)
+	if (!world || r_sun.enabled || r_worldspawn_has_sun)
 		return;
 
 	center[0] = 0.5f * (world->mins[0] + world->maxs[0]);
@@ -917,8 +953,13 @@ static void R_ApplyDefaultSunIfMissing (qmodel_t *world)
 	ang[ROLL] = 0.0f;
 
 	AngleVectors (ang, r_sun.dir, NULL, NULL);
-	VectorNormalize (r_sun.dir);
+	if (VectorLength (r_sun.dir) < 0.001f)
+		VectorSet (r_sun.dir, 0.f, 0.f, -1.f);
+	else
+		VectorNormalize (r_sun.dir);
 
+	VectorSet (r_sun.color, 1.f, 1.f, 1.f);
+	r_sun.intensity = 1.f;
 	r_sun.enabled = true;
 }
 
@@ -944,7 +985,7 @@ static void R_ParseWorldspawn (void)
 	const char *data;
 
 	map_fallbackalpha = r_wateralpha.value;
-	r_worldspawn_has_sun = false;
+	R_ResetSunState ();
 	map_wateralpha = (cl.worldmodel->contentstransparent&SURF_DRAWWATER)?r_wateralpha.value:1;
 	map_lavaalpha = 1.0f;
 	map_telealpha = (cl.worldmodel->contentstransparent&SURF_DRAWTELE)?r_telealpha.value:1;
@@ -978,7 +1019,10 @@ if (!strcmp("wateralpha", key))
 map_wateralpha = atof(value);
 
 if (!strcmp("sunlight", key) || !strcmp("sun_mangle", key))
+{
 	r_worldspawn_has_sun = true;
+	r_sun.enabled = true;
+}
 
 if (!strcmp("telealpha", key))
 map_telealpha = atof(value);
@@ -1017,10 +1061,7 @@ void R_NewMap (void)
 	R_ResetGodraysStabilization ();
 	R_FogVol_ClearHistory ();
 
-	r_worldspawn_has_sun = false;
-	r_sun.enabled = false;
-	VectorClear (r_sun.origin);
-	VectorClear (r_sun.dir);
+	R_ResetSunState ();
 
 	GL_BuildLightmaps ();
         GL_BuildBModelVertexBuffer ();

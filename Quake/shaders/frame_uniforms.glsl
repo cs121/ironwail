@@ -47,17 +47,20 @@ layout(std140, binding=0) uniform FrameDataUBO
     vec4    DLightParams;       // 336
     vec4    ColorSpaceParams;   // 352
     vec4    ShaderParams;       // 368
+    vec4    SunDirEnabled;  // 384  xyz: scene->sun direction, w: enabled
+    vec4    SunColorIntensity; // 400 rgb: sun color, w: intensity
 
-    // ── Global params ── offset 384
+    // ── Global params ── offset 416
     // NOTE: These members must stay layout-compatible with gpuframedata_t
     // their expected offsets.
 
 
-    // ── Misc ──────────────────────────────────────────── offset 880
-    uint    NumLights;      // 880
-    uint    PrevFrameValid; // 884
-    uint    _Pad1;          // 888
-    uint    _Pad2;          // 892
-};                          // Total: 896 bytes
+    // ── Misc ──────────────────────────────────────────── offset 416
+    uint    NumLights;      // 416
+    uint    PrevFrameValid; // 420
+    uint    _Pad1;          // 424
+    uint    _Pad2;          // 428
+};                          // Total: 432 bytes
+
 
 #endif // FRAME_UNIFORMS_GLSL
