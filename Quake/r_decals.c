@@ -312,16 +312,68 @@ static int R_ClipPolyAxis (const decalvert_t *in, int count, decalvert_t *out, i
 	return out_count;
 }
 
-static int R_ProjectDecalToSurface (const msurface_t *surf, const vec3_t origin, const vec3_t sdir, const vec3_t tdir, const vec3_t normal,
+static void R_BuildSurfaceDecalBasis (const msurface_t *surf, float rotation, vec3_t out_sdir, vec3_t out_tdir, vec3_t out_normal)
+{
+	vec3_t surf_normal, up = {0.f, 0.f, 1.f};
+	float c = cosf (rotation), s = sinf (rotation);
+	int i;
+
+	VectorCopy (surf->plane->normal, surf_normal);
+	if (surf->flags & SURF_PLANEBACK)
+		VectorInverse (surf_normal);
+	VectorNormalizeFast (surf_normal);
+
+	for (i = 0; i < 3; ++i)
+	{
+		out_sdir[i] = surf->texinfo->vecs[0][i];
+		out_tdir[i] = surf->texinfo->vecs[1][i];
+	}
+
+	if (VectorLengthSquared (out_sdir) < 0.0001f)
+	{
+		if (fabsf (surf_normal[2]) > 0.95f)
+			VectorSet (up, 1.f, 0.f, 0.f);
+		CrossProduct (up, surf_normal, out_sdir);
+	}
+	VectorNormalizeFast (out_sdir);
+
+	CrossProduct (surf_normal, out_sdir, out_tdir);
+	if (VectorLengthSquared (out_tdir) < 0.0001f)
+	{
+		CrossProduct (out_sdir, surf_normal, out_tdir);
+	}
+	VectorNormalizeFast (out_tdir);
+
+	CrossProduct (out_tdir, surf_normal, out_sdir);
+	VectorNormalizeFast (out_sdir);
+
+	if (rotation != 0.f)
+	{
+		for (i = 0; i < 3; ++i)
+		{
+			float ns = out_sdir[i] * c + out_tdir[i] * s;
+			float nt = out_tdir[i] * c - out_sdir[i] * s;
+			out_sdir[i] = ns;
+			out_tdir[i] = nt;
+		}
+	}
+
+	VectorCopy (surf_normal, out_normal);
+}
+
+static int R_ProjectDecalToSurface (const msurface_t *surf, const vec3_t origin, float rotation,
 	float radius, float alpha, const vec3_t color, int first_vert)
 {
 	decalvert_t poly0[MAX_POLY_VERTS], poly1[MAX_POLY_VERTS];
+	vec3_t sdir, tdir, normal;
 	int i, count = surf->numedges;
 	int total_added = 0;
 	float depth = q_max (2.f, radius * 0.5f);
 
 	if (count < 3 || count >= MAX_POLY_VERTS)
 		return 0;
+
+	R_BuildSurfaceDecalBasis (surf, rotation, sdir, tdir, normal);
 
 	for (i = 0; i < count; ++i)
 	{
@@ -349,6 +401,7 @@ static int R_ProjectDecalToSurface (const msurface_t *surf, const vec3_t origin,
 		VectorCopy (origin, v->pos);
 		VectorMA (v->pos, poly0[i].pos[0], sdir, v->pos);
 		VectorMA (v->pos, poly0[i].pos[1], tdir, v->pos);
+		VectorMA (v->pos, poly0[i].pos[2], normal, v->pos);
 		v->uv[0] = 0.5f + poly0[i].pos[0] / (2.f * radius);
 		v->uv[1] = 0.5f + poly0[i].pos[1] / (2.f * radius);
 		v->color[0] = (byte) (CLAMP (0.f, color[0], 1.f) * 255.f);
@@ -365,8 +418,8 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 {
 	decaldef_t *def;
 	mleaf_t *leaf;
-	vec3_t n, sdir, tdir, up = {0.f, 0.f, 1.f};
-	float radius, alpha, rot, c, s;
+	vec3_t n;
+	float radius, alpha, rot;
 	int i, inst_idx, first_vert;
 	decalinst_t *inst;
 
@@ -385,27 +438,10 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 	if (VectorLengthSquared (n) < 0.0001f)
 		return;
 	VectorNormalizeFast (n);
-
-	if (fabsf (n[2]) > 0.95f)
-		VectorSet (up, 1.f, 0.f, 0.f);
-	CrossProduct (up, n, sdir);
-	VectorNormalizeFast (sdir);
-	CrossProduct (n, sdir, tdir);
-	VectorNormalizeFast (tdir);
+	rot = 0.f;
 
 	if (def->random_rotation)
-	{
 		rot = ((float) rand () / (float) RAND_MAX) * (2.f * M_PI);
-		c = cosf (rot);
-		s = sinf (rot);
-		for (i = 0; i < 3; ++i)
-		{
-			float ns = sdir[i] * c + tdir[i] * s;
-			float nt = tdir[i] * c - sdir[i] * s;
-			sdir[i] = ns;
-			tdir[i] = nt;
-		}
-	}
 
 	radius = def->size_min + ((float) rand () / (float) RAND_MAX) * (def->size_max - def->size_min);
 	alpha = def->alpha_min + ((float) rand () / (float) RAND_MAX) * (def->alpha_max - def->alpha_min);
@@ -436,7 +472,7 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 		if (decal_vert_cursor + MAX_POLY_VERTS >= MAX_DECAL_VERTS)
 			break;
 
-		added = R_ProjectDecalToSurface (surf, origin, sdir, tdir, n, radius, alpha, def->color, decal_vert_cursor);
+		added = R_ProjectDecalToSurface (surf, origin, rot, radius, alpha, def->color, decal_vert_cursor);
 		decal_vert_cursor += added;
 	}
 
