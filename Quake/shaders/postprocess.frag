@@ -126,7 +126,7 @@ layout(location=6) uniform vec4 MotionParams0; // x: enabled, y: shutter strengt
 layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y: max samples, z: velocity texture available, w: reserved
 layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: inner radius, z: outer radius, w: falloff
 layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend mode
-layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: screen-space darken strength, z: screen-space darken depth range, w: unused
+layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, yzw: unused
 layout(location=11) uniform vec4 TeleportParams; // x: teleport fade, y: blur radius (pixels)
 layout(location=12) uniform float u_saturation;
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
@@ -437,17 +437,6 @@ void main()
         {
                 vec2 viewUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
                 float aspect = texSize.y > 0.0 ? texSize.x / texSize.y : 1.0;
-
-                float screenDarkenStrength = clamp(PostFXParams2.y, 0.0, 1.0);
-                float screenDarkenDepth = max(PostFXParams2.z, 1e-4);
-                if (screenDarkenStrength > 0.0 && depthInfo.valid)
-                {
-                        float linearDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
-                        float depthRange = max(DoFParams1.y - DoFParams1.x, 1e-6);
-                        float normalizedDepth = clamp((linearDepth - DoFParams1.x) / depthRange, 0.0, 1.0);
-                        float screenAO = smoothstep(0.0, screenDarkenDepth, 1.0 - normalizedDepth);
-                        color.rgb *= mix(vec3(1.0), vec3(screenAO), screenDarkenStrength);
-                }
 
                 float vignetteStrength = clamp(PostFXParams0.x, 0.0, 1.0);
                 float vignetteInner = max(PostFXParams0.y, 0.0);

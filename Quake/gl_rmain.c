@@ -453,8 +453,6 @@ cvar_t	r_vignette_color_g = { "r_vignette_color_g", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_b = { "r_vignette_color_b", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_blend_mode = { "r_vignette_blend_mode", "0", CVAR_ARCHIVE };
 cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
-cvar_t	r_screendarken = { "r_screendarken", "0", CVAR_ARCHIVE };
-cvar_t	r_screendarken_depth = { "r_screendarken_depth", "0.4", CVAR_ARCHIVE };
 cvar_t	r_teleportfx = { "r_teleportfx", "1", CVAR_ARCHIVE };
 cvar_t	r_teleportfx_time = { "r_teleportfx_time", "0.35", CVAR_ARCHIVE };
 
@@ -2179,9 +2177,6 @@ void GL_PostProcess (void)
 	float motion_min_velocity;
 	float motion_depth_threshold;
 	int motion_max_samples;
-	qboolean screen_darken_enabled;
-	float screen_darken_strength;
-	float screen_darken_depth;
 	float teleport_fade;
 	float teleport_blur;
 	qboolean godrays_enabled;
@@ -2263,9 +2258,6 @@ void GL_PostProcess (void)
 	float bloom_intensity_effective = bloom_intensity;
 	float exposure = q_max (0.f, r_tonemap_exposure.value);
 	float tonemap_mode = q_max (0.f, r_tonemap.value);
-	screen_darken_strength = q_min (1.f, q_max (0.f, r_screendarken.value));
-	screen_darken_depth = q_max (0.f, r_screendarken_depth.value);
-	screen_darken_enabled = (screen_darken_strength > 0.f);
 	teleport_fade = 0.f;
 	teleport_blur = 0.f;
 	{
@@ -2444,8 +2436,8 @@ void GL_PostProcess (void)
 		q_min (2.f, q_max (0.f, r_vignette_blend_mode.value)));
 	GL_Uniform4fFunc (10,
 	q_min (0.1f, q_max (0.f, r_vignette_noise.value)),
-	screen_darken_strength,
-	screen_darken_depth,
+	0.f,
+	0.f,
 	0.f);
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, CLAMP (0.9f, r_color_saturation.value, 1.2f));
@@ -2504,7 +2496,7 @@ void GL_PostProcess (void)
 	{
 		qboolean ssao_needs_depth = (ssao_texture != 0
 			&& (r_ssao_halfres.value > 0.f || ssao_debug_mode == 8.f || ssao_fog_strength > 0.f));
-		if (framebufs.composite.depth_stencil_tex && (dof_enabled || screen_darken_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_needs_depth))
+		if (framebufs.composite.depth_stencil_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_needs_depth))
 			depth_texture = framebufs.composite.depth_stencil_tex;
 	}
 	GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_texture);
