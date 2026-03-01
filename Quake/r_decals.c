@@ -74,6 +74,28 @@ static int decal_inst_count;
 static cvar_t r_decals = {"r_decals", "1", CVAR_ARCHIVE};
 static cvar_t r_decals_max = {"r_decals_max", "256", CVAR_ARCHIVE};
 
+static void R_Decals_CompactVerts (void)
+{
+	int i;
+	int write_cursor = 0;
+
+	for (i = 0; i < MAX_DECAL_INSTANCES; ++i)
+	{
+		decalinst_t *inst = &decal_instances[i];
+
+		if (!inst->active || inst->num_verts <= 0)
+			continue;
+
+		if (inst->first_vert != write_cursor)
+			memmove (&decal_verts[write_cursor], &decal_verts[inst->first_vert], sizeof (decalvert_t) * inst->num_verts);
+
+		inst->first_vert = write_cursor;
+		write_cursor += inst->num_verts;
+	}
+
+	decal_vert_cursor = write_cursor;
+}
+
 static void R_Decals_ResetRuntime (void)
 {
 	memset (decal_instances, 0, sizeof (decal_instances));
@@ -262,7 +284,14 @@ static int R_DecalAllocInstance (int priority)
 	}
 
 	if (pick >= 0 && decal_instances[pick].priority <= priority)
+	{
+		if (decal_instances[pick].active)
+		{
+			decal_instances[pick].active = false;
+			decal_inst_count = q_max (0, decal_inst_count - 1);
+		}
 		return pick;
+	}
 	return -1;
 }
 
@@ -456,6 +485,14 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 		return;
 
 	first_vert = decal_vert_cursor;
+	if (first_vert + MAX_POLY_VERTS >= MAX_DECAL_VERTS)
+	{
+		R_Decals_CompactVerts ();
+		first_vert = decal_vert_cursor;
+		if (first_vert + MAX_POLY_VERTS >= MAX_DECAL_VERTS)
+			return;
+	}
+
 	for (i = 0; i < leaf->nummarksurfaces; ++i)
 	{
 		msurface_t *surf = &cl.worldmodel->surfaces[leaf->firstmarksurface[i]];
@@ -524,8 +561,14 @@ void R_UpdateDecals (void)
 		if (!decal_instances[i].active)
 			continue;
 		if (decal_instances[i].die_time <= cl.time)
+		{
 			decal_instances[i].active = false;
+			decal_inst_count = q_max (0, decal_inst_count - 1);
+		}
 	}
+
+	if (decal_vert_cursor + MAX_POLY_VERTS >= MAX_DECAL_VERTS)
+		R_Decals_CompactVerts ();
 }
 
 static int R_DecalSortCmp (const void *a, const void *b)
