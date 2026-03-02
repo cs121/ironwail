@@ -121,6 +121,74 @@ static void R_Q3P_TestSpawn_f (void)
 	Con_Printf ("q3p_spawned %d particles (%d active)\n", i, Q3P_ActiveCount ());
 }
 
+static qboolean R_CanUseQ3PForLegacyParticleEffect (void)
+{
+	particlemode_t mode = R_GetParticleMode ();
+
+	return mode == PARTICLEMODE_Q3P || mode == PARTICLEMODE_HYBRID;
+}
+
+static qboolean R_TrySpawnQ3PLegacyParticleEffect (const vec3_t org, const vec3_t dir, int color, int count)
+{
+	int i;
+	const qboolean rocket_explosion = (count == 1024);
+	const char *material = rocket_explosion ? "explosion" : "bullet";
+	const float lifetime_min = rocket_explosion ? 0.45f : 0.10f;
+	const float lifetime_rand = rocket_explosion ? 0.20f : 0.40f;
+	const float size = rocket_explosion ? 8.0f : 1.25f;
+	const float size_rand = rocket_explosion ? 4.0f : 0.75f;
+	const float alpha_ramp = rocket_explosion ? -2.0f : -3.0f;
+	const float gravity = rocket_explosion ? 100.f : 300.f;
+	const float drag = rocket_explosion ? 0.5f : 0.2f;
+
+	if (!R_CanUseQ3PForLegacyParticleEffect ())
+		return false;
+
+	for (i = 0; i < count; ++i)
+	{
+		q3p_particle_t p;
+
+		memset (&p, 0, sizeof(p));
+		p.spawn_time = cl.time;
+		p.lifetime = lifetime_min + ((rand() & 255) / 255.0f) * lifetime_rand;
+		p.size = size + ((rand() & 255) / 255.0f) * size_rand;
+		p.size_ramp = p.size * 8.0f;
+		p.alpha = 1.0f;
+		p.alpha_ramp = alpha_ramp;
+		p.color = rocket_explosion ? ramp1[0] : color;
+		p.gravity = gravity;
+		p.drag = drag;
+
+		q_strlcpy (p.material, material, sizeof(p.material));
+
+		if (rocket_explosion)
+		{
+			p.org[0] = org[0] + ((rand() % 32) - 16);
+			p.org[1] = org[1] + ((rand() % 32) - 16);
+			p.org[2] = org[2] + ((rand() % 32) - 16);
+
+			p.vel[0] = (float)((rand() % 512) - 256);
+			p.vel[1] = (float)((rand() % 512) - 256);
+			p.vel[2] = (float)((rand() % 512) - 256);
+		}
+		else
+		{
+			p.org[0] = org[0] + ((rand() & 15) - 8);
+			p.org[1] = org[1] + ((rand() & 15) - 8);
+			p.org[2] = org[2] + ((rand() & 15) - 8);
+
+			p.vel[0] = dir[0] * 15.f;
+			p.vel[1] = dir[1] * 15.f;
+			p.vel[2] = dir[2] * 15.f;
+		}
+
+		if (!Q3P_Spawn (&p))
+			return true;
+	}
+
+	return true;
+}
+
 typedef struct particlevert_t {
 	vec3_t		pos;
 	GLubyte		color[4];
@@ -299,6 +367,9 @@ void R_ParseParticleEffect (void)
 		count = 1024;
 	else
 		count = msgcount;
+
+	if (R_TrySpawnQ3PLegacyParticleEffect (org, dir, color, count))
+		return;
 
 	R_RunParticleEffect (org, dir, color, count);
 }

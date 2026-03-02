@@ -45,3 +45,32 @@ Damit bleibt Phase 0 rein dokumentarisch/spezifikativ; es gibt keine Verhaltens�
 - [x] Für jeden `TE_*` aus `Quake/protocol.h` gibt es genau einen Mapping-Eintrag in der Tabelle.
 - [x] Für jeden bestehenden Aufrufpfad (`svc_particle`, `svc_temp_entity`, QC `particle()`) ist eine explizite Fallback-Entscheidung dokumentiert.
 - [x] Review-Check: **keine** Änderung am Laufzeitverhalten in Phase 0 (nur Dokumentation).
+
+## 5) Implementierungsstatus `R_ParseParticleEffect` (legacy `(org,dir,color,count)` → q3p)
+
+- `R_ParseParticleEffect` liest weiterhin unverändert `org/dir/msgcount/color` aus `svc_particle`.
+- Ist `msgcount == 255`, bleibt die Legacy-Semantik `count = 1024` (Rocket-Explosion).
+- Für `r_particles_mode = q3p|hybrid` wird nun ein q3p-Preset-Mapping ausgeführt:
+  - `count == 1024` → Material `explosion` (Explosion-Preset).
+  - sonst → Material `bullet` (klassischer `R_RunParticleEffect`-Sprühpfad).
+- Für andere Modi (`classic|glquake`) bleibt der alte Pfad vollständig erhalten (`R_RunParticleEffect`).
+
+### Indirekter QC-`particle()`-Pfad (`sv_main.c`/`pr_cmds.c` → `svc_particle` → Client)
+
+Der Laufweg ist unverändert und weiter konsistent:
+
+1. QC `particle(origin, dir, color, count)` ruft `PF_particle` auf.
+2. `PF_particle` ruft `SV_StartParticle(org, dir, color, count)`.
+3. `SV_StartParticle` serialisiert ein `svc_particle`-Event (`org`, quantisiertes `dir`, `count`, `color`).
+4. Client empfängt `svc_particle` und landet in `R_ParseParticleEffect`, das jetzt abhängig vom Partikelmodus q3p-Presets oder Legacy rendert.
+
+### Farb-/Count-Semantik und bekannte Abweichungen
+
+- **Beibehalten:**
+  - Netz-/QC-Werte `color` und `count` werden weiterhin aus demselben `svc_particle`-Payload gelesen.
+  - Sonderfall `count == 255` auf dem Netzkanal bleibt `1024` (Explosion).
+  - Bei deaktiviertem q3p ist das Verhalten byte-identisch zum alten Pfad.
+- **Abweichungen im q3p-Pfad (dokumentiert):**
+  - Legacy-Rand-Color-Jitter `(color&~7)+(rand&7)` wird nicht 1:1 repliziert; q3p übernimmt den Basisfarbwert als `p.color`.
+  - Legacy-Partikeltypen (`pt_slowgrav`, `pt_explode`, `pt_explode2`) werden durch q3p-Material-Presets (`bullet`/`explosion`) angenähert.
+  - Bei erschöpftem q3p-Partikelpool wird der Spawn früh beendet (best-effort) statt auf Legacy zurückzufallen.
