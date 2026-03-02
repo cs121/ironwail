@@ -1080,9 +1080,11 @@ static void Mat_Shader_FuzzCommand_f (void)
 }
 
 
-qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, char *reason, size_t reason_size)
+mat_particle_stage_support_t Mat_Shader_ClassifyParticleStage (const mat_shader_stage_t *stage,
+	mat_particle_policy_t policy, char *reason, size_t reason_size)
 {
 	int i;
+	qboolean strict = (policy == MAT_PARTICLE_POLICY_STRICT);
 
 	if (reason && reason_size)
 		reason[0] = '\0';
@@ -1091,14 +1093,14 @@ qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, c
 	{
 		if (reason && reason_size)
 			q_strlcpy (reason, "missing stage", reason_size);
-		return false;
+		return MAT_PARTICLE_STAGE_HARD_FAIL;
 	}
 
 	if (stage->map_type == MAT_MAP_LIGHTMAP)
 	{
 		if (reason && reason_size)
 			q_strlcpy (reason, "map $lightmap unsupported for particles", reason_size);
-		return false;
+		return strict ? MAT_PARTICLE_STAGE_HARD_FAIL : MAT_PARTICLE_STAGE_SKIPPED;
 	}
 
 	if (stage->map_type != MAT_MAP_MAP && stage->map_type != MAT_MAP_CLAMPMAP &&
@@ -1106,7 +1108,7 @@ qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, c
 	{
 		if (reason && reason_size)
 			q_strlcpy (reason, "unsupported map type", reason_size);
-		return false;
+		return strict ? MAT_PARTICLE_STAGE_HARD_FAIL : MAT_PARTICLE_STAGE_SKIPPED;
 	}
 
 	if (stage->rgbgen != MAT_RGBGEN_IDENTITY && stage->rgbgen != MAT_RGBGEN_VERTEX &&
@@ -1114,7 +1116,7 @@ qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, c
 	{
 		if (reason && reason_size)
 			q_strlcpy (reason, "unsupported rgbGen", reason_size);
-		return false;
+		return strict ? MAT_PARTICLE_STAGE_HARD_FAIL : MAT_PARTICLE_STAGE_SKIPPED;
 	}
 
 	if (stage->alphagen != MAT_ALPHAGEN_IDENTITY && stage->alphagen != MAT_ALPHAGEN_VERTEX &&
@@ -1122,21 +1124,21 @@ qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, c
 	{
 		if (reason && reason_size)
 			q_strlcpy (reason, "unsupported alphaGen", reason_size);
-		return false;
+		return strict ? MAT_PARTICLE_STAGE_HARD_FAIL : MAT_PARTICLE_STAGE_SKIPPED;
 	}
 
 	if (stage->tcgen != MAT_TCGEN_BASE)
 	{
 		if (reason && reason_size)
 			q_strlcpy (reason, "tcGen must be base", reason_size);
-		return false;
+		return strict ? MAT_PARTICLE_STAGE_HARD_FAIL : MAT_PARTICLE_STAGE_SKIPPED;
 	}
 
 	if (stage->tcmod_count > countof (stage->tcmods))
 	{
 		if (reason && reason_size)
 			q_strlcpy (reason, "tcMod count overflow", reason_size);
-		return false;
+		return MAT_PARTICLE_STAGE_HARD_FAIL;
 	}
 
 	for (i = 0; i < stage->tcmod_count; ++i)
@@ -1147,7 +1149,7 @@ qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, c
 		{
 			if (reason && reason_size)
 				q_strlcpy (reason, "unsupported tcMod type", reason_size);
-			return false;
+			return strict ? MAT_PARTICLE_STAGE_HARD_FAIL : MAT_PARTICLE_STAGE_SKIPPED;
 		}
 	}
 
@@ -1157,11 +1159,20 @@ qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, c
 		{
 			if (reason && reason_size)
 				q_strlcpy (reason, "invalid custom blend factors", reason_size);
-			return false;
+			return MAT_PARTICLE_STAGE_HARD_FAIL;
 		}
 	}
 
-	return true;
+	return MAT_PARTICLE_STAGE_SUPPORTED;
+}
+
+qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, char *reason, size_t reason_size)
+{
+	mat_particle_policy_t policy = r_particles_shader_strict.value > 0.f
+		? MAT_PARTICLE_POLICY_STRICT
+		: MAT_PARTICLE_POLICY_TOLERANT;
+
+	return Mat_Shader_ClassifyParticleStage (stage, policy, reason, reason_size) == MAT_PARTICLE_STAGE_SUPPORTED;
 }
 
 void Mat_Shader_Init (void)
