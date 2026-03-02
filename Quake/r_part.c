@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "r_particles_iw.h"
 
 #define MAX_PARTICLES			16384	// default max # of particles at one
 										//  time
@@ -75,6 +76,9 @@ R_AllocParticle
 */
 particle_t *R_AllocParticle (void)
 {
+	if (!R_ParticlesUseClassic ())
+		return NULL;
+
 	if (r_numactiveparticles < r_numparticles)
 	{
 		particle_t *p = &particles[r_numactiveparticles++];
@@ -184,6 +188,7 @@ R_ClearParticles
 void R_ClearParticles (void)
 {
 	r_numactiveparticles = 0;
+	R_IWParticles_Clear ();
 }
 
 /*
@@ -196,6 +201,9 @@ Parse an effect out of the server message
 void R_ParseParticleEffect (void)
 {
 	vec3_t		org, dir;
+
+	if (!R_ParticlesUseClassic ())
+		return;
 	int			i, count, msgcount, color;
 
 	for (i=0 ; i<3 ; i++)
@@ -462,6 +470,9 @@ FIXME -- rename function and use #defined types instead of numbers
 void R_RocketTrail (vec3_t start, vec3_t end, int type)
 {
 	vec3_t		vec;
+
+	if (!R_ParticlesUseClassic ())
+		return;
 	float		len;
 	int			j;
 	particle_t	*p;

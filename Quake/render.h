@@ -144,6 +144,7 @@ extern vec3_t	r_origin, vpn, vright, vup;
 
 
 void R_Init (void);
+void R_Shutdown (void);
 void R_RenderView (void);		// must set r_refdef first
 void R_ClearEfrags (void);
 void R_CheckEfrags (void); //johnfitz
@@ -164,6 +165,11 @@ void R_ParticleExplosion2 (vec3_t org, int colorStart, int colorLength);
 void R_LavaSplash (vec3_t org);
 void R_TeleportSplash (vec3_t org);
 const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos);
+
+void R_IWParticles_Init (void);
+void R_IWParticles_Shutdown (void);
+void R_IWParticles_NewMap (void);
+void R_IWParticles_Clear (void);
 
 
 void R_InitDecals (void);
