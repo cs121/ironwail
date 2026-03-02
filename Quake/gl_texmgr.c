@@ -2401,13 +2401,13 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 	        GLsizeiptr upload_size = (GLsizeiptr) glt->width * glt->height * 4;
 	        if (TexMgr_EnsureLightmapUploadBuffer (upload_size))
 	        {
-	                glTexImage2D (glt->target, 0, glt->internal_format, glt->width, glt->height, 0, gl_lightmap_format, GL_UNSIGNED_BYTE, NULL);
+	                glTexImage2D (glt->target, 0, glt->internal_format, glt->width, glt->height, 0, gl_lightmap_format, gl_lightmap_type, NULL);
 	                memcpy (lightmap_upload_ptr, data, upload_size);
-	                glTexSubImage2D (glt->target, 0, 0, 0, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, (const GLvoid *) 0);
+	                glTexSubImage2D (glt->target, 0, 0, 0, glt->width, glt->height, gl_lightmap_format, gl_lightmap_type, (const GLvoid *) 0);
 	                GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, 0);
 	        }
 	        else
-	                GL_TexImage (glt, 0, glt->internal_format, glt->width, glt->height, gl_lightmap_format, GL_UNSIGNED_BYTE, data);
+	                GL_TexImage (glt, 0, glt->internal_format, glt->width, glt->height, gl_lightmap_format, gl_lightmap_type, data);
 	}
 
 #ifdef GL_EXT_texture_sRGB_decode
