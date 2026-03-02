@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "mat_shader.h"
 #include "r_part_q3p.h"
 
 extern cvar_t r_particles_max;
@@ -154,7 +155,7 @@ static void Q3P_ParseEffectDefText (const char *source_name, char *text)
 		def = entry->def;
 
 		cursor = COM_Parse (cursor);
-		if (!cursor || q_strcmp (com_token, "{"))
+		if (!cursor || strcmp (com_token, "{"))
 		{
 			Con_Warning ("Q3P: expected '{' after effect '%s' in %s\n", effect_name, source_name);
 			return;
@@ -162,7 +163,7 @@ static void Q3P_ParseEffectDefText (const char *source_name, char *text)
 
 		while ((cursor = COM_Parse (cursor)) != NULL)
 		{
-			if (!q_strcmp (com_token, "}"))
+			if (!strcmp (com_token, "}"))
 				break;
 
 			if (!q_strcasecmp (com_token, "material"))
