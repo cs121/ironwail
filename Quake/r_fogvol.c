@@ -75,7 +75,24 @@ typedef struct fogvol_light_candidate_s
 	int index;
 	float score;
 	fog_light_gpu_t light;
+	vec3_t bounds_mins;
+	vec3_t bounds_maxs;
 } fogvol_light_candidate_t;
+
+typedef struct fogvol_visible_volume_s
+{
+	const fog_volume_t *volume;
+	float screen_weight;
+} fogvol_visible_volume_t;
+
+typedef struct fogvol_light_stats_s
+{
+	int broadphase_candidates;
+	int narrowphase_candidates;
+	int narrowphase_accepted;
+	double broadphase_seconds;
+	double narrowphase_seconds;
+} fogvol_light_stats_t;
 
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
 static int r_fogvolume_count = 0;
@@ -164,6 +181,7 @@ cvar_t r_fogvol_globalfog_priority = { "r_fogvol_globalfog_priority", "-1", CVAR
 cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_lightgrid = { "r_fogvol_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
+cvar_t r_fogvol_light_stats = { "r_fogvol_light_stats", "0", CVAR_NONE };
 cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
@@ -867,25 +885,59 @@ static qboolean R_FogVol_LightOverlapsVolume (const fog_volume_t *volume, const 
 	return dist <= light_radius;
 }
 
-static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, fog_light_gpu_t *out, int max_count)
+static void R_FogVol_GetVolumeBounds (const fog_volume_t *vol, vec3_t bmins, vec3_t bmaxs)
 {
-	const dlight_t *const *active;
-	fogvol_light_candidate_t candidates[256];
-	const fog_volume_t *visible_volumes[MAX_FOGVOLUMES];
-	float visible_volume_screen_weight[MAX_FOGVOLUMES];
-	vec3_t fog_bounds_mins;
-	vec3_t fog_bounds_maxs;
-	int active_count = 0;
-	int candidate_count = 0;
+	if (vol->shape == 1)
+	{
+		for (int a = 0; a < 3; ++a)
+		{
+			bmins[a] = vol->sphereCenter[a] - vol->sphereRadius;
+			bmaxs[a] = vol->sphereCenter[a] + vol->sphereRadius;
+		}
+	}
+	else
+	{
+		VectorCopy (vol->mins, bmins);
+		VectorCopy (vol->maxs, bmaxs);
+	}
+}
+
+static qboolean R_FogVol_LightOverlapsBounds (const vec3_t light_origin, float light_radius, const vec3_t bmins, const vec3_t bmaxs)
+{
+	float dist2 = 0.f;
+
+	for (int a = 0; a < 3; ++a)
+	{
+		if (light_origin[a] < bmins[a])
+		{
+			float d = bmins[a] - light_origin[a];
+			dist2 += d * d;
+		}
+		else if (light_origin[a] > bmaxs[a])
+		{
+			float d = light_origin[a] - bmaxs[a];
+			dist2 += d * d;
+		}
+	}
+
+	return dist2 <= light_radius * light_radius;
+}
+
+static qboolean R_FogVol_BoundsOverlap (const vec3_t mins0, const vec3_t maxs0, const vec3_t mins1, const vec3_t maxs1)
+{
+	for (int a = 0; a < 3; ++a)
+	{
+		if (maxs0[a] < mins1[a] || mins0[a] > maxs1[a])
+			return false;
+	}
+	return true;
+}
+
+static int R_FogVol_BuildVisibleVolumeCache (fogvol_visible_volume_t *visible, int max_visible, vec3_t fog_bounds_mins, vec3_t fog_bounds_maxs, qboolean *has_fog_bounds)
+{
 	int visible_count = 0;
-	qboolean has_fog_bounds = false;
-	int copy_count;
 
-	if (!volume || !out || max_count <= 0)
-		return 0;
-	if (r_fogvolume_count <= 0)
-		return 0;
-
+	*has_fog_bounds = false;
 	VectorSet (fog_bounds_mins, 0.f, 0.f, 0.f);
 	VectorSet (fog_bounds_maxs, 0.f, 0.f, 0.f);
 
@@ -895,25 +947,13 @@ static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, fog_lig
 		vec3_t bmins, bmaxs;
 		int sx0, sy0, sx1, sy1;
 
-		if (vol->shape == 1)
-		{
-			for (int a = 0; a < 3; ++a)
-			{
-				bmins[a] = vol->sphereCenter[a] - vol->sphereRadius;
-				bmaxs[a] = vol->sphereCenter[a] + vol->sphereRadius;
-			}
-		}
-		else
-		{
-			VectorCopy (vol->mins, bmins);
-			VectorCopy (vol->maxs, bmaxs);
-		}
+		R_FogVol_GetVolumeBounds (vol, bmins, bmaxs);
 
-		if (!has_fog_bounds)
+		if (!*has_fog_bounds)
 		{
 			VectorCopy (bmins, fog_bounds_mins);
 			VectorCopy (bmaxs, fog_bounds_maxs);
-			has_fog_bounds = true;
+			*has_fog_bounds = true;
 		}
 		else
 		{
@@ -924,178 +964,165 @@ static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, fog_lig
 			}
 		}
 
-		if (R_FogVol_ProjectAABBToScreenRect (vol, &sx0, &sy0, &sx1, &sy1, true) && visible_count < MAX_FOGVOLUMES)
+		if (visible_count >= max_visible)
+			continue;
+
+		if (R_FogVol_ProjectAABBToScreenRect (vol, &sx0, &sy0, &sx1, &sy1, true))
 		{
-			float view_area = (float)(q_max (1, r_refdef.vrect.width) * q_max (1, r_refdef.vrect.height));
-			float rect_area = (float)q_max (1, (sx1 - sx0) * (sy1 - sy0));
-			visible_volumes[visible_count] = vol;
-			/* Optional screen weighting: favour fog regions occupying more of the
-			 * current frame while keeping an in-world overlap requirement. */
-			visible_volume_screen_weight[visible_count] = CLAMP (0.1f, rect_area / view_area, 1.f);
+			const float view_area = (float)(q_max (1, r_refdef.vrect.width) * q_max (1, r_refdef.vrect.height));
+			const float rect_area = (float)q_max (1, (sx1 - sx0) * (sy1 - sy0));
+			visible[visible_count].volume = vol;
+			visible[visible_count].screen_weight = CLAMP (0.1f, rect_area / view_area, 1.f);
 			visible_count++;
 		}
 	}
 
-	if (visible_count <= 0)
+	return visible_count;
+}
+
+static int R_FogVol_BuildFrameLightBroadphase (const fogvol_visible_volume_t *visible_volumes, int visible_count, const vec3_t fog_bounds_mins, const vec3_t fog_bounds_maxs, qboolean has_fog_bounds, fogvol_light_candidate_t *out, int max_out)
+{
+	const dlight_t *const *active;
+	int active_count = 0;
+	int candidate_count = 0;
+
+	if (!out || max_out <= 0 || visible_count <= 0)
 		return 0;
 
 	active = DLightPool_GetActiveList (&active_count);
 	if (active && active_count > 0)
 	{
-		for (int i = 0; i < active_count && candidate_count < countof (candidates); ++i)
-	{
-		const dlight_t *dl = active[i];
-		vec3_t to_light;
-		float dist2;
-		float overlap_score = 0.f;
-		float intensity;
-		float radius;
-		float score;
-
-		if (!dl || !CL_DlightIsActive (dl))
-			continue;
-
-		radius = dl->radius;
-		if (radius <= 0.f)
-			continue;
-
-		intensity = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
-		if (intensity <= 0.f)
-			continue;
-
-		/* Keep an emergency cheap cull for pathological light counts. Cull by
-		 * distance to aggregate fog bounds (not by camera distance), so lights
-		 * near visible fog remain eligible even when far from the viewer. */
-		if (active_count > 192 && has_fog_bounds)
+		for (int i = 0; i < active_count && candidate_count < max_out; ++i)
 		{
-			float fog_dist = 0.f;
-			for (int a = 0; a < 3; ++a)
-			{
-				if (dl->origin[a] < fog_bounds_mins[a])
-				{
-					float d = fog_bounds_mins[a] - dl->origin[a];
-					fog_dist += d * d;
-				}
-				else if (dl->origin[a] > fog_bounds_maxs[a])
-				{
-					float d = dl->origin[a] - fog_bounds_maxs[a];
-					fog_dist += d * d;
-				}
-			}
-			if (fog_dist > (radius * 4.f) * (radius * 4.f))
+			const dlight_t *dl = active[i];
+			vec3_t to_light;
+			float overlap_score = 0.f;
+			float score;
+			float intensity;
+			float radius;
+
+			if (!dl || !CL_DlightIsActive (dl))
 				continue;
-		}
 
-		for (int v = 0; v < visible_count; ++v)
-		{
-			const fog_volume_t *vol = visible_volumes[v];
-			float overlap = 0.f;
+			radius = dl->radius;
+			if (radius <= 0.f)
+				continue;
 
-			if (vol->shape == 1)
+			intensity = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
+			if (intensity <= 0.f)
+				continue;
+
+			if (active_count > 192 && has_fog_bounds)
 			{
-				vec3_t delta;
-				float center_dist;
-				float sum_radius = radius + q_max (0.f, vol->sphereRadius);
-				VectorSubtract (dl->origin, vol->sphereCenter, delta);
-				center_dist = VectorLength (delta);
-				if (center_dist < sum_radius && sum_radius > 0.f)
-					overlap = 1.f - (center_dist / sum_radius);
-			}
-			else
-			{
-				float dist_to_box = 0.f;
-				for (int a = 0; a < 3; ++a)
-				{
-					if (dl->origin[a] < vol->mins[a])
-					{
-						float d = vol->mins[a] - dl->origin[a];
-						dist_to_box += d * d;
-					}
-					else if (dl->origin[a] > vol->maxs[a])
-					{
-						float d = dl->origin[a] - vol->maxs[a];
-						dist_to_box += d * d;
-					}
-				}
-				dist_to_box = sqrtf (dist_to_box);
-				if (dist_to_box < radius)
-					overlap = 1.f - (dist_to_box / q_max (1.f, radius));
+				if (!R_FogVol_LightOverlapsBounds (dl->origin, radius * 4.f, fog_bounds_mins, fog_bounds_maxs))
+					continue;
 			}
 
-			overlap_score += overlap * visible_volume_screen_weight[v];
-		}
+			for (int v = 0; v < visible_count; ++v)
+			{
+				if (!R_FogVol_LightOverlapsVolume (visible_volumes[v].volume, dl->origin, radius))
+					continue;
+				overlap_score += visible_volumes[v].screen_weight;
+			}
 
-		if (overlap_score <= 0.f)
-			continue;
+			if (overlap_score <= 0.f)
+				continue;
 
-		VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
-		dist2 = DotProduct (to_light, to_light);
+			VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
+			score = overlap_score * intensity * radius;
+			score *= 1.f / (1.f + 0.0025f * sqrtf (DotProduct (to_light, to_light)));
+			if (score <= 0.f)
+				continue;
 
-		score = overlap_score * intensity * radius;
-		/* Preserve a soft view weighting for tie-breaking, but avoid camera-only
-		 * rejection so fog-relevant distant lights can still be selected. */
-		score *= 1.f / (1.f + 0.0025f * sqrtf (dist2));
-		if (score <= 0.f)
-			continue;
-
-		candidates[candidate_count].index = (dl->id != 0) ? dl->id : i;
-		candidates[candidate_count].score = score;
-		candidates[candidate_count].light.pos_rad[0] = dl->origin[0];
-		candidates[candidate_count].light.pos_rad[1] = dl->origin[1];
-		candidates[candidate_count].light.pos_rad[2] = dl->origin[2];
-		candidates[candidate_count].light.pos_rad[3] = radius;
-		candidates[candidate_count].light.col_int[0] = dl->color[0];
-		candidates[candidate_count].light.col_int[1] = dl->color[1];
-		candidates[candidate_count].light.col_int[2] = dl->color[2];
-		/* col_int.w was intensity=max(r,g,b), used as extra shader multiplier
-		 * on top of col_int.rgb — double-counting brightness. Shader now uses
-		 * col_int.rgb directly, so set .w=1.0 for forward compatibility. */
-		candidates[candidate_count].light.col_int[3] = 1.f;
-		candidate_count++;
+			out[candidate_count].index = (dl->id != 0) ? dl->id : i;
+			out[candidate_count].score = score;
+			out[candidate_count].light.pos_rad[0] = dl->origin[0];
+			out[candidate_count].light.pos_rad[1] = dl->origin[1];
+			out[candidate_count].light.pos_rad[2] = dl->origin[2];
+			out[candidate_count].light.pos_rad[3] = radius;
+			out[candidate_count].light.col_int[0] = dl->color[0];
+			out[candidate_count].light.col_int[1] = dl->color[1];
+			out[candidate_count].light.col_int[2] = dl->color[2];
+			out[candidate_count].light.col_int[3] = 1.f;
+			out[candidate_count].bounds_mins[0] = dl->origin[0] - radius;
+			out[candidate_count].bounds_mins[1] = dl->origin[1] - radius;
+			out[candidate_count].bounds_mins[2] = dl->origin[2] - radius;
+			out[candidate_count].bounds_maxs[0] = dl->origin[0] + radius;
+			out[candidate_count].bounds_maxs[1] = dl->origin[1] + radius;
+			out[candidate_count].bounds_maxs[2] = dl->origin[2] + radius;
+			candidate_count++;
 		}
 	}
 
-	for (int i = 0; i < r_num_fog_dlights && candidate_count < countof (candidates); ++i)
+	for (int i = 0; i < r_num_fog_dlights && candidate_count < max_out; ++i)
 	{
 		const dlight_t *dl = &r_fog_dlights[i];
 		float overlap_score = 0.f;
-		float score;
 
 		if (!CL_DlightIsActive (dl) || dl->radius <= 0.f)
 			continue;
 
 		for (int v = 0; v < visible_count; ++v)
 		{
-			float overlap = 0.f;
-			if (R_FogVol_LightOverlapsVolume (visible_volumes[v], dl->origin, dl->radius))
-				overlap = 1.f;
-			overlap_score += overlap * visible_volume_screen_weight[v];
+			if (!R_FogVol_LightOverlapsVolume (visible_volumes[v].volume, dl->origin, dl->radius))
+				continue;
+			overlap_score += visible_volumes[v].screen_weight;
 		}
 
 		if (overlap_score <= 0.f)
 			continue;
 
-		score = overlap_score * dl->radius;
-		candidates[candidate_count].index = 100000 + i;
-		candidates[candidate_count].score = score;
-		candidates[candidate_count].light.pos_rad[0] = dl->origin[0];
-		candidates[candidate_count].light.pos_rad[1] = dl->origin[1];
-		candidates[candidate_count].light.pos_rad[2] = dl->origin[2];
-		candidates[candidate_count].light.pos_rad[3] = dl->radius;
-		candidates[candidate_count].light.col_int[0] = dl->color[0];
-		candidates[candidate_count].light.col_int[1] = dl->color[1];
-		candidates[candidate_count].light.col_int[2] = dl->color[2];
-		candidates[candidate_count].light.col_int[3] = 1.f;
+		out[candidate_count].index = 100000 + i;
+		out[candidate_count].score = overlap_score * dl->radius;
+		out[candidate_count].light.pos_rad[0] = dl->origin[0];
+		out[candidate_count].light.pos_rad[1] = dl->origin[1];
+		out[candidate_count].light.pos_rad[2] = dl->origin[2];
+		out[candidate_count].light.pos_rad[3] = dl->radius;
+		out[candidate_count].light.col_int[0] = dl->color[0];
+		out[candidate_count].light.col_int[1] = dl->color[1];
+		out[candidate_count].light.col_int[2] = dl->color[2];
+		out[candidate_count].light.col_int[3] = 1.f;
+		out[candidate_count].bounds_mins[0] = dl->origin[0] - dl->radius;
+		out[candidate_count].bounds_mins[1] = dl->origin[1] - dl->radius;
+		out[candidate_count].bounds_mins[2] = dl->origin[2] - dl->radius;
+		out[candidate_count].bounds_maxs[0] = dl->origin[0] + dl->radius;
+		out[candidate_count].bounds_maxs[1] = dl->origin[1] + dl->radius;
+		out[candidate_count].bounds_maxs[2] = dl->origin[2] + dl->radius;
 		candidate_count++;
 	}
 
-	if (candidate_count <= 0)
+	if (candidate_count > 1)
+		qsort (out, candidate_count, sizeof (out[0]), R_FogVol_CompareLightCandidate);
+
+	return candidate_count;
+}
+
+static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, const fogvol_light_candidate_t *prefiltered, int prefiltered_count, fog_light_gpu_t *out, int max_count, fogvol_light_stats_t *stats)
+{
+	vec3_t volume_mins;
+	vec3_t volume_maxs;
+	int copy_count = 0;
+
+	if (!volume || !out || max_count <= 0)
+		return 0;
+	if (!prefiltered || prefiltered_count <= 0)
 		return 0;
 
-	qsort (candidates, candidate_count, sizeof (candidates[0]), R_FogVol_CompareLightCandidate);
-	copy_count = q_min (candidate_count, max_count);
-	for (int i = 0; i < copy_count; ++i)
-		out[i] = candidates[i].light;
+	R_FogVol_GetVolumeBounds (volume, volume_mins, volume_maxs);
+	for (int i = 0; i < prefiltered_count && copy_count < max_count; ++i)
+	{
+		const fogvol_light_candidate_t *candidate = &prefiltered[i];
+		if (stats)
+			stats->narrowphase_candidates++;
+
+		if (!R_FogVol_BoundsOverlap (candidate->bounds_mins, candidate->bounds_maxs, volume_mins, volume_maxs))
+			continue;
+
+		out[copy_count++] = candidate->light;
+		if (stats)
+			stats->narrowphase_accepted++;
+	}
+
 	return copy_count;
 }
 
@@ -1146,6 +1173,7 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_light);
 	Cvar_RegisterVariable (&r_fogvol_lightgrid);
 	Cvar_RegisterVariable (&r_fogvol_light_max);
+	Cvar_RegisterVariable (&r_fogvol_light_stats);
 	Cvar_RegisterVariable (&r_fogvol_shadow);
 	Cvar_RegisterVariable (&r_fogvol_shadow_samples);
 	Cvar_RegisterVariable (&r_fogvol_shadow_strength);
@@ -1814,6 +1842,15 @@ void R_FogVol_Render (void)
 	float sun_intensity = 1.f;
 	float sun_scatter = 0.f;
 	int shadow_samples;
+	fogvol_visible_volume_t visible_volumes[MAX_FOGVOLUMES];
+	fogvol_light_candidate_t frame_candidates[256];
+	fogvol_light_stats_t light_stats;
+	vec3_t fog_bounds_mins;
+	vec3_t fog_bounds_maxs;
+	int visible_count = 0;
+	int frame_candidate_count = 0;
+	qboolean has_fog_bounds = false;
+	const qboolean light_stats_enabled = r_fogvol_light_stats.value > 0.f;
 
 	/* Per-frame validity: only expose a fogvol composite texture after this
 	 * frame actually produced one. */
@@ -1874,29 +1911,53 @@ void R_FogVol_Render (void)
 	steps = CLAMP (8, steps, q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
 
 	memset (&fog_lights, 0, sizeof (fog_lights));
+	memset (&light_stats, 0, sizeof (light_stats));
 	lightgrid = Lightgrid_Get ();
 	fog_lightgrid_has_data = (lightgrid && lightgrid->octree && r_lightgrid.value > 0.f);
 	fog_lightgrid_enabled = fog_lightgrid_has_data && (r_fogvol_lightgrid.value > 0.f);
 
 	if (r_fogvol_light.value > 0.f)
 	{
+		const double broadphase_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
 		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), MAX_FOGLIGHTS);
 		int write_offset = 0;
+
+		visible_count = R_FogVol_BuildVisibleVolumeCache (visible_volumes, countof (visible_volumes), fog_bounds_mins, fog_bounds_maxs, &has_fog_bounds);
+		if (visible_count > 0 && max_lights > 0)
+		{
+			frame_candidate_count = R_FogVol_BuildFrameLightBroadphase (visible_volumes, visible_count, fog_bounds_mins, fog_bounds_maxs, has_fog_bounds, frame_candidates, countof (frame_candidates));
+			light_stats.broadphase_candidates = frame_candidate_count;
+		}
+		if (light_stats_enabled)
+			light_stats.broadphase_seconds = Sys_DoubleTime () - broadphase_start;
 
 		for (int i = 0; i < r_fogvolume_count; ++i)
 		{
 			int remaining = (int)countof (fog_lights.lights) - write_offset;
 			int count = 0;
-			if (remaining > 0 && max_lights > 0)
+			if (remaining > 0 && max_lights > 0 && frame_candidate_count > 0)
 			{
+				const double narrowphase_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
 				int per_volume_cap = q_min (max_lights, remaining);
-				count = R_FogVol_BuildLightListForVolume (&r_fogvolumes[i], &fog_lights.lights[write_offset], per_volume_cap);
+				count = R_FogVol_BuildLightListForVolume (&r_fogvolumes[i], frame_candidates, frame_candidate_count, &fog_lights.lights[write_offset], per_volume_cap, light_stats_enabled ? &light_stats : NULL);
+				if (light_stats_enabled)
+					light_stats.narrowphase_seconds += Sys_DoubleTime () - narrowphase_start;
 			}
 
 			fog_lights.volumes[i].offset_count[0] = write_offset;
 			fog_lights.volumes[i].offset_count[1] = count;
 			write_offset += count;
 			fog_light_enabled = fog_light_enabled || (count > 0);
+		}
+
+		if (light_stats_enabled)
+		{
+			Con_DPrintf ("fogvol_light_stats: broadphase_candidates=%d narrowphase_candidates=%d accepted=%d broadphase_ms=%.3f narrowphase_ms=%.3f\n",
+				light_stats.broadphase_candidates,
+				light_stats.narrowphase_candidates,
+				light_stats.narrowphase_accepted,
+				light_stats.broadphase_seconds * 1000.0,
+				light_stats.narrowphase_seconds * 1000.0);
 		}
 	}
 
