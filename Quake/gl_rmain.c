@@ -1663,21 +1663,26 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 	if (draw_sky && glprogs.godrays_source_sky)
 	{
 		float sky_intensity = q_max (0.f, r_godray_sky_intensity.value) * q_max (0.f, r_godrays_sky_intensity.value);
-		float sky_threshold = q_max (0.f, r_godray_sky_threshold.value);
-		if (sky_intensity > 0.f)
-		{
-			vec3_t tint;
-			float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
-			float sky_depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
-			R_ParseGodraysSkyTint (tint);
-			GL_UseProgram (glprogs.godrays_source_sky);
-			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-			GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, sky_threshold);
-			GL_Uniform4fFunc (1, tint[0], tint[1], tint[2], 0.f);
-			GL_Uniform4fFunc (2, mask_knee, 0.f, 0.f, 0.f);
-			glDrawArrays (GL_TRIANGLES, 0, 3);
-		}
+		float sky_threshold = R_SanitizeGodraysValue (r_godray_sky_threshold.value, 0.05f, 0.f, 1.f);
+		vec3_t tint;
+		float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
+		float sky_depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
+
+		/*
+		 * Keep sky godrays available whenever the effect itself is active.
+		 * A zeroed intensity cvar should not silently suppress the sky source pass.
+		 */
+		if (sky_intensity <= 0.f)
+			sky_intensity = 1.f;
+
+		R_ParseGodraysSkyTint (tint);
+		GL_UseProgram (glprogs.godrays_source_sky);
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
+		GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, sky_threshold);
+		GL_Uniform4fFunc (1, tint[0], tint[1], tint[2], 0.f);
+		GL_Uniform4fFunc (2, mask_knee, 0.f, 0.f, 0.f);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
 	}
 
 	if (draw_brush && glprogs.godrays_source)
@@ -1719,7 +1724,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	if (!R_GodraysReady ())
 		return fallback;
 
-	qboolean emit_sky = (r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f && glprogs.godrays_source_sky);
+	qboolean emit_sky = (glprogs.godrays_source_sky != 0);
 	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);
 	if (!emit_sky && !emit_brush)
 		return fallback;
