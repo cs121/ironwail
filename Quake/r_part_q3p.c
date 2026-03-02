@@ -3,10 +3,32 @@
 
 extern cvar_t r_particles_max;
 extern cvar_t r_particles_sort;
+extern cvar_t r_particles_shader_strict;
 
 static q3p_particle_t *q3p_particles;
 static int q3p_maxparticles;
 static int q3p_numactive;
+
+#define Q3P_MATERIAL_DEFAULT_REF "*particle"
+#define Q3P_PARTICLE_SHADER_PREFIX "particles/"
+#define Q3P_MATERIAL_CACHE_SIZE 128
+
+enum
+{
+	Q3P_MATFLAG_RESOLVED = 1u << 0,
+	Q3P_MATFLAG_STAGE0_VALID = 1u << 1,
+	Q3P_MATFLAG_FALLBACK = 1u << 2
+};
+
+typedef struct q3p_material_cache_entry_s {
+	qboolean used;
+	char key[64];
+	unsigned material_id;
+	const shader_material_t *material;
+	unsigned flags;
+} q3p_material_cache_entry_t;
+
+static q3p_material_cache_entry_t q3p_material_cache[Q3P_MATERIAL_CACHE_SIZE];
 
 typedef struct q3p_drawitem_s {
 	int particle_index;
@@ -25,7 +47,7 @@ static q3p_particlevert_t *q3p_partverts;
 static int q3p_numdrawitems;
 static int q3p_numpartverts;
 
-static unsigned Q3P_MaterialId (const char *material)
+static unsigned Q3P_HashMaterialId (const char *material)
 {
 	unsigned id = 2166136261u;
 
@@ -39,6 +61,104 @@ static unsigned Q3P_MaterialId (const char *material)
 	}
 
 	return id;
+}
+
+static unsigned Q3P_MaterialCacheSlotForName (const char *name)
+{
+	return Q3P_HashMaterialId (name) & (Q3P_MATERIAL_CACHE_SIZE - 1);
+}
+
+static void Q3P_NormalizeMaterialRef (const char *name, char *out, size_t out_size)
+{
+	char canonical[MAX_QPATH];
+
+	if (!name || !name[0])
+	{
+		q_strlcpy (out, Q3P_MATERIAL_DEFAULT_REF, out_size);
+		return;
+	}
+
+	Mat_Shader_Canonicalize (name, canonical, sizeof (canonical));
+	if (!canonical[0])
+	{
+		q_strlcpy (out, Q3P_MATERIAL_DEFAULT_REF, out_size);
+		return;
+	}
+
+	if (!q_strncasecmp (canonical, Q3P_PARTICLE_SHADER_PREFIX, strlen (Q3P_PARTICLE_SHADER_PREFIX)))
+		q_strlcpy (out, canonical, out_size);
+	else
+		q_snprintf (out, out_size, "%s%s", Q3P_PARTICLE_SHADER_PREFIX, canonical);
+}
+
+static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *name)
+{
+	unsigned slot;
+	unsigned i;
+	char normalized[64];
+	char fallback_reason[128];
+	const shader_material_t *material;
+	qboolean stage0_ok;
+
+	Q3P_NormalizeMaterialRef (name, normalized, sizeof (normalized));
+	slot = Q3P_MaterialCacheSlotForName (normalized);
+
+	for (i = 0; i < Q3P_MATERIAL_CACHE_SIZE; ++i)
+	{
+		q3p_material_cache_entry_t *entry = &q3p_material_cache[(slot + i) & (Q3P_MATERIAL_CACHE_SIZE - 1)];
+
+		if (!entry->used)
+			break;
+		if (!q_strcasecmp (entry->key, normalized))
+			return entry;
+	}
+
+	for (i = 0; i < Q3P_MATERIAL_CACHE_SIZE; ++i)
+	{
+		q3p_material_cache_entry_t *entry = &q3p_material_cache[(slot + i) & (Q3P_MATERIAL_CACHE_SIZE - 1)];
+
+		if (entry->used)
+			continue;
+
+		memset (entry, 0, sizeof (*entry));
+		entry->used = true;
+		q_strlcpy (entry->key, normalized, sizeof (entry->key));
+		entry->material_id = Q3P_HashMaterialId (entry->key);
+
+		material = Mat_Shader_Find (entry->key);
+		if (!material)
+		{
+			const char *texname = entry->key;
+			if (!q_strncasecmp (texname, Q3P_PARTICLE_SHADER_PREFIX, strlen (Q3P_PARTICLE_SHADER_PREFIX)))
+				texname += strlen (Q3P_PARTICLE_SHADER_PREFIX);
+			material = Mat_Shader_FindForTextureName (texname, NULL);
+		}
+
+		stage0_ok = false;
+		if (material)
+		{
+			entry->flags |= Q3P_MATFLAG_RESOLVED;
+			stage0_ok = Mat_Shader_StageSupportsParticleMVP (&material->stage0, fallback_reason, sizeof (fallback_reason));
+			if (stage0_ok)
+				entry->flags |= Q3P_MATFLAG_STAGE0_VALID;
+		}
+
+		if (!material || (!stage0_ok && r_particles_shader_strict.value > 0.f))
+		{
+			entry->flags |= Q3P_MATFLAG_FALLBACK;
+			entry->material = NULL;
+			q_strlcpy (entry->key, Q3P_MATERIAL_DEFAULT_REF, sizeof (entry->key));
+			entry->material_id = Q3P_HashMaterialId (entry->key);
+		}
+		else
+		{
+			entry->material = material;
+		}
+
+		return entry;
+	}
+
+	return NULL;
 }
 
 static int Q3P_DrawSortCmp (const void *a, const void *b)
@@ -78,6 +198,7 @@ void Q3P_Init (void)
 	q3p_numactive = 0;
 	q3p_numdrawitems = 0;
 	q3p_numpartverts = 0;
+	memset (q3p_material_cache, 0, sizeof (q3p_material_cache));
 }
 
 void Q3P_Shutdown (void)
@@ -89,6 +210,7 @@ void Q3P_Shutdown (void)
 	q3p_numactive = 0;
 	q3p_numdrawitems = 0;
 	q3p_numpartverts = 0;
+	memset (q3p_material_cache, 0, sizeof (q3p_material_cache));
 }
 
 void Q3P_Clear (void)
@@ -100,6 +222,9 @@ void Q3P_Clear (void)
 
 qboolean Q3P_Spawn (const q3p_particle_t *particle)
 {
+	q3p_particle_t *dst;
+	const q3p_material_cache_entry_t *cache_entry;
+
 	if (!particle)
 		return false;
 	if (!q3p_particles)
@@ -107,7 +232,19 @@ qboolean Q3P_Spawn (const q3p_particle_t *particle)
 	if (q3p_numactive >= q3p_maxparticles)
 		return false;
 
-	q3p_particles[q3p_numactive++] = *particle;
+	dst = &q3p_particles[q3p_numactive++];
+	*dst = *particle;
+	cache_entry = Q3P_ResolveMaterialCached (particle->material);
+	if (cache_entry)
+	{
+		q_strlcpy (dst->material, cache_entry->key, sizeof (dst->material));
+		dst->material_id = cache_entry->material_id;
+	}
+	else
+	{
+		q_strlcpy (dst->material, Q3P_MATERIAL_DEFAULT_REF, sizeof (dst->material));
+		dst->material_id = Q3P_HashMaterialId (dst->material);
+	}
 	return true;
 }
 
@@ -181,7 +318,7 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 
 		q3p_drawitems[q3p_numdrawitems].particle_index = i;
 		q3p_drawitems[q3p_numdrawitems].blend_group = blend_group;
-		q3p_drawitems[q3p_numdrawitems].material_id = Q3P_MaterialId (p->material);
+		q3p_drawitems[q3p_numdrawitems].material_id = p->material_id;
 		q3p_drawitems[q3p_numdrawitems].depth = DotProduct (r_origin, vpn) - DotProduct (p->org, vpn);
 		++q3p_numdrawitems;
 	}
