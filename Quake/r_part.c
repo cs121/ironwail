@@ -628,6 +628,15 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 	particle_t	*p;
 	int			dec;
 	static int	tracercount;
+	qboolean	use_q3p;
+	const char	*trail_material = NULL;
+	float		trail_lifetime = 0.f;
+	float		trail_size = 0.f;
+	float		trail_size_ramp = 0.f;
+	float		trail_alpha_ramp = 0.f;
+	float		trail_gravity = 0.f;
+	float		trail_drag = 0.f;
+	int			trail_color = 0;
 
 	VectorSubtract (end, start, vec);
 	len = VectorNormalize (vec);
@@ -639,80 +648,141 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 		type -= 128;
 	}
 
-	while (len > 0)
+	use_q3p = R_CanUseQ3PForLegacyParticleEffect ();
+	if (use_q3p)
 	{
-		len -= dec;
-
-		if (!(p = R_AllocParticle ()))
-			return;
-
-		VectorCopy (vec3_origin, p->vel);
-		p->die = cl.time + 2;
-
 		switch (type)
 		{
-			case 0:	// rocket trail
-				p->ramp = (rand()&3);
-				p->color = ramp3[(int)p->ramp];
-				p->type = pt_fire;
-				for (j=0 ; j<3 ; j++)
-					p->org[j] = start[j] + ((rand()%6)-3);
-				break;
+		case 0:
+			trail_material = "smoke";
+			trail_lifetime = 0.65f;
+			trail_size = 2.8f;
+			trail_size_ramp = 10.0f;
+			trail_alpha_ramp = -1.35f;
+			trail_drag = 0.25f;
+			trail_color = ramp3[0];
+			break;
+		case 1:
+			trail_material = "smoke";
+			trail_lifetime = 0.85f;
+			trail_size = 2.5f;
+			trail_size_ramp = 9.5f;
+			trail_alpha_ramp = -1.1f;
+			trail_drag = 0.35f;
+			trail_color = ramp3[2];
+			break;
+		case 6:
+			trail_material = "voor";
+			trail_lifetime = 0.25f;
+			trail_size = 2.0f;
+			trail_size_ramp = 2.0f;
+			trail_alpha_ramp = -3.0f;
+			trail_drag = 0.05f;
+			trail_color = 9*16 + 9;
+			break;
+		default:
+			break;
+		}
+	}
 
-			case 1:	// smoke smoke
-				p->ramp = (rand()&3) + 2;
-				p->color = ramp3[(int)p->ramp];
-				p->type = pt_fire;
-				for (j=0 ; j<3 ; j++)
-					p->org[j] = start[j] + ((rand()%6)-3);
-				break;
+	while (len > 0)
+	{
+		qboolean spawned_q3p = false;
+		len -= dec;
 
-			case 2:	// blood
-				p->type = pt_grav;
-				p->color = 67 + (rand()&3);
-				for (j=0 ; j<3 ; j++)
-					p->org[j] = start[j] + ((rand()%6)-3);
-				break;
+		if (trail_material)
+		{
+			q3p_particle_t qp;
+			memset (&qp, 0, sizeof(qp));
+			qp.spawn_time = cl.time;
+			qp.lifetime = trail_lifetime;
+			qp.size = trail_size + ((rand() & 7) - 3) * 0.05f;
+			qp.size_ramp = trail_size_ramp;
+			qp.alpha = 1.0f;
+			qp.alpha_ramp = trail_alpha_ramp;
+			qp.color = trail_color;
+			qp.gravity = trail_gravity;
+			qp.drag = trail_drag;
+			q_strlcpy (qp.material, trail_material, sizeof(qp.material));
+			for (j = 0; j < 3; ++j)
+				qp.org[j] = start[j] + ((rand() & 7) - 3);
+			if (Q3P_Spawn (&qp))
+				spawned_q3p = true;
+		}
 
-			case 3:
-			case 5:	// tracer
-				p->die = cl.time + 0.5;
-				p->type = pt_static;
-				if (type == 3)
-					p->color = 52 + ((tracercount&4)<<1);
-				else
-					p->color = 230 + ((tracercount&4)<<1);
+		if (!spawned_q3p)
+		{
+			if (!(p = R_AllocParticle ()))
+				return;
 
-				tracercount++;
+			VectorCopy (vec3_origin, p->vel);
+			p->die = cl.time + 2;
 
-				VectorCopy (start, p->org);
-				if (tracercount & 1)
-				{
-					p->vel[0] = 30*vec[1];
-					p->vel[1] = 30*-vec[0];
-				}
-				else
-				{
-					p->vel[0] = 30*-vec[1];
-					p->vel[1] = 30*vec[0];
-				}
-				break;
+			switch (type)
+			{
+				case 0:	// rocket trail
+					p->ramp = (rand()&3);
+					p->color = ramp3[(int)p->ramp];
+					p->type = pt_fire;
+					for (j=0 ; j<3 ; j++)
+						p->org[j] = start[j] + ((rand()%6)-3);
+					break;
 
-			case 4:	// slight blood
-				p->type = pt_grav;
-				p->color = 67 + (rand()&3);
-				for (j=0 ; j<3 ; j++)
-					p->org[j] = start[j] + ((rand()%6)-3);
-				len -= 3;
-				break;
+				case 1:	// smoke smoke
+					p->ramp = (rand()&3) + 2;
+					p->color = ramp3[(int)p->ramp];
+					p->type = pt_fire;
+					for (j=0 ; j<3 ; j++)
+						p->org[j] = start[j] + ((rand()%6)-3);
+					break;
 
-			case 6:	// voor trail
-				p->color = 9*16 + 8 + (rand()&3);
-				p->type = pt_static;
-				p->die = cl.time + 0.3;
-				for (j=0 ; j<3 ; j++)
-					p->org[j] = start[j] + ((rand()&15)-8);
-				break;
+				case 2:	// blood
+					p->type = pt_grav;
+					p->color = 67 + (rand()&3);
+					for (j=0 ; j<3 ; j++)
+						p->org[j] = start[j] + ((rand()%6)-3);
+					break;
+
+				case 3:
+				case 5:	// tracer
+					p->die = cl.time + 0.5;
+					p->type = pt_static;
+					if (type == 3)
+						p->color = 52 + ((tracercount&4)<<1);
+					else
+						p->color = 230 + ((tracercount&4)<<1);
+
+					tracercount++;
+
+					VectorCopy (start, p->org);
+					if (tracercount & 1)
+					{
+						p->vel[0] = 30*vec[1];
+						p->vel[1] = 30*-vec[0];
+					}
+					else
+					{
+						p->vel[0] = 30*-vec[1];
+						p->vel[1] = 30*vec[0];
+					}
+					break;
+
+				case 4:	// slight blood
+					p->type = pt_grav;
+					p->color = 67 + (rand()&3);
+					for (j=0 ; j<3 ; j++)
+						p->org[j] = start[j] + ((rand()%6)-3);
+					len -= 3;
+					break;
+
+				case 6:	// voor trail
+					p->color = 9*16 + 8 + (rand()&3);
+					p->type = pt_static;
+					p->die = cl.time + 0.3;
+					for (j=0 ; j<3 ; j++)
+						p->org[j] = start[j] + ((rand()&15)-8);
+					break;
+			}
 		}
 
 		VectorAdd (start, vec, start);

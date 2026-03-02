@@ -59,6 +59,34 @@ void CL_InitTEnts (void)
 CL_ParseBeam
 =================
 */
+
+static qboolean CL_BeamCanUseQ3P (void)
+{
+	return !q_strcasecmp (r_particles_mode.string, "q3p")
+		|| !q_strcasecmp (r_particles_mode.string, "hybrid");
+}
+
+static qboolean CL_BeamResolveAttachment (int entnum, qboolean local_space, const vec3_t fallback, vec3_t out)
+{
+	if (entnum <= 0 || entnum >= cl.num_entities)
+	{
+		VectorCopy (fallback, out);
+		return false;
+	}
+
+	if (!cl_entities[entnum].model)
+	{
+		VectorCopy (fallback, out);
+		return false;
+	}
+
+	if (local_space)
+		VectorAdd (cl_entities[entnum].origin, fallback, out);
+	else
+		VectorCopy (cl_entities[entnum].origin, out);
+	return true;
+}
+
 void CL_ParseBeam (qmodel_t *m)
 {
 	int		ent;
@@ -84,8 +112,12 @@ void CL_ParseBeam (qmodel_t *m)
 			b->model = m;
 			b->starttime = cl.time - 0.001;
 			b->endtime = cl.time + 0.2;
+			b->attach_entity = ent;
+			b->local_space = false;
 			VectorCopy (start, b->start);
 			VectorCopy (end, b->end);
+			VectorCopy (start, b->start_local);
+			VectorCopy (end, b->end_local);
 			return;
 		}
 
@@ -98,8 +130,12 @@ void CL_ParseBeam (qmodel_t *m)
 			b->model = m;
 			b->starttime = cl.time - 0.001;
 			b->endtime = cl.time + 0.2;
+			b->attach_entity = ent;
+			b->local_space = false;
 			VectorCopy (start, b->start);
 			VectorCopy (end, b->end);
+			VectorCopy (start, b->start_local);
+			VectorCopy (end, b->end_local);
 			return;
 		}
 	}
@@ -430,6 +466,53 @@ void CL_ParseTEnt (void)
 }
 
 
+
+static void CL_AddQ3PBeamSegments (const beam_t *b, const vec3_t start, const vec3_t end)
+{
+	vec3_t dir, org;
+	float len;
+	float step = 20.f;
+	int color;
+
+	if (!CL_BeamCanUseQ3P ())
+		return;
+
+	if (!b || !b->model)
+		return;
+
+	VectorSubtract (end, start, dir);
+	len = VectorNormalize (dir);
+	if (len <= 0.01f)
+		return;
+
+	if (strstr (b->model->name, "progs/bolt"))
+		color = 0xe8;
+	else
+		color = 0x6f;
+
+	VectorCopy (start, org);
+	while (len > 0.f)
+	{
+		q3p_particle_t p;
+		memset (&p, 0, sizeof(p));
+		p.spawn_time = cl.time;
+		p.lifetime = 0.08f;
+		p.size = 3.0f;
+		p.size_ramp = -1.0f;
+		p.alpha = 1.0f;
+		p.alpha_ramp = -8.0f;
+		p.color = color;
+		p.drag = 0.0f;
+		p.gravity = 0.0f;
+		q_strlcpy (p.material, "lightning", sizeof(p.material));
+		VectorCopy (org, p.org);
+		if (!Q3P_Spawn (&p))
+			break;
+		VectorMA (org, step, dir, org);
+		len -= step;
+	}
+}
+
 /*
 =================
 CL_NewTempEntity
@@ -479,10 +562,18 @@ void CL_UpdateTEnts (void)
 		if (!b->model || b->starttime > cl.time || b->endtime < cl.time)
 			continue;
 
-	// if coming from the player, update the start position
-		if (b->entity == cl.viewentity)
-		{
+	// resolve attached beam endpoints (worldspace or localspace offsets)
+		CL_BeamResolveAttachment (b->attach_entity, b->local_space, b->start_local, b->start);
+		CL_BeamResolveAttachment (b->attach_entity, b->local_space, b->end_local, b->end);
+
+	// if coming from the player, keep the start position synced to the view entity
+		if (b->entity == cl.viewentity && !b->local_space)
 			VectorCopy (cl_entities[cl.viewentity].origin, b->start);
+
+		if (CL_BeamCanUseQ3P ())
+		{
+			CL_AddQ3PBeamSegments (b, b->start, b->end);
+			continue;
 		}
 
 	// calculate pitch and yaw
