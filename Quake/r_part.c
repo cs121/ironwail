@@ -46,6 +46,14 @@ cvar_t	r_particles_sort = {"r_particles_sort", "0", CVAR_ARCHIVE};
 cvar_t	r_particles_cull_dist = {"r_particles_cull_dist", "4096", CVAR_ARCHIVE};
 cvar_t	r_particles_collision = {"r_particles_collision", "1", CVAR_ARCHIVE};
 cvar_t	r_particles_spawn_max = { "r_particles_spawn_max", "2048", CVAR_ARCHIVE};
+cvar_t	r_particles_debug = { "r_particles_debug", "0", CVAR_ARCHIVE};
+
+
+static int r_particles_debug_legacy_buckets[8];
+static vec3_t r_particles_debug_bounds_mins;
+static vec3_t r_particles_debug_bounds_maxs;
+static qboolean r_particles_debug_has_bounds;
+static float r_particles_debug_overdraw_score;
 
 typedef enum
 {
@@ -336,6 +344,7 @@ void R_InitParticles (void)
 	Cvar_RegisterVariable (&r_particles_cull_dist);
 	Cvar_RegisterVariable (&r_particles_collision);
 	Cvar_RegisterVariable (&r_particles_spawn_max);
+	Cvar_RegisterVariable (&r_particles_debug);
 
 	Q3P_Init ();
 	Cmd_AddCommand ("q3p_spawn", R_Q3P_TestSpawn_f);
@@ -900,6 +909,32 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 	}
 }
 
+
+void R_GetParticleDebugStats (particle_debug_stats_t *stats)
+{
+	q3p_debug_stats_t q3p_stats;
+
+	if (!stats)
+		return;
+
+	memset (stats, 0, sizeof (*stats));
+	stats->active_legacy = r_numactiveparticles;
+	memcpy (stats->bucket_legacy, r_particles_debug_legacy_buckets, sizeof (stats->bucket_legacy));
+	stats->overdraw_score = r_particles_debug_overdraw_score;
+	stats->has_bounds = r_particles_debug_has_bounds;
+	if (r_particles_debug_has_bounds)
+	{
+		VectorCopy (r_particles_debug_bounds_mins, stats->bounds_mins);
+		VectorCopy (r_particles_debug_bounds_maxs, stats->bounds_maxs);
+	}
+
+	Q3P_GetDebugStats (&q3p_stats);
+	stats->active_q3p = q3p_stats.active;
+	stats->q3p_spawned = q3p_stats.spawned;
+	stats->q3p_dropped = q3p_stats.dropped;
+	stats->q3p_culled = q3p_stats.culled;
+}
+
 /*
 ===============
 CL_RunParticles -- johnfitz -- all the particle behavior, separated from R_DrawParticles
@@ -994,6 +1029,37 @@ void CL_RunParticles (void)
 	}
 
 	r_numactiveparticles = active;
+
+	memset (r_particles_debug_legacy_buckets, 0, sizeof (r_particles_debug_legacy_buckets));
+	r_particles_debug_has_bounds = false;
+	r_particles_debug_overdraw_score = 0.f;
+	if (r_numactiveparticles > 0)
+	{
+		for (i = 0; i < r_numactiveparticles; ++i)
+		{
+			int bucket = particles[i].type;
+			if (bucket < 0 || bucket >= (int)countof (r_particles_debug_legacy_buckets))
+				bucket = 0;
+			r_particles_debug_legacy_buckets[bucket]++;
+			if (!r_particles_debug_has_bounds)
+			{
+				VectorCopy (particles[i].org, r_particles_debug_bounds_mins);
+				VectorCopy (particles[i].org, r_particles_debug_bounds_maxs);
+				r_particles_debug_has_bounds = true;
+			}
+			else
+			{
+				int j;
+				for (j = 0; j < 3; ++j)
+				{
+					r_particles_debug_bounds_mins[j] = q_min (r_particles_debug_bounds_mins[j], particles[i].org[j]);
+					r_particles_debug_bounds_maxs[j] = q_max (r_particles_debug_bounds_maxs[j], particles[i].org[j]);
+				}
+			}
+		}
+		r_particles_debug_overdraw_score = ((float)r_numactiveparticles * 16.f) /
+			q_max ((float)(r_refdef.vrect.width * r_refdef.vrect.height), 1.f);
+	}
 }
 
 /*

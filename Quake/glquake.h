@@ -66,6 +66,20 @@ typedef struct particle_s
 	float		ramp;
 } particle_t;
 
+typedef struct particle_debug_stats_s
+{
+	int	active_legacy;
+	int	active_q3p;
+	int	bucket_legacy[8];
+	int	q3p_spawned;
+	int	q3p_dropped;
+	int	q3p_culled;
+	float	overdraw_score;
+	qboolean has_bounds;
+	vec3_t	bounds_mins;
+	vec3_t	bounds_maxs;
+} particle_debug_stats_t;
+
 
 //====================================================
 
@@ -496,6 +510,7 @@ void R_DrawParticles (qboolean alpha);
 void R_DrawParticles_ShowTris (void);
 void CL_RunParticles (void);
 void R_ClearParticles (void);
+void R_GetParticleDebugStats (particle_debug_stats_t *stats);
 
 void R_TranslatePlayerSkin (int playernum);
 void R_TranslateNewPlayerSkin (int playernum); //johnfitz -- this handles cases when the actual texture changes

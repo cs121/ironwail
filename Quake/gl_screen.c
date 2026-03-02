@@ -30,6 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern cvar_t r_autoexposure;
 extern cvar_t r_exposure_debug;
+extern cvar_t r_particles_debug;
 extern float r_autoexposure_debug_exposure;
 extern float r_autoexposure_debug_luminance;
 
@@ -1052,6 +1053,60 @@ void SCR_DrawExposureDebug (void)
 
 	sprintf (str, "AutoExp  %s", r_autoexposure.value > 0.f ? "on" : "off");
 	Draw_String (x, (y++) * 8 - x, str);
+}
+
+
+void SCR_DrawParticleDebug (void)
+{
+	particle_debug_stats_t stats;
+	char str[96];
+	int x = 0;
+	int y = 25 - 8;
+	int i;
+	const char *overdraw;
+
+	if (r_particles_debug.value <= 0.f)
+		return;
+
+	R_GetParticleDebugStats (&stats);
+	if (stats.overdraw_score < 0.05f)
+		overdraw = "low";
+	else if (stats.overdraw_score < 0.15f)
+		overdraw = "med";
+	else
+		overdraw = "high";
+
+	GL_SetCanvas (CANVAS_BOTTOMLEFT);
+	Draw_Fill (x, y * 8, 36 * 8, ((int)r_particles_debug.value >= 2 ? 8 : 5) * 8, 0, 0.5f);
+
+	q_snprintf (str, sizeof (str), "particles debug");
+	Draw_String (x, (y++) * 8 - x, str);
+	q_snprintf (str, sizeof (str), "active legacy=%4d q3p=%4d", stats.active_legacy, stats.active_q3p);
+	Draw_String (x, (y++) * 8 - x, str);
+	q_snprintf (str, sizeof (str), "q3p spawned=%4d drop=%4d cull=%4d", stats.q3p_spawned, stats.q3p_dropped, stats.q3p_culled);
+	Draw_String (x, (y++) * 8 - x, str);
+	q_snprintf (str, sizeof (str), "overdraw=%0.3f (%s)", stats.overdraw_score, overdraw);
+	Draw_String (x, (y++) * 8 - x, str);
+
+	q_snprintf (str, sizeof (str), "buckets:");
+	for (i = 0; i < 8; ++i)
+		q_snprintf (str + strlen (str), sizeof (str) - strlen (str), " %d", stats.bucket_legacy[i]);
+	Draw_String (x, (y++) * 8 - x, str);
+
+	if ((int)r_particles_debug.value >= 2)
+	{
+		if (stats.has_bounds)
+		{
+			q_snprintf (str, sizeof (str), "mins %6.1f %6.1f %6.1f", stats.bounds_mins[0], stats.bounds_mins[1], stats.bounds_mins[2]);
+			Draw_String (x, (y++) * 8 - x, str);
+			q_snprintf (str, sizeof (str), "maxs %6.1f %6.1f %6.1f", stats.bounds_maxs[0], stats.bounds_maxs[1], stats.bounds_maxs[2]);
+			Draw_String (x, (y++) * 8 - x, str);
+		}
+		else
+		{
+			Draw_String (x, (y++) * 8 - x, "bounds: n/a");
+		}
+	}
 }
 
 /*
@@ -2197,6 +2252,7 @@ void SCR_UpdateScreen (void)
 		SCR_CheckDrawCenterString ();
 		Sbar_Draw ();
 		SCR_DrawDevStats (); //johnfitz
+		SCR_DrawParticleDebug ();
 		SCR_DrawExposureDebug ();
 		SCR_DrawClock (); //johnfitz
 		SCR_DrawDemoControls ();
