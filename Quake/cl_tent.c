@@ -22,6 +22,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // cl_tent.c -- client side temporary entities
 
 #include "quakedef.h"
+#include "r_part_q3p.h"
+
+extern cvar_t r_particles_mode;
 
 int			num_temp_entities;
 entity_t	cl_temp_entities[MAX_TEMP_ENTITIES];
@@ -185,6 +188,75 @@ static qboolean CL_DecalNormalForImpact (const vec3_t impact, vec3_t out_normal)
 	return CL_DecalNormalFromView (impact, out_normal);
 }
 
+static qboolean CL_TEntCanUseQ3P (void)
+{
+	return !q_strcasecmp (r_particles_mode.string, "q3p")
+		|| !q_strcasecmp (r_particles_mode.string, "hybrid");
+}
+
+static qboolean CL_TEntTrySpawnQ3P (const char *material, const vec3_t pos, const vec3_t vel_base,
+	int count, float lifetime_min, float lifetime_rand, float size, float size_rand,
+	float alpha_ramp, float gravity, float drag, int color)
+{
+	int i;
+
+	if (!CL_TEntCanUseQ3P ())
+		return false;
+
+	for (i = 0; i < count; ++i)
+	{
+		q3p_particle_t p;
+
+		memset (&p, 0, sizeof(p));
+		p.spawn_time = cl.time;
+		p.lifetime = lifetime_min + ((rand() & 255) / 255.0f) * lifetime_rand;
+		p.size = size + ((rand() & 255) / 255.0f) * size_rand;
+		p.size_ramp = p.size * 8.0f;
+		p.alpha = 1.0f;
+		p.alpha_ramp = alpha_ramp;
+		p.color = color;
+		p.gravity = gravity;
+		p.drag = drag;
+
+		q_strlcpy (p.material, material, sizeof(p.material));
+
+		p.org[0] = pos[0] + ((rand() & 15) - 8);
+		p.org[1] = pos[1] + ((rand() & 15) - 8);
+		p.org[2] = pos[2] + ((rand() & 15) - 8);
+
+		p.vel[0] = vel_base[0] + (float)((rand() & 255) - 128);
+		p.vel[1] = vel_base[1] + (float)((rand() & 255) - 128);
+		p.vel[2] = vel_base[2] + (float)((rand() & 255) - 128);
+
+		if (!Q3P_Spawn (&p))
+			return false;
+	}
+
+	return true;
+}
+
+static qboolean CL_TEntRunImpactDispatcher (int type, const vec3_t pos)
+{
+	static const vec3_t vel_zero = {0.f, 0.f, 0.f};
+
+	switch (type)
+	{
+	case TE_SPIKE:
+		return CL_TEntTrySpawnQ3P ("bullet", pos, vel_zero, 10, 0.20f, 0.10f, 1.25f, 0.5f, -3.0f, 300.f, 0.2f, 0x6f);
+	case TE_SUPERSPIKE:
+	case TE_GUNSHOT:
+		return CL_TEntTrySpawnQ3P ("bullet", pos, vel_zero, 20, 0.20f, 0.10f, 1.25f, 0.5f, -3.0f, 300.f, 0.2f, 0x6f);
+	case TE_EXPLOSION:
+		return CL_TEntTrySpawnQ3P ("explosion", pos, vel_zero, 96, 0.45f, 0.20f, 8.0f, 4.0f, -2.0f, 100.f, 0.5f, 0x6f);
+	case TE_EXPLOSION2:
+		return CL_TEntTrySpawnQ3P ("explosion", pos, vel_zero, 96, 0.45f, 0.20f, 8.0f, 4.0f, -2.0f, 100.f, 0.5f, 0x6f);
+	default:
+		break;
+	}
+
+	return false;
+}
+
 void CL_ParseTEnt (void)
 {
 	int		type;
@@ -217,7 +289,8 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 0, 10);
+		if (!CL_TEntRunImpactDispatcher (TE_SPIKE, pos))
+			R_RunParticleEffect (pos, vec3_origin, 0, 10);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
 			R_SpawnImpactDecal ("bullet", pos, decal_normal);
 		if ( rand() % 5 )
@@ -237,7 +310,8 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		if (!CL_TEntRunImpactDispatcher (TE_SUPERSPIKE, pos))
+			R_RunParticleEffect (pos, vec3_origin, 0, 20);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
 			R_SpawnImpactDecal ("bullet", pos, decal_normal);
 
@@ -259,7 +333,8 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		if (!CL_TEntRunImpactDispatcher (TE_GUNSHOT, pos))
+			R_RunParticleEffect (pos, vec3_origin, 0, 20);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
 			R_SpawnImpactDecal ("bullet", pos, decal_normal);
 		break;
@@ -269,7 +344,8 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		V_AddExplosionVibration (pos);
-		R_ParticleExplosion (pos);
+		if (!CL_TEntRunImpactDispatcher (TE_EXPLOSION, pos))
+			R_ParticleExplosion (pos);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
 			R_SpawnImpactDecal ("scorch", pos, decal_normal);
 		dl = CL_AllocDlight (0);
@@ -334,18 +410,19 @@ void CL_ParseTEnt (void)
 		V_AddExplosionVibration (pos);
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
-                R_ParticleExplosion2 (pos, colorStart, colorLength);
+		if (!CL_TEntRunImpactDispatcher (TE_EXPLOSION2, pos))
+			R_ParticleExplosion2 (pos, colorStart, colorLength);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
 			R_SpawnImpactDecal ("scorch", pos, decal_normal);
-                dl = CL_AllocDlight (0);
-                VectorCopy (pos, dl->origin);
-                dl->radius = 350;
-                dl->baseradius = dl->radius;
-                dl->die = cl.time + 0.5;
-                dl->decay = 300;
-                dl->type = DLIGHT_EXPLOSION;
-                S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
-                break;
+		dl = CL_AllocDlight (0);
+		VectorCopy (pos, dl->origin);
+		dl->radius = 350;
+		dl->baseradius = dl->radius;
+		dl->die = cl.time + 0.5;
+		dl->decay = 300;
+		dl->type = DLIGHT_EXPLOSION;
+		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
+		break;
 
 	default:
 		Sys_Error ("CL_ParseTEnt: bad type");
