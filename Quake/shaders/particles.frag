@@ -59,6 +59,10 @@ float tri(float x)
 layout(location=0) in vec2 in_uv;
 layout(location=1) in vec4 in_color;
 layout(location=2) in vec3 in_pos;
+layout(location=3) in vec2 in_stage_uv;
+
+layout(binding=0) uniform sampler2D Tex;
+layout(location=2) uniform vec4 StageColorMul;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -101,7 +105,8 @@ layout(location=2) in vec3 in_pos;
 
 void main()
 {
-	out_fragcolor = in_color;
+	vec4 texel = texture(Tex, in_stage_uv);
+	out_fragcolor = in_color * texel * StageColorMul;
 #if !OIT
         out_velocity = vec4(0.0, 0.0, 0.0, 2.0);
 #endif

@@ -26,6 +26,7 @@ typedef struct q3p_material_cache_entry_s {
 	unsigned material_id;
 	const shader_material_t *material;
 	unsigned flags;
+	int supported_stage_count;
 } q3p_material_cache_entry_t;
 
 static q3p_material_cache_entry_t q3p_material_cache[Q3P_MATERIAL_CACHE_SIZE];
@@ -46,6 +47,104 @@ static q3p_drawitem_t *q3p_drawitems;
 static q3p_particlevert_t *q3p_partverts;
 static int q3p_numdrawitems;
 static int q3p_numpartverts;
+
+static float Q3P_Clamp01 (float value)
+{
+	if (value < 0.f)
+		return 0.f;
+	if (value > 1.f)
+		return 1.f;
+	return value;
+}
+
+static void Q3P_SetStageTexMatrixUniform (const mat_texmatrix_t *matrix)
+{
+	float m[9];
+
+	if (!matrix)
+	{
+		m[0] = 1.f; m[1] = 0.f; m[2] = 0.f;
+		m[3] = 0.f; m[4] = 1.f; m[5] = 0.f;
+		m[6] = 0.f; m[7] = 0.f; m[8] = 1.f;
+	}
+	else
+	{
+		m[0] = matrix->m[0][0]; m[1] = matrix->m[1][0]; m[2] = matrix->m[2][0];
+		m[3] = matrix->m[0][1]; m[4] = matrix->m[1][1]; m[5] = matrix->m[2][1];
+		m[6] = matrix->m[0][2]; m[7] = matrix->m[1][2]; m[8] = matrix->m[2][2];
+	}
+
+	GL_UniformMatrix3fvFunc (1, 1, GL_FALSE, m);
+}
+
+static void Q3P_EvalStageColorMul (const mat_shader_stage_t *stage, float particle_alpha, vec4_t out)
+{
+	out[0] = 1.f;
+	out[1] = 1.f;
+	out[2] = 1.f;
+	out[3] = Q3P_Clamp01 (particle_alpha);
+
+	if (!stage)
+		return;
+
+	switch (stage->rgbgen)
+	{
+	case MAT_RGBGEN_CONST:
+		out[0] = stage->const_color[0];
+		out[1] = stage->const_color[1];
+		out[2] = stage->const_color[2];
+		break;
+	case MAT_RGBGEN_WAVE:
+		out[0] = out[1] = out[2] = Q3P_Clamp01 (Mat_Shader_EvalWaveValue (&stage->rgb_wave, cl.time));
+		break;
+	case MAT_RGBGEN_VERTEX:
+	case MAT_RGBGEN_IDENTITY:
+	default:
+		break;
+	}
+
+	switch (stage->alphagen)
+	{
+	case MAT_ALPHAGEN_CONST:
+		out[3] *= Q3P_Clamp01 (stage->const_alpha);
+		break;
+	case MAT_ALPHAGEN_WAVE:
+		out[3] *= Q3P_Clamp01 (Mat_Shader_EvalWaveValue (&stage->alpha_wave, cl.time));
+		break;
+	case MAT_ALPHAGEN_VERTEX:
+	case MAT_ALPHAGEN_IDENTITY:
+	default:
+		break;
+	}
+}
+
+static gltexture_t *Q3P_ResolveStageTexture (const mat_shader_stage_t *stage)
+{
+	const char *path = NULL;
+
+	if (!stage)
+		return particletexture;
+
+	switch (stage->map_type)
+	{
+	case MAT_MAP_WHITE:
+		return whitetexture;
+	case MAT_MAP_BLACK:
+		return blacktexture;
+	case MAT_MAP_CLAMPMAP:
+	case MAT_MAP_MAP:
+	default:
+		break;
+	}
+
+	path = MatStage_GetAnimMapPath ((mat_shader_stage_t *)stage, cl.time);
+	if (!path || !path[0])
+		path = stage->map_path;
+	if (!path || !path[0])
+		return particletexture;
+
+	return TexMgr_FindTexture (cl.worldmodel, path);
+}
 
 static unsigned Q3P_HashMaterialId (const char *material)
 {
@@ -135,16 +234,37 @@ static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *
 		}
 
 		stage0_ok = false;
+		entry->supported_stage_count = 0;
 		if (material)
 		{
+			int stage_count = (int)VEC_SIZE (material->stages);
+			int si;
+			mat_particle_policy_t policy = r_particles_shader_strict.value > 0.f
+				? MAT_PARTICLE_POLICY_STRICT
+				: MAT_PARTICLE_POLICY_TOLERANT;
+
 			entry->flags |= Q3P_MATFLAG_RESOLVED;
 			stage0_ok = Mat_Shader_StageSupportsParticleMVP (&material->stage0, fallback_reason, sizeof (fallback_reason));
 			if (stage0_ok)
 				entry->flags |= Q3P_MATFLAG_STAGE0_VALID;
+
+			for (si = 0; si < stage_count; ++si)
+			{
+				const mat_shader_stage_t *stage = &material->stages[si];
+				if (Mat_Shader_ClassifyParticleStage (stage, policy, fallback_reason, sizeof (fallback_reason)) == MAT_PARTICLE_STAGE_SUPPORTED)
+					entry->supported_stage_count = si + 1;
+				else if (r_particles_shader_strict.value > 0.f)
+					break;
+			}
+
+			if (entry->supported_stage_count <= 0 && stage0_ok)
+				entry->supported_stage_count = 1;
 		}
 
 		if (!material || (!stage0_ok && r_particles_shader_strict.value > 0.f))
 		{
+			if (material && !stage0_ok)
+				Con_Warning ("Q3P: strict mode skipping particle material '%s' (%s)\n", normalized, fallback_reason[0] ? fallback_reason : "unsupported stage");
 			entry->flags |= Q3P_MATFLAG_FALLBACK;
 			entry->material = NULL;
 			q_strlcpy (entry->key, Q3P_MATERIAL_DEFAULT_REF, sizeof (entry->key));
@@ -152,6 +272,9 @@ static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *
 		}
 		else
 		{
+			if (entry->supported_stage_count < (int)VEC_SIZE (material->stages))
+				Con_Warning ("Q3P: particle material '%s' has unsupported stages (%d/%d supported), rendering best-effort\n",
+					normalized, entry->supported_stage_count, (int)VEC_SIZE (material->stages));
 			entry->material = material;
 		}
 
@@ -299,6 +422,8 @@ static void Q3P_FlushParticleBatch (void)
 void Q3P_Draw (qboolean alpha, qboolean showtris)
 {
 	int i;
+	int stage_index;
+	int max_stage_count = 1;
 	float scalex, scaley;
 	qboolean dither, oit;
 	unsigned saved_state;
@@ -328,6 +453,13 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 
 	qsort (q3p_drawitems, q3p_numdrawitems, sizeof(q3p_drawitems[0]), Q3P_DrawSortCmp);
 
+	for (i = 0; i < q3p_numdrawitems; ++i)
+	{
+		const q3p_material_cache_entry_t *entry = Q3P_ResolveMaterialCached (q3p_particles[q3p_drawitems[i].particle_index].material);
+		if (entry && entry->supported_stage_count > max_stage_count)
+			max_stage_count = entry->supported_stage_count;
+	}
+
 	GL_BeginGroup ("Q3P Particles");
 
 	dither = (softemu == SOFTEMU_COARSE && !showtris);
@@ -338,6 +470,8 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 	scalex *=  r_matproj[1*4 + 0];
 	scaley *= -r_matproj[2*4 + 1];
 	GL_Uniform3fFunc (0, scalex, scaley, 0.25f);
+	Q3P_SetStageTexMatrixUniform (NULL);
+	GL_Uniform4fFunc (2, 1.f, 1.f, 1.f, 1.f);
 
 	saved_state = glstate;
 	if (alpha)
@@ -345,25 +479,55 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 	else
 		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
 
-	q3p_numpartverts = 0;
-	for (i = 0; i < q3p_numdrawitems; ++i)
+	for (stage_index = 0; stage_index < max_stage_count; ++stage_index)
 	{
-		q3p_particle_t *p = &q3p_particles[q3p_drawitems[i].particle_index];
-		q3p_particlevert_t *v;
-		const GLubyte *c = showtris ? white : (const GLubyte *)&d_8to24table[p->color & 0xff];
+		unsigned current_material = 0;
+		const q3p_material_cache_entry_t *current_entry = NULL;
+		const mat_shader_stage_t *current_stage = NULL;
+		vec4_t stage_mul;
 
-		if (q3p_numpartverts == q3p_maxparticles)
-			Q3P_FlushParticleBatch ();
+		q3p_numpartverts = 0;
+		for (i = 0; i < q3p_numdrawitems; ++i)
+		{
+			q3p_particle_t *p = &q3p_particles[q3p_drawitems[i].particle_index];
+			q3p_particlevert_t *v;
+			const GLubyte *c = showtris ? white : (const GLubyte *)&d_8to24table[p->color & 0xff];
+			const q3p_material_cache_entry_t *entry = Q3P_ResolveMaterialCached (p->material);
 
-		v = &q3p_partverts[q3p_numpartverts++];
-		VectorCopy (p->org, v->pos);
-		v->color[0] = c[0];
-		v->color[1] = c[1];
-		v->color[2] = c[2];
-		v->color[3] = (GLubyte)(CLAMP (0.f, p->alpha, 1.f) * 255.f);
+			if (!entry || stage_index >= entry->supported_stage_count)
+				continue;
+
+			if (!current_entry || p->material_id != current_material)
+			{
+				current_material = p->material_id;
+				current_entry = entry;
+				current_stage = (entry->material && stage_index < (int)VEC_SIZE (entry->material->stages))
+					? &entry->material->stages[stage_index]
+					: NULL;
+
+				if (q3p_numpartverts)
+					Q3P_FlushParticleBatch ();
+
+				GL_Bind (GL_TEXTURE0, current_stage ? Q3P_ResolveStageTexture (current_stage) : particletexture);
+				Q3P_SetStageTexMatrixUniform (current_stage ? MatStage_EvalTexMatrix ((mat_shader_stage_t *)current_stage, cl.time) : NULL);
+				Q3P_EvalStageColorMul (current_stage, 1.f, stage_mul);
+				GL_Uniform4fFunc (2, stage_mul[0], stage_mul[1], stage_mul[2], stage_mul[3]);
+			}
+
+			if (q3p_numpartverts == q3p_maxparticles)
+				Q3P_FlushParticleBatch ();
+
+			v = &q3p_partverts[q3p_numpartverts++];
+			VectorCopy (p->org, v->pos);
+			v->color[0] = c[0];
+			v->color[1] = c[1];
+			v->color[2] = c[2];
+			v->color[3] = (GLubyte)(CLAMP (0.f, p->alpha, 1.f) * 255.f);
+		}
+
+		Q3P_FlushParticleBatch ();
 	}
 
-	Q3P_FlushParticleBatch ();
 	GL_SetState (saved_state);
 	GL_EndGroup ();
 }
