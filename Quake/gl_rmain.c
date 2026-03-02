@@ -3198,6 +3198,11 @@ qboolean GL_NeedsSceneEffects (void)
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
 		return true;
 
+	/* Bloom extraction relies on material masks in scene velocity alpha.
+	 * Route bloom frames through the scene FBO so particles (mask=2) stay excluded. */
+	if (r_bloom.value > 0.f)
+		return true;
+
 	if (r_dlight_mode.value > 0.f && r_dlight_style.value > 0.f && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo)
 		return true;
 
