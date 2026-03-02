@@ -255,6 +255,7 @@ OBJS = strlcat.o \
 	cl_demo.o \
 	cl_input.o \
 	cl_main.o \
+	cl_iwmusic.o \
 	cl_postfx.o \
 	cl_parse.o \
 	cl_tent.o \

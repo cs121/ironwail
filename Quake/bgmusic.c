@@ -74,6 +74,7 @@ static music_handler_t *music_handlers = NULL;
 #define CDRIPTYPE(x)	(((x) & CDRIP_TYPES) != 0)
 
 static snd_stream_t *bgmstream = NULL;
+static float bgm_volume_scale = 1.f;
 
 static void BGM_Play_f (void)
 {
@@ -453,7 +454,7 @@ static void BGM_UpdateStream (void)
 			S_RawSamples(fileSamples, bgmstream->info.rate,
 							bgmstream->info.width,
 							bgmstream->info.channels,
-							raw, bgmvolume.value * bgmstream->volume);
+							raw, bgmvolume.value * bgmstream->volume * bgm_volume_scale);
 			did_rewind = false;
 		}
 		else if (res == 0)	/* EOF */
@@ -505,3 +506,13 @@ void BGM_Update (void)
 		BGM_UpdateStream ();
 }
 
+
+void BGM_SetVolumeScale (float scale)
+{
+	bgm_volume_scale = CLAMP(0.f, scale, 1.f);
+}
+
+qboolean BGM_HasStream (void)
+{
+	return bgmstream != NULL;
+}

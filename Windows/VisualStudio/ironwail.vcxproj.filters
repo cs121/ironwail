@@ -36,6 +36,9 @@
     <ClCompile Include="..\..\Quake\cl_input.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\cl_iwmusic.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\cl_main.c">
       <Filter>Source Files</Filter>
     </ClCompile>

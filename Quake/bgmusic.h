@@ -38,6 +38,8 @@ void BGM_Pause (void);
 void BGM_Resume (void);
 
 void BGM_PlayCDtrack (byte track, qboolean looping);
+void BGM_SetVolumeScale (float scale);
+qboolean BGM_HasStream (void);
 
 #endif	/* _BGMUSIC_H_ */
 

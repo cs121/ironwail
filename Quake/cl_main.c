@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "cl_postfx.h"
 #include "bgmusic.h"
+#include "cl_iwmusic.h"
 #include "../common/lightgrid.h"
 #include "r_dlight_pool.h"
 
@@ -140,6 +141,7 @@ void CL_Disconnect (void)
 // stop sounds (especially looping!)
 	S_StopAllSounds (true);
 	BGM_Pause ();
+	CL_IWMusic_Disconnect ();
 
 // if running a local server, shut it down
 	if (cls.demoplayback)
@@ -814,6 +816,7 @@ int CL_ReadFromServer (void)
 
 	CL_RelinkEntities ();
 	CL_UpdateTEnts ();
+	CL_IWMusic_Update ();
 
 //johnfitz -- devstats
 
@@ -1078,6 +1081,7 @@ void CL_Init (void)
 	CL_InitTEnts ();
 	DLightPool_Init ();
 	CL_PostFX_Init ();
+	CL_IWMusic_Init ();
 
 	Cvar_RegisterVariable (&cl_name);
 	Cvar_RegisterVariable (&cl_color);
