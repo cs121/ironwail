@@ -223,6 +223,7 @@ GLOBJS = \
 	r_postfx.o \
 	r_part.o \
 	r_world.o \
+	r_decals.o \
 	gl_screen.o \
 gl_shaders.o \
 gl_sky.o \
@@ -232,7 +233,6 @@ gl_draw.o \
 image.o \
 gl_texmgr.o \
 ktx2_write.o \
-r_maptex_export.o \
 bc7enc.o \
 gl_mesh.o \
 r_sprite.o \

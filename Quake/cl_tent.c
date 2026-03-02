@@ -115,10 +115,81 @@ void CL_ParseBeam (qmodel_t *m)
 CL_ParseTEnt
 =================
 */
+static qboolean CL_DecalNormalFromView (const vec3_t impact, vec3_t out_normal)
+{
+	vec3_t from;
+	VectorCopy (cl_entities[cl.viewentity].origin, from);
+	VectorSubtract (from, impact, out_normal);
+	if (VectorLengthSquared (out_normal) < 0.0001f)
+		return false;
+	VectorNormalizeFast (out_normal);
+	return true;
+}
+
+static qboolean CL_DecalNormalFromImpactTrace (const vec3_t impact, vec3_t out_normal)
+{
+	static const vec3_t directions[] = {
+		{ 1.f, 0.f, 0.f }, {-1.f, 0.f, 0.f },
+		{ 0.f, 1.f, 0.f }, { 0.f,-1.f, 0.f },
+		{ 0.f, 0.f, 1.f }, { 0.f, 0.f,-1.f },
+	};
+	const float trace_dist = 8.f;
+	qboolean found = false;
+	float best_fraction = 2.f;
+	int i;
+
+	if (!cl.worldmodel)
+		return false;
+
+	for (i = 0; i < (int)countof (directions); ++i)
+	{
+		trace_t trace;
+		vec3_t start, end;
+
+		VectorCopy (impact, start);
+		VectorMA (impact, trace_dist, directions[i], end);
+
+		memset (&trace, 0, sizeof(trace));
+		trace.fraction = 1.f;
+		trace.allsolid = true;
+		VectorCopy (end, trace.endpos);
+		SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0, 1, start, end, &trace);
+
+		if (VectorLengthSquared (trace.plane.normal) < 0.0001f)
+			continue;
+
+		if (trace.fraction >= best_fraction)
+			continue;
+
+		best_fraction = trace.fraction;
+		VectorCopy (trace.plane.normal, out_normal);
+		found = true;
+	}
+
+	if (found)
+		VectorNormalizeFast (out_normal);
+
+	return found;
+}
+
+static qboolean CL_DecalNormalForImpact (const vec3_t impact, vec3_t out_normal)
+{
+	if (CL_DecalNormalFromImpactTrace (impact, out_normal))
+		return true;
+
+	/*
+	 * Demo/network temp entity events only provide an impact position. If we
+	 * cannot recover a nearby world BSP plane from that point, fall back to the
+	 * legacy view-based approximation so these events can still spawn decals.
+	 */
+	return CL_DecalNormalFromView (impact, out_normal);
+}
+
 void CL_ParseTEnt (void)
 {
 	int		type;
 	vec3_t	pos;
+	vec3_t	decal_normal;
 	dlight_t	*dl;
 	int		rnd;
 	int		colorStart, colorLength;
@@ -147,6 +218,8 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 10);
+		if (CL_DecalNormalForImpact (pos, decal_normal))
+			R_SpawnImpactDecal ("bullet", pos, decal_normal);
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
@@ -165,6 +238,8 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		if (CL_DecalNormalForImpact (pos, decal_normal))
+			R_SpawnImpactDecal ("bullet", pos, decal_normal);
 
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
@@ -185,6 +260,8 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		R_RunParticleEffect (pos, vec3_origin, 0, 20);
+		if (CL_DecalNormalForImpact (pos, decal_normal))
+			R_SpawnImpactDecal ("bullet", pos, decal_normal);
 		break;
 
 	case TE_EXPLOSION:                      // rocket explosion
@@ -193,6 +270,8 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		V_AddExplosionVibration (pos);
 		R_ParticleExplosion (pos);
+		if (CL_DecalNormalForImpact (pos, decal_normal))
+			R_SpawnImpactDecal ("scorch", pos, decal_normal);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
@@ -210,6 +289,8 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		V_AddExplosionVibration (pos);
 		R_BlobExplosion (pos);
+		if (CL_DecalNormalForImpact (pos, decal_normal))
+			R_SpawnImpactDecal ("scorch", pos, decal_normal);
 
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
@@ -254,6 +335,8 @@ void CL_ParseTEnt (void)
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
                 R_ParticleExplosion2 (pos, colorStart, colorLength);
+		if (CL_DecalNormalForImpact (pos, decal_normal))
+			R_SpawnImpactDecal ("scorch", pos, decal_normal);
                 dl = CL_AllocDlight (0);
                 VectorCopy (pos, dl->origin);
                 dl->radius = 350;

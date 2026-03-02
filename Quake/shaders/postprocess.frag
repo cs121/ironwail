@@ -8,6 +8,11 @@ layout(binding=6) uniform sampler2D GodraysMaskTexture;
 layout(binding=7) uniform sampler2D GodraysSourceTexture;
 layout(binding=8) uniform sampler2D SSAOTexture;
 layout(binding=9) uniform sampler2DArray PostFXLUT;
+// Fog volume composite texture (halfres, upsampled to full-res by fogvol pass).
+// RGB = composited fog color as blended into the scene. Used to derive per-pixel
+// volumetric transmittance for SSAO suppression. Binding is left unbound (→ black)
+// when fogvol is inactive, giving transmittance=1.0 and no suppression.
+layout(binding=10) uniform sampler2D FogVolTexture;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -126,7 +131,7 @@ layout(location=6) uniform vec4 MotionParams0; // x: enabled, y: shutter strengt
 layout(location=7) uniform vec4 MotionParams1; // x: max blur radius (pixels), y: max samples, z: velocity texture available, w: reserved
 layout(location=8) uniform vec4 PostFXParams0; // x: vignette strength, y: inner radius, z: outer radius, w: falloff
 layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend mode
-layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, y: screen-space darken strength, z: screen-space darken depth range, w: unused
+layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, yzw: unused
 layout(location=11) uniform vec4 TeleportParams; // x: teleport fade, y: blur radius (pixels)
 layout(location=12) uniform float u_saturation;
 layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
@@ -140,6 +145,9 @@ layout(location=24) uniform vec4 PostFXFogColor; // rgb: underwater fog color, w
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
 layout(location=27) uniform vec4 TonemapBlackLiftParams; // x: lift, y: strength, z: unused, w: unused
+// Volumetric fog params for SSAO suppression.
+// x: fogvol active flag (1.0 = fogvol texture is bound and valid, 0.0 = inactive)
+layout(location=28) uniform vec4 FogVolParams;
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -230,6 +238,22 @@ float FogTransmittanceFromGlobalFog(float depth)
                 return 1.0;
         float fog = exp2(-density * depth * depth);
         return clamp(fog, 0.0, 1.0);
+}
+
+// Returns volumetric fog transmittance [0..1] for the current pixel from the
+// Returns volumetric fog transmittance [0..1] for SSAO suppression.
+// fogvol.frag writes alpha = (1.0 - transmittance) into composite_tex.
+// The temporal and upsample passes propagate this alpha unchanged.
+// transmittance=1.0 (alpha=0) → no fog → full SSAO.
+// transmittance=0.0 (alpha=1) → fully dense fog → SSAO completely suppressed.
+// Reading alpha is correct for ALL fog colors including dark ones (purple,
+// red, brown) where RGB luminance was near-zero even at full opacity.
+float FogVolTransmittance(vec2 uv)
+{
+        if (FogVolParams.x < 0.5)
+                return 1.0; // fogvol inactive — no suppression
+        float fogDensity = texture(FogVolTexture, uv).a; // 0=no fog, 1=full fog
+        return clamp(1.0 - fogDensity, 0.0, 1.0);
 }
 
 float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)
@@ -438,17 +462,6 @@ void main()
                 vec2 viewUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
                 float aspect = texSize.y > 0.0 ? texSize.x / texSize.y : 1.0;
 
-                float screenDarkenStrength = clamp(PostFXParams2.y, 0.0, 1.0);
-                float screenDarkenDepth = max(PostFXParams2.z, 1e-4);
-                if (screenDarkenStrength > 0.0 && depthInfo.valid)
-                {
-                        float linearDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
-                        float depthRange = max(DoFParams1.y - DoFParams1.x, 1e-6);
-                        float normalizedDepth = clamp((linearDepth - DoFParams1.x) / depthRange, 0.0, 1.0);
-                        float screenAO = smoothstep(0.0, screenDarkenDepth, 1.0 - normalizedDepth);
-                        color.rgb *= mix(vec3(1.0), vec3(screenAO), screenDarkenStrength);
-                }
-
                 float vignetteStrength = clamp(PostFXParams0.x, 0.0, 1.0);
                 float vignetteInner = max(PostFXParams0.y, 0.0);
                 float vignetteOuter = max(PostFXParams0.z, vignetteInner + 1e-3);
@@ -541,7 +554,12 @@ void main()
                                         if (fogStrength > 0.0)
                                                 underwaterTransmittance = FogTransmittanceFromDepth(ssaoCenterDepth, fogStrength);
                                         float globalTransmittance = FogTransmittanceFromGlobalFog(ssaoCenterDepth);
-                                        fogTransmittance = globalTransmittance * underwaterTransmittance;
+                                        // Volumetric fog transmittance: sample the fogvol composite buffer
+                                        // directly. This correctly handles spatial noise variation and
+                                        // color variation that FogTransmittanceFromGlobalFog cannot model.
+                                        // Take the minimum (most suppressing) of classical and volumetric fog.
+                                        float fogvolTransmittance = FogVolTransmittance(uv);
+                                        fogTransmittance = min(globalTransmittance, fogvolTransmittance) * underwaterTransmittance;
                                 }
                                 float aoFogMask = pow(clamp(fogTransmittance, 0.0, 1.0), ssaoFogPower);
                                 float aoFogged = mix(1.0, ao, aoFogMask);

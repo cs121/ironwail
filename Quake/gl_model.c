@@ -28,7 +28,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_lightgrid.h"
 #include "gl_ktx2.h"
 #include "mat_shader.h"
-#include "r_maptex_export.h"
 #include "../common/lightgrid.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
@@ -577,15 +576,58 @@ typedef struct
 } bsp_header_info_t;
 static bspx_header_t *BSPX_Setup(qmodel_t *mod, const bsp_header_info_t *header, size_t filelen);
 static void *BSPX_FindLump(bspx_header_t *bspxheader, void *base, const char *lumpname, size_t *lumpsize);
+
+/*
+ * BSPX lump names are fixed 24-byte, zero-padded fields (max 23 chars + NUL).
+ * Compare against the full field so handler aliases never match by prefix.
+ */
+static qboolean BSPX_LumpNameEquals(const char entry_name[24], const char *name)
+{
+	char expected_name[24];
+	size_t len;
+
+	len = strlen(name);
+	if (len >= sizeof(expected_name))
+		return false;
+
+	memset(expected_name, 0, sizeof(expected_name));
+	memcpy(expected_name, name, len);
+
+	return !memcmp(entry_name, expected_name, sizeof(expected_name));
+}
+
 typedef struct
 {
         char lumpname[sizeof(((bspx_lump_disk_t *)0)->lumpname) + 1];
         qboolean used;
         qboolean unsupported;
 } bspx_lump_usage_t;
+#define MAX_BSPX_LUMPS 1024
 #define MAX_BSPX_LUMP_USAGE 256
 static bspx_lump_usage_t bspx_lump_usage[MAX_BSPX_LUMP_USAGE];
+static int bspx_lump_usage_index[MAX_BSPX_LUMP_USAGE];
 static int bspx_lump_usage_count;
+
+static int Q1BSPX_UsageIndexCompare(const void *a, const void *b)
+{
+	const int index_a = *(const int *)a;
+	const int index_b = *(const int *)b;
+	const int cmp = strncmp(
+		bspx_lump_usage[index_a].lumpname,
+		bspx_lump_usage[index_b].lumpname,
+		sizeof(((bspx_lump_disk_t *)0)->lumpname));
+
+	if (cmp)
+		return cmp;
+
+	/* Keep deterministic order for duplicate lump names. */
+	if (index_a < index_b)
+		return -1;
+	if (index_a > index_b)
+		return 1;
+
+	return 0;
+}
 //supported lumps:
 //RGBLIGHTING (.lit)
 //LIGHTING_E5BGR9 (hdr lighting)
@@ -601,6 +643,7 @@ static void Q1BSPX_ResetUsage(void)
 {
         bspx_lump_usage_count = 0;
         memset(bspx_lump_usage, 0, sizeof(bspx_lump_usage));
+	memset(bspx_lump_usage_index, 0, sizeof(bspx_lump_usage_index));
 }
 static void Q1BSPX_RecordEntries(qmodel_t *mod)
 {
@@ -610,18 +653,41 @@ static void Q1BSPX_RecordEntries(qmodel_t *mod)
         for (i = 0; i < bspx_lump_usage_count; i++)
         {
                 q_strlcpy(bspx_lump_usage[i].lumpname, mod->bspx_entries[i].name, sizeof(bspx_lump_usage[i].lumpname));
+		bspx_lump_usage_index[i] = i;
         }
+
+	qsort(bspx_lump_usage_index, bspx_lump_usage_count, sizeof(bspx_lump_usage_index[0]), Q1BSPX_UsageIndexCompare);
 }
 static bspx_lump_usage_t *Q1BSPX_FindUsage(const char *lumpname)
 {
-        int i;
+	int low = 0;
+	int high = bspx_lump_usage_count - 1;
+	int hit = -1;
 
-        for (i = 0; i < bspx_lump_usage_count; i++)
-        {
-                if (!strncmp(bspx_lump_usage[i].lumpname, lumpname, sizeof(((bspx_lump_disk_t *)0)->lumpname)))
-                        return &bspx_lump_usage[i];
-        }
-        return NULL;
+	while (low <= high)
+	{
+		const int mid = low + (high - low) / 2;
+		const int usage_index = bspx_lump_usage_index[mid];
+		const int cmp = strncmp(
+			bspx_lump_usage[usage_index].lumpname,
+			lumpname,
+			sizeof(((bspx_lump_disk_t *)0)->lumpname));
+
+		if (cmp < 0)
+			low = mid + 1;
+		else if (cmp > 0)
+			high = mid - 1;
+		else
+		{
+			hit = mid;
+			high = mid - 1;
+		}
+	}
+
+	if (hit < 0)
+		return NULL;
+
+	return &bspx_lump_usage[bspx_lump_usage_index[hit]];
 }
 
 static qboolean Q1BSPX_IsProcessed(const char *lumpname)
@@ -730,13 +796,19 @@ void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size)
         int expected_size;
         byte *memptr;
 
-        if (!mod || !mod->lightdatasize)
+        if (!mod)
                 return;
 
-        expected_size = mod->lightdatasize * 3;
+        expected_size = mod->lightdatasamples ? (mod->lightdatasamples * 3) : (mod->lightdatasize * 3);
+        if (!expected_size)
+                return;
 
         if (size != expected_size)
+        {
+                Q1BSPX_MarkUnsupported("RGBLIGHTING");
+                Con_DWarning("BSPX: RGBLIGHTING size mismatch (%d bytes, expected %d)\n", size, expected_size);
                 return;
+        }
 
         memptr = (byte *)Hunk_AllocName(size, loadname);
         memcpy(memptr, buffer, size);
@@ -780,7 +852,50 @@ void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size)
         Q1BSPX_MarkUsed("FACENORMALS");
 }
 
-static size_t Mod_FindEndOfStandardLumps(const lump_t *lumps, int numlumps, qboolean *misaligned)
+static qboolean Mod_ValidateLumpRange(const char *modelname, const char *lumpname, int fileofs, int filelen, size_t filelen_total)
+{
+        if (fileofs < 0 || filelen < 0)
+        {
+                Con_Warning("%s: invalid %s lump range (ofs=%d len=%d total=%zu)\n", modelname, lumpname, fileofs, filelen, filelen_total);
+                return false;
+        }
+
+        if ((size_t)fileofs > filelen_total || (size_t)filelen > filelen_total - (size_t)fileofs)
+        {
+                Con_Warning("%s: invalid %s lump range (ofs=%d len=%d total=%zu)\n", modelname, lumpname, fileofs, filelen, filelen_total);
+                return false;
+        }
+
+        return true;
+}
+
+static const char *Mod_StandardLumpName(int lumpindex)
+{
+        static const char *const names[HEADER_LUMPS] = {
+                "ENTITIES",
+                "PLANES",
+                "TEXTURES",
+                "VERTEXES",
+                "VISIBILITY",
+                "NODES",
+                "TEXINFO",
+                "FACES",
+                "LIGHTING",
+                "CLIPNODES",
+                "LEAFS",
+                "MARKSURFACES",
+                "EDGES",
+                "SURFEDGES",
+                "MODELS"
+        };
+
+        if (lumpindex < 0 || lumpindex >= HEADER_LUMPS)
+                return "UNKNOWN";
+
+        return names[lumpindex];
+}
+
+static qboolean Mod_FindEndOfStandardLumps(const qmodel_t *mod, const lump_t *lumps, int numlumps, size_t filelen_total, qboolean *misaligned, size_t *end_offset)
 {
         size_t  offs = 0;
         int             i;
@@ -788,15 +903,24 @@ static size_t Mod_FindEndOfStandardLumps(const lump_t *lumps, int numlumps, qboo
         if (misaligned)
                 *misaligned = false;
 
+        if (end_offset)
+                *end_offset = 0;
+
         for (i = 0; i < numlumps; i++)
         {
+                if (!Mod_ValidateLumpRange(mod->name, Mod_StandardLumpName(i), lumps[i].fileofs, lumps[i].filelen, filelen_total))
+                        return false;
+
                 if (misaligned && (lumps[i].fileofs & 3) && i != LUMP_ENTITIES)
                         *misaligned = true;
 
                 offs = q_max(offs, (size_t)lumps[i].fileofs + (size_t)lumps[i].filelen);
         }
 
-        return (offs + 3) & ~((size_t)3);
+        if (end_offset)
+                *end_offset = (offs + 3) & ~((size_t)3);
+
+        return true;
 }
 
 static qboolean Mod_ParseBSPHeader(const byte *buffer, size_t length, bsp_header_info_t *out)
@@ -858,7 +982,9 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
         mod->bspx_entries_count = 0;
         mod->bspx_header = NULL;
 
-        offs = Mod_FindEndOfStandardLumps(header->lumps, HEADER_LUMPS, &misaligned);
+        if (!Mod_FindEndOfStandardLumps(mod, header->lumps, HEADER_LUMPS, filelen, &misaligned, &offs))
+                return false;
+
         header_offset = offs;
 
         if (misaligned)
@@ -887,8 +1013,11 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
                 return false;
 
         numlumps = LittleLong(h->numlumps);
-        if (numlumps <= 0)
+        if (numlumps <= 0 || numlumps > MAX_BSPX_LUMPS)
+        {
+                Con_Warning("%s has invalid BSPX lump count %d (allowed 1..%d)\n", mod->name, numlumps, MAX_BSPX_LUMPS);
                 return false;
+        }
 
         if (header_offset + sizeof(*h) + sizeof(h->lumps[0]) * (numlumps - 1) > filelen)
                 return false;
@@ -898,11 +1027,11 @@ static qboolean Mod_ParseBSPXDirectory(qmodel_t *mod, const bsp_header_info_t *h
                 int fileofs = LittleLong(h->lumps[i].fileofs);
                 int filelen_lump = LittleLong(h->lumps[i].filelen);
 
+                if (!Mod_ValidateLumpRange(mod->name, h->lumps[i].lumpname, fileofs, filelen_lump, filelen))
+                        return false;
+
                 if (fileofs & 3)
                         Con_DWarning("%s contains misaligned bspx lump %s\n", mod->name, h->lumps[i].lumpname);
-
-                if ((unsigned int)fileofs + (unsigned int)filelen_lump > filelen)
-                        return false;
         }
 
         mod->bspx_entries = (bspx_entry_t *)Hunk_AllocName(numlumps * sizeof(bspx_entry_t), loadname);
@@ -968,16 +1097,21 @@ static qboolean BSPX_MarkKnown(qmodel_t *mod, void *data, int size)
         return true;
 }
 
-static qboolean BSPX_ApplyLumpOverride(const char *lumpname, lump_t *target)
+static qboolean BSPX_ApplyLumpOverride(qmodel_t *mod, const char *lumpname, lump_t *target, size_t filelen_total)
 {
         size_t          size;
         void            *data;
+        int                     offset;
 
-        data = BSPX_FindLump(loadmodel ? loadmodel->bspx_header : NULL, mod_base, lumpname, &size);
+        data = BSPX_FindLump(mod ? mod->bspx_header : NULL, mod_base, lumpname, &size);
         if (!data || !size)
                 return false;
 
-        target->fileofs = (int)((byte *)data - mod_base);
+        offset = (int)((byte *)data - mod_base);
+        if (!Mod_ValidateLumpRange(mod ? mod->name : "<unknown>", lumpname, offset, (int)size, filelen_total))
+                return false;
+
+        target->fileofs = offset;
         target->filelen = (int)size;
         Q1BSPX_MarkUsed(lumpname);
         return true;
@@ -1021,7 +1155,11 @@ static void Mod_DispatchBSPXLumps(qmodel_t *mod)
 
                 for (handler = bspx_handlers; handler->handler; handler++)
                 {
-                        if (!strncmp(entry->name, handler->name, strlen(handler->name)))
+                        /*
+                         * Must be exact BSPX name equality (24-byte field semantics),
+                         * not prefix matching.
+                         */
+                        if (BSPX_LumpNameEquals(entry->name, handler->name))
                         {
                                 handled = true;
                                 if (handler->handler(mod, mod_base + entry->offset, entry->size))
@@ -1543,12 +1681,14 @@ static void Mod_LoadLighting (lump_t *l)
 {
 	int i, mark;
 	byte *in, *out, *data;
+	byte *bspx_lighting;
+	byte *bspx_rgblighting;
+	byte *bspx_dlit;
 	byte d, q64_b0, q64_b1;
 	char litfilename[MAX_OSPATH];
 	const char *lighting_source;
 	unsigned int path_id;
-	int	bspxsize;
-	qboolean bspx_dlit;
+	int	bspxsize, bspx_lighting_size, bspx_rgb_size, bspx_dlit_size;
 
 	loadmodel->lightdata = NULL;
 	loadmodel->lightdatasamples = 0;
@@ -1560,7 +1700,19 @@ static void Mod_LoadLighting (lump_t *l)
 	loadmodel->lightdatasize = l->filelen;
 	loadmodel->flags &= ~MOD_HDRLIGHTING;
 	loadmodel->litfile = false;
-	bspx_dlit = Q1BSPX_IsProcessed("DLIT");
+	bspx_lighting = Q1BSPX_FindLump("LIGHTING", &bspx_lighting_size);
+	bspx_rgblighting = Q1BSPX_FindLump("RGBLIGHTING", &bspx_rgb_size);
+	bspx_dlit = Q1BSPX_FindLump("DLIT", &bspx_dlit_size);
+
+	/*
+	 * Lighting source precedence for loadmodel->lightdata:
+	 * 1) external .lit
+	 * 2) BSPX LIGHTING_E5BGR9
+	 * 3) BSPX RGBLIGHTING
+	 * 4) BSPX DLIT
+	 * 5) BSPX LIGHTING (classic bytes)
+	 * 6) embedded BSP LUMP_LIGHTING (classic bytes)
+	 */
 	// LordHavoc: check for a .lit file
 	q_strlcpy(litfilename, loadmodel->name, sizeof(litfilename));
 	COM_StripExtension(litfilename, litfilename, sizeof(litfilename));
@@ -1674,7 +1826,7 @@ static void Mod_LoadLighting (lump_t *l)
 		}
 	}
 	// LordHavoc: no .lit found, expand the white lighting data to color
-	if (!l->filelen)
+	if (!l->filelen && !(bspx_lighting && bspx_lighting_size > 0))
 		goto loadlightdir;
 
         if (gl_loadlitfiles.value > 0) // woods #loadlits
@@ -1697,25 +1849,24 @@ static void Mod_LoadLighting (lump_t *l)
                         Con_DWarning("LIGHTING_E5BGR9 lump size %d is not a multiple of 4 bytes\n", bspxsize);
                 }
 
-                in = Q1BSPX_FindLump("RGBLIGHTING", &bspxsize);
-                if (in && (bspxsize % 3 == 0))
+                if (bspx_rgblighting && (bspx_rgb_size % 3 == 0))
                 {
-                        int samples = bspxsize / 3;
+                        int samples = bspx_rgb_size / 3;
 
-                        loadmodel->lightdata = (byte*)Hunk_AllocName(bspxsize, litfilename);
+			loadmodel->lightdata = (byte*)Hunk_AllocName(bspx_rgb_size, litfilename);
                         loadmodel->lightdatasamples = samples;
                         loadmodel->litfile = true;
 
-                        memcpy(loadmodel->lightdata, in, bspxsize);
+			memcpy(loadmodel->lightdata, bspx_rgblighting, bspx_rgb_size);
                         Q1BSPX_MarkUsed("RGBLIGHTING");
 
 					Con_Printf("loaded BSPX lighting (%d samples)\n", samples);
                         goto loadlightdir;
                 }
-                else if (in)
+                else if (bspx_rgblighting)
                 {
                         Q1BSPX_MarkUnsupported("RGBLIGHTING");
-                        Con_DWarning("RGBLIGHTING lump size %d is not a multiple of 3 bytes\n", bspxsize);
+			Con_DWarning("RGBLIGHTING lump size %d is not a multiple of 3 bytes\n", bspx_rgb_size);
                 }
 
         }
@@ -1723,14 +1874,14 @@ static void Mod_LoadLighting (lump_t *l)
                 Con_DPrintf2("gl_loadlitfiles 0: ignoring BSPX colored lighting lumps\n");
         }
 
-        if (bspx_dlit && l->filelen && !loadmodel->lightdata)
+        if (bspx_dlit && bspx_dlit_size > 0 && !loadmodel->lightdata)
         {
-                int samples = l->filelen / 6;
+                int samples = bspx_dlit_size / 6;
 
-                if (l->filelen % 6)
+                if (bspx_dlit_size % 6)
                 {
                         Q1BSPX_MarkUnsupported("DLIT");
-                        Con_DWarning("DLIT lump size %d is not a multiple of 6 bytes\n", l->filelen);
+                        Con_DWarning("DLIT lump size %d is not a multiple of 6 bytes\n", bspx_dlit_size);
                 }
                 else
                 {
@@ -1740,7 +1891,7 @@ static void Mod_LoadLighting (lump_t *l)
                         loadmodel->lightdatasamples = samples;
                         loadmodel->lightdirdata = (byte *)Hunk_AllocName(samples * 3, litfilename);
                         loadmodel->lightdirsamples = samples;
-                        in = mod_base + l->fileofs;
+                        in = bspx_dlit;
                         out = loadmodel->lightdata;
                         luxout = loadmodel->lightdirdata;
 
@@ -1759,6 +1910,25 @@ static void Mod_LoadLighting (lump_t *l)
                         goto loadlightdir;
                 }
         }
+
+
+	if (bspx_lighting && bspx_lighting_size > 0)
+	{
+		loadmodel->lightdata = (byte *) Hunk_AllocName (bspx_lighting_size * 3, litfilename);
+		loadmodel->lightdatasamples = bspx_lighting_size;
+		in = loadmodel->lightdata + bspx_lighting_size * 2;
+		out = loadmodel->lightdata;
+		memcpy (in, bspx_lighting, bspx_lighting_size);
+		for (unsigned int sample = 0; sample < (unsigned int)bspx_lighting_size; sample++)
+		{
+			d = *in++;
+			*out++ = d;
+			*out++ = d;
+			*out++ = d;
+		}
+		Q1BSPX_MarkUsed("LIGHTING");
+		goto loadlightdir;
+	}
 
         // Quake64 bsp lighmap data
         if (loadmodel->bspversion == BSPVERSION_QUAKE64)
@@ -1803,6 +1973,9 @@ static void Mod_LoadLighting (lump_t *l)
 
 
 loadlightdir:
+	if (bspx_rgblighting && loadmodel->lightdatasamples)
+		Mod_LoadRGBLightingBSPX(loadmodel, bspx_rgblighting, bspx_rgb_size);
+
 	if (!loadmodel->lightdirdata)
 	{
 		in = Q1BSPX_FindLump("LIGHTINGDIR", &bspxsize);
@@ -3950,21 +4123,22 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 
                 if (bspx)
                 {
-                        BSPX_ApplyLumpOverride("BSPX_VERTS", &header.lumps[LUMP_VERTEXES]);
-                        BSPX_ApplyLumpOverride("BSPX_FACES", &header.lumps[LUMP_FACES]);
+                        BSPX_ApplyLumpOverride(mod, "BSPX_VERTS", &header.lumps[LUMP_VERTEXES], (size_t)com_filesize);
+                        BSPX_ApplyLumpOverride(mod, "BSPX_FACES", &header.lumps[LUMP_FACES], (size_t)com_filesize);
 
-                        BSPX_ApplyLumpOverride("LIGHTING", &header.lumps[LUMP_LIGHTING]);
-                        BSPX_ApplyLumpOverride("DLIT", &header.lumps[LUMP_LIGHTING]);
-                        BSPX_ApplyLumpOverride("RGBLIGHTING", &header.lumps[LUMP_LIGHTING]);
+                        /*
+                         * Keep LUMP_LIGHTING tied to classic lighting data.
+                         * Extended BSPX lighting variants are selected by Mod_LoadLighting
+                         * with explicit precedence.
+                         */
+                        BSPX_ApplyLumpOverride(mod, "BSPX_ENTITYSTRING", &header.lumps[LUMP_ENTITIES], (size_t)com_filesize);
 
-                        BSPX_ApplyLumpOverride("BSPX_ENTITYSTRING", &header.lumps[LUMP_ENTITIES]);
+                        BSPX_ApplyLumpOverride(mod, "BSPX_MODELS", &header.lumps[LUMP_MODELS], (size_t)com_filesize);
 
-                        BSPX_ApplyLumpOverride("BSPX_MODELS", &header.lumps[LUMP_MODELS]);
-
-                        if (!BSPX_ApplyLumpOverride("VISX", &header.lumps[LUMP_VISIBILITY]))
+                        if (!BSPX_ApplyLumpOverride(mod, "VISX", &header.lumps[LUMP_VISIBILITY], (size_t)com_filesize))
                         {
-                                if (!BSPX_ApplyLumpOverride("PVS2", &header.lumps[LUMP_VISIBILITY]))
-                                        BSPX_ApplyLumpOverride("PVS_COMPRESSED", &header.lumps[LUMP_VISIBILITY]);
+                                if (!BSPX_ApplyLumpOverride(mod, "PVS2", &header.lumps[LUMP_VISIBILITY], (size_t)com_filesize))
+                                        BSPX_ApplyLumpOverride(mod, "PVS_COMPRESSED", &header.lumps[LUMP_VISIBILITY], (size_t)com_filesize);
                         }
                 }
         }
@@ -3984,17 +4158,6 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadSurfedges (&header.lumps[LUMP_SURFEDGES]);
 	Mod_LoadTextures (&header.lumps[LUMP_TEXTURES]);
 	Mod_LoadLighting (&header.lumps[LUMP_LIGHTING]);
-	if (is_main_model)
-	{
-		void *lump;
-		int lumpsize;
-
-		lump = Q1BSPX_FindLump("RGBLIGHTING", &lumpsize);
-		if (lump && lumpsize > 0)
-		{
-			Mod_LoadRGBLightingBSPX(mod, lump, lumpsize);
-		}
-	}
 	Mod_LoadPlanes (&header.lumps[LUMP_PLANES]);
 	Mod_LoadTexinfo (&header.lumps[LUMP_TEXINFO]);
 	Mod_LoadEntities (&header.lumps[LUMP_ENTITIES]);	//Spike: moved this earlier, so that we can parse worldspawn keys earlier.
@@ -4066,9 +4229,6 @@ visdone:
 	mod->nummodelsurfaces = mod->numsurfaces;
 	mod->sortkey = (CRC_Block (mod->name, strlen(mod->name)) & MODSORT_MODELMASK) << MODSORT_FRAMEBITS;
 	Mod_FindUsedTextures (mod);
-	if (is_main_model)
-		R_MapTex_ExportFromBsp (mod, mod_base, &header.lumps[LUMP_TEXTURES]);
-
 	// johnfitz -- okay, so that i stop getting confused every time i look at this loop, here's how it works:
 	// we're looping through the submodels starting at 0.  Submodel 0 is the main model, so we don't have to
 	// worry about clobbering data the first time through, since it's the same data.  At the end of the loop,

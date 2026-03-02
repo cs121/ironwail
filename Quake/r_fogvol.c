@@ -21,20 +21,60 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
-#include "rb_gl.h"
 #include "draw.h"
+#include "gl_lightgrid.h"
 #include "r_fogvol.h"
+#include "r_dlight_pool.h"
 #include <math.h>
 
 typedef struct fog_volume_gpu_s
 {
 	float mins[4];
 	float maxs[4];
+	float sphere[4];
 	float color_density[4];
 	float noise_params[4];
-	float velocity[4];
+	float velocity_windspeed[4];
+	float wind_turbulence[4];
 	float misc[4];
+	float extra[4];
 } fog_volume_gpu_t;
+
+COMPILE_TIME_ASSERT (fog_volume_gpu_align16, (sizeof (fog_volume_gpu_t) % 16) == 0);
+
+typedef struct fog_light_gpu_s
+{
+	float pos_rad[4];
+	float col_int[4];
+} fog_light_gpu_t;
+
+typedef struct fog_light_list_gpu_s
+{
+	int offset_count[4];
+} fog_light_list_gpu_t;
+
+typedef struct fog_light_lists_gpu_s
+{
+	fog_light_list_gpu_t volumes[MAX_FOGVOLUMES];
+	fog_light_gpu_t lights[MAX_FOGVOLUMES * 32];
+} fog_light_lists_gpu_t;
+
+typedef struct fog_lightgrid_gpu_s
+{
+	float probe_rgb[8][4];
+} fog_lightgrid_gpu_t;
+
+COMPILE_TIME_ASSERT (fog_light_gpu_align16, (sizeof (fog_light_gpu_t) % 16) == 0);
+COMPILE_TIME_ASSERT (fog_light_list_gpu_align16, (sizeof (fog_light_list_gpu_t) % 16) == 0);
+COMPILE_TIME_ASSERT (fog_light_lists_gpu_align16, (sizeof (fog_light_lists_gpu_t) % 16) == 0);
+COMPILE_TIME_ASSERT (fog_lightgrid_gpu_align16, (sizeof (fog_lightgrid_gpu_t) % 16) == 0);
+
+typedef struct fogvol_light_candidate_s
+{
+	int index;
+	float score;
+	fog_light_gpu_t light;
+} fogvol_light_candidate_t;
 
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
 static int r_fogvolume_count = 0;
@@ -43,9 +83,17 @@ static int r_fogvolume_entity_count = 0;
 
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
+cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
+cvar_t r_fogvol_stepsize = { "r_fogvol_stepsize", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_upsample = { "r_fogvol_upsample", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_upsample_k = { "r_fogvol_upsample_k", "100", CVAR_ARCHIVE };
+/* r_fogvol_upsample_k: bilateral weight scale for depth difference in the
+ * upsample pass.  exp(-|delta_depth| * K) — higher K = sharper depth edges.
+ * Default changed from 100 to 25: value 100 produced extremely harsh depth
+ * discontinuities at fog/geometry edges visible as a 1-pixel black fringe.
+ * 25 gives well-defined edges while preserving smooth gradients in open areas.
+ * Recommended range: 10–50. */
+cvar_t r_fogvol_upsample_k = { "r_fogvol_upsample_k", "25", CVAR_ARCHIVE };
 cvar_t r_fogvol_upsample_taps = { "r_fogvol_upsample_taps", "4", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps_scale_halfres = { "r_fogvol_steps_scale_halfres", "0.5", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
@@ -53,12 +101,53 @@ cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes_dumpstate = { "r_fogvol_testvolumes_dumpstate", "0", CVAR_NONE };
 cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_blendmode = { "r_fogvol_blendmode", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_emissive = { "r_fogvol_emissive", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.01", CVAR_ARCHIVE };
+cvar_t r_fogvol_temporal_confidence_min_alpha = { "r_fogvol_temporal_confidence_min_alpha", "0.05", CVAR_ARCHIVE };
+cvar_t r_fogvol_temporal_disocclusion_bias = { "r_fogvol_temporal_disocclusion_bias", "0.5", CVAR_ARCHIVE };
+cvar_t r_fogvol_temporal_clamp_strength = { "r_fogvol_temporal_clamp_strength", "1.5", CVAR_ARCHIVE };
 cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_sigma_max = { "r_fogvol_sigma_max", "2", CVAR_ARCHIVE };
+/* r_fogvol_sigma_max: maximum optical depth *per raymarching step*.
+ * exp(-4) ≈ 0.018, so 4.0 is already near-black in one step.
+ * Previous default of "2" was applied as a per-unit extinction cap, which
+ * saturated instantly at any stepLen > ~1 unit.  Now treated as an optical
+ * depth cap (sigma*stepLen), making the value scale-independent. */
+cvar_t r_fogvol_sigma_max = { "r_fogvol_sigma_max", "4", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog = { "r_fogvol_globalfog", "1", CVAR_ARCHIVE };
+/* r_fogvol_globalfog_density_scale: scales the density taken from the map's
+ * classic Quake fog command before passing it to the volumetric raymarcher.
+ * Quake fog density is dimensionless (used in GL_EXP as exp(-density*z));
+ * the raymarcher treats density as an extinction coefficient in quake-units^-1.
+ * A map fog density of 0.1 means GL_EXP gives 37% transmittance at z=10 units,
+ * which is far too dense for the raymarcher (sigma=0.1, stepLen~64 → opaque).
+ * Scale down by ~0.01–0.1 to get visually comparable results.
+ * Default changed from 1 to 0.05 so global fog is not white-out by default. */
+cvar_t r_fogvol_globalfog_density_scale = { "r_fogvol_globalfog_density_scale", "0.05", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_falloff = { "r_fogvol_globalfog_falloff", "64", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_noise_scale = { "r_fogvol_globalfog_noise_scale", "0.02", CVAR_ARCHIVE };
+/* r_fogvol_globalfog_noise_amount: 0=uniform fog, 1=fully noise-modulated.
+ * Was 0 (disabled) by default, making global fog always uniform regardless of
+ * other noise settings. Changed to 0.4 for visible clumping out of the box. */
+cvar_t r_fogvol_globalfog_noise_amount = { "r_fogvol_globalfog_noise_amount", "0.4", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_noise_bias = { "r_fogvol_globalfog_noise_bias", "0.0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_velocity_x = { "r_fogvol_globalfog_velocity_x", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_velocity_y = { "r_fogvol_globalfog_velocity_y", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_velocity_z = { "r_fogvol_globalfog_velocity_z", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_height = { "r_fogvol_globalfog_height", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_height_scale = { "r_fogvol_globalfog_height_scale", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_globalfog_priority = { "r_fogvol_globalfog_priority", "-1", CVAR_ARCHIVE };
+cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_lightgrid = { "r_fogvol_lightgrid", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_sun_dir = { "r_fogvol_sun_dir", "1", CVAR_ARCHIVE };
 
 extern cvar_t gl_farclip;
 
@@ -76,17 +165,22 @@ void R_FogVol_ClearHistory (void)
 	if (!framebufs.fogvol.history_fbo[0] || !framebufs.fogvol.history_fbo[1])
 		return;
 
-	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[0]);
+	/* BUG FIX (C-04): Save the previously bound draw FBO so we can restore it
+	 * after clearing.  R_FogVol_ClearHistory() may be called during map loading
+	 * or from contexts where a different FBO is active — unconditionally leaving
+	 * composite.fbo bound corrupts the GL state for the caller. */
 	{
 		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
+		GLint prev_fbo = 0;
+		glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &prev_fbo);
+
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[0]);
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
-	}
-	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[1]);
-	{
-		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[1]);
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
+
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, (GLuint)prev_fbo);
 	}
-	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 }
 
 typedef struct fogvol_test_state_s
@@ -161,7 +255,7 @@ static fogvol_state_cache_t r_fogvol_state_cache = { 0, 0, 0, 0 };
 
 static void R_FogVol_BindFramebuffer (GLenum target, GLuint fbo)
 {
-	RB_BindFramebuffer (target, fbo);
+	GL_BindFramebufferFunc (target, fbo);
 	/* BEST PRACTICE #10: GL_FRAMEBUFFER is an alias that binds both draw and
 	 * read targets simultaneously (GL 3.0+).  Reflect that in the cache so
 	 * that subsequent GL_DRAW/READ_FRAMEBUFFER queries against the cache are
@@ -179,7 +273,7 @@ static void R_FogVol_BindFramebuffer (GLenum target, GLuint fbo)
 
 static void R_FogVol_UseProgram (GLuint prog)
 {
-	RB_UseProgram (prog);
+	GL_UseProgram (prog);
 	r_fogvol_state_cache.program = (GLint)prog;
 }
 
@@ -192,14 +286,53 @@ static void R_FogVol_BindVertexArray (GLuint vao)
 static void R_FogVol_SetDepthMask (qboolean enabled)
 {
 	if (enabled)
-		RB_SetState (glstate & ~GLS_NO_ZWRITE);
+		GL_SetState (glstate & ~GLS_NO_ZWRITE);
 	else
-		RB_SetState (glstate | GLS_NO_ZWRITE);
+		GL_SetState (glstate | GLS_NO_ZWRITE);
 }
 
 static qboolean R_FogVol_TestDebugEnabled (void)
 {
 	return r_fogvol_testvolumes.value > 0.f || r_fogvol_testvolumes_dumpstate.value > 0.f;
+}
+
+static qboolean R_FogVol_StateDebugEnabled (void)
+{
+	return r_fogvol_debug.value > 0.f || developer.value > 0.f;
+}
+
+static void R_FogVol_LogStateSnapshot (const char *marker)
+{
+	GLint viewport[4] = {0};
+	GLint scissor_box[4] = {0};
+	GLint draw_fbo = 0, read_fbo = 0;
+	GLint draw_buffer = 0, read_buffer = 0;
+	GLint program = 0;
+	GLint active_texture = 0;
+	GLboolean scissor_enabled = GL_FALSE;
+
+	if (!R_FogVol_StateDebugEnabled ())
+		return;
+
+	glGetIntegerv (GL_VIEWPORT, viewport);
+	scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
+	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
+	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
+	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
+	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
+	glGetIntegerv (GL_ACTIVE_TEXTURE, &active_texture);
+
+	Con_DPrintf (
+		"FOGVOL_STATE %s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=%d box=(%d %d %d %d) drawbuf=0x%04x readbuf=0x%04x prog=%d active_tex=%d\n",
+		marker,
+		draw_fbo, read_fbo,
+		viewport[0], viewport[1], viewport[2], viewport[3],
+		scissor_enabled,
+		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
+		(unsigned)draw_buffer, (unsigned)read_buffer,
+		program, active_texture - GL_TEXTURE0);
 }
 
 static void R_FogVol_LogBufferMarker (const char *marker)
@@ -220,13 +353,13 @@ static void R_FogVol_LogBufferMarker (const char *marker)
 
 static void R_FogVol_SetDrawBufferDebug (GLenum buf, const char *marker)
 {
-	RB_DrawBuffer (buf);
+	glDrawBuffer (buf);
 	R_FogVol_LogBufferMarker (marker);
 }
 
 static void R_FogVol_SetReadBufferDebug (GLenum buf, const char *marker)
 {
-	RB_ReadBuffer (buf);
+	glReadBuffer (buf);
 	R_FogVol_LogBufferMarker (marker);
 }
 
@@ -501,23 +634,26 @@ static void R_FogVol_Restore3DRenderState (const fogvol_restore_state_t *state)
 {
 	R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, state->draw_fbo);
 	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, state->read_fbo);
-	RB_DrawBuffer ((GLenum)state->draw_buffer);
-	RB_ReadBuffer ((GLenum)state->read_buffer);
-	RB_Viewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
+	glDrawBuffer ((GLenum)state->draw_buffer);
+	glReadBuffer ((GLenum)state->read_buffer);
+	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
 	if (state->scissor_test)
 		GL_SetScissorEnabled (true);
 	else
 		GL_SetScissorEnabled (false);
-	RB_Scissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
+	glScissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
 	R_FogVol_UseProgram ((GLuint)state->program);
 	R_FogVol_BindVertexArray ((GLuint)state->vao);
 	GL_ActiveTextureFunc ((GLenum)state->active_texture);
 
-	RB_ColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_FogVol_SetDepthMask (true);
-	RB_PolygonMode (GL_FRONT_AND_BACK, GL_FILL);
-	RB_SetState (state->glstate_bits);
-	RB_EnableFramebufferSRGB (state->framebuffer_srgb);
+	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
+	GL_SetState (state->glstate_bits);
+	if (state->framebuffer_srgb)
+		glEnable (GL_FRAMEBUFFER_SRGB);
+	else
+		glDisable (GL_FRAMEBUFFER_SRGB);
 }
 
 static qboolean R_FogVol_MatrixInverse4x4 (const float m[16], float out[16])
@@ -583,10 +719,257 @@ static int R_FogVol_ComparePriority (const void *a, const void *b)
 	return 0;
 }
 
+static int R_FogVol_CompareLightCandidate (const void *a, const void *b)
+{
+	const fogvol_light_candidate_t *la = (const fogvol_light_candidate_t *)a;
+	const fogvol_light_candidate_t *lb = (const fogvol_light_candidate_t *)b;
+
+	if (la->score > lb->score)
+		return -1;
+	if (la->score < lb->score)
+		return 1;
+	if (la->index < lb->index)
+		return -1;
+	if (la->index > lb->index)
+		return 1;
+	return 0;
+}
+
+static float R_FogVol_DistanceToVolume (const fog_volume_t *volume, const vec3_t p)
+{
+	if (!volume)
+		return 999999.f;
+
+	if (volume->shape > 0)
+	{
+		vec3_t d;
+		VectorSubtract (p, volume->sphereCenter, d);
+		return q_max (0.f, VectorLength (d) - q_max (0.f, volume->sphereRadius));
+	}
+
+	{
+		float dx = q_max (q_max (volume->mins[0] - p[0], 0.f), p[0] - volume->maxs[0]);
+		float dy = q_max (q_max (volume->mins[1] - p[1], 0.f), p[1] - volume->maxs[1]);
+		float dz = q_max (q_max (volume->mins[2] - p[2], 0.f), p[2] - volume->maxs[2]);
+		return sqrtf (dx * dx + dy * dy + dz * dz);
+	}
+}
+
+static qboolean R_FogVol_LightOverlapsVolume (const fog_volume_t *volume, const vec3_t light_origin, float light_radius)
+{
+	float dist;
+
+	if (!volume || light_radius <= 0.f)
+		return false;
+
+	dist = R_FogVol_DistanceToVolume (volume, light_origin);
+	return dist <= light_radius;
+}
+
+static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, fog_light_gpu_t *out, int max_count)
+{
+	const dlight_t *const *active;
+	fogvol_light_candidate_t candidates[256];
+	const fog_volume_t *visible_volumes[MAX_FOGVOLUMES];
+	float visible_volume_screen_weight[MAX_FOGVOLUMES];
+	vec3_t fog_bounds_mins;
+	vec3_t fog_bounds_maxs;
+	int active_count = 0;
+	int candidate_count = 0;
+	int visible_count = 0;
+	qboolean has_fog_bounds = false;
+	int copy_count;
+
+	if (!volume || !out || max_count <= 0)
+		return 0;
+	if (r_fogvolume_count <= 0)
+		return 0;
+
+	VectorSet (fog_bounds_mins, 0.f, 0.f, 0.f);
+	VectorSet (fog_bounds_maxs, 0.f, 0.f, 0.f);
+
+	for (int i = 0; i < r_fogvolume_count; ++i)
+	{
+		const fog_volume_t *vol = &r_fogvolumes[i];
+		vec3_t bmins, bmaxs;
+		int sx0, sy0, sx1, sy1;
+
+		if (vol->shape == 1)
+		{
+			for (int a = 0; a < 3; ++a)
+			{
+				bmins[a] = vol->sphereCenter[a] - vol->sphereRadius;
+				bmaxs[a] = vol->sphereCenter[a] + vol->sphereRadius;
+			}
+		}
+		else
+		{
+			VectorCopy (vol->mins, bmins);
+			VectorCopy (vol->maxs, bmaxs);
+		}
+
+		if (!has_fog_bounds)
+		{
+			VectorCopy (bmins, fog_bounds_mins);
+			VectorCopy (bmaxs, fog_bounds_maxs);
+			has_fog_bounds = true;
+		}
+		else
+		{
+			for (int a = 0; a < 3; ++a)
+			{
+				fog_bounds_mins[a] = q_min (fog_bounds_mins[a], bmins[a]);
+				fog_bounds_maxs[a] = q_max (fog_bounds_maxs[a], bmaxs[a]);
+			}
+		}
+
+		if (R_FogVol_ProjectAABBToScreenRect (vol, &sx0, &sy0, &sx1, &sy1, true) && visible_count < MAX_FOGVOLUMES)
+		{
+			float view_area = (float)(q_max (1, r_refdef.vrect.width) * q_max (1, r_refdef.vrect.height));
+			float rect_area = (float)q_max (1, (sx1 - sx0) * (sy1 - sy0));
+			visible_volumes[visible_count] = vol;
+			/* Optional screen weighting: favour fog regions occupying more of the
+			 * current frame while keeping an in-world overlap requirement. */
+			visible_volume_screen_weight[visible_count] = CLAMP (0.1f, rect_area / view_area, 1.f);
+			visible_count++;
+		}
+	}
+
+	if (visible_count <= 0)
+		return 0;
+
+	active = DLightPool_GetActiveList (&active_count);
+	if (!active || active_count <= 0)
+		return 0;
+
+	for (int i = 0; i < active_count && candidate_count < countof (candidates); ++i)
+	{
+		const dlight_t *dl = active[i];
+		vec3_t to_light;
+		float dist2;
+		float overlap_score = 0.f;
+		float intensity;
+		float radius;
+		float score;
+
+		if (!dl || !CL_DlightIsActive (dl))
+			continue;
+
+		radius = dl->radius;
+		if (radius <= 0.f)
+			continue;
+
+		intensity = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
+		if (intensity <= 0.f)
+			continue;
+
+		/* Keep an emergency cheap cull for pathological light counts. Cull by
+		 * distance to aggregate fog bounds (not by camera distance), so lights
+		 * near visible fog remain eligible even when far from the viewer. */
+		if (active_count > 192 && has_fog_bounds)
+		{
+			float fog_dist = 0.f;
+			for (int a = 0; a < 3; ++a)
+			{
+				if (dl->origin[a] < fog_bounds_mins[a])
+				{
+					float d = fog_bounds_mins[a] - dl->origin[a];
+					fog_dist += d * d;
+				}
+				else if (dl->origin[a] > fog_bounds_maxs[a])
+				{
+					float d = dl->origin[a] - fog_bounds_maxs[a];
+					fog_dist += d * d;
+				}
+			}
+			if (fog_dist > (radius * 4.f) * (radius * 4.f))
+				continue;
+		}
+
+		for (int v = 0; v < visible_count; ++v)
+		{
+			const fog_volume_t *vol = visible_volumes[v];
+			float overlap = 0.f;
+
+			if (vol->shape == 1)
+			{
+				vec3_t delta;
+				float center_dist;
+				float sum_radius = radius + q_max (0.f, vol->sphereRadius);
+				VectorSubtract (dl->origin, vol->sphereCenter, delta);
+				center_dist = VectorLength (delta);
+				if (center_dist < sum_radius && sum_radius > 0.f)
+					overlap = 1.f - (center_dist / sum_radius);
+			}
+			else
+			{
+				float dist_to_box = 0.f;
+				for (int a = 0; a < 3; ++a)
+				{
+					if (dl->origin[a] < vol->mins[a])
+					{
+						float d = vol->mins[a] - dl->origin[a];
+						dist_to_box += d * d;
+					}
+					else if (dl->origin[a] > vol->maxs[a])
+					{
+						float d = dl->origin[a] - vol->maxs[a];
+						dist_to_box += d * d;
+					}
+				}
+				dist_to_box = sqrtf (dist_to_box);
+				if (dist_to_box < radius)
+					overlap = 1.f - (dist_to_box / q_max (1.f, radius));
+			}
+
+			overlap_score += overlap * visible_volume_screen_weight[v];
+		}
+
+		if (overlap_score <= 0.f)
+			continue;
+
+		VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
+		dist2 = DotProduct (to_light, to_light);
+
+		score = overlap_score * intensity * radius;
+		/* Preserve a soft view weighting for tie-breaking, but avoid camera-only
+		 * rejection so fog-relevant distant lights can still be selected. */
+		score *= 1.f / (1.f + 0.0025f * sqrtf (dist2));
+		if (score <= 0.f)
+			continue;
+
+		candidates[candidate_count].index = (dl->id != 0) ? dl->id : i;
+		candidates[candidate_count].score = score;
+		candidates[candidate_count].light.pos_rad[0] = dl->origin[0];
+		candidates[candidate_count].light.pos_rad[1] = dl->origin[1];
+		candidates[candidate_count].light.pos_rad[2] = dl->origin[2];
+		candidates[candidate_count].light.pos_rad[3] = radius;
+		candidates[candidate_count].light.col_int[0] = dl->color[0];
+		candidates[candidate_count].light.col_int[1] = dl->color[1];
+		candidates[candidate_count].light.col_int[2] = dl->color[2];
+		/* col_int.w was intensity=max(r,g,b), used as extra shader multiplier
+		 * on top of col_int.rgb — double-counting brightness. Shader now uses
+		 * col_int.rgb directly, so set .w=1.0 for forward compatibility. */
+		candidates[candidate_count].light.col_int[3] = 1.f;
+		candidate_count++;
+	}
+
+	if (candidate_count <= 0)
+		return 0;
+
+	qsort (candidates, candidate_count, sizeof (candidates[0]), R_FogVol_CompareLightCandidate);
+	copy_count = q_min (candidate_count, max_count);
+	for (int i = 0; i < copy_count; ++i)
+		out[i] = candidates[i].light;
+	return copy_count;
+}
+
 void R_FogVol_Init (void)
 {
 	Cvar_RegisterVariable (&r_fogvol);
 	Cvar_RegisterVariable (&r_fogvol_steps);
+	Cvar_RegisterVariable (&r_fogvol_maxsteps);
+	Cvar_RegisterVariable (&r_fogvol_stepsize);
 	Cvar_RegisterVariable (&r_fogvol_halfres);
 	Cvar_RegisterVariable (&r_fogvol_upsample);
 	Cvar_RegisterVariable (&r_fogvol_upsample_k);
@@ -597,12 +980,37 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_testvolumes);
 	Cvar_RegisterVariable (&r_fogvol_testvolumes_dumpstate);
 	Cvar_RegisterVariable (&r_fogvol_physblend);
+	Cvar_RegisterVariable (&r_fogvol_blendmode);
+	Cvar_RegisterVariable (&r_fogvol_emissive);
 	Cvar_RegisterVariable (&r_fogvol_temporal_alpha);
 	Cvar_RegisterVariable (&r_fogvol_temporal_depth_reject);
+	Cvar_RegisterVariable (&r_fogvol_temporal_confidence_min_alpha);
+	Cvar_RegisterVariable (&r_fogvol_temporal_disocclusion_bias);
+	Cvar_RegisterVariable (&r_fogvol_temporal_clamp_strength);
 	Cvar_RegisterVariable (&r_fogvol_jitter);
 	Cvar_RegisterVariable (&r_fogvol_debug);
 	Cvar_RegisterVariable (&r_fogvol_density_scale);
 	Cvar_RegisterVariable (&r_fogvol_sigma_max);
+	Cvar_RegisterVariable (&r_fogvol_globalfog);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_density_scale);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_falloff);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_noise_scale);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_noise_amount);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_noise_bias);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_velocity_x);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_velocity_y);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_velocity_z);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_height);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_height_scale);
+	Cvar_RegisterVariable (&r_fogvol_globalfog_priority);
+	Cvar_RegisterVariable (&r_fogvol_light);
+	Cvar_RegisterVariable (&r_fogvol_lightgrid);
+	Cvar_RegisterVariable (&r_fogvol_light_max);
+	Cvar_RegisterVariable (&r_fogvol_shadow);
+	Cvar_RegisterVariable (&r_fogvol_shadow_samples);
+	Cvar_RegisterVariable (&r_fogvol_shadow_strength);
+	Cvar_RegisterVariable (&r_fogvol_shadow_jitter);
+	Cvar_RegisterVariable (&r_fogvol_sun_dir);
 }
 
 void R_FogVol_Clear (void)
@@ -619,6 +1027,12 @@ static void R_FogVol_ClampVolume (fog_volume_t *volume)
 {
 	volume->density = CLAMP (0.f, volume->density, 10.f);
 	volume->falloff = CLAMP (0.f, volume->falloff, 256.f);
+	volume->noiseAmount = CLAMP (0.f, volume->noiseAmount, 1.f);
+	volume->noiseScale = CLAMP (0.001f, volume->noiseScale, 0.5f);
+	volume->turbulence = CLAMP (0.f, volume->turbulence, 2.f);
+	volume->emissiveStrength = CLAMP (0.f, volume->emissiveStrength, 16.f);
+	volume->shape = CLAMP (0, volume->shape, 2);
+	volume->blendMode = CLAMP (-1, volume->blendMode, 1);
 }
 
 static void R_FogVol_AddVolume (const fog_volume_t *volume)
@@ -673,11 +1087,25 @@ static qboolean R_FogVol_ParseVector (const char *value, vec3_t out)
 	return value && sscanf (value, "%f %f %f", &out[0], &out[1], &out[2]) == 3;
 }
 
-static float R_FogVol_PointAABBDistance (const vec3_t point, const fog_volume_t *volume)
+static float R_FogVol_PointDistance (const vec3_t point, const fog_volume_t *volume)
 {
+	/* BUG FIX (C-07): Declare all locals at the top of the function so this
+	 * code compiles cleanly under strict C89 (-std=c89 / /Za).  Mixed
+	 * declarations after statements are a C99 extension that some Quake-engine
+	 * toolchains reject. */
 	float dist2 = 0.f;
+	int i;
 
-	for (int i = 0; i < 3; ++i)
+	if (volume->shape == 1)
+	{
+		vec3_t delta;
+		float dist;
+		VectorSubtract (point, volume->sphereCenter, delta);
+		dist = VectorLength (delta) - volume->sphereRadius;
+		return q_max (0.f, dist);
+	}
+
+	for (i = 0; i < 3; ++i)
 	{
 		if (point[i] < volume->mins[i])
 		{
@@ -690,8 +1118,67 @@ static float R_FogVol_PointAABBDistance (const vec3_t point, const fog_volume_t 
 			dist2 += d * d;
 		}
 	}
-
 	return sqrtf (dist2);
+}
+
+static void R_FogVol_AddGlobalFog (void)
+{
+	fog_volume_t volume;
+	float *color = Fog_GetColor ();
+
+	if (r_fogvol_globalfog.value <= 0.f)
+		return;
+	if (r_fogvol.value <= 0.f)
+		return;
+	if (Fog_GetDensity () <= 0.f)
+		return;
+
+	memset (&volume, 0, sizeof (volume));
+
+	VectorSet (volume.mins, -8192.f, -8192.f, -8192.f);
+	VectorSet (volume.maxs, 8192.f, 8192.f, 8192.f);
+
+	VectorCopy (color, volume.color);
+
+	volume.density = Fog_GetDensity () * q_max (0.f, r_fogvol_globalfog_density_scale.value);
+	volume.falloff = q_max (0.f, r_fogvol_globalfog_falloff.value);
+	volume.mode = 0;
+	volume.noiseScale = q_max (0.f, r_fogvol_globalfog_noise_scale.value);
+	volume.noiseAmount = CLAMP (0.f, r_fogvol_globalfog_noise_amount.value, 1.f);
+	volume.noiseBias = r_fogvol_globalfog_noise_bias.value;
+	volume.velocity[0] = r_fogvol_globalfog_velocity_x.value;
+	volume.velocity[1] = r_fogvol_globalfog_velocity_y.value;
+	volume.velocity[2] = r_fogvol_globalfog_velocity_z.value;
+	volume.maxDistance = 0.f;
+	volume.priority = (int)Q_rint (r_fogvol_globalfog_priority.value);
+	volume.enabled = 1;
+	volume.height = r_fogvol_globalfog_height.value;
+	volume.heightScale = r_fogvol_globalfog_height_scale.value;
+
+	R_FogVol_AddVolume (&volume);
+}
+
+qboolean R_FogVol_CanRenderGlobal (void)
+{
+	if (Fog_GetDensity () <= 0.f)
+		return false;
+	if (!glprogs.fogvol)
+		return false;
+	if (framebufs.composite.color_tex == 0 || framebufs.fogvol.color_tex[0] == 0)
+		return false;
+	if (framebufs.composite.depth_stencil_tex == 0)
+		return false;
+	return true;
+}
+
+/* Returns the fogvol composite texture that was rendered this frame.
+ * After R_FogVol_Render(), r_fogvol_history_index points to the slot that
+ * received the temporal composite output — that is the most recent result.
+ * Returns 0 if fogvol did not render this frame (no active volumes). */
+GLuint R_FogVol_GetCompositeTex (void)
+{
+	GLuint tex = framebufs.fogvol.composite_tex[r_fogvol_history_index];
+	return tex;
 }
 
 void R_FogVol_ParseEntities (void)
@@ -721,10 +1208,16 @@ void R_FogVol_ParseEntities (void)
 		volume.density = 0.1f;
 		volume.falloff = 16.f;
 		volume.mode = 0;
+		volume.shape = 0;
+		volume.blendMode = -1;
+		volume.emissiveStrength = 0.f;
 		volume.noiseScale = 0.05f;
 		volume.noiseAmount = 0.5f;
 		volume.noiseBias = 0.f;
+		volume.turbulence = 0.f;
 		VectorSet (volume.velocity, 0.f, 0.f, 0.f);
+		volume.windSpeed = 0.f;
+		VectorSet (volume.windDir, 0.f, 0.f, 0.f);
 		volume.maxDistance = 2048.f;
 		volume.priority = 0;
 		volume.enabled = 1;
@@ -806,6 +1299,41 @@ void R_FogVol_ParseEntities (void)
 			{
 				volume.mode = atoi (value);
 			}
+			else if (!strcmp (key, "shape"))
+			{
+				if (!q_strcasecmp (value, "sphere") || atoi (value) == 1)
+					volume.shape = 1;
+				else
+					volume.shape = 0;
+			}
+			else if (!strcmp (key, "radius"))
+			{
+				volume.sphereRadius = atof (value);
+			}
+			else if (!strcmp (key, "center"))
+			{
+				R_FogVol_ParseVector (value, volume.sphereCenter);
+			}
+			else if (!strcmp (key, "blendmode"))
+			{
+				volume.blendMode = atoi (value);
+			}
+			else if (!strcmp (key, "emissive"))
+			{
+				volume.emissiveStrength = atof (value);
+			}
+			else if (!strcmp (key, "wind_dir"))
+			{
+				R_FogVol_ParseVector (value, volume.windDir);
+			}
+			else if (!strcmp (key, "wind_speed"))
+			{
+				volume.windSpeed = atof (value);
+			}
+			else if (!strcmp (key, "turbulence"))
+			{
+				volume.turbulence = atof (value);
+			}
 			else if (!strcmp (key, "height"))
 			{
 				volume.height = atof (value);
@@ -832,6 +1360,18 @@ void R_FogVol_ParseEntities (void)
 				}
 				VectorCopy (mins, volume.mins);
 				VectorCopy (maxs, volume.maxs);
+				if (volume.shape == 1)
+				{
+					for (int a = 0; a < 3; ++a)
+						volume.sphereCenter[a] = 0.5f * (volume.mins[a] + volume.maxs[a]);
+					if (volume.sphereRadius <= 0.f)
+					{
+						float ex = 0.5f * (volume.maxs[0] - volume.mins[0]);
+						float ey = 0.5f * (volume.maxs[1] - volume.mins[1]);
+						float ez = 0.5f * (volume.maxs[2] - volume.mins[2]);
+						volume.sphereRadius = q_max (ex, q_max (ey, ez));
+					}
+				}
 				R_FogVol_AddEntityVolume (&volume);
 			}
 		}
@@ -843,39 +1383,50 @@ void R_FogVol_ParseEntities (void)
 void R_FogVol_AddTestVolumes (void)
 {
 	fog_volume_t volume;
-	vec3_t origin;
+	vec3_t origin, forward, right, up;
+	AngleVectors (r_refdef.viewangles, forward, right, up);
 	VectorCopy (r_refdef.vieworg, origin);
 
+	/* Single test volume: a fog patch placed 100 units ahead of the camera.
+	 * The player is OUTSIDE the volume looking in, so this cleanly tests
+	 * the compositing pipeline without camera-inside-volume complications.
+	 *
+	 * Expected result: a visible blue-grey fog patch floating in the scene.
+	 * If the scene outside the volume looks correct and the volume itself
+	 * shows fog colour, the pipeline is working.
+	 *
+	 * density=0.02 → tau≈2.0 at 100 units → transmittance≈0.14 (clearly
+	 * visible, opaque-looking fog patch). */
 	memset (&volume, 0, sizeof (volume));
-	VectorSet (volume.color, 0.8f, 0.85f, 0.9f);
-	volume.density = 0.35f;
-	volume.falloff = 24.f;
-	volume.mode = 0;
-	volume.noiseScale = 0.08f;
-	volume.noiseAmount = 0.85f;
-	volume.noiseBias = 0.0f;
-	VectorSet (volume.velocity, 0.f, 0.f, 6.f);
+	VectorSet (volume.color, 0.6f, 0.75f, 1.0f);
+	volume.density    = 0.02f;
+	volume.falloff    = 16.f;
+	volume.mode       = 0;
+	volume.shape      = 0;
+	volume.blendMode  = -1;
+	volume.noiseScale = 0.05f;
+	volume.noiseAmount = 0.6f;
+	volume.noiseBias  = 0.0f;
+	VectorSet (volume.velocity, 0.f, 0.f, 4.f);
 	volume.maxDistance = 0.f;
-	volume.priority = 0;
-	volume.enabled = 1;
-	VectorSet (volume.mins, origin[0] - 32.f, origin[1] - 32.f, origin[2] - 16.f);
-	VectorSet (volume.maxs, origin[0] + 32.f, origin[1] + 32.f, origin[2] + 48.f);
-	R_FogVol_AddVolume (&volume);
-
-	memset (&volume, 0, sizeof (volume));
-	VectorSet (volume.color, 0.7f, 0.75f, 0.85f);
-	volume.density = 0.05f;
-	volume.falloff = 32.f;
-	volume.mode = 0;
-	volume.noiseScale = 0.02f;
-	volume.noiseAmount = 0.25f;
-	volume.noiseBias = 0.0f;
-	VectorSet (volume.velocity, -1.f, 0.5f, 0.f);
-	volume.maxDistance = 0.f;
-	volume.priority = 1;
-	volume.enabled = 1;
-	VectorSet (volume.mins, origin[0] - 256.f, origin[1] - 256.f, origin[2] - 128.f);
-	VectorSet (volume.maxs, origin[0] + 256.f, origin[1] + 256.f, origin[2] + 128.f);
+	volume.priority   = 0;
+	volume.enabled    = 1;
+	/* Place the box 100..260 units ahead, 96 units wide, 80 units tall.
+	 * Compute proper axis-aligned bounds from the oriented corners. */
+	{
+		vec3_t c0, c1;
+		VectorMA (origin, 100.f, forward, c0);
+		VectorMA (origin, 260.f, forward, c1);
+		/* half-width along right axis */
+		for (int a = 0; a < 3; ++a)
+		{
+			float span = fabsf (right[a]) * 96.f;
+			volume.mins[a] = q_min (c0[a], c1[a]) - span;
+			volume.maxs[a] = q_max (c0[a], c1[a]) + span;
+		}
+		volume.mins[2] = origin[2] - 40.f;
+		volume.maxs[2] = origin[2] + 80.f;
+	}
 	R_FogVol_AddVolume (&volume);
 }
 
@@ -883,8 +1434,17 @@ void R_FogVol_BuildList (void)
 {
 	R_FogVol_Clear ();
 
+	/* BUG FIX (testvolumes): r_fogvol_testvolumes must work independently of
+	 * r_fogvol so developers can test the pipeline without setting up entity
+	 * fog volumes.  Add test volumes first if requested, then check r_fogvol
+	 * for the entity-volume path. */
+	if (r_fogvol_testvolumes.value > 0.f)
+		R_FogVol_AddTestVolumes ();
+
 	if (r_fogvol.value <= 0.f)
-		return;
+		goto sort_and_done;
+
+	R_FogVol_AddGlobalFog ();
 
 	for (int i = 0; i < r_fogvolume_entity_count; ++i)
 	{
@@ -894,16 +1454,14 @@ void R_FogVol_BuildList (void)
 			continue;
 		if (volume->maxDistance > 0.f)
 		{
-			float dist = R_FogVol_PointAABBDistance (r_refdef.vieworg, volume);
+			float dist = R_FogVol_PointDistance (r_refdef.vieworg, volume);
 			if (dist > volume->maxDistance)
 				continue;
 		}
 		R_FogVol_AddVolume (volume);
 	}
 
-	if (r_fogvol_testvolumes.value > 0.f)
-		R_FogVol_AddTestVolumes ();
-
+sort_and_done:
 	if (r_fogvolume_count > 1)
 		qsort (r_fogvolumes, r_fogvolume_count, sizeof (fog_volume_t), R_FogVol_ComparePriority);
 }
@@ -930,38 +1488,64 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 		view_h = r_refdef.vrect.height;
 	}
 
-	corners[0][0] = v->mins[0]; corners[0][1] = v->mins[1]; corners[0][2] = v->mins[2];
-	corners[1][0] = v->maxs[0]; corners[1][1] = v->mins[1]; corners[1][2] = v->mins[2];
-	corners[2][0] = v->mins[0]; corners[2][1] = v->maxs[1]; corners[2][2] = v->mins[2];
-	corners[3][0] = v->maxs[0]; corners[3][1] = v->maxs[1]; corners[3][2] = v->mins[2];
-	corners[4][0] = v->mins[0]; corners[4][1] = v->mins[1]; corners[4][2] = v->maxs[2];
-	corners[5][0] = v->maxs[0]; corners[5][1] = v->mins[1]; corners[5][2] = v->maxs[2];
-	corners[6][0] = v->mins[0]; corners[6][1] = v->maxs[1]; corners[6][2] = v->maxs[2];
-	corners[7][0] = v->maxs[0]; corners[7][1] = v->maxs[1]; corners[7][2] = v->maxs[2];
-
-	for (int i = 0; i < 8; ++i)
 	{
-		ProjectVector (corners[i], r_matviewproj, proj);
-		/* BUG FIX #2: When a corner is at or behind the near plane (proj[2]<=0)
-		 * it was silently skipped.  But if at least one corner is in front and at
-		 * least one is behind, the AABB straddles the near plane and the correct
-		 * conservative screen rect is the full viewport.  Detect this case and
-		 * clamp to the entire viewport so we don't miss geometry near the edges. */
-		if (proj[2] <= 0.f)
+		vec3_t bmins, bmaxs;
+		if (v->shape == 1)
 		{
-			/* Corner behind camera — expand rect to full viewport conservatively. */
-			minx = -1.f;
-			miny = -1.f;
-			maxx =  1.f;
-			maxy =  1.f;
-			valid = 1;
-			break; /* No point testing further corners once fully expanded. */
+			for (int a = 0; a < 3; ++a)
+			{
+				bmins[a] = v->sphereCenter[a] - v->sphereRadius;
+				bmaxs[a] = v->sphereCenter[a] + v->sphereRadius;
+			}
 		}
-		minx = q_min (minx, proj[0]);
-		miny = q_min (miny, proj[1]);
-		maxx = q_max (maxx, proj[0]);
-		maxy = q_max (maxy, proj[1]);
-		valid = 1;
+		else
+		{
+			VectorCopy (v->mins, bmins);
+			VectorCopy (v->maxs, bmaxs);
+		}
+
+		corners[0][0] = bmins[0]; corners[0][1] = bmins[1]; corners[0][2] = bmins[2];
+		corners[1][0] = bmaxs[0]; corners[1][1] = bmins[1]; corners[1][2] = bmins[2];
+		corners[2][0] = bmins[0]; corners[2][1] = bmaxs[1]; corners[2][2] = bmins[2];
+		corners[3][0] = bmaxs[0]; corners[3][1] = bmaxs[1]; corners[3][2] = bmins[2];
+		corners[4][0] = bmins[0]; corners[4][1] = bmins[1]; corners[4][2] = bmaxs[2];
+		corners[5][0] = bmaxs[0]; corners[5][1] = bmins[1]; corners[5][2] = bmaxs[2];
+		corners[6][0] = bmins[0]; corners[6][1] = bmaxs[1]; corners[6][2] = bmaxs[2];
+		corners[7][0] = bmaxs[0]; corners[7][1] = bmaxs[1]; corners[7][2] = bmaxs[2];
+	}
+
+	{
+		int behind = 0;
+		for (int i = 0; i < 8; ++i)
+		{
+			ProjectVector (corners[i], r_matviewproj, proj);
+			/* BUG FIX #2 / BUG-C-01: Track corners behind the near plane.
+			 * If ALL 8 corners are behind the camera the volume is fully
+			 * occluded and we return false.  If some are behind and some in
+			 * front, the AABB straddles the near plane — conservatively expand
+			 * to the full viewport so we never miss geometry near the edges.
+			 * The original code broke out of the loop on the first behind-corner,
+			 * which prevented detection of the all-behind case. */
+			if (proj[2] <= 0.f)
+			{
+				behind++;
+				/* Expand to full viewport and continue counting. */
+				minx = -1.f;
+				miny = -1.f;
+				maxx =  1.f;
+				maxy =  1.f;
+				valid = 1;
+				continue;
+			}
+			minx = q_min (minx, proj[0]);
+			miny = q_min (miny, proj[1]);
+			maxx = q_max (maxx, proj[0]);
+			maxy = q_max (maxy, proj[1]);
+			valid = 1;
+		}
+		/* All corners behind the near plane — volume is not visible. */
+		if (behind == 8)
+			return false;
 	}
 
 	if (!valid)
@@ -1006,12 +1590,15 @@ void R_FogVol_Render (void)
 	GLuint buf;
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
-	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 7);
+	fog_light_lists_gpu_t fog_lights;
+	fog_lightgrid_gpu_t fog_lightgrid;
+	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 8);
 	float inv_viewproj[16];
 	GLuint src_tex;
 	GLuint dst_tex;
 	GLuint dst_fbo;
 	GLuint depth_tex;
+	GLuint velocity_tex;
 	GLuint fog_tex[2];
 	GLuint fog_fbo[2];
 	GLuint history_tex[2];
@@ -1037,9 +1624,13 @@ void R_FogVol_Render (void)
 	qboolean use_test_guard;
 	qboolean dumpstate_always;
 	fogvol_restore_state_t restore_state;
+	qboolean fog_light_enabled = false;
+	qboolean fog_lightgrid_enabled = false;
+	qboolean fog_lightgrid_has_data = false;
+	const lightgrid_t *lightgrid = NULL;
+	vec3_t shadow_dir;
+	int shadow_samples;
 
-	if (r_fogvol.value <= 0.f)
-		return;
 	if (!glprogs.fogvol)
 		return;
 	if (r_fogvolume_count <= 0)
@@ -1061,8 +1652,12 @@ void R_FogVol_Render (void)
 	use_test_guard = (r_fogvol_testvolumes.value > 0.f);
 	if (use_test_guard)
 		R_FogVol_CaptureRestoreState (&restore_state);
-	R_GLStateDump ("before-fogvol");
-	R_FogVol_LogPipelineState ("FOGVOL_BEGIN");
+	if (R_FogVol_TestDebugEnabled ())
+	{
+		R_GLStateDump ("before-fogvol");
+		R_FogVol_LogPipelineState ("FOGVOL_BEGIN");
+	}
+	R_FogVol_LogStateSnapshot ("before-pass");
 	if (use_test_guard)
 		R_FogVol_LogBufferMarker ("pre");
 
@@ -1083,7 +1678,39 @@ void R_FogVol_Render (void)
 		steps = (int)Q_rint (r_fogvol_steps.value * r_fogvol_steps_scale_halfres.value);
 	else
 		steps = (int)Q_rint (r_fogvol_steps.value);
-	steps = CLAMP (8, steps, 128);
+	if (r_fogvol_stepsize.value > 0.f)
+	{
+		float step_size = q_max (1.f, r_fogvol_stepsize.value);
+		steps = (int)Q_rint (depth_far / step_size);
+	}
+	steps = CLAMP (8, steps, q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
+
+	memset (&fog_lights, 0, sizeof (fog_lights));
+	lightgrid = Lightgrid_Get ();
+	fog_lightgrid_has_data = (lightgrid && lightgrid->octree && r_lightgrid.value > 0.f);
+	fog_lightgrid_enabled = fog_lightgrid_has_data && (r_fogvol_lightgrid.value > 0.f);
+
+	if (r_fogvol_light.value > 0.f)
+	{
+		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), 32);
+		int write_offset = 0;
+
+		for (int i = 0; i < r_fogvolume_count; ++i)
+		{
+			int remaining = (int)countof (fog_lights.lights) - write_offset;
+			int count = 0;
+			if (remaining > 0 && max_lights > 0)
+			{
+				int per_volume_cap = q_min (max_lights, remaining);
+				count = R_FogVol_BuildLightListForVolume (&r_fogvolumes[i], &fog_lights.lights[write_offset], per_volume_cap);
+			}
+
+			fog_lights.volumes[i].offset_count[0] = write_offset;
+			fog_lights.volumes[i].offset_count[1] = count;
+			write_offset += count;
+			fog_light_enabled = fog_light_enabled || (count > 0);
+		}
+	}
 
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
@@ -1100,6 +1727,11 @@ void R_FogVol_Render (void)
 		gpu->maxs[2] = v->maxs[2];
 		gpu->maxs[3] = 0.f;
 
+		gpu->sphere[0] = v->sphereCenter[0];
+		gpu->sphere[1] = v->sphereCenter[1];
+		gpu->sphere[2] = v->sphereCenter[2];
+		gpu->sphere[3] = q_max (0.f, v->sphereRadius);
+
 		gpu->color_density[0] = v->color[0];
 		gpu->color_density[1] = v->color[1];
 		gpu->color_density[2] = v->color[2];
@@ -1110,26 +1742,58 @@ void R_FogVol_Render (void)
 		gpu->noise_params[2] = v->noiseBias;
 		gpu->noise_params[3] = v->maxDistance;
 
-		gpu->velocity[0] = v->velocity[0];
-		gpu->velocity[1] = v->velocity[1];
-		gpu->velocity[2] = v->velocity[2];
-		gpu->velocity[3] = 0.f;
+		gpu->velocity_windspeed[0] = v->velocity[0];
+		gpu->velocity_windspeed[1] = v->velocity[1];
+		gpu->velocity_windspeed[2] = v->velocity[2];
+		gpu->velocity_windspeed[3] = v->windSpeed;
+
+		gpu->wind_turbulence[0] = v->windDir[0];
+		gpu->wind_turbulence[1] = v->windDir[1];
+		gpu->wind_turbulence[2] = v->windDir[2];
+		gpu->wind_turbulence[3] = v->turbulence;
 
 		gpu->misc[0] = (float)v->priority;
 		gpu->misc[1] = (float)v->enabled;
 		gpu->misc[2] = v->falloff;
-		gpu->misc[3] = (float)v->mode;
+		gpu->misc[3] = v->height;
+
+		gpu->extra[0] = (float)v->shape;
+		gpu->extra[1] = (float)((v->blendMode >= 0) ? v->blendMode : (int)Q_rint (r_fogvol_blendmode.value));
+		gpu->extra[2] = v->emissiveStrength;
+		gpu->extra[3] = v->heightScale;
 	}
 
 	GL_Upload (GL_UNIFORM_BUFFER, gpu_volumes, sizeof (fog_volume_gpu_t) * r_fogvolume_count, &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, buf, (GLintptr)ofs, sizeof (fog_volume_gpu_t) * r_fogvolume_count);
 
-	RB_BeginPass (PASS_FOGVOL);
+	/* PERF FIX (C-02): glGetError() forces a GPU-CPU pipeline flush and is
+	 * expensive in the per-frame hot path.  Guard with NDEBUG so release builds
+	 * skip the sync entirely.  The lights UBO upload failure path becomes a
+	 * no-op in release, which is acceptable: a failed UBO upload would simply
+	 * leave fog lights disabled for one frame rather than crashing. */
+#if !defined(NDEBUG)
+	/* Clear any stale GL errors before the lights UBO upload so glGetError()
+	 * below only catches errors from THIS call, not from earlier unrelated GL
+	 * operations — a stale error would silently disable all fog lights. */
+	while (glGetError () != GL_NO_ERROR) {}
+#endif
+	GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
+	GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
+#if !defined(NDEBUG)
+	if (glGetError () != GL_NO_ERROR)
+	{
+		fog_light_enabled = false;
+		memset (&fog_lights, 0, sizeof (fog_lights));
+		GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
+		GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
+	}
+#endif
+
 	GL_BeginGroup ("Fog volumes");
 	R_FogVol_UseProgram (glprogs.fogvol);
-	RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_SetScissorEnabled (false);
-	RB_ColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	GL_Uniform1iFunc (0, steps);
 	GL_Uniform1iFunc (1, r_fogvol_noise.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (2, mode);
@@ -1140,15 +1804,66 @@ void R_FogVol_Render (void)
 	GL_Uniform3fFunc (8, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
 	GL_Uniform4fFunc (9, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
 	GL_Uniform2fFunc (10, depth_scale_x, depth_scale_y);
-	GL_Uniform4fFunc (11, view_x, view_y, 1.f / view_w, 1.f / view_h);
+	/* BUG FIX (halfres distortion): In halfres mode the fog viewport is placed
+	 * at (0,0) so gl_FragCoord.xy starts from (0,0), not (view_x,view_y).
+	 * FogDepthScale already maps fragcoord to full-res pixel space, so
+	 * screenPos = fragcoord * DepthScale correctly ranges over [0,glwidth) even
+	 * in halfres.  The shader computes viewUv as
+	 *   (screenPos - FogViewParams.xy) * FogViewParams.zw
+	 * In fullres the viewport IS at (view_x,view_y), so screenPos starts there
+	 * and subtracting view_x/view_y gives (0,0) at the view origin — correct.
+	 * In halfres screenPos starts at (0,0), so passing view_x/view_y shifts the
+	 * entire UV mapping into negative territory, causing the visible warping.
+	 * Fix: pass xy=(0,0) in halfres; zw=(1/view_w,1/view_h) is unchanged since
+	 * screenPos is already in full-res-equivalent coordinates. */
+	GL_Uniform4fFunc (11,
+		use_halfres ? 0.f : view_x,
+		use_halfres ? 0.f : view_y,
+		1.f / view_w, 1.f / view_h);
 	GL_Uniform4fFunc (12, depth_near, depth_far, gl_clipcontrol_able ? 1.f : 0.f, depth_sky_cutoff);
 	GL_Uniform2fFunc (13, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
+	GL_Uniform1iFunc (14, r_fogvol_emissive.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (15, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
+	GL_Uniform1iFunc (16, fog_light_enabled ? 1 : 0);
+	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
+	if (r_fogvol_sun_dir.value > 0.f && R_GetSun (shadow_dir, NULL, NULL, NULL))
+	{
+		/* Convention: r_sun.dir points from scene toward the sun (light source).
+		 * Fog shadow marching moves from sample point toward the blocker, so use
+		 * the same direction without flipping to keep shader/CPU conventions aligned. */
+	}
+	else
+	{
+		VectorScale (vpn, -1.f, shadow_dir);
+	}
+	/* BUG FIX (C-09): Length check must happen BEFORE VectorNormalize.
+	 * VectorNormalize on a zero-vector causes division-by-zero / NaN.
+	 * Only normalize when the vector is non-degenerate. */
+	if (VectorLength (shadow_dir) < 0.001f)
+		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
+	else
+		VectorNormalize (shadow_dir);
+	GL_Uniform1iFunc (17, r_fogvol_shadow.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (18, shadow_samples);
+	GL_Uniform1fFunc (19, CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f));
+	GL_Uniform1fFunc (20, r_fogvol_shadow_jitter.value > 0.f ? 1.f : 0.f);
+	GL_Uniform3fFunc (21, shadow_dir[0], shadow_dir[1], shadow_dir[2]);
+	GL_Uniform1iFunc (22, fog_lightgrid_enabled ? 1 : 0);
 
 	if (use_halfres)
-		RB_Viewport (0, 0, fog_width, fog_height);
+		glViewport (0, 0, fog_width, fog_height);
 	else
-		RB_Viewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
+		glViewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
 	depth_tex = framebufs.composite.depth_stencil_tex;
+	velocity_tex = 0;
+	if (framebufs.scene.velocity_tex)
+	{
+		qboolean msaa = framebufs.scene.samples > 1;
+		velocity_tex = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
+		/* r_fogvol.c has no access to gl_rmain.c's internal framesetup state.
+		 * Keep the available velocity texture and let TAA/motion resolve handle
+		 * stale-history rejection through their normal confidence path. */
+	}
 	fog_tex[0] = framebufs.fogvol.color_tex[0];
 	fog_tex[1] = framebufs.fogvol.color_tex[1];
 	fog_fbo[0] = framebufs.fogvol.fbo[0];
@@ -1173,6 +1888,10 @@ void R_FogVol_Render (void)
 		fog_volume_t *v = &r_fogvolumes[i];
 		int x0, y0, x1, y1;
 		GLuint src_fbo;
+		static const vec3_t corner_lut[8] = {
+			{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f, 0.f},
+			{0.f, 0.f, 1.f}, {1.f, 0.f, 1.f}, {0.f, 1.f, 1.f}, {1.f, 1.f, 1.f}
+		};
 
 		if (!v->enabled)
 			continue;
@@ -1228,7 +1947,12 @@ void R_FogVol_Render (void)
 					0, 0, fog_width, fog_height,
 					GL_COLOR_BUFFER_BIT, GL_NEAREST);
 			}
+			/* BUG FIX: Update src_fbo to match src_tex after the copy.
+			 * Previously src_fbo stayed as composite.fbo while src_tex
+			 * became finalcopy_tex, making the subsequent READ_FRAMEBUFFER
+			 * bind incorrect and hazard checks misleading. */
 			src_tex = framebufs.fogvol.finalcopy_tex;
+			src_fbo = framebufs.fogvol.finalcopy_fbo;
 		}
 		else
 		{
@@ -1246,12 +1970,33 @@ void R_FogVol_Render (void)
 				i, src_tex, depth_tex, dst_tex, src_fbo, dst_fbo, x0, y0, x1 - x0, y1 - y0);
 		R_FogVol_AssertNoFeedbackHazard ("ITER", dst_tex, src_tex);
 		R_FogVol_AssertNoBoundFeedbackHazard ("ITER");
+		memset (&fog_lightgrid, 0, sizeof (fog_lightgrid));
+		if (fog_lightgrid_enabled)
+		{
+			for (int c = 0; c < 8; ++c)
+			{
+				vec3_t probe_pos;
+				const lightgrid_probe_t *probe;
+				probe_pos[0] = v->mins[0] + (v->maxs[0] - v->mins[0]) * corner_lut[c][0];
+				probe_pos[1] = v->mins[1] + (v->maxs[1] - v->mins[1]) * corner_lut[c][1];
+				probe_pos[2] = v->mins[2] + (v->maxs[2] - v->mins[2]) * corner_lut[c][2];
+				probe = R_GetLightgridSample (probe_pos);
+				if (probe)
+				{
+					fog_lightgrid.probe_rgb[c][0] = probe->rgb[0] * probe->ao;
+					fog_lightgrid.probe_rgb[c][1] = probe->rgb[1] * probe->ao;
+					fog_lightgrid.probe_rgb[c][2] = probe->rgb[2] * probe->ao;
+				}
+			}
+		}
+		GL_Upload (GL_UNIFORM_BUFFER, &fog_lightgrid, sizeof (fog_lightgrid), &buf, &ofs);
+		GL_BindBufferRange (GL_UNIFORM_BUFFER, 5, buf, (GLintptr)ofs, sizeof (fog_lightgrid));
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 		GL_SetScissorEnabled (true);
-		RB_Scissor (x0, y0, x1 - x0, y1 - y0);
+		glScissor (x0, y0, x1 - x0, y1 - y0);
 		GL_Uniform1iFunc (3, i);
-		RB_DrawArrays (GL_TRIANGLES, 0, 3);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
 		GL_SetScissorEnabled (false);
 
 		fog_src = fog_dst;
@@ -1259,14 +2004,22 @@ void R_FogVol_Render (void)
 		has_drawn = true;
 	}
 	GL_SetScissorEnabled (false);
-	GLuint final_fbo = framebufs.fogvol.fbo[fog_src];
+	/* BUG FIX (C-08): final_fbo is derived from fog_src which is 0 here only
+	 * when no iterations ran (has_drawn=false).  In that case the code jumps
+	 * to `done` via the has_drawn check below and final_fbo is never used —
+	 * but the declaration order made this non-obvious and fragile.  Declare
+	 * final_fbo only after confirming has_drawn so the value is always valid
+	 * when it reaches code that actually uses it.  This matches final_tex
+	 * which was already set correctly inside the loop via fog_src=fog_dst. */
+	{
+		GLuint final_fbo = framebufs.fogvol.fbo[fog_src];
 
 	if (!has_drawn)
 	{
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "temporal draw=COLOR_ATTACHMENT0");
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "temporal read=COLOR_ATTACHMENT0");
-		RB_Viewport (glx, gly, glwidth, glheight);
+		glViewport (glx, gly, glwidth, glheight);
 		goto done;
 	}
 
@@ -1293,7 +2046,7 @@ void R_FogVol_Render (void)
 		}
 
 		R_FogVol_UseProgram (glprogs.fogvol_temporal);
-		RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		/* BUG FIX #5: Removed unreachable same-index guards.  history_src and
 		 * history_dst are always opposite values after the init block above, so
 		 * the guards `if (history_src == history_dst)` were dead code that
@@ -1302,13 +2055,14 @@ void R_FogVol_Render (void)
 		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE read=COLOR_ATTACHMENT0");
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE draw=COLOR_ATTACHMENT0");
-		RB_Viewport (0, 0, fog_width, fog_height);
+		glViewport (0, 0, fog_width, fog_height);
 		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], final_tex);
 		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], history_tex[history_src]);
 		R_FogVol_AssertNoBoundFeedbackHazard ("COMPOSITE");
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, history_tex[history_src]);
 		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_tex);
+		GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, velocity_tex);
 		R_FogVol_LogHazardPass ("COMPOSITE", final_tex, history_tex[history_src], final_tex);
 		GL_Uniform1fFunc (0, r_fogvol_temporal_alpha.value);
 		GL_Uniform1fFunc (1, r_fogvol_temporal_depth_reject.value);
@@ -1317,11 +2071,25 @@ void R_FogVol_Render (void)
 		GL_Uniform4fFunc (4, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
 		GL_Uniform2fFunc (5, depth_scale_x, depth_scale_y);
 		GL_Uniform1iFunc (6, history_valid ? 1 : 0);
-		GL_Uniform4fFunc (7, view_x, view_y, 1.f / view_w, 1.f / view_h);
+		/* BUG FIX (halfres distortion): temporal shader also runs at viewport
+		 * (0,0,fog_width,fog_height) in halfres, so view_x/view_y must not be
+		 * subtracted — pass (0,0) as the origin, same reasoning as FogViewParams
+		 * in the raymarcher pass above. */
+		GL_Uniform4fFunc (7,
+			use_halfres ? 0.f : view_x,
+			use_halfres ? 0.f : view_y,
+			1.f / view_w, 1.f / view_h);
+		GL_Uniform4fFunc (8,
+			CLAMP (0.f, r_fogvol_temporal_confidence_min_alpha.value, 1.f),
+			q_max (0.f, r_fogvol_temporal_disocclusion_bias.value),
+			q_max (0.1f, r_fogvol_temporal_clamp_strength.value),
+			0.f);
+		GL_Uniform1iFunc (9, velocity_tex != 0 ? 1 : 0);
 		if (mode == 1)
-			Con_DPrintf ("FOGVOL debug COMPOSITE final_tex=%u history_tex=%u depth_tex=%u dst_tex=%u\n",
-				final_tex, history_tex[history_src], depth_tex, framebufs.fogvol.composite_tex[composite_dst]);
-		RB_DrawArrays (GL_TRIANGLES, 0, 3);
+			Con_DPrintf ("FOGVOL debug COMPOSITE final_tex=%u history_tex=%u depth_tex=%u velocity_tex=%u dst_tex=%u conf[min=%.3f disocc=%.3f clamp=%.3f]\n",
+				final_tex, history_tex[history_src], depth_tex, velocity_tex, framebufs.fogvol.composite_tex[composite_dst],
+				r_fogvol_temporal_confidence_min_alpha.value, r_fogvol_temporal_disocclusion_bias.value, r_fogvol_temporal_clamp_strength.value);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
 
 		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);
 		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, history_fbo[history_dst]);
@@ -1345,7 +2113,7 @@ void R_FogVol_Render (void)
 	{
 		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
 		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
-		RB_Viewport (glx, gly, glwidth, glheight);
+		glViewport (glx, gly, glwidth, glheight);
 		if (use_halfres)
 		{
 			if (composite_src_tex)
@@ -1358,7 +2126,7 @@ void R_FogVol_Render (void)
 				int taps = (int)Q_rint (r_fogvol_upsample_taps.value);
 				taps = (taps == 9) ? 9 : 4;
 				R_FogVol_UseProgram (glprogs.fogvol_upsample);
-				RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+				GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 				R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
 				GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
 				GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
@@ -1366,7 +2134,12 @@ void R_FogVol_Render (void)
 				GL_Uniform4fFunc (0, (float)glwidth, (float)glheight, (float)fog_width, (float)fog_height);
 				GL_Uniform1fFunc (1, r_fogvol_upsample_k.value);
 				GL_Uniform1iFunc (2, taps);
-				RB_DrawArrays (GL_TRIANGLES, 0, 3);
+				/* BUG FIX (white screen): protect alpha channel — upsample shader
+				 * outputs alpha=1.0 (fixed in fogvol_upsample.frag), but guard here
+				 * so the composite FBO alpha is never overwritten. */
+				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+				glDrawArrays (GL_TRIANGLES, 0, 3);
+				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 			}
 			else
 			{
@@ -1376,9 +2149,12 @@ void R_FogVol_Render (void)
 				R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
 				R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
 				R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
+				/* BUG FIX (white screen): protect alpha channel on linear upscale blit. */
+				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 				GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
 					0, 0, glwidth, glheight,
 					GL_COLOR_BUFFER_BIT, GL_LINEAR);
+				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 			}
 		}
 		else
@@ -1389,18 +2165,56 @@ void R_FogVol_Render (void)
 			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
 			R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
 			R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
-			GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
-				0, 0, glwidth, glheight,
+			/* BUG FIX (white screen): Protect composite FBO alpha channel.
+			 * BUG FIX (grey washout): Only blit the viewrect region, not the
+			 * full glwidth×glheight.  The fog FBO is cleared to (0,0,0,0)
+			 * outside the viewrect; blitting that area would overwrite HUD
+			 * and other non-fog pixels with black.  Blit only the view area
+			 * that was actually rendered by the fog shader. */
+			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+			GL_BlitFramebufferFunc (
+				(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
+				(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
 				GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		}
 	}
 
 	if (mode == 1)
 		R_DebugFlushGeometry ();
 
+	} /* end final_fbo block (BUG FIX C-08) */
+
 done:
-	R_FogVol_LogPipelineState ("FOGVOL_END");
-	R_GLStateDump ("after-fogvol");
+	R_FogVol_LogStateSnapshot ("after-pass");
+	if (use_halfres)
+	{
+		GLint viewport[4] = {0};
+		GLint scissor_box[4] = {0};
+		GLboolean scissor_enabled = GL_FALSE;
+		const GLint expected_vp[4] = { glx, gly, glwidth, glheight };
+
+		glGetIntegerv (GL_VIEWPORT, viewport);
+		scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
+		glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+
+		if (viewport[0] != expected_vp[0] || viewport[1] != expected_vp[1] || viewport[2] != expected_vp[2] || viewport[3] != expected_vp[3]
+			|| (scissor_enabled && (scissor_box[0] != expected_vp[0] || scissor_box[1] != expected_vp[1] || scissor_box[2] != expected_vp[2] || scissor_box[3] != expected_vp[3])))
+		{
+			Con_DPrintf ("FOGVOL_STATE defensive-restore viewport=(%d %d %d %d) scissor=%d box=(%d %d %d %d)\n",
+				viewport[0], viewport[1], viewport[2], viewport[3],
+				scissor_enabled,
+				scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3]);
+			glViewport (expected_vp[0], expected_vp[1], expected_vp[2], expected_vp[3]);
+			GL_SetScissorEnabled (false);
+			glScissor (expected_vp[0], expected_vp[1], expected_vp[2], expected_vp[3]);
+		}
+	}
+	if (R_FogVol_TestDebugEnabled ())
+	{
+		R_FogVol_LogPipelineState ("FOGVOL_END");
+		R_GLStateDump ("after-fogvol");
+	}
 	if (use_test_guard)
 	{
 		R_FogVol_Restore3DRenderState (&restore_state);
@@ -1413,7 +2227,6 @@ done:
 	}
 
 	GL_EndGroup ();
-	RB_EndPass ();
 }
 
 
@@ -1424,6 +2237,12 @@ void R_FogVol_LogEndFrameState (void)
 
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num)
 {
+	/* TODO: Inject fog volumes into the froxel grid for Forward+ clustered
+	 * lighting integration.  Currently a no-op stub — clustered rendering
+	 * bypasses this path and the fog volumes are rendered via R_FogVol_Render()
+	 * as a separate post-process pass.  When implemented, this function should
+	 * iterate vols[0..num-1] and mark each froxel that overlaps the AABB or
+	 * sphere of the volume with the volume's density and colour. */
 	(void)grid;
 	(void)vols;
 	(void)num;

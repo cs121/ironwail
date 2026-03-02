@@ -16,6 +16,7 @@ layout(location=0) uniform vec4 DLightConfig0; // x: scale, y: radius scale, z: 
 layout(location=1) uniform vec4 DLightConfig1; // x: core boost, y: core exp, z: soft knee, w: ndotl mix
 layout(location=2) uniform vec4 DLightConfig2; // x: saturation chop
 
+// Fog.w is treated as a signed-friendly density; use abs(Fog.w) so negative CPU values do not invert attenuation.
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
         float fog = exp2(-abs(Fog.w) * dot(p, p));

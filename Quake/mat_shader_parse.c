@@ -1839,11 +1839,27 @@ static const char *ParseMaterialBlock (const char *data, const char *name, const
 		if (!q_strcasecmp (com_token, "bloom"))
 		{
 			Mat_Shader_MarkKeywordSeen ("bloom", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL);
+			const char *cursor = Mat_Shader_ParseToken (data, NULL);
+			if (cursor && com_token[0] && Mat_Shader_IsNumericToken (com_token))
+			{
+				float validated_scale = 1.f;
+				if (!ParseFloat (&data, &scale, state))
+				{
+					data = ResyncMaterialBlock (data, state);
+					break;
+				}
+				Mat_Shader_ValidateFiniteFloat (state, "bloom", scale, 1.f, &validated_scale);
+				material.bloom_scale = CLAMP (0.f, validated_scale, MAT_SHADER_SCALE_MAX);
+				material.bloom_enable = (material.bloom_scale > 0.f);
+				continue;
+			}
 			if (!ParseRequiredBool (&data, &material.bloom_enable, state))
 			{
 				data = ResyncMaterialBlock (data, state);
 				break;
 			}
+			if (!material.bloom_enable)
+				material.bloom_scale = 0.f;
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "godray"))

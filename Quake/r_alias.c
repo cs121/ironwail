@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_alias.c -- alias model rendering
 
 #include "quakedef.h"
-#include "rb_gl.h"
 #include "../common/lightgrid.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
@@ -98,7 +97,7 @@ COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
 
-static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add)
+static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_delta)
 {
         if (!r_lightgrid_debug.value)
         {
@@ -117,14 +116,14 @@ static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add)
 
         r_lightgrid_debug_sample_reported = true;
 
-        Con_Printf ("r_lightgrid_debug: %s probe rgb=(%.2f %.2f %.2f) ao=%.2f ambient_add=(%.1f %.1f %.1f)\n",
+        Con_Printf ("r_lightgrid_debug: %s probe rgb=(%.2f %.2f %.2f) ao=%.2f ambient_delta=(%.1f %.1f %.1f)\n",
                 e->model ? e->model->name : "<no model>",
                 e->lightcache.lightgrid_color[0], e->lightcache.lightgrid_color[1], e->lightcache.lightgrid_color[2],
                 e->lightcache.lightgrid_ao,
-                ambient_add[0], ambient_add[1], ambient_add[2]);
+                ambient_delta[0], ambient_delta[1], ambient_delta[2]);
 }
 
-static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, vec3_t dlightcolor)
+static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor)
 {
         vec3_t          gridcolor;
 
@@ -136,19 +135,16 @@ static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, ve
                 return;
 
         {
-                vec3_t ambient_add;
+                vec3_t ambient_delta;
                 for (int i = 0; i < 3; i++)
                 {
-                        ambientcolor[i] -= gridcolor[i];
-                        if (ambientcolor[i] < 0.f)
-                                ambientcolor[i] = 0.f;
-
-                        ambientcolor[i] += gridcolor[i];
-
-                        ambient_add[i] = gridcolor[i];
+                        const float before = fmaxf (ambientcolor[i], 0.f);
+                        const float after = fmaxf (before, gridcolor[i]);
+                        ambientcolor[i] = after;
+                        ambient_delta[i] = after - before;
                 }
 
-                R_DebugLightgridSample (e, ambient_add);
+                R_DebugLightgridSample (e, ambient_delta);
         }
 }
 
@@ -426,7 +422,7 @@ void R_SetupAliasLighting (entity_t     *e)
                 }
         }
 
-        R_ApplyLightgridLighting (e, ambientcolor, dlightcolor);
+        R_ApplyLightgridLighting (e, ambientcolor);
 
         // viewmodel lighting is typically darker because world lights aren't placed for a free camera
 	if (e == &cl.viewent)
@@ -535,14 +531,6 @@ void R_FlushAliasInstances (qboolean showtris)
 	if (!ibuf.count)
 		return;
 
-	/*
-	 * Leaf baseline: PASS_ENTS_OPAQUE/PASS_ENTS_ALPHA (or show-tris overlay path
-	 * without a pass). Expected baseline when pass is active: opaque blend,
-	 * depth test/write on, back-face cull, program 0, and textures 0..2 unbound.
-	 */
-	if (RB_PassActive () && RB_CurrentPass () != PASS_ENTS_OPAQUE && RB_CurrentPass () != PASS_ENTS_ALPHA)
-		Con_DWarning ("R_FlushAliasInstances invoked outside entity passes (owners: %s)\n", RB_DebugStateOwnersString ());
-
 	R_GLStateDump (ibuf.ent == &cl.viewent ? "before-viewmodel" : "before-alias");
 
 	model = ibuf.ent->model;
@@ -568,7 +556,7 @@ void R_FlushAliasInstances (qboolean showtris)
 		mode = r_softemu_mdl_warp.value > 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
 		break;
 	}
-	RB_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
+	GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
 
 	if (md5)
 		state = GLS_CULL_BACK | GLS_ATTRIBS(5);
@@ -579,7 +567,7 @@ void R_FlushAliasInstances (qboolean showtris)
 		state |= GLS_BLEND_OPAQUE;
 	else
 		state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
-	RB_SetState (state);
+	GL_SetState (state);
 
 memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
 memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));

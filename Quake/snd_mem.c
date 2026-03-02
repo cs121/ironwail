@@ -23,6 +23,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+static short GetLittleShort (void);
+
 /*
 ================
 ResampleSfx
@@ -86,6 +88,141 @@ static void ResampleSfx (sfx_t *sfx, int inrate, int inwidth, byte *data)
 }
 
 //=============================================================================
+
+typedef struct pending_snd_job_s
+{
+	sfx_t *sfx;
+	char name[MAX_QPATH];
+	byte *file_data;
+	size_t file_len;
+	wavinfo_t info;
+	byte *decoded;
+	int decoded_bytes;
+	int status;
+	volatile int done;
+	struct pending_snd_job_s *next;
+} pending_snd_job_t;
+
+static pending_snd_job_t *pending_snd_jobs;
+static SDL_mutex *wavinfo_mutex;
+
+static void S_LoadSoundDecodeJob (void *userdata)
+{
+	pending_snd_job_t *job = (pending_snd_job_t *) userdata;
+	float stepscale;
+	int srcsample, samplefrac, fracstep;
+	int i, outcount, sample;
+	byte *src;
+	byte *dst;
+
+	SDL_LockMutex (wavinfo_mutex);
+	job->info = GetWavinfo (job->name, job->file_data, (int) job->file_len);
+	SDL_UnlockMutex (wavinfo_mutex);
+
+	if (job->info.channels != 1 || (job->info.width != 1 && job->info.width != 2))
+	{
+		job->status = -1;
+		job->done = 1;
+		return;
+	}
+
+	stepscale = (float) job->info.rate / shm->speed;
+	outcount = (int) (job->info.samples / stepscale);
+	if (outcount <= 0)
+	{
+		job->status = -1;
+		job->done = 1;
+		return;
+	}
+
+	job->decoded_bytes = outcount * (loadas8bit.value ? 1 : job->info.width);
+	job->decoded = (byte *) malloc (job->decoded_bytes);
+	if (!job->decoded)
+		Sys_Error ("S_LoadSoundDecodeJob: out of memory");
+
+	src = job->file_data + job->info.dataofs;
+	dst = job->decoded;
+	srcsample = samplefrac = 0;
+	fracstep = (int)(stepscale * 256.f);
+	for (i = 0; i < outcount; ++i)
+	{
+		if (job->info.width == 2)
+			sample = LittleShort (((short *) src)[srcsample]);
+		else
+			sample = ((int)((unsigned char) src[srcsample]) - 128) << 8;
+		if (loadas8bit.value)
+			((signed char *) dst)[i] = sample >> 8;
+		else if (job->info.width == 2)
+			((short *) dst)[i] = (short) sample;
+		else
+			((signed char *) dst)[i] = sample >> 8;
+		samplefrac += fracstep;
+		srcsample += samplefrac >> 8;
+		samplefrac &= 255;
+	}
+
+	job->status = 0;
+	job->done = 1;
+}
+
+static void S_AsyncReadComplete (void *user, uint8_t *data, size_t len, int status)
+{
+	pending_snd_job_t *job = (pending_snd_job_t *) user;
+	job->file_data = data;
+	job->file_len = len;
+	if (status != 0 || !data)
+	{
+		job->status = -1;
+		job->done = 1;
+		return;
+	}
+	Jobs_SubmitDetached (S_LoadSoundDecodeJob, job);
+}
+
+static sfxcache_t *S_CommitPendingSound (pending_snd_job_t *job)
+{
+	sfxcache_t *sc;
+	pending_snd_job_t **pp;
+
+	if (!job->done)
+		return NULL;
+
+	pp = &pending_snd_jobs;
+	while (*pp && *pp != job)
+		pp = &(*pp)->next;
+	if (*pp == job)
+		*pp = job->next;
+
+	if (job->status != 0)
+	{
+		free (job->file_data);
+		free (job->decoded);
+		free (job);
+		return NULL;
+	}
+
+	sc = (sfxcache_t *) Cache_Alloc (&job->sfx->cache, job->decoded_bytes + sizeof (sfxcache_t), job->sfx->name);
+	if (!sc)
+	{
+		free (job->file_data);
+		free (job->decoded);
+		free (job);
+		return NULL;
+	}
+
+	sc->length = job->decoded_bytes / (loadas8bit.value ? 1 : job->info.width);
+	sc->loopstart = job->info.loopstart;
+	sc->speed = shm->speed;
+	sc->width = loadas8bit.value ? 1 : job->info.width;
+	sc->stereo = 0;
+	memcpy (sc->data, job->decoded, job->decoded_bytes);
+
+	free (job->file_data);
+	free (job->decoded);
+	free (job);
+	return sc;
+}
+
 
 /*
 ==============

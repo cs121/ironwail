@@ -27,14 +27,28 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define GLSL_PATH_PREFIX "shaders/"
 #define GLSL_PATH(name)   GLSL_PATH_PREFIX name
 
+
+/*
+Particle material MVP contract (quad/beam path):
+- Reference name/path: "particles/<name>" (see MAT_PARTICLE_SHADER_PREFIX).
+- Supported stage features: map/clampmap (+ $white/$black), blendFunc (named/custom),
+  rgbGen/alphaGen {identity,vertex,const,wave}, animMap (fps + frame list),
+  and tcMod {scroll,scale,rotate,turb,stretch}.
+- Deferred (non-MVP): alphaFunc, tcGen environment/lightmap, q3 sky/fog/deform,
+  and advanced stage directives outside the list above.
+- Degradation strategy: any unsupported stage falls back to safe default particle
+  rendering; when r_particles_shader_strict=1, emit debug diagnostics for the skip.
+*/
+
 typedef struct shader_cache_s
 {
         char path[MAX_QPATH];
         char *data;
 } shader_cache_t;
 
-static shader_cache_t shader_cache[128];
+static shader_cache_t *shader_cache;
 static int shader_cache_count;
+static int shader_cache_capacity;
 
 static qboolean GL_IsShaderIncludePathSafe (const char *path, const char **reason)
 {
@@ -180,9 +194,50 @@ static qboolean GL_NormalizeShaderIncludePath (const char *basepath, const char 
 }
 
 glprogs_t glprogs;
-static GLuint gl_programs[128];
+static GLuint *gl_programs;
 static GLuint gl_current_program;
 static int gl_num_programs;
+static int gl_programs_capacity;
+
+static void GL_EnsureProgramCapacity (int needed)
+{
+	int newcapacity;
+	GLuint *newprograms;
+
+	if (needed <= gl_programs_capacity)
+		return;
+
+	newcapacity = gl_programs_capacity ? gl_programs_capacity : 64;
+	while (newcapacity < needed)
+		newcapacity *= 2;
+
+	newprograms = (GLuint *) realloc (gl_programs, newcapacity * sizeof (*gl_programs));
+	if (!newprograms)
+		Sys_Error ("GL_EnsureProgramCapacity: out of memory");
+
+	gl_programs = newprograms;
+	gl_programs_capacity = newcapacity;
+}
+
+static void GL_EnsureShaderCacheCapacity (int needed)
+{
+	int newcapacity;
+	shader_cache_t *newcache;
+
+	if (needed <= shader_cache_capacity)
+		return;
+
+	newcapacity = shader_cache_capacity ? shader_cache_capacity : 64;
+	while (newcapacity < needed)
+		newcapacity *= 2;
+
+	newcache = (shader_cache_t *) realloc (shader_cache, newcapacity * sizeof (*shader_cache));
+	if (!newcache)
+		Sys_Error ("GL_EnsureShaderCacheCapacity: out of memory");
+
+	shader_cache = newcache;
+	shader_cache_capacity = newcapacity;
+}
 
 /*
 =============
@@ -249,6 +304,42 @@ static qboolean AppendString (char **dst, const char *dstend, const char *str, i
 	*dst += len;
 	return true;
 }
+
+static qboolean GL_IsValidMacroIdentifier (const char *name, size_t len)
+{
+	size_t i;
+
+	if (!len)
+		return false;
+
+	if (!(q_isalpha ((unsigned char)name[0]) || name[0] == '_'))
+		return false;
+
+	for (i = 1; i < len; i++)
+	{
+		if (!(q_isalnum ((unsigned char)name[i]) || name[i] == '_'))
+			return false;
+	}
+
+	return true;
+}
+
+#ifndef NDEBUG
+static void GL_DebugTestMacroIdentifierParser (void)
+{
+	static qboolean ran;
+
+	if (ran)
+		return;
+	ran = true;
+
+	assert (GL_IsValidMacroIdentifier ("FOO", 3));
+	assert (GL_IsValidMacroIdentifier ("_BAR9", 5));
+	assert (!GL_IsValidMacroIdentifier ("", 0));
+	assert (!GL_IsValidMacroIdentifier ("9BAD", 4));
+	assert (!GL_IsValidMacroIdentifier ("BAD-NAME", 8));
+}
+#endif
 
 /*
 =============
@@ -342,8 +433,7 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 		GL_InitError ("Error linking %s program:\n\n%s", name, infolog);
 	}
 
-	if (gl_num_programs == countof(gl_programs))
-		Sys_Error ("gl_programs overflow");
+	GL_EnsureProgramCapacity (gl_num_programs + 1);
 	gl_programs[gl_num_programs] = program;
 	gl_num_programs++;
 
@@ -355,12 +445,13 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 GL_CreateProgramFromSources
 ====================
 */
-static char *GL_LoadShaderFile_Internal (const char *path, int depth)
+static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char **include_stack, int include_stack_size)
 {
         size_t capacity, result_len;
         char *result;
         char *source;
         const char *cursor;
+        int parent_line;
         int i;
 
         for (i = 0; i < shader_cache_count; i++)
@@ -372,8 +463,12 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
         if (depth >= 32)
                 Sys_Error ("GL_LoadShaderFile: include depth overflow for %s", path);
 
-        if (shader_cache_count == countof(shader_cache))
-                Sys_Error ("GL_LoadShaderFile: shader cache overflow");
+        if (include_stack_size >= 32)
+                Sys_Error ("GL_LoadShaderFile: include stack overflow for %s", path);
+
+        include_stack[include_stack_size++] = path;
+
+        GL_EnsureShaderCacheCapacity (shader_cache_count + 1);
 
         source = (char *) COM_LoadMallocFile (path, NULL);
         if (!source)
@@ -411,6 +506,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
         } while (0)
 
         cursor = source;
+        parent_line = 1;
         while (*cursor)
         {
                 const char *line_start = cursor;
@@ -441,11 +537,12 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
                                         end++;
                                 if (end < line_start + line_len)
                                 {
-								char include_path[MAX_QPATH];
-								char full_path[MAX_QPATH];
-								size_t include_len = (size_t) (end - ptr);
-								const char *reason = NULL;
-								char *included;
+                                        char include_path[MAX_QPATH];
+                                        char full_path[MAX_QPATH];
+                                        char linebuf[2 * MAX_QPATH + 64];
+                                        size_t include_len = (size_t) (end - ptr);
+                                        const char *reason = NULL;
+                                        char *included;
 
                                         if (include_len >= sizeof (include_path))
                                         {
@@ -465,15 +562,47 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
 										path, include_path, reason ? reason : "invalid path");
 								}
 
-                                        included = GL_LoadShaderFile_Internal (full_path, depth + 1);
+                                        for (i = 0; i < include_stack_size; i++)
+                                        {
+                                                if (!strcmp (include_stack[i], full_path))
+                                                {
+                                                        char cycle[4096];
+                                                        char *dst = cycle;
+                                                        size_t remaining = sizeof (cycle);
+                                                        int j;
+
+                                                        cycle[0] = '\0';
+                                                        for (j = i; j < include_stack_size; j++)
+                                                        {
+                                                                int written = q_snprintf (dst, remaining, "%s -> ", include_stack[j]);
+                                                                if (written < 0 || (size_t) written >= remaining)
+                                                                        break;
+                                                                dst += written;
+                                                                remaining -= (size_t) written;
+                                                        }
+                                                        if (remaining > 0)
+                                                                q_snprintf (dst, remaining, "%s", full_path);
+
+                                                        free (result);
+                                                        free (source);
+                                                        GL_InitError ("Shader include cycle detected: %s", cycle);
+                                                }
+                                        }
+
+                                        included = GL_LoadShaderFile_Internal (full_path, depth + 1, include_stack, include_stack_size);
                                         if (included)
                                         {
+                                                q_snprintf (linebuf, sizeof (linebuf), "#line 1 \"%s\"\n", full_path);
+                                                APPEND_STR (linebuf, strlen (linebuf));
                                                 APPEND_STR (included, strlen (included));
                                                 if (line_end && (result_len == 0 || result[result_len - 1] != '\n'))
                                                         APPEND_STR ("\n", 1);
+                                                q_snprintf (linebuf, sizeof (linebuf), "#line %d \"%s\"\n", parent_line + 1, path);
+                                                APPEND_STR (linebuf, strlen (linebuf));
                                         }
 
                                         cursor = line_end ? line_end + 1 : cursor + line_len;
+                                        parent_line++;
                                         continue;
                                 }
                         }
@@ -481,6 +610,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
 
                 APPEND_STR (line_start, line_len);
                 cursor = line_end ? line_end + 1 : cursor + line_len;
+                parent_line++;
         }
 
 #undef APPEND_STR
@@ -496,7 +626,8 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth)
 
 static char *GL_LoadShaderFile (const char *path)
 {
-        return GL_LoadShaderFile_Internal (path, 0);
+        const char *include_stack[32];
+        return GL_LoadShaderFile_Internal (path, 0, include_stack, 0);
 }
 
 static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GLenum *types, const char *name, va_list argptr)
@@ -521,23 +652,61 @@ static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GL
 		char *dstend = macros + sizeof (macros);
 		char *src = eval + 1 + (pipe - name);
 
+#ifndef NDEBUG
+		GL_DebugTestMacroIdentifierParser ();
+#endif
+
 		while (*src == ' ')
 			src++;
 
 		while (*src)
 		{
-			char *srcend = src + 1;
+			char *srcend = src;
+			char *tokstart, *tokend;
+			char *namestart, *nameend;
+			char *valuestart;
 			while (*srcend && *srcend != ';')
 				srcend++;
 
+			tokstart = src;
+			while (tokstart < srcend && q_isspace ((unsigned char)*tokstart))
+				tokstart++;
+			tokend = srcend;
+			while (tokend > tokstart && q_isspace ((unsigned char)tokend[-1]))
+				tokend--;
+
+			if (tokstart == tokend)
+				GL_InitError ("GL_CreateProgram '%s': empty macro token in '%s'", name, eval);
+
+			namestart = tokstart;
+			nameend = namestart;
+			while (nameend < tokend && !q_isspace ((unsigned char)*nameend))
+				nameend++;
+
+			if (!GL_IsValidMacroIdentifier (namestart, nameend - namestart))
+				GL_InitError ("GL_CreateProgram '%s': invalid macro identifier '%.*s' in '%s'",
+					name, (int)(nameend - namestart), namestart, eval);
+
+			valuestart = nameend;
+			while (valuestart < tokend && q_isspace ((unsigned char)*valuestart))
+				valuestart++;
+
 			if (!AppendString (&dst, dstend, "#define ", 8) ||
-				!AppendString (&dst, dstend, src, srcend - src) ||
+				!AppendString (&dst, dstend, namestart, nameend - namestart) ||
+				(valuestart < tokend && (!AppendString (&dst, dstend, " ", 1) ||
+					!AppendString (&dst, dstend, valuestart, tokend - valuestart))) ||
 				!AppendString (&dst, dstend, "\n", 1))
 				Sys_Error ("GL_CreateProgram: symbol overflow for %s", eval);
 
 			src = srcend;
-			while (*src == ';' || *src == ' ')
+			if (*src == ';')
+			{
 				src++;
+				while (*src == ' ')
+					src++;
+				if (!*src)
+					GL_InitError ("GL_CreateProgram '%s': empty trailing macro token in '%s'", name, eval);
+			}
 		}
 
 		AppendString (&dst, dstend, "\n", 1);
@@ -686,6 +855,7 @@ void GL_CreateShaders (void)
                 glprogs.skylayers[dither] = GL_CreateProgram (GLSL_PATH("sky_layers.vert"), GLSL_PATH("sky_layers.frag"), "sky layers|DITHER %d", dither);
                 glprogs.skyboxside[dither] = GL_CreateProgram (GLSL_PATH("sky_boxside.vert"), GLSL_PATH("sky_boxside.frag"), "skybox side|DITHER %d", dither);
                 glprogs.sprites[dither] = GL_CreateProgram (GLSL_PATH("sprites.vert"), GLSL_PATH("sprites.frag"), "sprites|DITHER %d", dither);
+        glprogs.decal = GL_CreateProgram (GLSL_PATH("decal.vert"), GLSL_PATH("decal.frag"), "decal");
         }
         glprogs.skystencil = GL_CreateProgram (GLSL_PATH("skystencil.vert"), NULL, "sky stencil");
 
@@ -704,6 +874,8 @@ void GL_CreateShaders (void)
         for (mode = 0; mode < 3; mode++)
                 glprogs.palette_init[mode] = GL_CreateComputeProgram (GLSL_PATH("palette_init.comp"), "palette init|MODE %d", mode);
         glprogs.palette_postprocess = GL_CreateComputeProgram (GLSL_PATH("palette_postprocess.comp"), "palette postprocess");
+
+	Con_Printf ("Loaded %d GLSL programs (%d shader cache entries)\n", gl_num_programs, shader_cache_count);
 }
 
 /*
@@ -717,9 +889,11 @@ void GL_DeleteShaders (void)
         for (i = 0; i < gl_num_programs; i++)
         {
                 GL_DeleteProgramFunc (gl_programs[i]);
-                gl_programs[i] = 0;
         }
+        free (gl_programs);
+        gl_programs = NULL;
         gl_num_programs = 0;
+        gl_programs_capacity = 0;
 
         GL_UseProgramFunc (0);
         gl_current_program = 0;
@@ -729,8 +903,9 @@ void GL_DeleteShaders (void)
         for (i = 0; i < shader_cache_count; i++)
         {
                 free (shader_cache[i].data);
-                shader_cache[i].data = NULL;
-                shader_cache[i].path[0] = '\0';
         }
+        free (shader_cache);
+        shader_cache = NULL;
         shader_cache_count = 0;
+        shader_cache_capacity = 0;
 }

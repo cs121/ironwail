@@ -1,7 +1,6 @@
 #include "quakedef.h"
 #include "r_dlight_pool.h"
 #include <float.h>
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -101,22 +100,31 @@ void DLightPool_ClearPersistent (void)
 	}
 }
 
-static void DLightPool_EnsureScratch (int needed)
+static qboolean DLightPool_EnsureScratch (int needed)
 {
 	if (needed <= dlight_pool.scratch_capacity)
-		return;
+		return true;
 
-	dlight_pool.scratch = (dlight_t **)realloc (dlight_pool.scratch, sizeof (dlight_pool.scratch[0]) * needed);
+	dlight_t **new_scratch = (dlight_t **)realloc (dlight_pool.scratch, sizeof (dlight_pool.scratch[0]) * needed);
+	if (!new_scratch)
+	{
+		Con_DPrintf ("DLightPool_EnsureScratch: allocation failed for %d entries (capacity stays %d)\n",
+				needed, dlight_pool.scratch_capacity);
+		return false;
+	}
+
+	dlight_pool.scratch = new_scratch;
 	dlight_pool.scratch_capacity = needed;
+	return true;
 }
 
-static void DLightPool_EnsureCapacity (int desired)
+static qboolean DLightPool_EnsureCapacity (int desired)
 {
 	const int pool_max = DLightPool_GetPoolMax ();
 	if (desired > pool_max)
 		desired = pool_max;
 	if (desired <= dlight_pool.capacity)
-		return;
+		return true;
 
 	int new_capacity = dlight_pool.capacity ? dlight_pool.capacity * 2 : 64;
 	if (new_capacity < desired)
@@ -124,11 +132,20 @@ static void DLightPool_EnsureCapacity (int desired)
 	if (new_capacity > pool_max)
 		new_capacity = pool_max;
 	if (new_capacity <= dlight_pool.capacity)
-		return;
+		return true;
 
-	dlight_pool.items = (dlight_t *)realloc (dlight_pool.items, sizeof (dlight_pool.items[0]) * new_capacity);
+	dlight_t *new_items = (dlight_t *)realloc (dlight_pool.items, sizeof (dlight_pool.items[0]) * new_capacity);
+	if (!new_items)
+	{
+		Con_Warning ("DLightPool_EnsureCapacity: allocation failed for %d lights (capacity stays %d)\n",
+				new_capacity, dlight_pool.capacity);
+		return false;
+	}
+
+	dlight_pool.items = new_items;
 	memset (dlight_pool.items + dlight_pool.capacity, 0, sizeof (dlight_pool.items[0]) * (new_capacity - dlight_pool.capacity));
 	dlight_pool.capacity = new_capacity;
+	return true;
 }
 
 static void DLightPool_ResetLight (dlight_t *dl, dlight_kind_t kind, double time)
@@ -172,24 +189,19 @@ static float DLightPool_ScoreLight (dlight_t *dl, double time, const vec3_t view
 	return influence * lum * bias;
 }
 
-static int DLightPool_CompareScore (const void *a, const void *b)
+static qboolean DLightPool_IsBetterScore (const dlight_t *candidate, const dlight_t *current)
 {
-	const dlight_t *dl_a = *(const dlight_t *const *)a;
-	const dlight_t *dl_b = *(const dlight_t *const *)b;
-
-	if (dl_a->last_score > dl_b->last_score)
-		return -1;
-	if (dl_a->last_score < dl_b->last_score)
-		return 1;
-	if (dl_a->spawn_time > dl_b->spawn_time)
-		return -1;
-	if (dl_a->spawn_time < dl_b->spawn_time)
-		return 1;
-	if (dl_a->id < dl_b->id)
-		return -1;
-	if (dl_a->id > dl_b->id)
-		return 1;
-	return 0;
+	if (candidate->last_score > current->last_score)
+		return true;
+	if (candidate->last_score < current->last_score)
+		return false;
+	if (candidate->spawn_time > current->spawn_time)
+		return true;
+	if (candidate->spawn_time < current->spawn_time)
+		return false;
+	if (candidate->id < current->id)
+		return true;
+	return false;
 }
 
 static dlight_t *DLightPool_EvictWorstTransient (double time)
@@ -237,7 +249,7 @@ static dlight_t *DLightPool_AcquireSlot (double time)
 		dlight_t *dl = &dlight_pool.items[i];
 		if (!dl->active)
 			return dl;
-		if (dl->kind == DL_TRANSIENT && (dl->die < time || dl->spawn > time))
+		if (dl->kind == DL_TRANSIENT && !CL_DlightTransientIsLiveAtTime (dl, time, NULL))
 			return dl;
 	}
 
@@ -332,10 +344,12 @@ void DLightPool_NewFrame (double time, int framecount)
 		dlight_t *dl = &dlight_pool.items[i];
 		if (!dl->active)
 			continue;
-		if (dl->kind == DL_TRANSIENT && dl->die < time)
+		qboolean expired = false;
+		if (!CL_DlightTransientIsLiveAtTime (dl, time, &expired))
 		{
+			if (expired)
+				dlight_pool.stats.expired++;
 			dl->active = false;
-			dlight_pool.stats.expired++;
 		}
 	}
 }
@@ -354,12 +368,12 @@ void DLightPool_Decay (float frametime, double time)
 		if (dl->baseradius < 0.f)
 			dl->baseradius = 0.f;
 
-		if (CL_DlightShouldFlicker (dl))
-			dl->radius = dl->baseradius * (1.0f + 0.1f * (float) sin (time * 9.0 + dl->flicker_seed));
-		else
-			dl->radius = dl->baseradius;
-		if (dl->radius < 0.f)
-			dl->radius = 0.f;
+		/*
+		Keep pool state authoritative for raw light values only.
+		Type-specific flicker is applied in R_PushDlightArray so there is a single
+		submit-time source of truth for radius/color modulation.
+		*/
+		dl->radius = dl->baseradius;
 	}
 }
 
@@ -392,12 +406,18 @@ const dlight_t *const *DLightPool_GetActiveList (int *count)
 
 	DLightPool_EnsureScratch (dlight_pool.capacity);
 
+	const int max_scratch = q_min (dlight_pool.capacity, dlight_pool.scratch_capacity);
+	if (!dlight_pool.scratch || max_scratch <= 0)
+		return NULL;
+
 	int found = 0;
 	for (int i = 0; i < dlight_pool.capacity; i++)
 	{
 		dlight_t *dl = &dlight_pool.items[i];
 		if (!CL_DlightIsActive (dl))
 			continue;
+		if (found >= max_scratch)
+			break;
 		dlight_pool.scratch[found++] = dl;
 	}
 
@@ -427,11 +447,23 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		return 0;
 	}
 
-	DLightPool_EnsureScratch (dlight_pool.capacity);
+	const int selection_max = q_min (out_max, dlight_pool.capacity);
+	DLightPool_EnsureScratch (selection_max);
 
-	int found = 0;
+	const int max_scratch = q_min (dlight_pool.capacity, dlight_pool.scratch_capacity);
+	if (!dlight_pool.scratch || max_scratch <= 0)
+	{
+		dlight_pool.stats.submitted = 0;
+		DLightPool_UpdateStats ();
+		return 0;
+	}
+
+	int selected = 0;
 	for (int i = 0; i < dlight_pool.capacity; i++)
 	{
+		if (selected >= max_scratch)
+			break;
+
 		dlight_t *dl = &dlight_pool.items[i];
 		if (!dl->active)
 			continue;
@@ -439,16 +471,14 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		if (dl->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
 			continue;
 
-		if (dl->kind == DL_TRANSIENT && dl->die < time)
+		qboolean expired = false;
+		if (!CL_DlightTransientIsLiveAtTime (dl, time, &expired))
 		{
-			dl->active = false;
-			dlight_pool.stats.expired++;
-			continue;
-		}
-
-		if (dl->spawn > time)
-		{
-			dl->die = 0.f;
+			if (expired)
+			{
+				dlight_pool.stats.expired++;
+				dl->active = false;
+			}
 			continue;
 		}
 
@@ -459,13 +489,32 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 			continue;
 
 		dl->last_score = DLightPool_ScoreLight (dl, time, vieworg);
-		dlight_pool.scratch[found++] = dl;
+
+		if (selected < selection_max)
+		{
+			/* Keep the top-N lights in-place via insertion ordering; this avoids full-array sort work. */
+			int insert_at = selected;
+			while (insert_at > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[insert_at - 1]))
+			{
+				dlight_pool.scratch[insert_at] = dlight_pool.scratch[insert_at - 1];
+				insert_at--;
+			}
+			dlight_pool.scratch[insert_at] = dl;
+			selected++;
+		}
+		else if (selected > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[selected - 1]))
+		{
+			int insert_at = selected - 1;
+			while (insert_at > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[insert_at - 1]))
+			{
+				dlight_pool.scratch[insert_at] = dlight_pool.scratch[insert_at - 1];
+				insert_at--;
+			}
+			dlight_pool.scratch[insert_at] = dl;
+		}
 	}
 
-	if (found > 1)
-		qsort (dlight_pool.scratch, found, sizeof (dlight_pool.scratch[0]), DLightPool_CompareScore);
-
-	const int submit_count = q_min (found, out_max);
+	const int submit_count = selected;
 	for (int i = 0; i < submit_count; i++)
 		out[i] = dlight_pool.scratch[i];
 

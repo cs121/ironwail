@@ -22,19 +22,18 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_main.c
 
 #include "quakedef.h"
-#include "rb_gl.h"
 #include "cl_postfx.h"
 #include "r_postfx.h"
 #include "r_fogvol.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
-#include "render_backend.h"
 #include <float.h>
 #include <math.h>
 
 #define NOISESCALE     (1.0f / 127.0f)
 
 extern gltexture_t *lightmap_dir_texture;
+extern cvar_t r_sun_light;
 
 qboolean	r_cache_thrash;		// compatability
 
@@ -42,91 +41,6 @@ gpuframedata_t r_framedata;
 
 static int r_fogvol_update_called = 0;
 static int r_fogvol_draw_called = 0;
-
-static qboolean r_backend_particles_warned = false;
-static qboolean r_backend_alias_warned = false;
-static qboolean r_backend_world_warned = false;
-static qboolean r_backend_fogvol_warned = false;
-
-static qboolean R_BackendAliasPathAvailable (const char **reason)
-{
-	if (reason)
-		*reason = NULL;
-
-	if (!glprogs.alias[0][0][0][0])
-	{
-		if (reason)
-			*reason = "missing shader program: alias";
-		return false;
-	}
-
-	return true;
-}
-
-static qboolean R_BackendWorldPathAvailable (const char **reason)
-{
-	if (reason)
-		*reason = NULL;
-
-	if (!glprogs.world[0][0][0])
-	{
-		if (reason)
-			*reason = "missing shader program: world";
-		return false;
-	}
-
-	if (!framebufs.scene.fbo)
-	{
-		if (reason)
-			*reason = "missing world framebuffer: scene.fbo";
-		return false;
-	}
-
-	return true;
-}
-
-static qboolean R_BackendParticlesPathAvailable (const char **reason)
-{
-	if (reason)
-		*reason = NULL;
-
-	if (!glprogs.particles[0][0])
-	{
-		if (reason)
-			*reason = "missing shader program: particles";
-		return false;
-	}
-
-	return true;
-}
-
-static qboolean R_BackendFogvolPathAvailable (const char **reason)
-{
-	if (reason)
-		*reason = NULL;
-
-	if (r_fogvol.value <= 0.f)
-		return true;
-
-	if (!glprogs.fogvol || !glprogs.fogvol_upsample || !glprogs.fogvol_temporal)
-	{
-		if (reason)
-			*reason = "missing shader program: fogvol";
-		return false;
-	}
-
-	if (!framebufs.fogvol.fbo[0] || !framebufs.fogvol.fbo[1] || !framebufs.fogvol.color_tex[0] || !framebufs.fogvol.color_tex[1])
-	{
-		if (reason)
-			*reason = "missing fog volume framebuffer resources";
-		return false;
-	}
-
-	return true;
-}
-
-static void R_DrawFogvol_Legacy (void);
-static qboolean R_DrawFogvol_Backend (void);
 
 /* BUG FIX #1 (SSAO/Fog): GL_GenerateSSAOTexture runs inside GL_PostProcess which
  * is called from SCR_UpdateScreen, AFTER Fog_DisableGFog() in R_RenderView.
@@ -138,6 +52,7 @@ static qboolean R_DrawFogvol_Backend (void);
  * Fix: save fog params just before Fog_DisableGFog and pass them explicitly to
  * ssao.frag via uniform 14 .yzw (previously unused, only .x = max_distance). */
 static float r_ssao_saved_fog[4]; /* xyz=fog color, w=fog density */
+static qboolean r_ssao_invalid_warned = false;
 
 float r_autoexposure_debug_exposure = 1.f;
 float r_autoexposure_debug_luminance = 0.f;
@@ -213,6 +128,12 @@ static float GL_ConsoleVisibility (void)
 		return 1.f;
 
 	return CLAMP (0.f, scr_con_current / height, 1.f);
+}
+
+
+static qboolean R_IsUnderwaterContents (int contents)
+{
+	return contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA;
 }
 
 static float GL_TemperedOverbright (float overbright)
@@ -315,16 +236,6 @@ static qboolean gl_srgb_capability_warned = false;
 
 
 cvar_t	r_norefresh = { "r_norefresh","0",CVAR_NONE };
-cvar_t	r_backend = { "r_backend", "0", CVAR_ARCHIVE };
-cvar_t	r_backend_ui = { "r_backend_ui", "1", CVAR_ARCHIVE };
-cvar_t	r_backend_postfx = { "r_backend_postfx", "1", CVAR_ARCHIVE };
-cvar_t	r_backend_particles = { "r_backend_particles", "1", CVAR_ARCHIVE };
-cvar_t	r_backend_alias = { "r_backend_alias", "1", CVAR_ARCHIVE };
-cvar_t	r_backend_world = { "r_backend_world", "1", CVAR_ARCHIVE };
-cvar_t	r_backend_fogvol = { "r_backend_fogvol", "1", CVAR_ARCHIVE };
-cvar_t	r_backend_framehash_debug = { "r_backend_framehash_debug", "0", CVAR_NONE };
-cvar_t	r_backend_framehash_scene = { "r_backend_framehash_scene", "0", CVAR_NONE };
-cvar_t	r_backend_framehash_epsilon = { "r_backend_framehash_epsilon", "0", CVAR_NONE };
 cvar_t	r_drawentities = { "r_drawentities","1",CVAR_NONE };
 cvar_t	r_drawviewmodel = { "r_drawviewmodel","1",CVAR_NONE };
 cvar_t	r_speeds = { "r_speeds","0",CVAR_NONE };
@@ -352,7 +263,6 @@ cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
 cvar_t  r_dlight_debug_spawn = { "r_dlight_debug_spawn", "0", CVAR_NONE };
 cvar_t  r_dlight_debug_models = { "r_dlight_debug_models", "0", CVAR_NONE };
 cvar_t  r_gl_state_validate = { "r_gl_state_validate", "0", CVAR_NONE };
-cvar_t  r_rb_assert_state = { "r_rb_assert_state", "0", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
 cvar_t  r_dlight_mode = { "r_dlight_mode", "0", CVAR_ARCHIVE };
 cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
@@ -498,6 +408,7 @@ cvar_t	r_ssao_upscale_nearest = { "r_ssao_upscale_nearest", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_strength = { "r_ssao_fog_strength", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_power = { "r_ssao_fog_power", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_max_distance = { "r_ssao_max_distance", "1024", CVAR_ARCHIVE };
+cvar_t	r_ssao_validate = { "r_ssao_validate", "0", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
@@ -545,8 +456,6 @@ cvar_t	r_vignette_color_g = { "r_vignette_color_g", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_color_b = { "r_vignette_color_b", "0.0", CVAR_ARCHIVE };
 cvar_t	r_vignette_blend_mode = { "r_vignette_blend_mode", "0", CVAR_ARCHIVE };
 cvar_t	r_vignette_noise = { "r_vignette_noise", "0.0", CVAR_ARCHIVE };
-cvar_t	r_screendarken = { "r_screendarken", "0", CVAR_ARCHIVE };
-cvar_t	r_screendarken_depth = { "r_screendarken_depth", "0.4", CVAR_ARCHIVE };
 cvar_t	r_teleportfx = { "r_teleportfx", "1", CVAR_ARCHIVE };
 cvar_t	r_teleportfx_time = { "r_teleportfx_time", "0.35", CVAR_ARCHIVE };
 
@@ -802,7 +711,7 @@ static GLuint GL_CreateFBO (GLenum target, const GLuint* colors, int numcolors, 
 		Sys_Error ("GL_CreateFBO: too many color buffers (%d)", numcolors);
 
 	GL_GenFramebuffersFunc (1, &fbo);
-	RB_BindFramebuffer (GL_FRAMEBUFFER, fbo);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, fbo, -1, name);
 	GL_LogErrorIfDeveloper ("GL_CreateFBO bind");
 
@@ -837,6 +746,22 @@ static GLuint GL_CreateSimpleFBO (GLenum target, GLuint colors, GLuint depth, GL
 	return GL_CreateFBO (target, colors ? &colors : NULL, colors ? 1 : 0, depth, stencil, name);
 }
 
+static qboolean GL_ValidateSimpleFramebuffer (GLuint fbo, const char* name)
+{
+	if (fbo == 0)
+		return false;
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbo);
+	GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		Con_DPrintf ("%s incomplete (0x%X)\n", name, status);
+		return false;
+	}
+
+	return true;
+}
+
 static qboolean GL_AutoExposurePBOAvailable (void);
 static void GL_AutoExposureDeletePBOs (void);
 static void GL_AutoExposureInitPBOs (void);
@@ -850,6 +775,9 @@ void GL_CreateFrameBuffers (void)
 {
 	GLenum color_format = GL_RGBA16F;
 	GLenum depth_format = GL_DEPTH24_STENCIL8;
+
+	framebufs.ssao.valid = false;
+	r_ssao_invalid_warned = false;
 
 	/* query MSAA limits */
 	glGetIntegerv (GL_MAX_COLOR_TEXTURE_SAMPLES, &framebufs.max_color_tex_samples);
@@ -943,6 +871,15 @@ void GL_CreateFrameBuffers (void)
 		framebufs.ssao.blur_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.blur_tex[i], 0, 0, va ("ssao blur fbo %s", suffix));
 	}
 
+	framebufs.ssao.valid = (framebufs.ssao.noise_tex != 0);
+	for (int i = 0; i < 2 && framebufs.ssao.valid; ++i)
+	{
+		framebufs.ssao.valid = GL_ValidateSimpleFramebuffer (framebufs.ssao.ao_fbo[i], va ("ssao fbo %d", i));
+		framebufs.ssao.valid = framebufs.ssao.valid && GL_ValidateSimpleFramebuffer (framebufs.ssao.blur_fbo[i], va ("ssao blur fbo %d", i));
+	}
+	if (!framebufs.ssao.valid)
+		Con_Warning ("SSAO framebuffer resources are invalid; SSAO disabled until framebuffer rebuild.\n");
+
 	/* scene framebuffer (color + depth + stencil, potentially multisampled) */
 	framebufs.scene.samples = Q_nextPow2 ((int)q_max (1.f, vid_fsaa.value));
 	framebufs.scene.samples = CLAMP (1, framebufs.scene.samples, framebufs.max_samples);
@@ -1012,7 +949,7 @@ void GL_CreateFrameBuffers (void)
 		);
 	}
 
-        RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
+        GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
         GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, 0);
 }
 
@@ -1046,7 +983,7 @@ void GL_DeleteFrameBuffers (void)
 		GL_DeleteFramebuffersFunc (1, &framebufs.ssao.ao_fbo[i]);
 		GL_DeleteFramebuffersFunc (1, &framebufs.ssao.blur_fbo[i]);
 	}
-	RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 
 	GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
 	GL_DeleteNativeTexture (framebufs.resolved_scene.velocity_tex);
@@ -1071,6 +1008,8 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.godrays.mask_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.shafts_tex);
 	GL_DeleteNativeTexture (framebufs.ssao.noise_tex);
+	framebufs.ssao.valid = false;
+	r_ssao_invalid_warned = false;
 	for (int i = 0; i < 2; ++i)
 	{
 		GL_DeleteNativeTexture (framebufs.ssao.ao_tex[i]);
@@ -1126,14 +1065,6 @@ static GLuint GL_GenerateBloomTexture (void)
 	if (!glprogs.bloom_extract || !glprogs.bloom_blur)
 		return fallback;
 
-	/*
-	 * Leaf baseline: PASS_POSTFX.
-	 * Expected baseline when pass is active: opaque blend, no z-test/write,
-	 * no culling, program 0, and texture units 0..2 unbound.
-	 */
-	if (RB_PassActive () && RB_CurrentPass () != PASS_POSTFX)
-		Con_DWarning ("GL_GenerateBloomTexture invoked outside PASS_POSTFX (owners: %s)\n", RB_DebugStateOwnersString ());
-
 	float threshold = q_max (0.f, r_bloom_threshold.value);
 	qboolean msaa = framebufs.scene.samples > 1;
 	GLuint velocity_texture = 0;
@@ -1146,17 +1077,17 @@ static GLuint GL_GenerateBloomTexture (void)
 	float mask_enabled = velocity_texture ? 1.f : 0.f;
 
 	GL_BeginGroup ("Bloom extract");
-	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
-	RB_Viewport (0, 0, width, height);
-	RB_UseProgram (glprogs.bloom_extract);
-	RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
+	glViewport (0, 0, width, height);
+	GL_UseProgram (glprogs.bloom_extract);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, velocity_texture);
 	GL_Uniform4fFunc (0, threshold, mask_enabled, 0.f, 0.f);
 	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
 		(float)vid.width / (float)width,
 		(float)vid.height / (float)height);
-	RB_DrawArrays (GL_TRIANGLES, 0, 3);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_EndGroup ();
 
 	GLuint input_tex = framebufs.bloom.extract_tex;
@@ -1165,15 +1096,15 @@ static GLuint GL_GenerateBloomTexture (void)
 	for (int pass = 0; pass < passes; ++pass)
 	{
 		int target_index = pass & 1;
-		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[target_index]);
-		RB_Viewport (0, 0, width, height);
-		RB_UseProgram (glprogs.bloom_blur);
-		RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[target_index]);
+		glViewport (0, 0, width, height);
+		GL_UseProgram (glprogs.bloom_blur);
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, input_tex);
 		float dirx = (pass & 1) ? 0.f : 1.f;
 		float diry = (pass & 1) ? 1.f : 0.f;
 		GL_Uniform4fFunc (0, 1.f / (float)width, 1.f / (float)height, dirx, diry);
-		RB_DrawArrays (GL_TRIANGLES, 0, 3);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
 		input_tex = framebufs.bloom.pingpong_tex[target_index];
 	}
 	GL_EndGroup ();
@@ -1194,37 +1125,23 @@ static GLuint GL_GenerateBloomTextureFrom (GLuint source_tex, float threshold, f
 	if (!glprogs.bloom_extract || !glprogs.bloom_blur)
 		return fallback;
 
-	/*
-	 * Leaf baseline: PASS_POSTFX (or local standalone fallback path, e.g. dlight composite).
-	 * Expected baseline when pass is active: opaque blend, no z-test/write,
-	 * no culling, program 0, and texture units 0..2 unbound.
-	 */
-	qboolean local_pass = false;
-	if (!RB_PassActive ())
-	{
-		RB_BeginPass (PASS_POSTFX);
-		local_pass = true;
-	}
-	else if (RB_CurrentPass () != PASS_POSTFX)
-		Con_DWarning ("GL_GenerateBloomTextureFrom invoked outside PASS_POSTFX (owners: %s)\n", RB_DebugStateOwnersString ());
-
 	threshold = q_max (0.f, threshold);
 	float radius = q_max (0.f, radius_scale);
 	if (radius <= 0.f)
 		radius = 1.f;
 
 	GL_BeginGroup ("Dlight bloom extract");
-	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
-	RB_Viewport (0, 0, width, height);
-	RB_UseProgram (glprogs.bloom_extract);
-	RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
+	glViewport (0, 0, width, height);
+	GL_UseProgram (glprogs.bloom_extract);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, source_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, 0);
 	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
 	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
 		(float)vid.width / (float)width,
 		(float)vid.height / (float)height);
-	RB_DrawArrays (GL_TRIANGLES, 0, 3);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_EndGroup ();
 
 	GLuint input_tex = framebufs.bloom.extract_tex;
@@ -1233,21 +1150,18 @@ static GLuint GL_GenerateBloomTextureFrom (GLuint source_tex, float threshold, f
 	for (int pass = 0; pass < passes; ++pass)
 	{
 		int target_index = pass & 1;
-		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[target_index]);
-		RB_Viewport (0, 0, width, height);
-		RB_UseProgram (glprogs.bloom_blur);
-		RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[target_index]);
+		glViewport (0, 0, width, height);
+		GL_UseProgram (glprogs.bloom_blur);
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, input_tex);
 		float dirx = (pass & 1) ? 0.f : 1.f;
 		float diry = (pass & 1) ? 1.f : 0.f;
 		GL_Uniform4fFunc (0, radius / (float)width, radius / (float)height, dirx, diry);
-		RB_DrawArrays (GL_TRIANGLES, 0, 3);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
 		input_tex = framebufs.bloom.pingpong_tex[target_index];
 	}
 	GL_EndGroup ();
-
-	if (local_pass)
-		RB_EndPass ();
 
 	return input_tex;
 }
@@ -1351,8 +1265,9 @@ static void R_CompositeDlightBuffer (void)
 		return;
 
 	float scale = q_max (0.f, r_dlight_scale.value);
-	float bloom_enabled = q_max (0.f, r_dlight_bloom.value);
-	float bloom_scale = q_max (0.f, r_dlight_bloom_scale.value);
+	float bloom_master = q_max (0.f, r_bloom.value);
+	float bloom_enabled = (bloom_master > 0.f) ? q_max (0.f, r_dlight_bloom.value) : 0.f;
+	float bloom_scale = q_max (0.f, r_dlight_bloom_scale.value) * bloom_master;
 	float bloom_radius = q_max (0.f, r_dlight_bloom_radius.value);
 	float bloom_threshold = q_max (0.f, r_dlight_bloom_threshold.value);
 
@@ -1360,11 +1275,11 @@ static void R_CompositeDlightBuffer (void)
 		return;
 
 	GL_BeginGroup ("Dlight composite");
-	RB_UseProgram (glprogs.dlight_composite);
-	RB_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_UseProgram (glprogs.dlight_composite);
+	GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.dlight.tex);
 	GL_Uniform1fFunc (0, scale);
-	RB_DrawArrays (GL_TRIANGLES, 0, 3);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_EndGroup ();
 
 	if (bloom_enabled > 0.f && bloom_scale > 0.f)
@@ -1373,11 +1288,11 @@ static void R_CompositeDlightBuffer (void)
 		if (bloom_tex)
 		{
 			GL_BeginGroup ("Dlight bloom composite");
-			RB_UseProgram (glprogs.dlight_composite);
-			RB_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_UseProgram (glprogs.dlight_composite);
+			GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, bloom_tex);
 			GL_Uniform1fFunc (0, bloom_scale);
-			RB_DrawArrays (GL_TRIANGLES, 0, 3);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 		}
 	}
@@ -1406,16 +1321,15 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		return 0;
 	if (!glprogs.ssao || !framebufs.composite.depth_stencil_tex || !framebufs.ssao.noise_tex)
 		return 0;
-	if (framebufs.ssao.ao_fbo[0] == 0 || framebufs.ssao.ao_fbo[1] == 0)
+	if (!framebufs.ssao.valid)
+	{
+		if (!r_ssao_invalid_warned)
+		{
+			Con_Warning ("Skipping SSAO: framebuffer resources are invalid (rebuild required).\n");
+			r_ssao_invalid_warned = true;
+		}
 		return 0;
-
-	/*
-	 * Leaf baseline: PASS_POSTFX.
-	 * Expected baseline when pass is active: opaque blend, no z-test/write,
-	 * no culling, program 0, and texture units 0..2 unbound.
-	 */
-	if (RB_PassActive () && RB_CurrentPass () != PASS_POSTFX)
-		Con_DWarning ("GL_GenerateSSAOTexture invoked outside PASS_POSTFX (owners: %s)\n", RB_DebugStateOwnersString ());
+	}
 
 	int samples = (int)Q_rint (r_ssao_samples.value);
 	samples = CLAMP (4, samples, SSAO_MAX_SAMPLES);
@@ -1429,6 +1343,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int height = framebufs.ssao.height[index];
 	if (width <= 0 || height <= 0)
 		return 0;
+
+	r_ssao_invalid_warned = false;
 
 	float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 	float depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
@@ -1465,13 +1381,15 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	}
 
 	GL_BeginGroup ("SSAO");
-	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
 	GL_LogErrorIfDeveloper ("SSAO bind FBO");
+	if (r_ssao_validate.value > 0.f)
 	{
 		GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
 		if (status != GL_FRAMEBUFFER_COMPLETE)
 		{
-			Con_DPrintf ("SSAO FBO incomplete (0x%X)\n", status);
+			Con_DPrintf ("SSAO runtime validation failed (0x%X)\n", status);
+			framebufs.ssao.valid = false;
 			GL_EndGroup ();
 			return 0;
 		}
@@ -1479,7 +1397,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	// SSAO FIX: Reset viewport/scissor/color mask per pass to avoid banding from stale state.
 	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	RB_Viewport (0, 0, width, height);
+	glViewport (0, 0, width, height);
 	{
 		const float clear[4] = { 1.f, 1.f, 1.f, 1.f };
 		GL_ClearBufferfvFunc (GL_COLOR, 0, clear);
@@ -1487,8 +1405,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 	GL_LogSSAODepthInfo (framebufs.composite.depth_stencil_tex, framebufs.ssao.ao_tex[index], width, height, view_min_x, view_min_y, view_max_x, view_max_y);
 
-	RB_UseProgram (glprogs.ssao);
-	RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_UseProgram (glprogs.ssao);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.ssao.noise_tex);
 	GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, r_matproj);
@@ -1525,7 +1443,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform4fFunc (14, max_distance, r_ssao_saved_fog[3],
 		r_ssao_saved_fog[0] * 0.299f + r_ssao_saved_fog[1] * 0.587f + r_ssao_saved_fog[2] * 0.114f,
 		0.f);
-	RB_DrawArrays (GL_TRIANGLES, 0, 3);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_LogErrorIfDeveloper ("SSAO draw");
 
 	qboolean allow_blur = (r_ssao_blur.value > 0.f) && (debug_mode_i < 0);
@@ -1538,7 +1456,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		float depth_threshold_scale = 0.02f;
 		float blur_bilateral = (r_ssao_blur_bilateral.value > 0.f) ? 1.f : 0.f;
 
-		RB_UseProgram (glprogs.ssao_blur);
+		GL_UseProgram (glprogs.ssao_blur);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 		GL_Uniform4fFunc (0,
 			1.f / (float)vid.width,
@@ -1557,22 +1475,22 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		GL_Uniform1iFunc (7, 0);
 		GL_UniformMatrix4fvFunc (8, 1, GL_FALSE, r_matinvproj);
 
-		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
 		GL_LogErrorIfDeveloper ("SSAO blur bind FBO");
 		GL_SetScissorEnabled (false);
 		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		RB_Viewport (0, 0, width, height);
+		glViewport (0, 0, width, height);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.ao_tex[index]);
 		GL_Uniform4fFunc (2, 1.f, 0.f, 0.f, 0.f);
-		RB_DrawArrays (GL_TRIANGLES, 0, 3);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
 		GL_LogErrorIfDeveloper ("SSAO blur horizontal draw");
 
-		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
 		GL_SetScissorEnabled (false);
 		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.blur_tex[index]);
 		GL_Uniform4fFunc (2, 0.f, 1.f, 0.f, 0.f);
-		RB_DrawArrays (GL_TRIANGLES, 0, 3);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
 		GL_LogErrorIfDeveloper ("SSAO blur vertical draw");
 	}
 
@@ -1734,8 +1652,8 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 	float mask_knee = q_max (0.f, r_godrays_mask_knee.value);
 
 	GL_BeginGroup ("Godrays source");
-	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.godrays.source_fbo);
-	RB_Viewport (0, 0, width, height);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.source_fbo);
+	glViewport (0, 0, width, height);
 	{
 		const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
@@ -1751,13 +1669,13 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 			float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 			float sky_depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
 			R_ParseGodraysSkyTint (tint);
-			RB_UseProgram (glprogs.godrays_source_sky);
-			RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_UseProgram (glprogs.godrays_source_sky);
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 			GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, sky_threshold);
 			GL_Uniform4fFunc (1, tint[0], tint[1], tint[2], 0.f);
 			GL_Uniform4fFunc (2, mask_knee, 0.f, 0.f, 0.f);
-			RB_DrawArrays (GL_TRIANGLES, 0, 3);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
 		}
 	}
 
@@ -1767,8 +1685,8 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 		entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
 		if (count > 0)
 		{
-			RB_UseProgram (glprogs.godrays_source);
-			RB_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (6));
+			GL_UseProgram (glprogs.godrays_source);
+			GL_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (6));
 			GL_Uniform4fFunc (0,
 				q_max (0.f, r_godrays_emissive_intensity.value),
 				q_max (0.f, r_godrays_lighttex_intensity.value),
@@ -1800,14 +1718,6 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	if (!R_GodraysReady ())
 		return fallback;
 
-	/*
-	 * Leaf baseline: PASS_POSTFX.
-	 * Expected baseline when pass is active: opaque blend, no z-test/write,
-	 * no culling, program 0, and texture units 0..2 unbound.
-	 */
-	if (RB_PassActive () && RB_CurrentPass () != PASS_POSTFX)
-		Con_DWarning ("GL_GenerateGodraysTexture invoked outside PASS_POSTFX (owners: %s)\n", RB_DebugStateOwnersString ());
-
 	qboolean emit_sky = (r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f && glprogs.godrays_source_sky);
 	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);
 	if (!emit_sky && !emit_brush)
@@ -1833,8 +1743,8 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
 
 	GL_BeginGroup ("Godrays scatter");
-	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
-	RB_Viewport (0, 0, width, height);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
+	glViewport (0, 0, width, height);
 	{
 		const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
@@ -1852,31 +1762,31 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_GenerateGodraysSource (true, false);
 
 			GL_BeginGroup ("Godrays mask (sky)");
-			RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
-			RB_Viewport (0, 0, width, height);
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
+			glViewport (0, 0, width, height);
 			{
 				const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 				GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 			}
-			RB_UseProgram (glprogs.godrays_mask);
-			RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_UseProgram (glprogs.godrays_mask);
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.source_tex);
 			GL_Uniform4fFunc (0, threshold, sky_softness, 1.f, 0.f);
 			GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
 				(float)vid.width / (float)width,
 				(float)vid.height / (float)height);
-			RB_DrawArrays (GL_TRIANGLES, 0, 3);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 
 			GL_BeginGroup ("Godrays scatter (sky)");
-			RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
-			RB_Viewport (0, 0, width, height);
-			RB_UseProgram (glprogs.godrays);
-			RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
+			glViewport (0, 0, width, height);
+			GL_UseProgram (glprogs.godrays);
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
-			RB_DrawArrays (GL_TRIANGLES, 0, 3);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 			first_pass = false;
 		}
@@ -1886,31 +1796,31 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_GenerateGodraysSource (false, true);
 
 			GL_BeginGroup ("Godrays mask (brush)");
-			RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
-			RB_Viewport (0, 0, width, height);
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
+			glViewport (0, 0, width, height);
 			{
 				const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 				GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 			}
-			RB_UseProgram (glprogs.godrays_mask);
-			RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_UseProgram (glprogs.godrays_mask);
+			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.source_tex);
 			GL_Uniform4fFunc (0, threshold, softness, sharpness, 0.f);
 			GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
 				(float)vid.width / (float)width,
 				(float)vid.height / (float)height);
-			RB_DrawArrays (GL_TRIANGLES, 0, 3);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 
 			GL_BeginGroup ("Godrays scatter (brush)");
-			RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
-			RB_Viewport (0, 0, width, height);
-			RB_UseProgram (glprogs.godrays);
-			RB_SetState ((first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
+			glViewport (0, 0, width, height);
+			GL_UseProgram (glprogs.godrays);
+			GL_SetState ((first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
-			RB_DrawArrays (GL_TRIANGLES, 0, 3);
+			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 		}
 	}
@@ -1980,12 +1890,12 @@ static void GL_PostProcessFallback (void)
 	if (!pixels)
 		return;
 
-	RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
-	RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
+	glReadBuffer (GL_COLOR_ATTACHMENT0);
 	glPixelStorei (GL_PACK_ALIGNMENT, 1);
 	glReadPixels (0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-	RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
-	RB_ReadBuffer (GL_BACK);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	glReadBuffer (GL_BACK);
 	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
 	{
 		qboolean srgb_output = GL_UseSRGBFramebuffer ();
@@ -2042,7 +1952,7 @@ static void GL_PostProcessFallback (void)
 
 	glDisable (GL_DEPTH_TEST);
 	glDisable (GL_BLEND);
-        RB_UseProgram (0);
+        GL_UseProgram (0);
 	glMatrixMode (GL_PROJECTION);
 	glPushMatrix ();
 	glLoadIdentity ();
@@ -2132,12 +2042,12 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 	if (width <= 0 || height <= 0 || pixel_count > (int)countof (luminance_samples))
 		return false;
 
-	RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
-	RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.autoexposure.fbo);
+	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
+	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.autoexposure.fbo);
 	GL_BlitFramebufferFunc (0, 0, vid.width, vid.height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
-	RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.autoexposure.fbo);
-	RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
+	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.autoexposure.fbo);
+	glReadBuffer (GL_COLOR_ATTACHMENT0);
 	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment);
 	glPixelStorei (GL_PACK_ALIGNMENT, 1);
 
@@ -2169,8 +2079,8 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 
 		if (!got_data)
 		{
-			RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
-			RB_ReadBuffer (GL_BACK);
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+			glReadBuffer (GL_BACK);
 			return false;
 		}
 	}
@@ -2184,8 +2094,8 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 		glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, pixels);
 		glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
 	}
-	RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
-	RB_ReadBuffer (GL_BACK);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	glReadBuffer (GL_BACK);
 
 	for (int i = 0; i < pixel_count; ++i)
 	{
@@ -2293,6 +2203,7 @@ static float GL_UpdateAutoExposure (void)
 void GL_PostProcess (void)
 {
 	int palidx, variant;
+	float saturation;
 	float dither;
 	qboolean dof_enabled;
 	float dof_focus, dof_range, dof_strength;
@@ -2312,9 +2223,6 @@ void GL_PostProcess (void)
 	float motion_min_velocity;
 	float motion_depth_threshold;
 	int motion_max_samples;
-	qboolean screen_darken_enabled;
-	float screen_darken_strength;
-	float screen_darken_depth;
 	float teleport_fade;
 	float teleport_blur;
 	qboolean godrays_enabled;
@@ -2351,29 +2259,26 @@ void GL_PostProcess (void)
 	float dv_quality;
 	float dv_debug;
 	float dv_time;
-	r_color_saturation.value = CLAMP (0.9f, r_color_saturation.value, 1.2f);
+	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (!GL_NeedsPostprocess ())
 		return;
 	if (framebufs.composite.fbo == 0 || framebufs.composite.color_tex == 0)
 		return;
 	if (!framesetup.composite_ready)
 	{
-		RB_BeginPass (PASS_POSTFX);
 		GL_BeginGroup ("Postprocess backbuffer copy");
-		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, 0);
-		RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
-		RB_ReadBuffer (GL_BACK);
-		RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, 0);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+		glReadBuffer (GL_BACK);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, vid.width, vid.height, 0, 0, vid.width, vid.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-		RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
-		RB_DrawBuffer (GL_BACK);
-		RB_ReadBuffer (GL_BACK);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+		glDrawBuffer (GL_BACK);
+		glReadBuffer (GL_BACK);
 		framesetup.composite_ready = true;
 		GL_EndGroup ();
-		RB_EndPass ();
 	}
 
-	RB_BeginPass (PASS_POSTFX);
 	GL_BeginGroup ("Postprocess");
 
 	R_PostFX_GetState (&postfx_state);
@@ -2399,9 +2304,6 @@ void GL_PostProcess (void)
 	float bloom_intensity_effective = bloom_intensity;
 	float exposure = q_max (0.f, r_tonemap_exposure.value);
 	float tonemap_mode = q_max (0.f, r_tonemap.value);
-	screen_darken_strength = q_min (1.f, q_max (0.f, r_screendarken.value));
-	screen_darken_depth = q_max (0.f, r_screendarken_depth.value);
-	screen_darken_enabled = (screen_darken_strength > 0.f);
 	teleport_fade = 0.f;
 	teleport_blur = 0.f;
 	{
@@ -2429,10 +2331,18 @@ void GL_PostProcess (void)
 			exposure *= auto_exposure;
 	}
 	r_autoexposure_debug_exposure = exposure;
-	if (r_postfx_bloom_mode.value > 0.f)
-		bloom_intensity_effective = q_max (bloom_intensity, postfx_bloom_boost);
+	if (bloom_intensity > 0.f)
+	{
+		if (r_postfx_bloom_mode.value > 0.f)
+			bloom_intensity_effective = q_max (bloom_intensity, postfx_bloom_boost);
+		else
+			bloom_intensity_effective = bloom_intensity + postfx_bloom_boost;
+	}
 	else
-		bloom_intensity_effective = bloom_intensity + postfx_bloom_boost;
+	{
+		bloom_intensity_effective = 0.f;
+		postfx_bloom_boost = 0.f;
+	}
 	bloom_intensity_effective = q_max (0.f, bloom_intensity_effective);
 
 	if (r_postfx_lut_debug_id.value > 0.f)
@@ -2524,8 +2434,8 @@ void GL_PostProcess (void)
 	}
 	motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
 
-	RB_BindFramebuffer (GL_FRAMEBUFFER, 0);
-	RB_Viewport (glx, gly, glwidth, glheight);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	glViewport (glx, gly, glwidth, glheight);
 	{
 		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
 		qboolean linear_debug = (debug_mode == 2);
@@ -2538,11 +2448,10 @@ void GL_PostProcess (void)
 	{
 		GL_PostProcessFallback ();
 		GL_EndGroup ();
-		RB_EndPass ();
 		return;
 	}
-	RB_UseProgram (glprogs.postprocess[variant]);
-	RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_UseProgram (glprogs.postprocess[variant]);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
 	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
@@ -2552,6 +2461,24 @@ void GL_PostProcess (void)
 	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, godrays_source);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, ssao_texture);
 	GL_BindNative (GL_TEXTURE9, GL_TEXTURE_2D_ARRAY, R_PostFX_GetLUTTexture ());
+	/* Bind fogvol composite texture at slot 10 for SSAO suppression in postprocess.frag.
+	 * postprocess.frag samples this to derive per-pixel volumetric transmittance and
+	 * suppress AO where fog is dense — replacing the inaccurate analytical fog formula
+	 * (exp2(-density*dist^2)) which cannot model spatial noise or color variation.
+	 * composite_tex[0] holds the upsampled full-res fogvol output from R_FogVol_Render.
+	 * Passing 0 when fogvol is inactive leaves the binding as the previous frame's tex
+	 * or driver default (black), which FogVolTransmittance treats as transmittance=1. */
+	{
+		GLuint fogvol_composite = 0;
+		float  fogvol_active    = 0.f;
+		if (r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
+		{
+			fogvol_composite = R_FogVol_GetCompositeTex ();
+			fogvol_active    = (fogvol_composite != 0) ? 1.f : 0.f;
+		}
+		GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, fogvol_composite);
+		GL_Uniform4fFunc (28, fogvol_active, 0.f, 0.f, 0.f);
+	}
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 	{
@@ -2581,11 +2508,11 @@ void GL_PostProcess (void)
 		q_min (2.f, q_max (0.f, r_vignette_blend_mode.value)));
 	GL_Uniform4fFunc (10,
 	q_min (0.1f, q_max (0.f, r_vignette_noise.value)),
-	screen_darken_strength,
-	screen_darken_depth,
+	0.f,
+	0.f,
 	0.f);
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
-	GL_Uniform1fFunc (12, CLAMP (0.9f, r_color_saturation.value, 1.2f));
+	GL_Uniform1fFunc (12, saturation);
 	GL_Uniform1fFunc (20, q_max (0.1f, r_color_midtone.value));
 	{
 		float black_lift = CLAMP (0.f, r_tonemap_black_lift.value, 0.05f);
@@ -2593,7 +2520,11 @@ void GL_PostProcess (void)
 		GL_Uniform4fFunc (27, black_lift, black_lift_strength, 0.f, 0.f);
 	}
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
-	GL_Uniform4fFunc (22, postfx_lut_strength, postfx_state.underwater_grade_strength, postfx_state.underwater_fog_strength, postfx_vignette_softness);
+	GL_Uniform4fFunc (22,
+		postfx_lut_strength,
+		postfx_state.underwater_postfx_active ? postfx_state.underwater_grade_strength : 0.f,
+		postfx_state.underwater_postfx_active ? postfx_state.underwater_fog_strength : 0.f,
+		postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
 	/* BUG FIX #1: uniform 24 .w was unused (0). Now carries scene fog density from
 	 * r_ssao_saved_fog[3] so postprocess.frag SampleSSAO fog-damping works correctly.
@@ -2637,7 +2568,7 @@ void GL_PostProcess (void)
 	{
 		qboolean ssao_needs_depth = (ssao_texture != 0
 			&& (r_ssao_halfres.value > 0.f || ssao_debug_mode == 8.f || ssao_fog_strength > 0.f));
-		if (framebufs.composite.depth_stencil_tex && (dof_enabled || screen_darken_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_needs_depth))
+		if (framebufs.composite.depth_stencil_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_needs_depth))
 			depth_texture = framebufs.composite.depth_stencil_tex;
 	}
 	GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_texture);
@@ -2662,10 +2593,9 @@ void GL_PostProcess (void)
 		GL_Uniform4fFunc (2, dof_znear, dof_zfar, gl_clipcontrol_able ? 1.f : 0.f, 0.f);
 	}
 
-	RB_DrawArrays (GL_TRIANGLES, 0, 3);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();
-	RB_EndPass ();
 }
 
 
@@ -3183,9 +3113,11 @@ R_SetFrustum
 */
 void R_SetFrustum (void)
 {
+	static qboolean warned_invalid_farclip = false;
 	float w, h, d;
 	float znear, zfar;
 	float logznear, logzfar;
+	float logrange;
 	float translation[16];
 	float rotation[16];
 	int i;
@@ -3196,6 +3128,19 @@ void R_SetFrustum (void)
 	d = 12.f * q_min (w, h);
 	znear = CLAMP (0.5f, d, 4.f);
 	zfar = gl_farclip.value;
+	if (zfar <= znear || zfar <= 0.f)
+	{
+		const float sanitized_zfar = q_max (znear + 1.f, 1.f);
+
+		if (!warned_invalid_farclip)
+		{
+			Con_DPrintf ("gl_farclip %0.4f is invalid for znear %0.4f; clamping to %0.4f\n",
+				zfar, znear, sanitized_zfar);
+			warned_invalid_farclip = true;
+		}
+
+		zfar = sanitized_zfar;
+	}
 
 	view_znear = znear;
 	view_zfar = zfar;
@@ -3232,10 +3177,14 @@ void R_SetFrustum (void)
 
 	logznear = log2f (znear);
 	logzfar = log2f (zfar);
-        memcpy (r_framedata.viewproj, r_matviewproj, 16 * sizeof (float));
-        memcpy (r_framedata.view, r_matview, 16 * sizeof (float));
-        r_framedata.zparams[0] = LIGHT_TILES_Z / (logzfar - logznear);
-        r_framedata.zparams[1] = -r_framedata.zparams[0] * logznear;
+	logrange = logzfar - logznear;
+	if (fabsf (logrange) < 1e-6f)
+		logrange = (logrange < 0.f) ? -1e-6f : 1e-6f;
+
+	memcpy (r_framedata.viewproj, r_matviewproj, 16 * sizeof (float));
+	memcpy (r_framedata.view, r_matview, 16 * sizeof (float));
+	r_framedata.zparams[0] = LIGHT_TILES_Z / logrange;
+	r_framedata.zparams[1] = -r_framedata.zparams[0] * logznear;
 }
 
 /*
@@ -3258,7 +3207,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (R_DoFEnabled ())
 		return true;
 
-	if (r_fogvol.value > 0.f)
+	if (r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
 		return true;
 
 	return false;
@@ -3271,11 +3220,12 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
+	float saturation;
+
 	if (r_postfx.value <= 0.f)
 		return false;
 
-        float saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
-	r_color_saturation.value = saturation;
+	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
 		return true;
 	if (r_debug_colorspace.value > 0.f)
@@ -3288,7 +3238,7 @@ qboolean GL_NeedsPostprocess (void)
 		return true;
 	if (r_godrays.value > 0.f)
 		return true;
-	if (r_fogvol.value > 0.f)
+	if (r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
 		return true;
 	return false;
 }
@@ -3320,26 +3270,26 @@ void R_SetupGL (void)
 		GLuint target = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0u;
 		qboolean srgb_output = (target == 0u) && GL_UseSRGBFramebuffer ();
 
-		RB_BindFramebuffer (GL_FRAMEBUFFER, target);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, target);
 		GL_SetFramebufferSRGB (srgb_output);
 		framesetup.scene_fbo = framebufs.composite.fbo;
 		framesetup.oit_fbo = framebufs.oit.fbo_composite;
 		framesetup.composite_ready = (target == framebufs.composite.fbo);
 		if (target)
 		{
-			RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
-			RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
 		else
 		{
-			RB_DrawBuffer (GL_BACK);
-			RB_ReadBuffer (GL_BACK);
+			glDrawBuffer (GL_BACK);
+			glReadBuffer (GL_BACK);
 		}
-		RB_Viewport (glx + r_refdef.vrect.x, gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height, r_refdef.vrect.width, r_refdef.vrect.height);
+		glViewport (glx + r_refdef.vrect.x, gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height, r_refdef.vrect.width, r_refdef.vrect.height);
 	}
 	else
 	{
-		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.scene.fbo);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.scene.fbo);
 		GL_SetFramebufferSRGB (false);
 		framesetup.scene_fbo = framebufs.scene.fbo;
 		framesetup.oit_fbo = framebufs.oit.fbo_scene;
@@ -3348,14 +3298,14 @@ void R_SetupGL (void)
 		{
 			GLuint buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
 			GL_DrawBuffersFunc (2, buffers);
-			RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
 		else
 		{
-			RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
-			RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
-		RB_Viewport (0, 0, r_refdef.vrect.width / r_refdef.scale, r_refdef.vrect.height / r_refdef.scale);
+		glViewport (0, 0, r_refdef.vrect.width / r_refdef.scale, r_refdef.vrect.height / r_refdef.scale);
 	}
 }
 
@@ -3371,9 +3321,9 @@ void R_Clear (void)
 	if (gl_clear.value)
 		clearbits |= GL_COLOR_BUFFER_BIT;
 
-	RB_SetState (glstate & ~GLS_NO_ZWRITE); // make sure depth writes are enabled
+	GL_SetState (glstate & ~GLS_NO_ZWRITE); // make sure depth writes are enabled
 	glStencilMask (~0u);
-	RB_Clear (clearbits);
+	glClear (clearbits);
 }
 
 /*
@@ -3447,9 +3397,8 @@ void R_GLStateDump (const char *tag)
 	glGetIntegerv (GL_TEXTURE_BINDING_2D, &tex2d_2);
 	GL_ActiveTextureFunc (prev_active_texture);
 
-	Con_Printf ("GL_STATE[%s] %s prog=%d acttex=%d fbo(draw/read)=%d/%d vp=(%d %d %d %d) sci=%d box=(%d %d %d %d) blend=%d depth=%d depthmask=%d cull=%d srgb=%d ubo(0/1/2)=%d/%d/%d tex2d(0/1/2)=%d/%d/%d\n",
+	Con_Printf ("GL_STATE[%s] prog=%d acttex=%d fbo(draw/read)=%d/%d vp=(%d %d %d %d) sci=%d box=(%d %d %d %d) blend=%d depth=%d depthmask=%d cull=%d srgb=%d ubo(0/1/2)=%d/%d/%d tex2d(0/1/2)=%d/%d/%d\n",
 		tag,
-		RB_DebugStateOwnersString (),
 		program,
 		active_texture - GL_TEXTURE0,
 		draw_fbo,
@@ -3537,6 +3486,30 @@ void R_SetupView (void)
         r_framedata.shader_params[2] = 0.f;
         r_framedata.shader_params[3] = 0.f;
 
+	{
+		vec3_t sun_dir;
+		vec3_t sun_color;
+		float sun_intensity = 1.f;
+		qboolean sun_enabled = (r_sun_light.value > 0.f) && R_GetSun (sun_dir, NULL, sun_color, &sun_intensity);
+
+		if (!sun_enabled)
+		{
+			VectorSet (sun_dir, 0.f, 0.f, -1.f);
+			VectorSet (sun_color, 1.f, 1.f, 1.f);
+			sun_intensity = 1.f;
+		}
+
+		r_framedata.sun_dir_enabled[0] = sun_dir[0];
+		r_framedata.sun_dir_enabled[1] = sun_dir[1];
+		r_framedata.sun_dir_enabled[2] = sun_dir[2];
+		r_framedata.sun_dir_enabled[3] = sun_enabled ? 1.f : 0.f;
+
+		r_framedata.sun_color_intensity[0] = sun_color[0];
+		r_framedata.sun_color_intensity[1] = sun_color[1];
+		r_framedata.sun_color_intensity[2] = sun_color[2];
+		r_framedata.sun_color_intensity[3] = q_max (0.f, sun_intensity);
+	}
+
 	double prev_delta = cl.time - r_prev_frame_time;
 	qboolean prev_valid = r_prev_frame_valid && prev_delta > 0.0;
 
@@ -3602,27 +3575,32 @@ void R_SetupView (void)
 	water_warp = false;
 	{
 		int contents = r_viewleaf->contents;
-		qboolean forced = M_ForcedUnderwater ();
-		qboolean underwater_active = (contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA || cl.forceunderwater || forced);
-	if (r_waterwarp.value)
-	{
-		if (underwater_active)
+		qboolean submerged = R_IsUnderwaterContents (contents);
+		qboolean forced = (cl.forceunderwater || M_ForcedUnderwater ());
+		qboolean underwater_active = (submerged || forced);
+		qboolean underwater_postfx_active = underwater_active;
+
+		if (r_waterwarp.value && underwater_active)
 		{
 			double t = forced ? realtime : cl.time;
+
 			if (r_waterwarp.value > 1.f)
 			{
-				//variance is a percentage of width, where width = 2 * tan(fov / 2) otherwise the effect is too dramatic at high FOV and too subtle at low FOV.  what a mess!
+				// Legacy warp has priority over postfx underwater treatment when animated FOV warp is active.
+				// variance is a percentage of width, where width = 2 * tan(fov / 2) otherwise the effect is too dramatic at high FOV and too subtle at low FOV. what a mess!
 				r_fovx = atan (tan (DEG2RAD (r_refdef.fov_x) / 2) * (0.97 + sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
 				r_fovy = atan (tan (DEG2RAD (r_refdef.fov_y) / 2) * (1.03 - sin (t * 1.5) * 0.03)) * 2 / M_PI_DIV_180;
+				underwater_postfx_active = false;
 			}
 			else
 			{
 				water_warp = true;
 			}
 		}
-	}
-	// TODO(postfx): hook underwater contents for postfx stack here.
-	CL_PostFX_SetContents (contents, underwater_active);
+
+		// Postfx stack consumes deterministic underwater state here.
+		// CL_PostFX_Frame aggregates it and GL_PostProcess applies the resulting uniforms/LUT selection.
+		CL_PostFX_SetContents (contents, underwater_active, underwater_postfx_active);
 	}
 	//johnfitz
 
@@ -3721,21 +3699,6 @@ static void R_DrawWater (qboolean translucent)
 
 }
 
-
-static entity_t **r_alias_dispatch_entlist;
-static int r_alias_dispatch_count;
-
-static void R_DrawAliasBatch_Legacy (void)
-{
-	R_DrawAliasModels (r_alias_dispatch_entlist, r_alias_dispatch_count);
-}
-
-static qboolean R_DrawAliasBatch_Backend (void)
-{
-	R_DrawAliasModels (r_alias_dispatch_entlist, r_alias_dispatch_count);
-	return true;
-}
-
 /*
 =============
 R_DrawEntitiesOnList
@@ -3745,18 +3708,12 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 {
 	int* ofs;
 	entity_t** entlist = cl_sorted_visedicts;
-	const char *alias_unavailable_reason = NULL;
-	qboolean alias_backend_available;
 
 	GL_BeginGroup (alphapass ? "Translucent entities" : "Opaque entities");
 
 	ofs = cl_modtype_ofs + (alphapass ? 1 : 0);
 	R_DrawBrushModels (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 1] - ofs[2 * mod_brush]);
-	r_alias_dispatch_entlist = entlist + ofs[2 * mod_alias];
-	r_alias_dispatch_count = ofs[2 * mod_alias + 1] - ofs[2 * mod_alias];
-	alias_backend_available = R_BackendAliasPathAvailable (&alias_unavailable_reason);
-	RBackend_DispatchBlock ("alias", &r_backend_alias, alias_backend_available, alias_unavailable_reason,
-		R_DrawAliasBatch_Backend, R_DrawAliasBatch_Legacy, &r_backend_alias_warned);
+	R_DrawAliasModels (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 1] - ofs[2 * mod_alias]);
 	if (!alphapass)
 		R_DrawSpriteModels (entlist + cl_modtype_ofs[2 * mod_sprite], cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite]);
 
@@ -3795,8 +3752,6 @@ R_DrawViewModel -- johnfitz -- gutted
 void R_DrawViewModel (void)
 {
 	entity_t* e = &cl.viewent;
-	const char *alias_unavailable_reason = NULL;
-	qboolean alias_backend_available;
 
 	if (!R_IsViewModelVisible ())
 		return;
@@ -3805,11 +3760,7 @@ void R_DrawViewModel (void)
 
 	// hack the depth range to prevent view model from poking into walls
 	GL_DepthRange (ZRANGE_VIEWMODEL);
-	r_alias_dispatch_entlist = &e;
-	r_alias_dispatch_count = 1;
-	alias_backend_available = R_BackendAliasPathAvailable (&alias_unavailable_reason);
-	RBackend_DispatchBlock ("alias", &r_backend_alias, alias_backend_available, alias_unavailable_reason,
-		R_DrawAliasBatch_Backend, R_DrawAliasBatch_Legacy, &r_backend_alias_warned);
+	R_DrawAliasModels (&e, 1);
 	GL_DepthRange (ZRANGE_FULL);
 
 	GL_EndGroup ();
@@ -3844,11 +3795,11 @@ static void R_FlushDebugGeometry (void)
 		GLbyte* ofs;
 		unsigned int state;
 
-		RB_UseProgram (glprogs.debug3d);
+		GL_UseProgram (glprogs.debug3d);
 		state = GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2);
 		if (!debugztest)
 			state |= GLS_NO_ZTEST;
-		RB_SetState (state);
+		GL_SetState (state);
 
 		GL_Upload (GL_ARRAY_BUFFER, debugverts, sizeof (debugverts[0]) * numdebugverts, &buf, &ofs);
 		GL_BindBuffer (GL_ARRAY_BUFFER, buf);
@@ -3857,7 +3808,7 @@ static void R_FlushDebugGeometry (void)
 
 		GL_Upload (GL_ELEMENT_ARRAY_BUFFER, debugidx, sizeof (debugidx[0]) * numdebugidx, &buf, &ofs);
 		GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-		RB_DrawElements (GL_LINES, numdebugidx, GL_UNSIGNED_SHORT, ofs);
+		glDrawElements (GL_LINES, numdebugidx, GL_UNSIGNED_SHORT, ofs);
 	}
 
 	numdebugverts = 0;
@@ -4665,7 +4616,7 @@ static void R_BeginTranslucency (void)
 
 	if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
 	{
-		RB_BindFramebuffer (GL_FRAMEBUFFER, framesetup.oit_fbo);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.oit_fbo);
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
 		GL_ClearBufferfvFunc (GL_COLOR, 1, ones);
 
@@ -4687,17 +4638,17 @@ static void R_EndTranslucency (void)
 	{
 		GL_BeginGroup ("OIT resolve");
 
-		RB_BindFramebuffer (GL_FRAMEBUFFER, framesetup.scene_fbo);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
 
 		glStencilFunc (GL_EQUAL, 2, 2);
 		glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
 
-		RB_UseProgram (glprogs.oit_resolve[framebufs.scene.samples > 1]);
-		RB_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		GL_UseProgram (glprogs.oit_resolve[framebufs.scene.samples > 1]);
+		GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		GL_BindNative (GL_TEXTURE0, framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D, framebufs.oit.accum_tex);
 		GL_BindNative (GL_TEXTURE1, framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D, framebufs.oit.revealage_tex);
 
-		RB_DrawArrays (GL_TRIANGLES, 0, 3);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
 
 		glDisable (GL_STENCIL_TEST);
 
@@ -4718,7 +4669,7 @@ static void R_SetDlightConfig (GLuint program, float scale, float falloff, float
 	if (!program)
 		return;
 
-	RB_UseProgram (program);
+	GL_UseProgram (program);
 	GL_Uniform4fFunc (0, scale, r_dlight_radius_scale.value, falloff, expval);
 	GL_Uniform4fFunc (1, core_boost, core_exp, knee, ndotl);
 	GL_Uniform4fFunc (2, satchop, 0.f, 0.f, 0.f);
@@ -4748,9 +4699,9 @@ static void R_DrawDLightPass (void)
 	{
 		use_buffer = true;
 		r_dlight_buffered_frame = true;
-		RB_BindFramebuffer (GL_FRAMEBUFFER, framebufs.dlight.fbo);
-		RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
-		RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.dlight.fbo);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		{
 			static const float zeroes[4] = { 0.f, 0.f, 0.f, 0.f };
 			GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
@@ -4793,96 +4744,20 @@ static void R_DrawDLightPass (void)
 
 	if (use_buffer)
 	{
-		RB_BindFramebuffer (GL_FRAMEBUFFER, framesetup.scene_fbo);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
 		if (framesetup.scene_fbo)
 		{
-			RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
-			RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
 		else
 		{
-			RB_DrawBuffer (GL_BACK);
-			RB_ReadBuffer (GL_BACK);
+			glDrawBuffer (GL_BACK);
+			glReadBuffer (GL_BACK);
 		}
 	}
 
         GL_EndGroup ();
-}
-
-
-static void R_DrawWorldOpaque_Legacy (void)
-{
-	RB_BeginPass (PASS_WORLD_OPAQUE);
-	R_DrawViewModel ();
-	RB_EndPass ();
-	S_ExtraUpdate ();
-
-	RB_BeginPass (PASS_ENTS_OPAQUE);
-	R_DrawEntitiesOnList (false);
-	RB_EndPass ();
-
-	RB_BeginPass (PASS_DLIGHT);
-	R_DrawDLightPass ();
-	RB_EndPass ();
-
-	RB_BeginPass (PASS_SKY);
-	Sky_DrawSky ();
-	RB_EndPass ();
-
-	RB_BeginPass (PASS_WATER_OPAQUE);
-	R_DrawWater (false);
-	RB_EndPass ();
-}
-
-static qboolean R_DrawWorldOpaque_Backend (void)
-{
-	R_DrawWorldOpaque_Legacy ();
-	return true;
-}
-
-static void R_DrawParticlesOpaque_Legacy (void)
-{
-	RB_BeginPass (PASS_PARTICLES);
-	R_DrawParticles (false);
-	RB_EndPass ();
-}
-
-static qboolean R_DrawParticlesOpaque_Backend (void)
-{
-	R_DrawParticlesOpaque_Legacy ();
-	return true;
-}
-
-static void R_DrawWorldAlpha_Legacy (void)
-{
-	R_BeginTranslucency ();
-	RB_BeginPass (PASS_WATER_ALPHA);
-	R_DrawWater (true);
-	RB_EndPass ();
-
-	RB_BeginPass (PASS_ENTS_ALPHA);
-	R_DrawEntitiesOnList (true);
-	RB_EndPass ();
-	R_EndTranslucency ();
-}
-
-static qboolean R_DrawWorldAlpha_Backend (void)
-{
-	R_DrawWorldAlpha_Legacy ();
-	return true;
-}
-
-static void R_DrawParticlesAlpha_Legacy (void)
-{
-	RB_BeginPass (PASS_PARTICLES);
-	R_DrawParticles (true);
-	RB_EndPass ();
-}
-
-static qboolean R_DrawParticlesAlpha_Backend (void)
-{
-	R_DrawParticlesAlpha_Legacy ();
-	return true;
 }
 
 /*
@@ -4892,31 +4767,26 @@ R_RenderScene
 */
 void R_RenderScene (void)
 {
-	const char *world_unavailable_reason = NULL;
-	const char *particles_unavailable_reason = NULL;
-	qboolean world_backend_available;
-	qboolean particles_backend_available;
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_SetupGL ();
 	R_Clear ();
-
+	
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
-
-	/* Backend migration order (keep incremental PRs consistent):
-	 * UI/Console/2D -> Fullscreen passes -> Particles/Sprites/Beams -> Alias ->
-	 * World (Sky->Opaque->Alpha) -> PostFX graph. */
-	world_backend_available = R_BackendWorldPathAvailable (&world_unavailable_reason);
-	particles_backend_available = R_BackendParticlesPathAvailable (&particles_unavailable_reason);
-	RBackend_DispatchBlock ("world_opaque", &r_backend_world, world_backend_available, world_unavailable_reason,
-		R_DrawWorldOpaque_Backend, R_DrawWorldOpaque_Legacy, &r_backend_world_warned);
-	RBackend_DispatchBlock ("particles_opaque", &r_backend_particles, particles_backend_available, particles_unavailable_reason,
-		R_DrawParticlesOpaque_Backend, R_DrawParticlesOpaque_Legacy, &r_backend_particles_warned);
-	RBackend_DispatchBlock ("world_alpha", &r_backend_world, world_backend_available, world_unavailable_reason,
-		R_DrawWorldAlpha_Backend, R_DrawWorldAlpha_Legacy, &r_backend_world_warned);
-	RBackend_DispatchBlock ("particles_alpha", &r_backend_particles, particles_backend_available, particles_unavailable_reason,
-		R_DrawParticlesAlpha_Backend, R_DrawParticlesAlpha_Legacy, &r_backend_particles_warned);
+	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
+	S_ExtraUpdate (); // don't let sound get messed up if going slow
+	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
+	R_DrawDecals ();
+	R_DrawDLightPass ();
+	R_DrawParticles (false);
+	Sky_DrawSky (); //johnfitz
+	R_DrawWater (false);
+	R_BeginTranslucency ();
+	R_DrawWater (true);
+	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
+	R_DrawParticles (true);
+	R_EndTranslucency ();
 	R_ShowTris (); //johnfitz
 	R_ShowBoundingBoxes (); //johnfitz
 	R_ShowPointFile ();
@@ -4954,39 +4824,38 @@ void R_WarpScaleView (void)
 	needwarpscale = r_refdef.scale != 1 || water_warp;
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
 	need_depth_resolve = (fbodest == framebufs.composite.fbo)
-		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || r_fogvol.value > 0.f);
+		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || r_fogvol.value > 0.f
+			|| (R_GodraysReady () && (r_godrays.value > 0.f || r_godrays_debug.value > 0.f || r_godrays_debug_source.value > 0.f)));
 
 	if (msaa)
 	{
-		RB_BeginPass (PASS_POSTFX);
 		GL_BeginGroup ("MSAA resolve");
 
-		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
-		RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.resolved_scene.fbo);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.resolved_scene.fbo);
 
-		RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
-		RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 		if (framebufs.scene.velocity_tex && framebufs.resolved_scene.velocity_tex)
 		{
-			RB_ReadBuffer (GL_COLOR_ATTACHMENT1);
-			RB_DrawBuffer (GL_COLOR_ATTACHMENT1);
+			glReadBuffer (GL_COLOR_ATTACHMENT1);
+			glDrawBuffer (GL_COLOR_ATTACHMENT1);
 			GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		}
 
 		GL_EndGroup ();
-		RB_EndPass ();
 
 		if (!needwarpscale)
 		{
-			RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.resolved_scene.fbo);
-			RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
-			RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, fbodest);
+			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.resolved_scene.fbo);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
+			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
 			if (fbodest)
-				RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
+				glDrawBuffer (GL_COLOR_ATTACHMENT0);
 			else
-				RB_DrawBuffer (GL_BACK);
+				glDrawBuffer (GL_BACK);
 			{
 				GLbitfield mask = GL_COLOR_BUFFER_BIT;
 				if (need_depth_resolve)
@@ -5001,39 +4870,39 @@ void R_WarpScaleView (void)
 		int dstw = (r_refdef.scale != 1) ? r_refdef.vrect.width : srcw;
 		int dsth = (r_refdef.scale != 1) ? r_refdef.vrect.height : srch;
 
-		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
-		RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
-		RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
-		RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	}
 
 	if (!msaa && !needwarpscale)
 	{
-		RB_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
-		RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
-		RB_BindFramebuffer (GL_DRAW_FRAMEBUFFER, fbodest);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
 		if (fbodest)
-			RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		else
-			RB_DrawBuffer (GL_BACK);
+			glDrawBuffer (GL_BACK);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch,
 			srcx, srcy, srcx + srcw, srcy + srch,
 			GL_COLOR_BUFFER_BIT, GL_NEAREST);
 	}
 
-	RB_BindFramebuffer (GL_FRAMEBUFFER, fbodest);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);
 	if (fbodest)
 	{
-		RB_DrawBuffer (GL_COLOR_ATTACHMENT0);
-		RB_ReadBuffer (GL_COLOR_ATTACHMENT0);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
 	}
 	else
 	{
-		RB_DrawBuffer (GL_BACK);
-		RB_ReadBuffer (GL_BACK);
+		glDrawBuffer (GL_BACK);
+		glReadBuffer (GL_BACK);
 	}
-	RB_Viewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
+	glViewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
 
 	if (!needwarpscale)
 	{
@@ -5043,14 +4912,13 @@ void R_WarpScaleView (void)
 		return;
 	}
 
-	RB_BeginPass (PASS_POSTFX);
 	GL_BeginGroup ("Warp/scale view");
 
 	smax = srcw / (float)vid.width;
 	tmax = srch / (float)vid.height;
 
-	RB_UseProgram (glprogs.warpscale[water_warp]);
-	RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_UseProgram (glprogs.warpscale[water_warp]);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 
 	t = M_ForcedUnderwater () ? realtime : cl.time;
 	GL_Uniform4fFunc (0, smax, tmax, water_warp ? 1.f / 256.f : 0.f, (float)t);
@@ -5060,10 +4928,9 @@ void R_WarpScaleView (void)
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
 
-	RB_DrawArrays (GL_TRIANGLES, 0, 3);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();
-	RB_EndPass ();
 
 	if (fbodest == framebufs.composite.fbo)
 		framesetup.composite_ready = true;
@@ -5075,11 +4942,9 @@ void R_WarpScaleView (void)
 R_RenderView
 ================
 */
-static void R_RenderView_Legacy (void)
+void R_RenderView (void)
 {
 	double	time1, time2;
-	const char *fogvol_unavailable_reason = NULL;
-	qboolean fogvol_backend_available;
 
 	if (r_norefresh.value)
 		return;
@@ -5101,6 +4966,7 @@ static void R_RenderView_Legacy (void)
                 glFinish ();
 
 	R_SetupView (); //johnfitz -- this does everything that should be done once per frame
+	R_UpdateDecals ();
         Fog_EnableGFog ();
         R_RenderScene ();
         R_WarpScaleView ();
@@ -5111,9 +4977,7 @@ static void R_RenderView_Legacy (void)
         r_fogvol_draw_called++;
         if (r_gl_state_validate.value > 0.f)
                 Con_DPrintf ("fogvol_draw_called=%d r_fogvol=%.1f\n", r_fogvol_draw_called, r_fogvol.value);
-	fogvol_backend_available = R_BackendFogvolPathAvailable (&fogvol_unavailable_reason);
-	RBackend_DispatchBlock ("fogvol", &r_backend_fogvol, fogvol_backend_available, fogvol_unavailable_reason,
-		R_DrawFogvol_Backend, R_DrawFogvol_Legacy, &r_backend_fogvol_warned);
+        R_FogVol_Render ();
         /* BUG FIX #1: Capture fog params while r_framedata.fogdata is still valid.
          * GL_GenerateSSAOTexture (called later in GL_PostProcess) uses these for
          * fog-damped AO; after Fog_DisableGFog the density is zeroed out. */
@@ -5153,20 +5017,4 @@ static void R_RenderView_Legacy (void)
 			rs_aliaspolys,
 			rs_dynamiclightmaps);
 	//johnfitz
-}
-
-static void R_DrawFogvol_Legacy (void)
-{
-	R_FogVol_Render ();
-}
-
-static qboolean R_DrawFogvol_Backend (void)
-{
-	R_FogVol_Render ();
-	return true;
-}
-
-void R_RenderView (void)
-{
-	RBackend_DispatchRenderView (R_RenderView_Legacy);
 }

@@ -15,6 +15,7 @@ The dominant issue was **A + C combined**:
 - `5`: integrated extinction (sigma/tau-like visualization)
 - `6`: transmittance visualization
 - `7`: temporal history contribution (`R=alpha, G=history valid, B=motion factor`)
+- `8`: fog shadow debug (`R=shadowed scattering, G=unshadowed estimate, B=visibility ratio`)
 
 ## Added guardrails
 - Runtime depth conventions are now passed explicitly (`near/far/reverseZ/skyCutoff`) to fog shader.
@@ -26,4 +27,13 @@ The dominant issue was **A + C combined**:
 - `r_fogvol_debug`
 - `r_fogvol_density_scale`
 - `r_fogvol_sigma_max`
+- `r_fogvol_shadow` (default `1`): enables per-step shadow visibility term for volumetric scattering.
+- `r_fogvol_shadow_samples` (default `2`, clamp `1..8`): shadow raymarch taps per fog step; higher values improve directional shadow stability at higher GPU cost.
+- `r_fogvol_shadow_strength` (default `0.8`): scales shadow optical depth influence; `0` disables darkening, `1` is physical-ish, values `>1` exaggerate shadows.
+- `r_fogvol_shadow_jitter` (default `1`): stochastic offset for shadow taps to reduce banding; may introduce light temporal noise.
 - Existing diagnostics retained: `r_fogvol_testvolumes`, `r_fogvol_testvolumes_dumpstate`
+
+## Performance implications of fog shadows
+- Cost scales roughly with `r_fogvol_steps * r_fogvol_shadow_samples` because each fog integration step performs an additional short visibility march.
+- Recommended baseline: keep `r_fogvol_shadow_samples=2` for gameplay, use `4` for captures, and avoid `8` unless fog coverage is limited.
+- If performance is tight, first reduce `r_fogvol_shadow_samples`, then disable jitter, and finally disable `r_fogvol_shadow`.

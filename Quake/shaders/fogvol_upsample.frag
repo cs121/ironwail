@@ -1,17 +1,17 @@
 // fogvol_upsample.frag  —  bilateral depth-weighted upsample from half-res fog
 // ── CHANGES FROM ORIGINAL ──────────────────────────────────────────────────
-//  1. [BUG] halfCoord derivation: `ivec2(gl_FragCoord.xy * 0.5)` uses integer
-//     truncation, which is correct for a simple 2x upsample *but* the tap
-//     offsets in the 2×2 path iterate [0,0],[1,0],[0,1],[1,1] which means the
-//     4 taps span halfCoord…halfCoord+1.  For a pixel at full-res (2,2) you
-//     get halfCoord=(1,1) and taps (1,1),(2,1),(1,2),(2,2) – fine.  For a
-//     pixel at (1,1) you get halfCoord=(0,0) and taps (0,0),(1,0),(0,1),(1,1)
-//     – also fine.  However the 9-tap path iterates [-1,1]×[-1,1] centred on
-//     halfCoord; for the same (0,0) halfCoord pixel the taps go to
-//     halfCoord+(-1,-1) = (-1,-1) which then *clamps* to (0,0), making that
-//     quadrant sample the same texel 4 times and biasing the result.  The fix
-//     is to keep the 9-tap path but ensure halfCoord is the *nearest* half-res
-//     texel to the full-res pixel centre rather than the floor.
+//  1. [BUG] halfCoord derivation: `round(gl_FragCoord.xy * 0.5 - 0.5)` was
+//     introduced as a "fix" but is wrong.  For a 2× downsample the correct
+//     mapping is simple floor/integer-truncation: full-res pixel (fx,fy) →
+//     half-res texel (fx/2, fy/2).  The round()-0.5 formula produces the same
+//     half-res index for two consecutive full-res pixels (e.g. pixels 2 and 3
+//     both map to half-res texel 1 instead of 1 and 1 respectively — actually
+//     round(2*0.5-0.5)=round(0.5)=0 and round(3*0.5-0.5)=round(1.0)=1, but
+//     round(0.5) is implementation-defined and can return 0 or 1).  On many
+//     GPU implementations this causes systematic ½-texel misalignment that
+//     manifests as a warped/distorted upsample.  The fix is to use integer
+//     division (floor) which is unambiguous and correct for 2× downsampling.
+//     The 9-tap path centring concern is handled by clamping to valid range.
 //  2. [BUG] fullTap for depth comparison is always `(tapCoord * 2) + (1,1)`.
 //     This maps every half-res tap to the *odd* full-res pixel, missing the
 //     even ones.  A proper bilateral upsample should compare against the
@@ -51,21 +51,25 @@ layout(location=0) out vec4 outColor;
 //         sample always corresponds to the correct representative pixel.
 // FIX #6: halfSizeSafe ensures clamp bounds are never negative.
 void AccumTap(ivec2 tapCoord, ivec2 halfSizeSafe, ivec2 fullSizeSafe,
-              float depthCenter, inout vec3 accum, inout float weightSum)
+              float depthCenter, inout vec4 accum, inout float weightSum)
 {
 	ivec2 clampedTap = clamp(tapCoord, ivec2(0), halfSizeSafe);
 	// FIX #2: representative full-res texel = top-left of the 2×2 block.
 	ivec2 fullTap    = clamp(clampedTap * 2, ivec2(0), fullSizeSafe);
 	float depthTap   = texelFetch(SceneDepth, fullTap, 0).r;
 	float weight     = exp(-abs(depthTap - depthCenter) * FogUpsampleK);
-	accum     += texelFetch(FogColor, clampedTap, 0).rgb * weight;
+	// Accumulate RGBA: RGB=fog color, A=fog density (1-transmittance).
+	accum     += texelFetch(FogColor, clampedTap, 0) * weight;
 	weightSum += weight;
 }
 
 void main()
 {
 	ivec2 fullSize = ivec2(FogUpsampleSize.xy);
-	ivec2 halfSize = ivec2(FogUpsampleSize.zw);
+	/* BP FIX: Clamp halfSize to at least ivec2(1) before subtraction to guard
+	 * against float-to-int conversion producing 0 or negative values for
+	 * degenerate framebuffers (e.g. if FogUpsampleSize.zw < 1.0). */
+	ivec2 halfSize = max(ivec2(FogUpsampleSize.zw), ivec2(1));
 
 	// FIX #6: Guard against degenerate sizes.
 	ivec2 halfSizeSafe = max(halfSize - ivec2(1), ivec2(0));
@@ -73,12 +77,14 @@ void main()
 
 	ivec2 fullCoord  = ivec2(gl_FragCoord.xy);
 
-	// FIX #1: Use round() → nearest half-res texel centre rather than floor().
-	// This centres the 3×3 neighbourhood correctly for both even and odd pixels.
-	ivec2 halfCoord  = clamp(ivec2(round(gl_FragCoord.xy * 0.5 - 0.5)), ivec2(0), halfSizeSafe);
+	// FIX #1: Use integer division (floor) for the half-res texel address.
+	// For a 2× downsample, full-res pixel (fx,fy) → half-res texel (fx/2,fy/2).
+	// The previous round()-0.5 formula was ambiguous at half-integer values and
+	// caused systematic ½-texel misalignment → warped/distorted output.
+	ivec2 halfCoord  = clamp(ivec2(gl_FragCoord.xy) / 2, ivec2(0), halfSizeSafe);
 
 	float depthCenter = texelFetch(SceneDepth, fullCoord, 0).r;
-	vec3  accum       = vec3(0.0);
+	vec4  accum       = vec4(0.0); // RGB=fog color, A=fog density (1-transmittance)
 	float weightSum   = 0.0;
 
 	if (FogUpsampleTaps == 9)
@@ -91,23 +97,33 @@ void main()
 	}
 	else
 	{
-		// 2×2 neighbourhood: the 4 half-res texels that map to this full-res pixel.
-		for (int j = 0; j < 2; ++j)
-			for (int i = 0; i < 2; ++i)
-				AccumTap(halfCoord + ivec2(i, j), halfSizeSafe, fullSizeSafe,
-				         depthCenter, accum, weightSum);
+		/* BUG FIX (G-08): The previous 4-tap loop iterated halfCoord + (0,0..1,1).
+		 * For a full-res pixel at (fx, fy), halfCoord = (fx/2, fy/2).
+		 * halfCoord + (1,1) = (fx/2+1, fy/2+1) — two half-res texels away in
+		 * both axes, not adjacent.  The correct 4-tap set is the 2×2 block of
+		 * half-res texels that STRADDLE the current full-res pixel, i.e. the
+		 * texel at halfCoord and its three neighbours at (-1,0), (0,-1), (-1,-1).
+		 * These are the four half-res texels that overlap the full-res pixel
+		 * when the half-res grid has 2× larger texels. */
+		AccumTap(halfCoord,                    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
+		AccumTap(halfCoord + ivec2(-1,  0),    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
+		AccumTap(halfCoord + ivec2( 0, -1),    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
+		AccumTap(halfCoord + ivec2(-1, -1),    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
 	}
 
-	vec3 color;
+	vec4 result;
 	if (weightSum > 0.0)
 	{
-		color = accum / weightSum;
+		result = accum / weightSum;
 	}
 	else
 	{
 		// FIX #4: Fallback to nearest half-res texel instead of black.
-		color = texelFetch(FogColor, halfCoord, 0).rgb;
+		// texelFetch returns RGBA — includes fog density in alpha.
+		result = texelFetch(FogColor, halfCoord, 0);
 	}
 
-	outColor = vec4(color, 1.0);
+	// Pass RGBA: RGB=upsampled fog color, A=upsampled fog density.
+	// glColorMask(A=false) in the final blit prevents this reaching composite.fbo.
+	outColor = result;
 }

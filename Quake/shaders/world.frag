@@ -9,8 +9,7 @@ layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
 #include "frame_uniforms.glsl"
 
-// BUG FIX: world.vert uses exp2(-Fog.w * ...) but frag used exp2(-abs(Fog.w) * ...)
-// Keep abs() for safety but unify sign convention with vertex shader
+// Fog.w is treated as a signed-friendly density; use abs(Fog.w) so negative CPU values do not invert attenuation.
 vec3 ApplyFog(vec3 clr, vec3 p)
 {
 	float fog = exp2(-abs(Fog.w) * dot(p, p));
@@ -514,6 +513,18 @@ void main()
 		}
 
 		// Sun light
+		if (SunDirEnabled.w > 0.5)
+		{
+			/* SunDirEnabled.xyz stores scene->sun direction. Surface lighting needs
+			 * incoming-light direction (sun->scene), therefore we negate it. */
+			vec3 sun_to_surface = -SunDirEnabled.xyz;
+			float ndotl = max(dot(surface_normal, sun_to_surface), 0.0);
+			if (ndotl > 0.0)
+			{
+				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl;
+				total_light += max(min(sun_contrib, 1.0 - total_light), 0.0);
+			}
+		}
 
 		// Apply lighting
 #if DITHER >= 2
@@ -570,7 +581,7 @@ void main()
 	OUT_COLOR.rgb = sqrt(OUT_COLOR.rgb);
 	float luma     = dot(OUT_COLOR.rgb, vec3(0.25, 0.625, 0.125));
 	float nearnoise = tri(whitenoise01(lmuv * lmsize)) * luma * TextureDither;
-	float farnoise  = (Fog.w > 0.0) ? SCREEN_SPACE_NOISE() * ScreenDither : 0.0;
+	float farnoise  = (abs(Fog.w) > 0.0) ? SCREEN_SPACE_NOISE() * ScreenDither : 0.0;
 	OUT_COLOR.rgb  += mix(nearnoise, farnoise, farblend);
 	OUT_COLOR.rgb  *= OUT_COLOR.rgb;
 #endif

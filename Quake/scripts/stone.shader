@@ -1,5 +1,11 @@
-// Stone / Rock / Brick: ebenfalls "sichere Defaults" im Rahmen deines Subsets.
-
+// stone.shader - Q3-kompatibel, Ironwail fork
+// Revised: 2026-03-01
+//
+// Aenderungen:
+//   - $whiteimage-Wave-Stages entfernt (kein Standard-Q3, unnoetig fuer Stein)
+//   - Saubere 1-Pass-Shader: nur Base-Textur mit Lightmap-Identity
+//   - Metall/Tech-Shader (metals.shader) behalt envmap-Stages
+//
 textures/stone1_3
 {
     qer_editorimage textures/stone1_3

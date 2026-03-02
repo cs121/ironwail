@@ -105,10 +105,10 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "emissive_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "bloom_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "godray_scale", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
-	{ "skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 sky parameters." },
-	{ "fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 fog parameters." },
-	{ "deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 vertex deformation." },
-	{ "q3map_*", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3Map compile-time directives." },
+	{ "skyParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 sky parameters (deferred; non-MVP)." },
+	{ "fogParms", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 fog parameters (deferred; non-MVP)." },
+	{ "deformVertexes", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 vertex deformation (deferred; non-MVP)." },
+	{ "q3map_*", MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3Map compile-time directives (deferred; non-MVP)." },
 
 	{ "map", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Supports $lightmap/$white/$black and textures." },
 	{ "clampmap", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Clamp-wrapped texture." },
@@ -118,7 +118,7 @@ static const mat_shader_keyword_def_t mat_shader_keyword_table[] =
 	{ "blendFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Supports add/filter/blend/premult or explicit factors." },
 	{ "depthWrite", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean." },
 	{ "depthFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: lequal/equal/always." },
-	{ "alphaFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 alpha test." },
+	{ "alphaFunc", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 alpha test (deferred; non-MVP)." },
 	{ "tcGen", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Modes: base/environment/lightmap." },
 	{ "tcMod", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_PARTIAL, "Types: scroll/scale/rotate/turb/stretch." },
 	{ "emissive", MAT_SHADER_KEYWORD_SCOPE_STAGE, MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED, "Stage-level emissive toggle." },
@@ -145,6 +145,7 @@ cvar_t r_shaders = { "r_shaders", "1", CVAR_ARCHIVE };
 cvar_t r_shader_debug = { "r_shader_debug", "0", CVAR_ARCHIVE };
 cvar_t r_tcgen_debug = { "r_tcgen_debug", "0", CVAR_ARCHIVE };
 cvar_t r_matshader_debug_parse = { "r_matshader_debug_parse", "0", CVAR_ARCHIVE };
+cvar_t r_particles_shader_strict = { "r_particles_shader_strict", "0", CVAR_ARCHIVE };
 static cvar_t r_reloadshaders = { "r_reloadshaders", "0", CVAR_NONE };
 static cvar_t r_matshader_fuzz = { "r_matshader_fuzz", "0", CVAR_NONE };
 static cvar_t r_matshader_report = { "r_matshader_report", "0", CVAR_NONE };
@@ -1078,12 +1079,98 @@ static void Mat_Shader_FuzzCommand_f (void)
 	Mat_Shader_DebugFuzzParse ();
 }
 
+
+qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, char *reason, size_t reason_size)
+{
+	int i;
+
+	if (reason && reason_size)
+		reason[0] = '\0';
+
+	if (!stage)
+	{
+		if (reason && reason_size)
+			q_strlcpy (reason, "missing stage", reason_size);
+		return false;
+	}
+
+	if (stage->map_type == MAT_MAP_LIGHTMAP)
+	{
+		if (reason && reason_size)
+			q_strlcpy (reason, "map $lightmap unsupported for particles", reason_size);
+		return false;
+	}
+
+	if (stage->map_type != MAT_MAP_MAP && stage->map_type != MAT_MAP_CLAMPMAP &&
+		stage->map_type != MAT_MAP_WHITE && stage->map_type != MAT_MAP_BLACK)
+	{
+		if (reason && reason_size)
+			q_strlcpy (reason, "unsupported map type", reason_size);
+		return false;
+	}
+
+	if (stage->rgbgen != MAT_RGBGEN_IDENTITY && stage->rgbgen != MAT_RGBGEN_VERTEX &&
+		stage->rgbgen != MAT_RGBGEN_CONST && stage->rgbgen != MAT_RGBGEN_WAVE)
+	{
+		if (reason && reason_size)
+			q_strlcpy (reason, "unsupported rgbGen", reason_size);
+		return false;
+	}
+
+	if (stage->alphagen != MAT_ALPHAGEN_IDENTITY && stage->alphagen != MAT_ALPHAGEN_VERTEX &&
+		stage->alphagen != MAT_ALPHAGEN_CONST && stage->alphagen != MAT_ALPHAGEN_WAVE)
+	{
+		if (reason && reason_size)
+			q_strlcpy (reason, "unsupported alphaGen", reason_size);
+		return false;
+	}
+
+	if (stage->tcgen != MAT_TCGEN_BASE)
+	{
+		if (reason && reason_size)
+			q_strlcpy (reason, "tcGen must be base", reason_size);
+		return false;
+	}
+
+	if (stage->tcmod_count > countof (stage->tcmods))
+	{
+		if (reason && reason_size)
+			q_strlcpy (reason, "tcMod count overflow", reason_size);
+		return false;
+	}
+
+	for (i = 0; i < stage->tcmod_count; ++i)
+	{
+		mat_tcmod_type_t type = stage->tcmods[i].type;
+		if (type != MAT_TCMOD_SCROLL && type != MAT_TCMOD_SCALE && type != MAT_TCMOD_ROTATE &&
+			type != MAT_TCMOD_TURB && type != MAT_TCMOD_STRETCH)
+		{
+			if (reason && reason_size)
+				q_strlcpy (reason, "unsupported tcMod type", reason_size);
+			return false;
+		}
+	}
+
+	if (stage->blend_mode == MAT_BLEND_CUSTOM)
+	{
+		if (stage->blend_src < 0 || stage->blend_dst < 0)
+		{
+			if (reason && reason_size)
+				q_strlcpy (reason, "invalid custom blend factors", reason_size);
+			return false;
+		}
+	}
+
+	return true;
+}
+
 void Mat_Shader_Init (void)
 {
 	Cvar_RegisterVariable (&r_shaders);
 	Cvar_RegisterVariable (&r_shader_debug);
 	Cvar_RegisterVariable (&r_tcgen_debug);
 	Cvar_RegisterVariable (&r_matshader_debug_parse);
+	Cvar_RegisterVariable (&r_particles_shader_strict);
 	Cvar_RegisterVariable (&r_reloadshaders);
 	Cvar_RegisterVariable (&r_matshader_fuzz);
 	Cvar_RegisterVariable (&r_matshader_report);

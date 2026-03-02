@@ -31,6 +31,7 @@
 #include "frame_uniforms.glsl"
 
 #define MAX_FOGVOLUMES 64
+#define MAX_FOGLIGHTS 32
 
 layout(binding=0) uniform sampler2D SceneColor;
 layout(binding=1) uniform sampler2D SceneDepth;
@@ -40,15 +41,40 @@ struct FogVolume
 {
 	vec4 mins;
 	vec4 maxs;
+	vec4 sphere;
 	vec4 color_density;
 	vec4 noise_params;
-	vec4 velocity;
+	vec4 velocity_windspeed;
+	vec4 wind_turbulence;
 	vec4 misc;
+	vec4 extra;
 };
 
 layout(std140, binding=2) uniform FogVolumeUBO
 {
 	FogVolume FogVolumes[MAX_FOGVOLUMES];
+};
+
+struct FogLight
+{
+	vec4 pos_rad;
+	vec4 col_int;
+};
+
+struct FogLightList
+{
+	ivec4 offset_count; // x = global light offset, y = per-volume light count
+};
+
+layout(std140, binding=4) uniform FogLightsUBO
+{
+	FogLightList FogLightLists[MAX_FOGVOLUMES];
+	FogLight FogLights[MAX_FOGVOLUMES * MAX_FOGLIGHTS];
+};
+
+layout(std140, binding=5) uniform FogLightgridUBO
+{
+	vec4 FogLightgridProbeRGB[8];
 };
 
 layout(location=0)  uniform int   FogSteps;
@@ -65,6 +91,15 @@ layout(location=10) uniform vec2  FogDepthScale;
 layout(location=11) uniform vec4  FogViewParams;     // xy: view origin in screen px, zw: inv view size
 layout(location=12) uniform vec4  FogDepthParams;    // x: near, y: far, z: reverse-Z flag, w: sky cutoff
 layout(location=13) uniform vec2  FogDensityParams;  // x: density scale, y: sigma clamp
+layout(location=14) uniform int   FogEmissiveEnabled;
+layout(location=15) uniform int   FogBlendModeDefault;
+layout(location=16) uniform int   FogLightEnabled;
+layout(location=17) uniform int   FogShadowEnabled;
+layout(location=18) uniform int   FogShadowSamples;
+layout(location=19) uniform float FogShadowStrength;
+layout(location=20) uniform float FogShadowJitter;
+layout(location=21) uniform vec3  FogShadowDir;
+layout(location=22) uniform int   FogLightgridEnabled;
 
 layout(location=0) out vec4 FragColor;
 
@@ -72,11 +107,17 @@ const int   NOISE_PERIOD     = 64;
 const float NOISE_SCALE_MIN  = 0.005;
 const float NOISE_SCALE_MAX  = 0.5;
 const float LUT_PERIOD       = 64.0;
+const float ANISO_G_LOCAL    = 0.5;
+const float ANISO_G_SUN      = 0.35;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
+// PERF FIX (G-02): NOISE_PERIOD = 64 is a power-of-two, so wrapping can be
+// done with a bitwise AND instead of integer modulo — avoids expensive div
+// instructions on older GPU architectures.
 int WrapIndex(int v, int period)
 {
+	// Generic path (kept for non-power-of-two periods if ever changed).
 	int r = v % period;
 	return (r < 0) ? (r + period) : r;
 }
@@ -84,6 +125,15 @@ int WrapIndex(int v, int period)
 ivec3 WrapIndex(ivec3 v, int period)
 {
 	return ivec3(WrapIndex(v.x, period), WrapIndex(v.y, period), WrapIndex(v.z, period));
+}
+
+// Fast wrap for NOISE_PERIOD (must be a power of two).
+ivec3 WrapNoise(ivec3 v)
+{
+	const int mask = NOISE_PERIOD - 1; // 63
+	// Correct for negative values: ((v % P) + P) % P == v & mask for P = 2^n
+	// because two's-complement negative & mask gives the correct positive remainder.
+	return ivec3(v.x & mask, v.y & mask, v.z & mask);
 }
 
 uint HashU32(ivec3 p)
@@ -104,8 +154,9 @@ float ValueNoise(vec3 p)
 	vec3 f = fract(p);
 	vec3 w = f * f * (3.0 - 2.0 * f);
 
-	ivec3 i0 = WrapIndex(ivec3(i), NOISE_PERIOD);
-	ivec3 i1 = WrapIndex(i0 + ivec3(1), NOISE_PERIOD);
+	// PERF: Use fast bitwise-AND wrap (WrapNoise) instead of modulo WrapIndex.
+	ivec3 i0 = WrapNoise(ivec3(i));
+	ivec3 i1 = WrapNoise(i0 + ivec3(1));
 
 	float n000 = Hash31(i0);
 	float n100 = Hash31(ivec3(i1.x, i0.y, i0.z));
@@ -125,22 +176,33 @@ float ValueNoise(vec3 p)
 	return mix(nxy0, nxy1, w.z);
 }
 
-float FBM(vec3 p)
+// PERF: FBM with LOD selection — distant fragments use 1 octave instead of 2.
+// Controlled by distance passed from the march loop.
+// lod=0 → 2 octaves (near, full quality), lod=1 → 1 octave (far, half cost).
+float FBM_LOD(vec3 p, int lod)
 {
-	float sum  = 0.0;
-	float amp  = 0.5;
-	float freq = 1.0;
-	float norm = 0.0;
-	for (int i = 0; i < 3; ++i)
-	{
-		sum  += amp * ValueNoise(p * freq);
-		norm += amp;
-		freq *= 2.0;
-		amp  *= 0.5;
-	}
-	return sum / max(norm, 1e-5);
+	float v0 = ValueNoise(p);
+	if (lod > 0)
+		return v0; // 1-octave fast path for distant fog
+	float v1 = ValueNoise(p * 2.0);
+	return (v0 * 0.5 + v1 * 0.25) * (1.0 / 0.75);
 }
 
+float FBM(vec3 p)
+{
+	float v0 = ValueNoise(p);
+	float v1 = ValueNoise(p * 2.0);
+	return (v0 * 0.5 + v1 * 0.25) * (1.0 / 0.75);
+}
+
+float FogNoise(vec3 p, int lod)
+{
+	if (FogNoiseMode == 1)
+		return texture(FogNoiseTex, fract(p / LUT_PERIOD)).r;
+	return FBM_LOD(p, lod);
+}
+
+// Keep overload for backward-compat with shadow calls (always full quality).
 float FogNoise(vec3 p)
 {
 	if (FogNoiseMode == 1)
@@ -188,7 +250,18 @@ float LinearEyeDepth(float depth, vec2 viewUv)
 
 bool RayAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tEnter, out float tExit)
 {
-	vec3 invRd  = 1.0 / rd;
+	/* BUG FIX (G-01): 1.0/rd produces +/-Inf when any component of rd is
+	 * exactly 0.0 (e.g. perfectly horizontal or vertical gaze directions).
+	 * While Inf arithmetic is technically well-defined in IEEE 754 and produces
+	 * the correct intersection result in most cases, some GPU drivers or
+	 * optimised compiler paths flush Inf to NaN, breaking the test.
+	 * Clamp each component to a minimum magnitude before inversion. */
+	vec3 rdSafe = vec3(
+		abs(rd.x) < 1e-7 ? (rd.x >= 0.0 ? 1e-7 : -1e-7) : rd.x,
+		abs(rd.y) < 1e-7 ? (rd.y >= 0.0 ? 1e-7 : -1e-7) : rd.y,
+		abs(rd.z) < 1e-7 ? (rd.z >= 0.0 ? 1e-7 : -1e-7) : rd.z
+	);
+	vec3 invRd  = 1.0 / rdSafe;
 	vec3 t0     = (bmin - ro) * invRd;
 	vec3 t1     = (bmax - ro) * invRd;
 	vec3 tmin   = min(t0, t1);
@@ -212,6 +285,17 @@ float InterleavedGradientNoise(vec2 p)
 	return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
 }
 
+// Henyey-Greenstein phase scaled so isotropic (g=0) evaluates to 1.0.
+// This lets us modulate existing scattering terms without changing their
+// baseline energy when anisotropy is disabled.
+float AnisotropicPhase(float cosTheta, float g)
+{
+	g = clamp(g, -0.95, 0.95);
+	float gg = g * g;
+	float denom = max(1.0 + gg - 2.0 * g * cosTheta, 1e-4);
+	return (1.0 - gg) / (denom * sqrt(denom));
+}
+
 vec3 DebugVolumeColor(float id, float priority)
 {
 	vec3 base = vec3(
@@ -224,6 +308,31 @@ vec3 DebugVolumeColor(float id, float priority)
 
 // FIX #6: Simplified – max(falloff,0) already ensures edgeThickness >= 0,
 // so the second <= 0 guard collapsed into a single early-out.
+
+bool RaySphere(vec3 ro, vec3 rd, vec3 center, float radius, out float tEnter, out float tExit)
+{
+	vec3 oc = ro - center;
+	float b = dot(oc, rd);
+	float c = dot(oc, oc) - radius * radius;
+	float h = b * b - c;
+	if (h < 0.0)
+		return false;
+	h = sqrt(h);
+	tEnter = -b - h;
+	tExit = -b + h;
+	return tExit > max(tEnter, 0.0);
+}
+
+float HeightFactor(vec3 p, FogVolume volume)
+{
+	float hScale = volume.extra.w;
+	if (abs(hScale) <= 1e-6)
+		return 1.0;
+	float baseH = volume.misc.w;
+	float dh = p.z - baseH;
+	return exp(-abs(hScale) * dh);
+}
+
 float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
 {
 	float edgeThickness = max(falloff, 0.0);
@@ -232,6 +341,93 @@ float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
 	vec3  d       = min(p - bmin, bmax - p);
 	float edgeDist = min(d.x, min(d.y, d.z));
 	return smoothstep(0.0, edgeThickness, edgeDist);
+}
+
+bool PointInsideVolume(vec3 p, FogVolume volume)
+{
+	if (volume.extra.x > 0.5)
+		return length(p - volume.sphere.xyz) <= volume.sphere.w;
+	return all(greaterThanEqual(p, volume.mins.xyz)) && all(lessThanEqual(p, volume.maxs.xyz));
+}
+
+vec3 SampleFogLightgrid(vec3 p, FogVolume volume)
+{
+	vec3 size = max(volume.maxs.xyz - volume.mins.xyz, vec3(1e-3));
+	vec3 local = clamp((p - volume.mins.xyz) / size, 0.0, 1.0);
+
+	vec3 c00 = mix(FogLightgridProbeRGB[0].rgb, FogLightgridProbeRGB[1].rgb, local.x);
+	vec3 c10 = mix(FogLightgridProbeRGB[2].rgb, FogLightgridProbeRGB[3].rgb, local.x);
+	vec3 c01 = mix(FogLightgridProbeRGB[4].rgb, FogLightgridProbeRGB[5].rgb, local.x);
+	vec3 c11 = mix(FogLightgridProbeRGB[6].rgb, FogLightgridProbeRGB[7].rgb, local.x);
+	vec3 c0 = mix(c00, c10, local.y);
+	vec3 c1 = mix(c01, c11, local.y);
+	return mix(c0, c1, local.z);
+}
+
+// PERF: lod=0 full quality (near), lod=1 coarse (far). Caller passes based on distance.
+float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, float noiseScalePre, vec3 flowPre, int lod)
+{
+	float edgeFade;
+	if (volume.extra.x > 0.5)
+	{
+		float d = volume.sphere.w - length(p - volume.sphere.xyz);
+		edgeFade = (falloff <= 0.0) ? 1.0 : smoothstep(0.0, falloff, d);
+	}
+	else
+	{
+		edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
+	}
+
+	// PERF: If edgeFade is zero, density is zero regardless of noise — skip noise entirely.
+	if (edgeFade < 1e-5)
+		return 0.0;
+
+	float noiseFactor = 1.0;
+	if (FogNoiseEnabled != 0)
+	{
+		vec3 noisePos = p * noiseScalePre + flowPre * Time * noiseScalePre;
+		// PERF: Turbulence domain warp costs 3 extra FBM calls. Apply only at lod=0
+		// (near samples). Far samples (lod=1) skip warp — imperceptible at distance.
+		if (volume.wind_turbulence.w > 1e-4 && lod == 0)
+			noisePos += vec3(FBM(p * noiseScalePre * 2.03), FBM(p.yzx * noiseScalePre * 2.71), FBM(p.zxy * noiseScalePre * 1.91)) * volume.wind_turbulence.w * 0.35;
+		float n = FogNoise(noisePos, lod);
+		float noiseBias = clamp(volume.noise_params.z, 0.0, 1.0);
+		if (noiseBias > 0.0)
+			n = smoothstep(noiseBias, 1.0, n);
+		float amt = clamp(volume.noise_params.y, 0.0, 1.0);
+		noiseFactor = mix(1.0, clamp(2.0 * n, 0.0, 2.0), amt);
+	}
+
+	float sigma = density * noiseFactor * edgeFade * HeightFactor(p, volume);
+	return IsFiniteFloat(sigma) ? max(sigma, 0.0) : 0.0;
+}
+
+// PERF: Accept pre-normalized sunDir + pre-computed jitter to avoid redundant
+// work per call. Shadow is now called with the sigma already known for the
+// current sample point (passed as firstSigma), so we skip one EvaluateFogSigma.
+float EstimateShadowVisibility(vec3 p, FogVolume volume, float density, float falloff,
+	float noiseScalePre, vec3 flowPre, float stepLen,
+	vec3 sunDirNorm, float shadowJitterVal, float firstSigma)
+{
+	// sunDirNorm is pre-validated (zero-length guard done by caller)
+	int sampleCount = min(FogShadowSamples, 8);
+	float shadowStep = max(stepLen * 2.0, 8.0);
+	// PERF: First sample reuses the sigma already computed for the main step —
+	// no extra EvaluateFogSigma call needed for s==0.
+	float tauLight = firstSigma * shadowStep;
+
+	for (int s = 1; s < sampleCount; ++s)
+	{
+		float sampleDist = (float(s) + shadowJitterVal) * shadowStep;
+		vec3 sp = p + sunDirNorm * sampleDist;
+		if (!PointInsideVolume(sp, volume))
+			break;
+		// PERF: Shadow samples always use lod=1 (1 octave) — shadows don't need full detail.
+		float sigma = EvaluateFogSigma(sp, volume, density, falloff, noiseScalePre, flowPre, 1);
+		tauLight += sigma * shadowStep;
+	}
+
+	return exp(-max(FogShadowStrength, 0.0) * tauLight);
 }
 
 // ── main ───────────────────────────────────────────────────────────────────
@@ -243,10 +439,17 @@ void main()
 	vec2 screenUv  = screenPos * invScreen;
 	vec2 viewUv    = (screenPos - FogViewParams.xy) * FogViewParams.zw;
 
+	/* BUG FIX (G-04): SceneColor was sampled up to 4 times per fragment across
+	 * the various early-return paths.  Load it once here and reuse the cached
+	 * value.  SceneColor is typically hot in the L2 cache for a fullscreen
+	 * pass, but eliminating redundant calls reduces instruction count and
+	 * avoids accidental double-sampling if the sampler is non-trivial. */
+	vec3 scene = texture(SceneColor, screenUv).rgb;
+
 	FogVolume volume = FogVolumes[FogVolumeIndex];
 	if (volume.misc.y <= 0.0)
 	{
-		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		FragColor = vec4(scene, 1.0);
 		return;
 	}
 
@@ -261,7 +464,7 @@ void main()
 	vec4  world    = FogInvViewProj * clip;
 	if (abs(world.w) < 1e-6)
 	{
-		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		FragColor = vec4(scene, 1.0);
 		return;
 	}
 	vec3 worldPos = world.xyz / world.w;
@@ -273,9 +476,17 @@ void main()
 		tScene = FogDepthParams.y;
 
 	float tEnter, tExit;
-	if (!RayAABB(ro, rd, volume.mins.xyz, volume.maxs.xyz, tEnter, tExit))
+	if (volume.extra.x > 0.5)
 	{
-		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		if (!RaySphere(ro, rd, volume.sphere.xyz, volume.sphere.w, tEnter, tExit))
+		{
+			FragColor = vec4(scene, 1.0);
+			return;
+		}
+	}
+	else if (!RayAABB(ro, rd, volume.mins.xyz, volume.maxs.xyz, tEnter, tExit))
+	{
+		FragColor = vec4(scene, 1.0);
 		return;
 	}
 
@@ -286,13 +497,48 @@ void main()
 		tExit = min(tExit, maxDistance);
 	if (tExit <= tEnter)
 	{
-		FragColor = vec4(texture(SceneColor, screenUv).rgb, 1.0);
+		FragColor = vec4(scene, 1.0);
 		return;
 	}
 
-	float stepCount = max(float(FogSteps), 1.0);
 	float len       = tExit - tEnter;
-	float stepLen   = len / stepCount;
+
+	// PERF: Adaptive step count — clamp stepLen to a maximum world-space size.
+	// Without this, a global fog volume (16384^3) with farclip=4096 gives
+	// stepLen = 4096/16 = 256 units, which is very coarse and wastes steps on
+	// short rays (near wall = len of 32 units → stepLen 256 → only 1 effective step).
+	//
+	// Strategy: use a target stepLen based on a fraction of the fog near-distance,
+	// but never more than len/4 (always at least 4 samples per ray) and never
+	// fewer steps than 4. This makes short rays cheap and long rays still sampled.
+	//
+	// FogDepthParams.x = near plane (~0.5 units), not useful here.
+	// Use a fixed world-space target: 32 units (tunable via density).
+	// For global fog, density is very low so large steps are fine visually.
+	const float MAX_STEP_LEN = 64.0; // world units — coarser = faster, less detail
+	float stepCount = max(float(FogSteps), 1.0);
+	float idealStepLen = len / stepCount;
+	// If stepLen would exceed MAX_STEP_LEN, reduce step count proportionally.
+	// This avoids wasting FogSteps iterations on a short ray.
+	float stepLen;
+	if (idealStepLen > MAX_STEP_LEN)
+	{
+		// Long ray: use fixed step size (fewer steps than FogSteps, but each at good spacing).
+		stepLen   = MAX_STEP_LEN;
+		stepCount = max(ceil(len / stepLen), 4.0);
+	}
+	else if (idealStepLen < 1.0 && len < float(FogSteps))
+	{
+		// Very short ray (e.g. 8 units to wall): use fewer steps to save ALU.
+		stepCount = max(ceil(len), 2.0);
+		stepLen   = len / stepCount;
+	}
+	else
+	{
+		stepLen = idealStepLen;
+	}
+	// Safety: cap at FogSteps so we never exceed the uniform limit.
+	stepCount = min(stepCount, float(FogSteps));
 
 	// FIX #2: Restructured jitter selection for clarity.
 	// When noise is enabled we always apply a jitter; which generator to use
@@ -316,42 +562,118 @@ void main()
 	vec3  accum        = vec3(0.0);
 	float transmittance = 1.0;
 	float tau           = 0.0;
+	float shadowVisAccum = 0.0;
+	float shadowWeightAccum = 0.0;
+
+	vec3  viewDir       = -rd;
+
+	// PERF: Precompute per-ray constants outside the march loop.
+	// Normalize sunDir once here — CPU already normalizes it, but guard against fp drift.
+	float sunDirLenSq   = dot(FogShadowDir, FogShadowDir);
+	vec3  sunDir        = (sunDirLenSq > 1e-6) ? (FogShadowDir * inversesqrt(sunDirLenSq)) : vec3(0.0);
+	sunDirLenSq         = dot(sunDir, sunDir); // recompute on normalized vector for guard checks
+
+	// Shadow jitter: compute once per ray (same screen pixel → same jitter value).
+	bool  doShadow      = (FogShadowEnabled != 0 && FogShadowSamples > 0 && sunDirLenSq > 1e-6);
+	float shadowJitter  = doShadow && (FogShadowJitter > 0.0)
+		? (InterleavedGradientNoise(gl_FragCoord.xy + Time * 13.37) - 0.5)
+		: 0.0;
+	// PERF: Precompute sun phase once per ray (viewDir and sunDir are constant).
+	float phaseSun      = (sunDirLenSq > 1e-6)
+		? AnisotropicPhase(clamp(dot(viewDir, sunDir), -1.0, 1.0), ANISO_G_SUN)
+		: 1.0;
+	// PERF: Cache active light count and enabled flag to avoid UBO re-fetch in loop.
+	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
+	int lightOffset     = max(lightList.offset_count.x, 0);
+	int lightCount      = clamp(lightList.offset_count.y, 0, MAX_FOGLIGHTS);
+	bool  doLights      = (FogLightEnabled != 0 && lightCount > 0);
+	bool  doLightgrid   = (FogLightgridEnabled != 0);
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated — they were
 	// accumulated but never consumed, silently wasting ALU every iteration.
 
+	// Precompute noise flow parameters once (used per step inside loop).
+	float noiseScalePre = 0.0;
+	vec3  flowPre       = vec3(0.0);
+	if (FogNoiseEnabled != 0)
+	{
+		noiseScalePre = clamp(volume.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
+		float windDirLen = length(volume.wind_turbulence.xyz);
+		vec3 flowDir = (windDirLen > 1e-6) ? (volume.wind_turbulence.xyz / windDirLen) : vec3(0.0);
+		flowPre = volume.velocity_windspeed.xyz + flowDir * volume.velocity_windspeed.w;
+	}
+
+	int adaptiveSteps = int(stepCount); // adaptive, already capped at FogSteps
 	for (int i = 0; i < FogSteps; ++i)
 	{
+		if (i >= adaptiveSteps) break; // PERF: early-out for short rays
 		float t = tEnter + (float(i) + 0.5) * stepLen;
 		if (t >= tExit)
 			break;
 
 		vec3  p        = ro + rd * t;
-		float edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
+		// PERF: LOD — beyond 128 world units OR when already mostly opaque, use 1-octave noise.
+		// When transmittance < 0.1, the ray contributes < 10% to final color — full quality
+		// noise is indistinguishable from coarse at this opacity level.
+		int   noiseLod = (t > 128.0 || transmittance < 0.1) ? 1 : 0;
+		// BUG FIX: Cap optical depth per step (sigma*stepLen), not sigma itself.
+		float rawSigma = EvaluateFogSigma(p, volume, density, falloff, noiseScalePre, flowPre, noiseLod);
+		float opticalDepth = min(rawSigma * stepLen, FogDensityParams.y);
+		float att        = exp(-opticalDepth);
 
-		float noiseFactor = 1.0;
-		if (FogNoiseEnabled != 0)
+		// PERF: Pass rawSigma as firstSigma → shadow reuses it, saves 1 EvaluateFogSigma.
+		// Note: rawSigma was computed at noiseLod which may be 0 (full quality near) or 1 (coarse far).
+		// Shadow internally uses lod=1 for all its samples anyway, so this approximation is fine.
+		// sunDir is pre-normalized; shadowJitter is pre-computed; phaseSun is pre-computed.
+		float shadowVisibility = doShadow
+			? EstimateShadowVisibility(p, volume, density, falloff, noiseScalePre, flowPre,
+				stepLen, sunDir, shadowJitter, rawSigma)
+			: 1.0;
+
+		// phaseSun is already precomputed per-ray (constant for all steps on same ray).
+		vec3  stepScatter = (1.0 - att) * scatterColor * phaseSun;
+		if (doLightgrid)
 		{
-			float noiseScale = clamp(volume.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
-			vec3  noisePos   = p * noiseScale + volume.velocity.xyz * Time * noiseScale;
-			float n          = FogNoise(noisePos);
-			float noiseBias  = clamp(volume.noise_params.z, 0.0, 1.0);
-			if (noiseBias > 0.0)
-				n = smoothstep(noiseBias, 1.0, n);
-			float amt   = clamp(volume.noise_params.y, 0.0, 1.0);
-			noiseFactor = mix(1.0, n, amt);
+			// Static/emissive world contribution comes from the baked lightgrid
+			// probe data; explicit fog volume emissive remains handled separately
+			// by FogEmissiveEnabled/volume.extra.z below.
+			vec3 staticScatter = SampleFogLightgrid(p, volume);
+			stepScatter += staticScatter * (1.0 - att);
 		}
 
-		float sigma  = min(density * noiseFactor * edgeFade, FogDensityParams.y);
-		if (!IsFiniteFloat(sigma))
-			sigma = 0.0;
-		float att        = exp(-sigma * stepLen);
-		vec3  stepScatter = (1.0 - att) * scatterColor;
+		if (doLights)
+		{
+			// BUG FIX 1: Was `lightScatter * opticalDepth`; correct weight is (1.0-att).
+			// BUG FIX 2: Was `col_int.rgb * col_int.w`; col_int.w is scoring only, drop it.
+			vec3 lightScatter = vec3(0.0);
+			/* PERF: Static loop bound (MAX_FOGLIGHTS) lets GPU unroll + schedule.
+			 * Dynamic bound prevents unrolling. Dynamic count guard inside static bound. */
+			for (int l = 0; l < MAX_FOGLIGHTS; ++l)
+			{
+				if (l >= lightCount) break;
+				int lightIndex = lightOffset + l;
+				if (lightIndex >= MAX_FOGVOLUMES * MAX_FOGLIGHTS) break;
+				vec3 lightVec = FogLights[lightIndex].pos_rad.xyz - p;
+				float lightDist = length(lightVec);
+				float radius = max(FogLights[lightIndex].pos_rad.w, 1e-3);
+				float atten = clamp(1.0 - lightDist / radius, 0.0, 1.0);
+				atten *= atten; // quadratic falloff
+				if (atten < 1e-5) continue; // PERF: Skip lights with negligible contribution
+				vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
+				float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
+				lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.25 * phaseLocal);
+			}
+			stepScatter += lightScatter * (1.0 - att);
+		}
+		stepScatter *= shadowVisibility;
 		accum            += transmittance * stepScatter;
 		transmittance    *= att;
-		tau              += sigma * stepLen;
+		tau              += opticalDepth;
+		shadowVisAccum   += shadowVisibility * (1.0 - att);
+		shadowWeightAccum += (1.0 - att);
 
-		if (transmittance < 0.01)
+		// BUG FIX 3: Threshold 0.005 — enough to abort when truly opaque.
+		if (transmittance < 0.005)
 			break;
 	}
 
@@ -390,13 +712,44 @@ void main()
 		FragColor = vec4(vec3(clamp(transmittance, 0.0, 1.0)), 1.0);
 		return;
 	}
+	if (FogDebugMode == 8)
+	{
+		float avgShadow = (shadowWeightAccum > 1e-6) ? (shadowVisAccum / shadowWeightAccum) : 1.0;
+		float shadowedLum = dot(accum, vec3(0.299, 0.587, 0.114));
+		float unshadowedLum = shadowedLum / max(avgShadow, 1e-3);
+		float ratio = clamp(shadowedLum / max(unshadowedLum, 1e-3), 0.0, 1.0);
+		FragColor = vec4(clamp(shadowedLum * 2.0, 0.0, 1.0), clamp(unshadowedLum * 2.0, 0.0, 1.0), ratio, 1.0);
+		return;
+	}
 
 	// ── composite ─────────────────────────────────────────────────────────
-	vec3 scene    = texture(SceneColor, screenUv).rgb;
+	// BUG FIX (G-04): Use the 'scene' value cached at the top of main() —
+	// no need to sample SceneColor a second time here.
 	vec3 outColor;
-	if (FogPhysBlend != 0)
+	int blendMode = int(volume.extra.y + 0.5);
+	if (blendMode < 0)
+		blendMode = FogBlendModeDefault;
+	if (blendMode == 1)
+	{
+		outColor = clamp(scene + accum, 0.0, 65504.0);
+	}
+	else if (FogPhysBlend != 0)
 		outColor = scene * transmittance + accum;
 	else
 		outColor = mix(scene, scatterColor, clamp(tau, 0.0, 1.0));
-	FragColor = vec4(outColor, transmittance);
+
+	if (FogEmissiveEnabled != 0 && volume.extra.z > 0.0)
+		outColor += scatterColor * volume.extra.z * (1.0 - transmittance);
+	// Alpha = fog density (1.0 - transmittance) for SSAO suppression:
+	//   alpha=0.0 → transparent/no fog → SSAO unchanged
+	//   alpha=1.0 → fully opaque fog → SSAO suppressed
+	// This is SAFE: the final blit into composite.fbo uses
+	// glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE) so this alpha never
+	// reaches composite.fbo, the display compositor, or any blending path
+	// that previously caused the white-screen bug. The alpha stays exclusively
+	// in the internal fogvol ping-pong composite_tex buffers where postprocess
+	// reads it. The temporal pass blends alpha like RGB (see fogvol_temporal.frag).
+	// Using alpha instead of RGB luminance correctly detects dark-colored fog
+	// (purple, red, brown) where lum≈0 even at full density.
+	FragColor = vec4(outColor, 1.0 - transmittance);
 }

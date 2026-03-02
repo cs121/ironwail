@@ -417,6 +417,37 @@ int COM_FOpenFile (const char *filename, FILE **file, unsigned int *path_id);
 qboolean COM_FileExists (const char *filename, unsigned int *path_id);
 void COM_CloseFile (int h);
 
+typedef struct jobhandle_s
+{
+	struct SDL_mutex *mutex;
+	struct SDL_cond *cond;
+	qboolean done;
+} JobHandle;
+
+// Thread-safety contract:
+// - completion is published while holding handle->mutex and signaled via handle->cond.
+// - Jobs_Wait may be called from any thread, but at most once per handle.
+// - ownership of the handle transfers to Jobs_Wait, which frees it.
+
+typedef void (*jobs_func_t)(void *userdata);
+
+JobHandle *Jobs_Submit (jobs_func_t func, void *userdata);
+void Jobs_SubmitDetached (jobs_func_t func, void *userdata);
+void Jobs_Wait (JobHandle *handle);
+void Jobs_Shutdown (void);
+
+typedef void (*fs_async_cb)(void *user, uint8_t *data, size_t len, int status);
+
+typedef struct fs_asyncread_handle_s
+{
+	unsigned int id;
+} fs_asyncread_handle_t;
+
+fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user);
+void FS_AsyncReadCancel (fs_asyncread_handle_t handle);
+void FS_PumpAsyncCompletions (void);
+void FS_AsyncAdvanceGeneration (void);
+
 // these procedures open a file using COM_FindFile and loads it into a proper
 // buffer. the buffer is allocated with a total size of com_filesize + 1. the
 // procedures differ by their buffer allocation method.
@@ -484,4 +515,3 @@ extern qboolean		fitzmode;
 	/* if true, run in fitzquake mode disabling custom quakespasm hacks */
 
 #endif	/* _Q_COMMON_H */
-

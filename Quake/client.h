@@ -355,9 +355,40 @@ static inline qboolean CL_DlightIsActive (const dlight_t *dl)
 	return dl && dl->active && dl->die >= cl.time && dl->spawn <= cl.time && dl->baseradius > 0;
 }
 
-static inline qboolean CL_DlightShouldFlicker (const dlight_t *dl)
+static inline qboolean CL_DlightTransientIsLiveAtTime (const dlight_t *dl, double time, qboolean *expired)
+{
+	if (expired)
+		*expired = false;
+
+	if (!dl || dl->kind != DL_TRANSIENT)
+		return true;
+
+	if (dl->die < time)
+	{
+		if (expired)
+			*expired = true;
+		return false;
+	}
+
+	return dl->spawn <= time;
+}
+
+/*
+Dynamic light flicker model (single source of truth lives in render submit path):
+  - Radius flicker: explosion, torch, lava.
+  - Color intensity flicker: torch, lava.
+  - Additional torch warm/cool color shift: torch only.
+Keep these helpers in sync with R_PushDlightArray so type-specific tuning stays
+predictable and does not accidentally diverge between pool update and submit.
+*/
+static inline qboolean CL_DlightShouldFlickerRadius (const dlight_t *dl)
 {
 	return dl && (dl->type == DLIGHT_EXPLOSION || dl->type == DLIGHT_TORCH || dl->type == DLIGHT_LAVA);
+}
+
+static inline qboolean CL_DlightShouldFlickerColor (const dlight_t *dl)
+{
+	return dl && (dl->type == DLIGHT_TORCH || dl->type == DLIGHT_LAVA);
 }
 
 extern	entity_t		*cl_entities; //johnfitz -- was a static array, now on hunk

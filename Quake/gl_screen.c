@@ -24,16 +24,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // screen.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "quakedef.h"
-#include "rb_gl.h"
 #include "r_fogvol.h"
-#include "render_backend.h"
 #include "steam.h"
 #include <time.h>
 
 extern cvar_t r_autoexposure;
 extern cvar_t r_exposure_debug;
-extern cvar_t r_backend_ui;
-extern cvar_t r_backend_postfx;
 extern float r_autoexposure_debug_exposure;
 extern float r_autoexposure_debug_luminance;
 
@@ -2104,126 +2100,6 @@ void SCR_TileClear (void)
 	}
 }
 
-static qboolean scr_backend_ui_warned = false;
-static qboolean scr_backend_postfx_warned = false;
-
-static qboolean SCR_BackendUIPathAvailable (const char **reason)
-{
-	if (reason)
-		*reason = NULL;
-
-	if (!glprogs.gui)
-	{
-		if (reason)
-			*reason = "missing shader program: gui";
-		return false;
-	}
-
-	return true;
-}
-
-static qboolean SCR_BackendPostFXPathAvailable (const char **reason)
-{
-	if (reason)
-		*reason = NULL;
-
-	if (!GL_NeedsPostprocess ())
-		return true;
-
-	if (!framebufs.composite.fbo || !framebufs.composite.color_tex)
-	{
-		if (reason)
-			*reason = "missing postfx framebuffer resources";
-		return false;
-	}
-
-	if (!glprogs.postprocess[0])
-	{
-		if (reason)
-			*reason = "missing shader program: postprocess";
-		return false;
-	}
-
-	return true;
-}
-
-static void SCR_DrawUI2D_Legacy (void)
-{
-	RB_BeginPass (PASS_UI2D);
-	GL_BeginGroup ("2D");
-
-	GL_Set2D ();
-	R_FogVol_DrawDebug2D ();
-	SCR_TileClear ();
-
-	if (scr_drawdialog)
-	{
-		if (con_forcedup)
-			Draw_ConsoleBackground ();
-		else
-			Sbar_Draw ();
-		Draw_FadeScreen (1.f);
-		SCR_DrawNotifyString ();
-	}
-	else if (scr_drawloading)
-	{
-		SCR_DrawLoading ();
-		Sbar_Draw ();
-		M_Draw ();
-	}
-	else if (cl.intermission == 1 && key_dest == key_game)
-	{
-		Sbar_IntermissionOverlay ();
-		SCR_DrawDemoControls ();
-	}
-	else if (cl.intermission == 2 && key_dest == key_game)
-	{
-		Sbar_FinaleOverlay ();
-		SCR_CheckDrawCenterString ();
-		SCR_DrawDemoControls ();
-	}
-	else
-	{
-		SCR_DrawCrosshair ();
-		SCR_DrawNet ();
-		SCR_DrawTurtle ();
-		SCR_DrawPause ();
-		SCR_CheckDrawCenterString ();
-		Sbar_Draw ();
-		SCR_DrawDevStats ();
-		SCR_DrawExposureDebug ();
-		SCR_DrawClock ();
-		SCR_DrawDemoControls ();
-		SCR_DrawSpeed ();
-		SCR_DrawEdictInfo ();
-		SCR_DrawConsole ();
-		M_Draw ();
-		SCR_DrawFPS ();
-		SCR_DrawSaving ();
-	}
-
-	Draw_Flush ();
-	GL_EndGroup ();
-	RB_EndPass ();
-}
-
-static qboolean SCR_DrawUI2D_Backend (void)
-{
-	SCR_DrawUI2D_Legacy ();
-	return true;
-}
-
-static void SCR_PostProcess_Legacy (void)
-{
-	GL_PostProcess ();
-}
-
-static qboolean SCR_PostProcess_Backend (void)
-{
-	GL_PostProcess ();
-	return true;
-}
-
 /*
 ==================
 SCR_UpdateScreen
@@ -2235,12 +2111,8 @@ WARNING: be very careful calling this from elsewhere, because the refresh
 needs almost the entire 256k of stack space!
 ==================
 */
-static void SCR_UpdateScreen_Legacy (void)
+void SCR_UpdateScreen (void)
 {
-	const char *postfx_unavailable_reason = NULL;
-	const char *ui_unavailable_reason = NULL;
-	qboolean postfx_backend_available;
-	qboolean ui_backend_available;
 	vid.numpages = (gl_triplebuffer.value) ? 3 : 2;
 
 	if (scr_disabled_for_loading)
@@ -2276,23 +2148,69 @@ static void SCR_UpdateScreen_Legacy (void)
 
        V_RenderView ();
 
-	postfx_backend_available = SCR_BackendPostFXPathAvailable (&postfx_unavailable_reason);
-	RBackend_DispatchBlock ("postfx", &r_backend_postfx, postfx_backend_available, postfx_unavailable_reason,
-		SCR_PostProcess_Backend, SCR_PostProcess_Legacy, &scr_backend_postfx_warned);
+       GL_PostProcess ();
 
        V_PolyBlend ();
 
        R_StorePrevFrameState ();
 
-	ui_backend_available = SCR_BackendUIPathAvailable (&ui_unavailable_reason);
-	RBackend_DispatchBlock ("ui", &r_backend_ui, ui_backend_available, ui_unavailable_reason,
-		SCR_DrawUI2D_Backend, SCR_DrawUI2D_Legacy, &scr_backend_ui_warned);
+	GL_BeginGroup ("2D");
 
-	RBackend_DebugCaptureEndFrameHash ();
+	GL_Set2D ();
+	R_FogVol_DrawDebug2D ();
+
+	//FIXME: only call this when needed
+	SCR_TileClear ();
+
+	if (scr_drawdialog) //new game confirm
+	{
+		if (con_forcedup)
+			Draw_ConsoleBackground ();
+		else
+			Sbar_Draw ();
+		Draw_FadeScreen (1.f);
+		SCR_DrawNotifyString ();
+	}
+	else if (scr_drawloading) //loading
+	{
+		SCR_DrawLoading ();
+		Sbar_Draw ();
+		M_Draw ();
+	}
+	else if (cl.intermission == 1 && key_dest == key_game) //end of level
+	{
+		Sbar_IntermissionOverlay ();
+		SCR_DrawDemoControls ();
+	}
+	else if (cl.intermission == 2 && key_dest == key_game) //end of episode
+	{
+		Sbar_FinaleOverlay ();
+		SCR_CheckDrawCenterString ();
+		SCR_DrawDemoControls ();
+	}
+	else
+	{
+		SCR_DrawCrosshair (); //johnfitz
+		SCR_DrawNet ();
+		SCR_DrawTurtle ();
+		SCR_DrawPause ();
+		SCR_CheckDrawCenterString ();
+		Sbar_Draw ();
+		SCR_DrawDevStats (); //johnfitz
+		SCR_DrawExposureDebug ();
+		SCR_DrawClock (); //johnfitz
+		SCR_DrawDemoControls ();
+		SCR_DrawSpeed ();
+		SCR_DrawEdictInfo ();
+		SCR_DrawConsole ();
+		M_Draw ();
+		SCR_DrawFPS (); //johnfitz
+		SCR_DrawSaving ();
+	}
+
+	Draw_Flush ();
+
+	GL_EndGroup ();
+
 	GL_EndRendering ();
-}
-
-void SCR_UpdateScreen (void)
-{
-	RBackend_DispatchUpdateScreen (SCR_UpdateScreen_Legacy);
 }

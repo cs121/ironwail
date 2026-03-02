@@ -22,7 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_sprite.c -- sprite model rendering
 
 #include "quakedef.h"
-#include "rb_gl.h"
 
 typedef struct spritevert_t {
 	vec3_t		pos;
@@ -154,14 +153,14 @@ static void R_FlushSpriteInstances (void)
 		GL_PolygonOffset (OFFSET_DECAL);
 
 	dither = (softemu == SOFTEMU_COARSE && !showtris);
-	RB_UseProgram (glprogs.sprites[dither]);
+	GL_UseProgram (glprogs.sprites[dither]);
 
 	if (showtris)
-		RB_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS(2));
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS(2));
 	else
-		RB_SetState (GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS(2));
+		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS(2));
 
-	RB_BindTexture (GL_TEXTURE0, showtris ? whitetexture : batchtexture);
+	GL_Bind (GL_TEXTURE0, showtris ? whitetexture : batchtexture);
 
 	GL_Upload (GL_ARRAY_BUFFER, batchverts, sizeof(batchverts[0]) * 4 * numbatchquads, &buf, &ofs);
 	GL_BindBuffer (GL_ARRAY_BUFFER, buf);
@@ -170,7 +169,7 @@ static void R_FlushSpriteInstances (void)
 
 	GL_Upload (GL_ELEMENT_ARRAY_BUFFER, batchindices, sizeof(batchindices[0]) * 6 * numbatchquads, &buf, &ofs);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-	RB_DrawElements (GL_TRIANGLES, 6 * numbatchquads, GL_UNSIGNED_SHORT, ofs);
+	glDrawElements (GL_TRIANGLES, 6 * numbatchquads, GL_UNSIGNED_SHORT, ofs);
 
 	//johnfitz: offset decals
 	if (psprite->type == SPR_ORIENTED)
@@ -211,18 +210,47 @@ static void R_DrawSpriteModel_Real (entity_t *e, qboolean showtris)
 		s_right = v_right;
 		break;
 	case SPR_FACING_UPRIGHT: //faces camera origin, up is towards the heavens
+	{
+		float forward_len2;
+
 		VectorSubtract(e->origin, r_origin, v_forward);
 		v_forward[2] = 0;
-		VectorNormalizeFast(v_forward);
-		v_right[0] = v_forward[1];
-		v_right[1] = -v_forward[0];
-		v_right[2] = 0;
+		forward_len2 = DotProduct(v_forward, v_forward);
+
+		if (forward_len2 > 0.000001f)
+		{
+			VectorNormalizeFast(v_forward);
+			v_right[0] = v_forward[1];
+			v_right[1] = -v_forward[0];
+			v_right[2] = 0;
+		}
+		else
+		{
+			/*
+			 * Degenerate case: sprite origin is on (or extremely close to)
+			 * the camera origin in the XY plane, so the facing direction
+			 * cannot be normalized reliably. Reuse the camera right axis,
+			 * projected to XY, and fall back to a fixed world axis if needed.
+			 */
+			v_right[0] = vright[0];
+			v_right[1] = vright[1];
+			v_right[2] = 0;
+			if (DotProduct(v_right, v_right) <= 0.000001f)
+			{
+				v_right[0] = 1;
+				v_right[1] = 0;
+				v_right[2] = 0;
+			}
+			VectorNormalizeFast(v_right);
+		}
+
 		v_up[0] = 0;
 		v_up[1] = 0;
 		v_up[2] = 1;
 		s_up = v_up;
 		s_right = v_right;
 		break;
+	}
 	case SPR_VP_PARALLEL: //faces view plane, up is towards the top of the screen
 		s_up = vup;
 		s_right = vright;

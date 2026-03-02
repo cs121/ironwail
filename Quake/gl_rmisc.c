@@ -25,68 +25,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
-#include "r_maptex_export.h"
 #include "r_dlight_pool.h"
 #include "r_postfx.h"
 #include "r_fogvol.h"
 
-//johnfitz -- new cvars
-extern cvar_t r_clearcolor;
-extern cvar_t r_flatlightstyles;
-extern cvar_t r_lerplightstyles;
-extern cvar_t gl_fullbrights;
-extern cvar_t gl_farclip;
-extern cvar_t gl_overbright_models;
-extern cvar_t r_model_halflambert;
-extern cvar_t r_facenormals_enable;
-extern cvar_t r_overbrightbits;
-extern cvar_t r_waterwarp;
-extern cvar_t r_oldskyleaf;
-extern cvar_t r_drawworld;
-extern cvar_t r_showtris;
-extern cvar_t r_showbboxes;
-extern cvar_t r_showbboxes_think;
-extern cvar_t r_showbboxes_health;
-extern cvar_t r_showbboxes_links;
-extern cvar_t r_showbboxes_targets;
-extern cvar_t r_showfields;
-extern cvar_t r_showfields_align;
-extern cvar_t r_lerpmodels;
-extern cvar_t r_lerpmove;
-extern cvar_t r_nolerp_list;
-extern cvar_t r_lightmap_linear;
-extern cvar_t r_lightmap_mipmaps;
-extern cvar_t r_lightmap16f;
-extern cvar_t r_lightingdir;
-extern cvar_t r_dlight_style;
-extern cvar_t r_dlight_debug;
-extern cvar_t r_dlight_debug_spawn;
-extern cvar_t r_dlight_entities;
-extern cvar_t r_dlight_mode;
-extern cvar_t r_dlight_scale;
-extern cvar_t r_dlight_radius_scale;
-extern cvar_t r_dlight_falloff;
-extern cvar_t r_dlight_exp;
-extern cvar_t r_dlight_core_boost;
-extern cvar_t r_dlight_core_exp;
-extern cvar_t r_dlight_softknee;
-extern cvar_t r_dlight_buffer;
-extern cvar_t r_dlight_bloom;
-extern cvar_t r_dlight_bloom_scale;
-extern cvar_t r_dlight_bloom_radius;
-extern cvar_t r_dlight_bloom_threshold;
-extern cvar_t r_dlight_ndotl;
-extern cvar_t r_dlight_satchop;
-extern cvar_t r_backend;
-extern cvar_t r_backend_ui;
-extern cvar_t r_backend_framehash_debug;
-extern cvar_t r_backend_framehash_scene;
-extern cvar_t r_backend_framehash_epsilon;
-extern cvar_t r_backend_postfx;
-extern cvar_t r_backend_particles;
-extern cvar_t r_backend_alias;
-extern cvar_t r_backend_world;
-extern cvar_t r_backend_fogvol;
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
 extern cvar_t r_flatlightstyles;
@@ -256,6 +198,7 @@ extern cvar_t r_ssao_upscale_nearest;
 extern cvar_t r_ssao_fog_strength;
 extern cvar_t r_ssao_fog_power;
 extern cvar_t r_ssao_max_distance;
+extern cvar_t r_ssao_validate;
 extern cvar_t r_godrays;
 extern cvar_t r_godrays_emit_sky;
 extern cvar_t r_godrays_emit_emissive;
@@ -292,6 +235,7 @@ extern cvar_t r_godrays_max_shift;
 extern cvar_t r_godrays_reset_on_teleport;
 extern cvar_t r_godrays_debug;
 extern cvar_t r_godrays_debug_source;
+extern cvar_t r_sun_light;
 extern cvar_t r_vignette;
 extern cvar_t r_vignette_radius_inner;
 extern cvar_t r_vignette_radius_outer;
@@ -301,8 +245,6 @@ extern cvar_t r_vignette_color_g;
 extern cvar_t r_vignette_color_b;
 extern cvar_t r_vignette_blend_mode;
 extern cvar_t r_vignette_noise;
-extern cvar_t r_screendarken;
-extern cvar_t r_screendarken_depth;
 extern cvar_t r_teleportfx;
 extern cvar_t r_teleportfx_time;
 
@@ -562,19 +504,8 @@ void R_Init (void)
 
         Lightgrid_Init ();
         Mat_Shader_Init ();
-        R_MapTex_ExportInit ();
 
 Cvar_RegisterVariable (&r_norefresh);
-Cvar_RegisterVariable (&r_backend);
-Cvar_RegisterVariable (&r_backend_ui);
-Cvar_RegisterVariable (&r_backend_postfx);
-Cvar_RegisterVariable (&r_backend_particles);
-Cvar_RegisterVariable (&r_backend_alias);
-Cvar_RegisterVariable (&r_backend_world);
-Cvar_RegisterVariable (&r_backend_fogvol);
-Cvar_RegisterVariable (&r_backend_framehash_debug);
-Cvar_RegisterVariable (&r_backend_framehash_scene);
-Cvar_RegisterVariable (&r_backend_framehash_epsilon);
 Cvar_RegisterVariable (&r_lightmap);
 Cvar_RegisterVariable (&r_lightmap_linear);
 Cvar_SetCallback (&r_lightmap_linear, TexMgr_LightmapLinearCompat_f);
@@ -741,6 +672,7 @@ Cvar_RegisterVariable (&r_ssao_samples);
 	Cvar_RegisterVariable (&r_ssao_fog_strength);
 	Cvar_RegisterVariable (&r_ssao_fog_power);
 	Cvar_RegisterVariable (&r_ssao_max_distance);
+	Cvar_RegisterVariable (&r_ssao_validate);
 Cvar_RegisterVariable (&r_godrays);
 	Cvar_RegisterVariable (&r_godrays_emit_sky);
 	Cvar_RegisterVariable (&r_godrays_emit_emissive);
@@ -786,8 +718,6 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_vignette_color_b);
 	Cvar_RegisterVariable (&r_vignette_blend_mode);
 	Cvar_RegisterVariable (&r_vignette_noise);
-	Cvar_RegisterVariable (&r_screendarken);
-	Cvar_RegisterVariable (&r_screendarken_depth);
 	Cvar_RegisterVariable (&r_teleportfx);
 	Cvar_RegisterVariable (&r_teleportfx_time);
         Cvar_RegisterVariable (&r_overbrightbits);
@@ -825,7 +755,6 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&gl_overbright_models);
 	Cvar_RegisterVariable (&r_model_halflambert);
 	Cvar_RegisterVariable (&r_gl_state_validate);
-	Cvar_RegisterVariable (&r_rb_assert_state);
 	Cvar_RegisterVariable (&r_lerpmodels);
 	Cvar_RegisterVariable (&r_lerpmove);
 	Cvar_RegisterVariable (&r_nolerp_list);
@@ -836,6 +765,7 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_telealpha);
 	Cvar_RegisterVariable (&r_slimealpha);
 	Cvar_RegisterVariable (&r_scale);
+	Cvar_RegisterVariable (&r_sun_light);
 	Cvar_SetCallback (&r_telealpha, R_SetTelealpha_f);
 	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
 
@@ -843,6 +773,7 @@ Cvar_RegisterVariable (&r_vignette);
 	R_FogVol_Init ();
 
 	R_InitParticles ();
+	R_InitDecals ();
 	R_SetClearColor_f (&r_clearcolor); //johnfitz
 
 	Sky_Init (); //johnfitz
@@ -917,6 +848,77 @@ void R_TranslateNewPlayerSkin (int playernum)
 R_NewGame -- johnfitz -- handle a game switch
 ===============
 */
+
+static qboolean r_worldspawn_has_sun = false;
+r_sun_t r_sun;
+cvar_t r_sun_light = { "r_sun_light", "0", CVAR_ARCHIVE };
+
+static void R_ResetSunState (void)
+{
+	r_worldspawn_has_sun = false;
+	r_sun.enabled = false;
+	VectorClear (r_sun.origin);
+	VectorClear (r_sun.dir);
+	VectorSet (r_sun.color, 1.f, 1.f, 1.f);
+	r_sun.intensity = 1.f;
+}
+
+qboolean R_WorldHasSun (void)
+{
+	return r_sun.enabled;
+}
+
+qboolean R_GetSun (vec3_t dir, vec3_t origin, vec3_t color, float *intensity)
+{
+	if (!r_sun.enabled)
+		return false;
+
+	if (dir)
+	{
+		if (DotProduct (r_sun.dir, r_sun.dir) > 1e-6f)
+			VectorCopy (r_sun.dir, dir);
+		else
+			VectorSet (dir, 0.f, 0.f, -1.f);
+	}
+	if (origin)
+		VectorCopy (r_sun.origin, origin);
+	if (color)
+		VectorCopy (r_sun.color, color);
+	if (intensity)
+		*intensity = r_sun.intensity;
+	return true;
+}
+
+static void R_ApplyDefaultSunIfMissing (qmodel_t *world)
+{
+	vec3_t center;
+	vec3_t ang;
+
+	if (!world || r_sun.enabled || r_worldspawn_has_sun)
+		return;
+
+	center[0] = 0.5f * (world->mins[0] + world->maxs[0]);
+	center[1] = 0.5f * (world->mins[1] + world->maxs[1]);
+	center[2] = 0.5f * (world->mins[2] + world->maxs[2]);
+
+	VectorCopy (center, r_sun.origin);
+	r_sun.origin[2] += 128.0f;
+
+	ang[PITCH] = 45.0f;
+	ang[YAW] = 225.0f;
+	ang[ROLL] = 0.0f;
+
+	AngleVectors (ang, r_sun.dir, NULL, NULL);
+	if (VectorLength (r_sun.dir) < 0.001f)
+		VectorSet (r_sun.dir, 0.f, 0.f, -1.f);
+	else
+		VectorNormalize (r_sun.dir);
+
+	VectorSet (r_sun.color, 1.f, 1.f, 1.f);
+	r_sun.intensity = 1.f;
+	r_sun.enabled = true;
+}
+
 void R_NewGame (void)
 {
 	int i;
@@ -939,6 +941,7 @@ static void R_ParseWorldspawn (void)
 	const char *data;
 
 	map_fallbackalpha = r_wateralpha.value;
+	R_ResetSunState ();
 	map_wateralpha = (cl.worldmodel->contentstransparent&SURF_DRAWWATER)?r_wateralpha.value:1;
 	map_lavaalpha = 1.0f;
 	map_telealpha = (cl.worldmodel->contentstransparent&SURF_DRAWTELE)?r_telealpha.value:1;
@@ -970,6 +973,12 @@ static void R_ParseWorldspawn (void)
 
 if (!strcmp("wateralpha", key))
 map_wateralpha = atof(value);
+
+if (!strcmp("sunlight", key) || !strcmp("sun_mangle", key))
+{
+	r_worldspawn_has_sun = true;
+	r_sun.enabled = true;
+}
 
 if (!strcmp("telealpha", key))
 map_telealpha = atof(value);
@@ -1007,6 +1016,10 @@ void R_NewMap (void)
 
 	R_ResetGodraysStabilization ();
 	R_FogVol_ClearHistory ();
+	R_ReloadDecals ();
+	R_ClearDecals ();
+
+	R_ResetSunState ();
 
 	GL_BuildLightmaps ();
         GL_BuildBModelVertexBuffer ();
@@ -1020,6 +1033,7 @@ void R_NewMap (void)
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
         R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
+        R_ApplyDefaultSunIfMissing (cl.worldmodel);
         R_ParseDlightEntities (); // persistent dlights from BSP entities
         R_FogVol_ParseEntities (); // fog volume entities from BSP
 
