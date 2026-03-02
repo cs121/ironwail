@@ -1350,7 +1350,7 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 			0.f, 1.f, 0.f,
 			0.f, 0.f, 1.f
 		};
-		GL_UniformMatrix3fvFunc (1, 1, GL_FALSE, identity3x3);
+		GL_Uniform3fvFunc (1, 3, identity3x3);
 	}
 	GL_Uniform4fFunc (2, 1.f, 1.f, 1.f, 1.f);
 
