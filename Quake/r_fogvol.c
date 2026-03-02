@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "draw.h"
+#include "gl_lightgrid.h"
 #include "r_fogvol.h"
 #include "r_dlight_pool.h"
 #include <math.h>
@@ -53,8 +54,14 @@ typedef struct fog_light_list_gpu_s
 	fog_light_gpu_t lights[32];
 } fog_light_list_gpu_t;
 
+typedef struct fog_lightgrid_gpu_s
+{
+	float probe_rgb[8][4];
+} fog_lightgrid_gpu_t;
+
 COMPILE_TIME_ASSERT (fog_light_gpu_align16, (sizeof (fog_light_gpu_t) % 16) == 0);
 COMPILE_TIME_ASSERT (fog_light_list_gpu_align16, (sizeof (fog_light_list_gpu_t) % 16) == 0);
+COMPILE_TIME_ASSERT (fog_lightgrid_gpu_align16, (sizeof (fog_lightgrid_gpu_t) % 16) == 0);
 
 typedef struct fogvol_light_candidate_s
 {
@@ -128,6 +135,7 @@ cvar_t r_fogvol_globalfog_height = { "r_fogvol_globalfog_height", "0", CVAR_ARCH
 cvar_t r_fogvol_globalfog_height_scale = { "r_fogvol_globalfog_height_scale", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_priority = { "r_fogvol_globalfog_priority", "-1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_lightgrid = { "r_fogvol_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE };
@@ -839,6 +847,7 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_globalfog_height_scale);
 	Cvar_RegisterVariable (&r_fogvol_globalfog_priority);
 	Cvar_RegisterVariable (&r_fogvol_light);
+	Cvar_RegisterVariable (&r_fogvol_lightgrid);
 	Cvar_RegisterVariable (&r_fogvol_light_max);
 	Cvar_RegisterVariable (&r_fogvol_shadow);
 	Cvar_RegisterVariable (&r_fogvol_shadow_samples);
@@ -1425,6 +1434,7 @@ void R_FogVol_Render (void)
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
 	fog_light_list_gpu_t fog_lights;
+	fog_lightgrid_gpu_t fog_lightgrid;
 	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 8);
 	float inv_viewproj[16];
 	GLuint src_tex;
@@ -1458,6 +1468,9 @@ void R_FogVol_Render (void)
 	qboolean dumpstate_always;
 	fogvol_restore_state_t restore_state;
 	qboolean fog_light_enabled = false;
+	qboolean fog_lightgrid_enabled = false;
+	qboolean fog_lightgrid_has_data = false;
+	const lightgrid_t *lightgrid = NULL;
 	vec3_t shadow_dir;
 	int shadow_samples;
 
@@ -1516,6 +1529,10 @@ void R_FogVol_Render (void)
 	steps = CLAMP (8, steps, q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
 
 	memset (&fog_lights, 0, sizeof (fog_lights));
+	lightgrid = Lightgrid_Get ();
+	fog_lightgrid_has_data = (lightgrid && lightgrid->octree && r_lightgrid.value > 0.f);
+	fog_lightgrid_enabled = fog_lightgrid_has_data && (r_fogvol_lightgrid.value > 0.f);
+
 	if (r_fogvol_light.value > 0.f)
 	{
 		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), (int)countof (fog_lights.lights));
@@ -1660,6 +1677,7 @@ void R_FogVol_Render (void)
 	GL_Uniform1fFunc (19, CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f));
 	GL_Uniform1fFunc (20, r_fogvol_shadow_jitter.value > 0.f ? 1.f : 0.f);
 	GL_Uniform3fFunc (21, shadow_dir[0], shadow_dir[1], shadow_dir[2]);
+	GL_Uniform1iFunc (22, fog_lightgrid_enabled ? 1 : 0);
 
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);
@@ -1699,6 +1717,10 @@ void R_FogVol_Render (void)
 		fog_volume_t *v = &r_fogvolumes[i];
 		int x0, y0, x1, y1;
 		GLuint src_fbo;
+		static const vec3_t corner_lut[8] = {
+			{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f, 0.f},
+			{0.f, 0.f, 1.f}, {1.f, 0.f, 1.f}, {0.f, 1.f, 1.f}, {1.f, 1.f, 1.f}
+		};
 
 		if (!v->enabled)
 			continue;
@@ -1777,6 +1799,27 @@ void R_FogVol_Render (void)
 				i, src_tex, depth_tex, dst_tex, src_fbo, dst_fbo, x0, y0, x1 - x0, y1 - y0);
 		R_FogVol_AssertNoFeedbackHazard ("ITER", dst_tex, src_tex);
 		R_FogVol_AssertNoBoundFeedbackHazard ("ITER");
+		memset (&fog_lightgrid, 0, sizeof (fog_lightgrid));
+		if (fog_lightgrid_enabled)
+		{
+			for (int c = 0; c < 8; ++c)
+			{
+				vec3_t probe_pos;
+				const lightgrid_probe_t *probe;
+				probe_pos[0] = v->mins[0] + (v->maxs[0] - v->mins[0]) * corner_lut[c][0];
+				probe_pos[1] = v->mins[1] + (v->maxs[1] - v->mins[1]) * corner_lut[c][1];
+				probe_pos[2] = v->mins[2] + (v->maxs[2] - v->mins[2]) * corner_lut[c][2];
+				probe = R_GetLightgridSample (probe_pos);
+				if (probe)
+				{
+					fog_lightgrid.probe_rgb[c][0] = probe->rgb[0] * probe->ao;
+					fog_lightgrid.probe_rgb[c][1] = probe->rgb[1] * probe->ao;
+					fog_lightgrid.probe_rgb[c][2] = probe->rgb[2] * probe->ao;
+				}
+			}
+		}
+		GL_Upload (GL_UNIFORM_BUFFER, &fog_lightgrid, sizeof (fog_lightgrid), &buf, &ofs);
+		GL_BindBufferRange (GL_UNIFORM_BUFFER, 5, buf, (GLintptr)ofs, sizeof (fog_lightgrid));
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 		GL_SetScissorEnabled (true);
