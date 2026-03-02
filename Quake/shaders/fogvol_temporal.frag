@@ -50,6 +50,7 @@ layout(location=6) uniform int   FogHistoryValid;
 layout(location=7) uniform vec4  FogViewParams;     // xy: view origin in screen px, zw: inv view size
 layout(location=8) uniform vec4  FogTemporalConfidenceParams; // x: min alpha, y: disocclusion bias, z: clamp strength, w: reserved
 layout(location=9) uniform int   FogHasVelocity;
+layout(location=10) uniform int  FogCheckerboard;
 
 layout(location=0) out vec4 OutColor;
 
@@ -118,6 +119,7 @@ void main()
 	vec2 viewUv    = (screenPos - FogViewParams.xy) * FogViewParams.zw;
 	vec2 viewSize  = 1.0 / max(FogViewParams.zw, vec2(1e-6));
 	vec4 current   = texture(FogCurrent, screenUv);
+	bool checkerboardMissing = (FogCheckerboard != 0 && current.a <= 0.0001);
 
 	// FIX #4: Cast PrevFrameValid to int to avoid signed/unsigned comparison
 	// warnings that some GL drivers promote to errors.
@@ -225,6 +227,12 @@ void main()
 		// Debug: R=confidence, G=depth agreement, B=rejection (1=reject)
 		float rejection = 1.0 - (valid ? confidence : 0.0);
 		OutColor = vec4(valid ? confidence : 0.0, depthAgreement, rejection, 1.0);
+		return;
+	}
+
+	if (checkerboardMissing && valid)
+	{
+		OutColor = history;
 		return;
 	}
 
