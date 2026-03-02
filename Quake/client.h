@@ -117,6 +117,10 @@ typedef struct
 	float	starttime;
 	float	endtime;
 	vec3_t	start, end;
+	int		attach_entity;
+	qboolean	local_space;
+	vec3_t	start_local;
+	vec3_t	end_local;
 } beam_t;
 
 #define	MAX_MAPSTRING	2048
