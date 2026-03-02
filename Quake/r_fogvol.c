@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_fogvol.h"
 #include "r_dlight_pool.h"
 #include <math.h>
+#include <stdint.h>
 
 typedef struct fog_volume_gpu_s
 {
@@ -80,6 +81,21 @@ static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
 static int r_fogvolume_count = 0;
 static fog_volume_t r_fogvolume_entities[MAX_FOGVOLUMES];
 static int r_fogvolume_entity_count = 0;
+
+#define MAX_FOG_DLIGHTS 64
+#define FOG_TORCH_CACHE_SIZE 128
+
+typedef struct fog_torch_cache_entry_s
+{
+	const qmodel_t *model;
+	qboolean is_torch;
+} fog_torch_cache_entry_t;
+
+/* Variant C split: these lights are fog-only and must never enter the normal
+ * geometry/cluster/shadow dlight pipelines. */
+static int r_num_fog_dlights = 0;
+static dlight_t r_fog_dlights[MAX_FOG_DLIGHTS];
+static fog_torch_cache_entry_t r_fog_torch_cache[FOG_TORCH_CACHE_SIZE];
 
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
@@ -403,6 +419,80 @@ static void R_FogVol_LogPipelineState (const char *marker)
 		program,
 		(unsigned)draw_buffer,
 		(unsigned)read_buffer);
+}
+
+static void R_FogDlights_Clear (void)
+{
+	r_num_fog_dlights = 0;
+}
+
+static void R_FogDlights_Add (const vec3_t origin, float radius, const vec3_t color)
+{
+	dlight_t *dl;
+
+	if (r_num_fog_dlights >= MAX_FOG_DLIGHTS)
+		return;
+	if (radius <= 0.f)
+		return;
+
+	dl = &r_fog_dlights[r_num_fog_dlights++];
+	memset (dl, 0, sizeof (*dl));
+	VectorCopy (origin, dl->origin);
+	dl->radius = q_max (0.f, radius);
+	dl->color[0] = CLAMP (0.f, color[0], 1.f);
+	dl->color[1] = CLAMP (0.f, color[1], 1.f);
+	dl->color[2] = CLAMP (0.f, color[2], 1.f);
+	dl->active = true;
+}
+
+static qboolean R_IsTorchName (const char *name)
+{
+	return name
+		&& (q_strcasestr (name, "torch")
+			|| q_strcasestr (name, "flame")
+			|| q_strcasestr (name, "fire")
+			|| q_strcasestr (name, "burn")
+			|| q_strcasestr (name, "lantern"));
+}
+
+static qboolean R_IsTorchModel (const qmodel_t *model)
+{
+	const uintptr_t key = (uintptr_t)model;
+	int slot;
+
+	if (!model)
+		return false;
+
+	slot = (int)(key % FOG_TORCH_CACHE_SIZE);
+	if (r_fog_torch_cache[slot].model != model)
+	{
+		r_fog_torch_cache[slot].model = model;
+		r_fog_torch_cache[slot].is_torch = R_IsTorchName (model->name);
+	}
+	return r_fog_torch_cache[slot].is_torch;
+}
+
+static void R_FogDlights_AddTorchEntities (void)
+{
+	const vec3_t torch_color = {1.f, 0.55f, 0.2f};
+
+	for (int i = 0; i < cl_numvisedicts; ++i)
+	{
+		const entity_t *ent = cl_visedicts[i];
+		float flicker_a;
+		float flicker_b;
+		float flicker;
+		float radius;
+
+		if (!ent || !ent->model || !R_IsTorchModel (ent->model))
+			continue;
+
+		flicker_a = 0.5f + 0.5f * sinf ((float)cl.time * 7.0f + (float)i * 12.9898f);
+		flicker_b = 0.5f + 0.5f * sinf ((float)cl.time * 13.0f + (float)i * 3.1f + 1.7f);
+		flicker = CLAMP (0.f, 0.7f * flicker_a + 0.3f * flicker_b, 1.f);
+		radius = 96.f * (0.85f + 0.15f * flicker);
+		R_FogDlights_Add (ent->origin, radius, torch_color);
+	}
 }
 
 static GLuint R_FogVol_GetFramebufferColorAttachmentTexture (GLenum target)
@@ -846,10 +936,9 @@ static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, fog_lig
 		return 0;
 
 	active = DLightPool_GetActiveList (&active_count);
-	if (!active || active_count <= 0)
-		return 0;
-
-	for (int i = 0; i < active_count && candidate_count < countof (candidates); ++i)
+	if (active && active_count > 0)
+	{
+		for (int i = 0; i < active_count && candidate_count < countof (candidates); ++i)
 	{
 		const dlight_t *dl = active[i];
 		vec3_t to_light;
@@ -957,6 +1046,41 @@ static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, fog_lig
 		/* col_int.w was intensity=max(r,g,b), used as extra shader multiplier
 		 * on top of col_int.rgb — double-counting brightness. Shader now uses
 		 * col_int.rgb directly, so set .w=1.0 for forward compatibility. */
+		candidates[candidate_count].light.col_int[3] = 1.f;
+		candidate_count++;
+		}
+	}
+
+	for (int i = 0; i < r_num_fog_dlights && candidate_count < countof (candidates); ++i)
+	{
+		const dlight_t *dl = &r_fog_dlights[i];
+		float overlap_score = 0.f;
+		float score;
+
+		if (!CL_DlightIsActive (dl) || dl->radius <= 0.f)
+			continue;
+
+		for (int v = 0; v < visible_count; ++v)
+		{
+			float overlap = 0.f;
+			if (R_FogVol_LightOverlapsVolume (visible_volumes[v], dl->origin, dl->radius))
+				overlap = 1.f;
+			overlap_score += overlap * visible_volume_screen_weight[v];
+		}
+
+		if (overlap_score <= 0.f)
+			continue;
+
+		score = overlap_score * dl->radius;
+		candidates[candidate_count].index = 100000 + i;
+		candidates[candidate_count].score = score;
+		candidates[candidate_count].light.pos_rad[0] = dl->origin[0];
+		candidates[candidate_count].light.pos_rad[1] = dl->origin[1];
+		candidates[candidate_count].light.pos_rad[2] = dl->origin[2];
+		candidates[candidate_count].light.pos_rad[3] = dl->radius;
+		candidates[candidate_count].light.col_int[0] = dl->color[0];
+		candidates[candidate_count].light.col_int[1] = dl->color[1];
+		candidates[candidate_count].light.col_int[2] = dl->color[2];
 		candidates[candidate_count].light.col_int[3] = 1.f;
 		candidate_count++;
 	}
@@ -1448,6 +1572,8 @@ void R_FogVol_AddTestVolumes (void)
 void R_FogVol_BuildList (void)
 {
 	R_FogVol_Clear ();
+	R_FogDlights_Clear ();
+	R_FogDlights_AddTorchEntities ();
 
 	/* BUG FIX (testvolumes): r_fogvol_testvolumes must work independently of
 	 * r_fogvol so developers can test the pipeline without setting up entity
