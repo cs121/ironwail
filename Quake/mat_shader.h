@@ -258,6 +258,9 @@ extern cvar_t r_shaders;
 extern cvar_t r_shader_debug;
 extern cvar_t r_tcgen_debug;
 extern cvar_t r_matshader_debug_parse;
+extern cvar_t r_particles_shader_strict;
+
+#define MAT_PARTICLE_SHADER_PREFIX "particles/"
 
 typedef enum
 {
@@ -294,5 +297,6 @@ void Mat_Shader_Insert (shader_material_t *material);
 void Mat_Shader_Remove (const shader_material_t *material);
 void Mat_Shader_MarkKeywordSeen (const char *keyword, mat_shader_keyword_scope_t scope);
 void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file, unsigned int line);
+qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, char *reason, size_t reason_size);
 
 #endif // MAT_SHADER_H

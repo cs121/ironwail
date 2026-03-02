@@ -27,6 +27,19 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define GLSL_PATH_PREFIX "shaders/"
 #define GLSL_PATH(name)   GLSL_PATH_PREFIX name
 
+
+/*
+Particle material MVP contract (quad/beam path):
+- Reference name/path: "particles/<name>" (see MAT_PARTICLE_SHADER_PREFIX).
+- Supported stage features: map/clampmap (+ $white/$black), blendFunc (named/custom),
+  rgbGen/alphaGen {identity,vertex,const,wave}, animMap (fps + frame list),
+  and tcMod {scroll,scale,rotate,turb,stretch}.
+- Deferred (non-MVP): alphaFunc, tcGen environment/lightmap, q3 sky/fog/deform,
+  and advanced stage directives outside the list above.
+- Degradation strategy: any unsupported stage falls back to safe default particle
+  rendering; when r_particles_shader_strict=1, emit debug diagnostics for the skip.
+*/
+
 typedef struct shader_cache_s
 {
         char path[MAX_QPATH];
