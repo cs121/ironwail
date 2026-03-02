@@ -31,7 +31,15 @@ typedef struct fog_volume_s
 	float heightScale;
 } fog_volume_t;
 
-typedef struct froxel_grid_s froxel_grid_t;
+typedef struct froxel_grid_s
+{
+	int dims[3];
+	vec3_t mins;
+	vec3_t maxs;
+	float *density;
+	float *color;
+	float *emissive;
+} froxel_grid_t;
 
 extern cvar_t r_fogvol;
 extern cvar_t r_fogvol_halfres;
@@ -63,6 +71,7 @@ extern cvar_t r_fogvol_checkerboard;
 extern cvar_t r_fogvol_light_subsample;
 extern cvar_t r_fogvol_jitter;
 extern cvar_t r_fogvol_debug;
+extern cvar_t r_fogvol_inject_debug;
 extern cvar_t r_fogvol_density_scale;
 extern cvar_t r_fogvol_sigma_max;
 extern cvar_t r_fogvol_testvolumes;
