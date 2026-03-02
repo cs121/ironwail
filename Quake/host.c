@@ -798,9 +798,11 @@ static void AsyncQueue_Drain (asyncqueue_t *queue)
 	SDL_LockMutex (queue->mutex);
 	while (queue->head != queue->tail)
 	{
-		asyncproc_t *proc = &queue->procs[(queue->head++) & (queue->capacity - 1)];
-		proc->func (proc->param);
+		asyncproc_t proc = queue->procs[(queue->head++) & (queue->capacity - 1)];
 		SDL_CondSignal (queue->notfull);
+		SDL_UnlockMutex (queue->mutex);
+		proc.func (proc.param);
+		SDL_LockMutex (queue->mutex);
 	}
 	SDL_UnlockMutex (queue->mutex);
 }
