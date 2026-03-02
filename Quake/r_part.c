@@ -151,6 +151,20 @@ static void R_Q3P_ResetStats_f (void)
 	Con_Printf ("q3p: debug stats reset\n");
 }
 
+static void R_Q3P_StressMaterialCache_f (void)
+{
+	int iterations = (Cmd_Argc () > 1) ? q_max (1, Q_atoi (Cmd_Argv (1))) : 2048;
+	int unique_names = (Cmd_Argc () > 2) ? q_max (1, Q_atoi (Cmd_Argv (2))) : 1;
+	int before = 0;
+	int after = 0;
+	qboolean ok = Q3P_DebugStressMaterialCache (iterations, unique_names, &before, &after);
+
+	Con_Printf ("q3p_material_cache_stress: iterations=%d unique=%d before=%d after=%d %s\n",
+		iterations, unique_names, before, after, ok ? "ok" : "failed");
+	if (!ok)
+		Con_DWarning ("q3p: material cache stress test detected unexpected cache growth\n");
+}
+
 static void R_Q3P_AddWorldEmitter_f (void)
 {
 	q3p_emitter_t e;
@@ -350,6 +364,7 @@ void R_InitParticles (void)
 	Cmd_AddCommand ("q3p_spawn", R_Q3P_TestSpawn_f);
 	Cmd_AddCommand ("q3p_stats", R_Q3P_DebugStats_f);
 	Cmd_AddCommand ("q3p_stats_reset", R_Q3P_ResetStats_f);
+	Cmd_AddCommand ("q3p_material_cache_stress", R_Q3P_StressMaterialCache_f);
 	Cmd_AddCommand ("q3p_emitter_add", R_Q3P_AddWorldEmitter_f);
 	Cmd_AddCommand ("q3p_emitter_clear", Q3P_ClearWorldEmitters);
 }

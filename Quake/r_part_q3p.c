@@ -33,12 +33,21 @@ enum
 	Q3P_MATFLAG_FALLBACK = 1u << 2
 };
 
+enum
+{
+	Q3P_MATWARN_STRICT_SKIP = 1u << 0,
+	Q3P_MATWARN_BEST_EFFORT = 1u << 1
+};
+
 typedef struct q3p_material_cache_entry_s {
 	qboolean used;
 	char key[64];
 	unsigned material_id;
+	char resolved_key[64];
+	unsigned resolved_material_id;
 	const shader_material_t *material;
 	unsigned flags;
+	unsigned warned_flags;
 	int supported_stage_count;
 } q3p_material_cache_entry_t;
 
@@ -490,6 +499,8 @@ static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *
 		entry->used = true;
 		q_strlcpy (entry->key, normalized, sizeof (entry->key));
 		entry->material_id = Q3P_HashMaterialId (entry->key);
+		q_strlcpy (entry->resolved_key, entry->key, sizeof (entry->resolved_key));
+		entry->resolved_material_id = entry->material_id;
 
 		material = Mat_Shader_Find (entry->key);
 		if (!material)
@@ -530,18 +541,25 @@ static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *
 
 		if (!material || (!stage0_ok && r_particles_shader_strict.value > 0.f))
 		{
-			if (material && !stage0_ok)
+			if (material && !stage0_ok && !(entry->warned_flags & Q3P_MATWARN_STRICT_SKIP))
+			{
 				Con_Warning ("Q3P: strict mode skipping particle material '%s' (%s)\n", normalized, fallback_reason[0] ? fallback_reason : "unsupported stage");
+				entry->warned_flags |= Q3P_MATWARN_STRICT_SKIP;
+			}
 			entry->flags |= Q3P_MATFLAG_FALLBACK;
 			entry->material = NULL;
-			q_strlcpy (entry->key, Q3P_MATERIAL_DEFAULT_REF, sizeof (entry->key));
-			entry->material_id = Q3P_HashMaterialId (entry->key);
+			q_strlcpy (entry->resolved_key, Q3P_MATERIAL_DEFAULT_REF, sizeof (entry->resolved_key));
+			entry->resolved_material_id = Q3P_HashMaterialId (entry->resolved_key);
 		}
 		else
 		{
-			if (entry->supported_stage_count < (int)VEC_SIZE (material->stages))
+			if (entry->supported_stage_count < (int)VEC_SIZE (material->stages)
+				&& !(entry->warned_flags & Q3P_MATWARN_BEST_EFFORT))
+			{
 				Con_Warning ("Q3P: particle material '%s' has unsupported stages (%d/%d supported), rendering best-effort\n",
 					normalized, entry->supported_stage_count, (int)VEC_SIZE (material->stages));
+				entry->warned_flags |= Q3P_MATWARN_BEST_EFFORT;
+			}
 			entry->material = material;
 		}
 
@@ -549,6 +567,58 @@ static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *
 	}
 
 	return NULL;
+}
+
+static int Q3P_DebugMaterialCacheUsedCount (void)
+{
+	int i;
+	int used = 0;
+
+	for (i = 0; i < Q3P_MATERIAL_CACHE_SIZE; ++i)
+	{
+		if (q3p_material_cache[i].used)
+			++used;
+	}
+
+	return used;
+}
+
+qboolean Q3P_DebugStressMaterialCache (int iterations, int unique_names, int *before_out, int *after_out)
+{
+	int i;
+	int before;
+	int after;
+	char material[64];
+
+	if (iterations <= 0)
+		iterations = 256;
+	if (unique_names <= 0)
+		unique_names = 1;
+
+	before = Q3P_DebugMaterialCacheUsedCount ();
+	if (before_out)
+		*before_out = before;
+
+	for (i = 0; i < iterations; ++i)
+	{
+		q_snprintf (material, sizeof (material), "__q3p_missing_material_%d", i % unique_names);
+		if (!Q3P_ResolveMaterialCached (material))
+			break;
+	}
+
+	after = Q3P_DebugMaterialCacheUsedCount ();
+	if (after_out)
+		*after_out = after;
+
+	if (i < iterations)
+		return false;
+
+	/* Re-resolving the same unsupported material should not consume additional slots. */
+	Q3P_ResolveMaterialCached ("__q3p_missing_material_repeat");
+	if (Q3P_DebugMaterialCacheUsedCount () > after)
+		return false;
+
+	return true;
 }
 
 
@@ -706,7 +776,7 @@ qboolean Q3P_Spawn (const q3p_particle_t *particle)
 	if (cache_entry)
 	{
 		q_strlcpy (dst->material, cache_entry->key, sizeof (dst->material));
-		dst->material_id = cache_entry->material_id;
+		dst->material_id = cache_entry->resolved_material_id;
 	}
 	else
 	{
