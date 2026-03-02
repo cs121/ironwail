@@ -109,6 +109,8 @@ extern	cvar_t	r_litwater;
 extern	cvar_t	r_dynamic;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_scale;
+extern	cvar_t	r_particles_mode;
+extern	cvar_t	r_particles_max;
 
 extern	cvar_t	r_oit;
 extern	cvar_t	r_alphasort;

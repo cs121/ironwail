@@ -1462,6 +1462,7 @@ void	VID_Shutdown (void)
 {
 	if (vid_initialized)
 	{
+		R_Shutdown ();
 		Lightgrid_Shutdown ();
 		VID_FreeMouseCursors();
 		SDL_GL_DeleteContext(gl_context);

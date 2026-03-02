@@ -222,6 +222,7 @@ GLOBJS = \
 	gl_rmisc.o \
 	r_postfx.o \
 	r_part.o \
+	r_particles_iw.o \
 	r_world.o \
 	r_decals.o \
 	gl_screen.o \

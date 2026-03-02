@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_dlight_pool.h"
 #include "r_postfx.h"
 #include "r_fogvol.h"
+#include "r_particles_iw.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -773,11 +774,18 @@ Cvar_RegisterVariable (&r_vignette);
 	R_FogVol_Init ();
 
 	R_InitParticles ();
+	R_IWParticles_Init ();
 	R_InitDecals ();
 	R_SetClearColor_f (&r_clearcolor); //johnfitz
 
 	Sky_Init (); //johnfitz
 	Fog_Init (); //johnfitz
+}
+
+
+void R_Shutdown (void)
+{
+	R_IWParticles_Shutdown ();
 }
 
 /*
@@ -1005,6 +1013,8 @@ R_NewMap
 void R_NewMap (void)
 {
 	int		i;
+
+	R_IWParticles_NewMap ();
 
 	for (i=0 ; i<256 ; i++)
 		d_lightstylevalue[i] = 264;		// normal light value
