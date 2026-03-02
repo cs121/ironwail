@@ -156,8 +156,40 @@ CL_ParseTEnt
 */
 static qboolean CL_DecalNormalFromView (const vec3_t impact, vec3_t out_normal)
 {
-	vec3_t from;
+	trace_t trace;
+	vec3_t from, to, dir;
+	float len;
+
+	if (!cl.worldmodel)
+		return false;
+
 	VectorCopy (cl_entities[cl.viewentity].origin, from);
+	VectorSubtract (impact, from, dir);
+	len = VectorLength (dir);
+	if (len < 0.0001f)
+		return false;
+	VectorScale (dir, 1.f / len, dir);
+	/*
+	 * TE impacts are quantized and can end up slightly in front of/behind the
+	 * touched plane. Extend the line a little past the impact so hull tracing
+	 * can still recover the contacted world normal.
+	 */
+	VectorMA (impact, 2.f, dir, to);
+
+	memset (&trace, 0, sizeof (trace));
+	trace.fraction = 1.f;
+	trace.allsolid = true;
+	VectorCopy (to, trace.endpos);
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0, 1, from, to, &trace);
+
+	if (trace.fraction < 1.f && VectorLengthSquared (trace.plane.normal) >= 0.0001f)
+	{
+		VectorCopy (trace.plane.normal, out_normal);
+		VectorNormalizeFast (out_normal);
+		return true;
+	}
+
+	/* fall back to the legacy approximation when no plane was hit */
 	VectorSubtract (from, impact, out_normal);
 	if (VectorLengthSquared (out_normal) < 0.0001f)
 		return false;
@@ -213,15 +245,13 @@ static qboolean CL_DecalNormalFromImpactTrace (const vec3_t impact, vec3_t out_n
 
 static qboolean CL_DecalNormalForImpact (const vec3_t impact, vec3_t out_normal)
 {
+	if (CL_DecalNormalFromView (impact, out_normal))
+		return true;
+
 	if (CL_DecalNormalFromImpactTrace (impact, out_normal))
 		return true;
 
-	/*
-	 * Demo/network temp entity events only provide an impact position. If we
-	 * cannot recover a nearby world BSP plane from that point, fall back to the
-	 * legacy view-based approximation so these events can still spawn decals.
-	 */
-	return CL_DecalNormalFromView (impact, out_normal);
+	return false;
 }
 
 static qboolean CL_TEntCanUseQ3P (void)
