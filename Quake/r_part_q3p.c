@@ -667,14 +667,25 @@ static int Q3P_DrawSortCmp (const void *a, const void *b)
 {
 	const q3p_drawitem_t *da = (const q3p_drawitem_t *)a;
 	const q3p_drawitem_t *db = (const q3p_drawitem_t *)b;
+	qboolean alpha_group;
 
 	if (da->blend_group != db->blend_group)
 		return da->blend_group - db->blend_group;
+
+	alpha_group = da->blend_group != 0;
+	if (alpha_group && r_particles_sort.value > 0.f)
+	{
+		if (da->depth < db->depth)
+			return 1;
+		if (da->depth > db->depth)
+			return -1;
+	}
+
 	if (da->material_id < db->material_id)
 		return -1;
 	if (da->material_id > db->material_id)
 		return 1;
-	if (r_particles_sort.value > 0.f)
+	if (!alpha_group && r_particles_sort.value > 0.f)
 	{
 		if (da->depth < db->depth)
 			return 1;
@@ -982,7 +993,7 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 		q3p_drawitems[q3p_numdrawitems].particle_index = i;
 		q3p_drawitems[q3p_numdrawitems].blend_group = blend_group;
 		q3p_drawitems[q3p_numdrawitems].material_id = p->material_id;
-		q3p_drawitems[q3p_numdrawitems].depth = DotProduct (r_origin, vpn) - DotProduct (p->org, vpn);
+		q3p_drawitems[q3p_numdrawitems].depth = DotProduct (p->org, vpn) - DotProduct (r_origin, vpn);
 		++q3p_numdrawitems;
 	}
 
