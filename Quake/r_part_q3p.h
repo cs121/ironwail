@@ -85,5 +85,6 @@ void Q3P_ResetDebugStats (void);
 int Q3P_AddWorldEmitter (const q3p_emitter_t *emitter);
 void Q3P_ClearWorldEmitters (void);
 qboolean Q3P_GetEffectDef (const char *name, q3p_effectdef_t *out_def);
+qboolean Q3P_DebugStressMaterialCache (int iterations, int unique_names, int *before_out, int *after_out);
 
 #endif
