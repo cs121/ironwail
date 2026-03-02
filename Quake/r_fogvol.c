@@ -56,7 +56,7 @@ typedef struct fog_light_list_gpu_s
 typedef struct fog_light_lists_gpu_s
 {
 	fog_light_list_gpu_t volumes[MAX_FOGVOLUMES];
-	fog_light_gpu_t lights[MAX_FOGVOLUMES * 32];
+	fog_light_gpu_t lights[MAX_FOGVOLUMES * MAX_FOGLIGHTS];
 } fog_light_lists_gpu_t;
 
 typedef struct fog_lightgrid_gpu_s
@@ -1692,7 +1692,7 @@ void R_FogVol_Render (void)
 
 	if (r_fogvol_light.value > 0.f)
 	{
-		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), 32);
+		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), MAX_FOGLIGHTS);
 		int write_offset = 0;
 
 		for (int i = 0; i < r_fogvolume_count; ++i)

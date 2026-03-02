@@ -31,7 +31,7 @@
 #include "frame_uniforms.glsl"
 
 #define MAX_FOGVOLUMES 64
-#define MAX_FOGLIGHTS 32
+#define MAX_FOGLIGHTS 31 // keep FogLightsUBO under 64KB std140 limit on some drivers
 
 layout(binding=0) uniform sampler2D SceneColor;
 layout(binding=1) uniform sampler2D SceneDepth;
