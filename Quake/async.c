@@ -19,6 +19,8 @@ static unsigned int jobs_pending;
 static unsigned int jobs_peak_pending;
 static unsigned int jobs_dropped;
 static unsigned int jobs_sync_fallbacks;
+static unsigned int jobs_wake_signals;
+static unsigned int jobs_wake_broadcasts;
 
 static qboolean Jobs_SubmitNode (jobnode_t *node);
 static void Jobs_LogQueueStats (const char *reason);
@@ -147,7 +149,8 @@ static qboolean Jobs_SubmitNode (jobnode_t *node)
 	jobs_pending++;
 	if (jobs_pending > jobs_peak_pending)
 		jobs_peak_pending = jobs_pending;
-	SDL_CondBroadcast (jobs_cond);
+	SDL_CondSignal (jobs_cond);
+	jobs_wake_signals++;
 	SDL_UnlockMutex (jobs_mutex);
 	Jobs_LogQueueStats ("enqueue");
 	return true;
@@ -157,12 +160,14 @@ static void Jobs_LogQueueStats (const char *reason)
 {
 	if (!developer.value)
 		return;
-	Con_DPrintf ("Async jobs %s: pending=%u peak=%u dropped=%u sync_fallbacks=%u max_pending=%d\n",
+	Con_DPrintf ("Async jobs %s: pending=%u peak=%u dropped=%u sync_fallbacks=%u wake_signals=%u wake_broadcasts=%u max_pending=%d\n",
 		reason,
 		jobs_pending,
 		jobs_peak_pending,
 		jobs_dropped,
 		jobs_sync_fallbacks,
+		jobs_wake_signals,
+		jobs_wake_broadcasts,
 		(int) host_async_max_pending.value);
 }
 
@@ -441,6 +446,7 @@ void Jobs_Shutdown (void)
 	SDL_LockMutex (jobs_mutex);
 	jobs_shutdown = true;
 	SDL_CondBroadcast (jobs_cond);
+	jobs_wake_broadcasts++;
 	SDL_UnlockMutex (jobs_mutex);
 
 	if (jobs_threads)
