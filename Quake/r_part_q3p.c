@@ -82,6 +82,177 @@ typedef struct q3p_named_effectdef_s {
 
 static q3p_named_effectdef_t q3p_effect_defs[Q3P_MAX_EFFECT_DEFS];
 
+typedef struct q3p_prt_parser_s {
+	const char *source_name;
+	const char *text_start;
+	const char *cursor;
+	const char *token_start;
+	int token_line;
+	int token_col;
+	char token[1024];
+	int debug_level;
+	int files_loaded;
+	int defs_parsed;
+	int warnings;
+	int errors;
+	qboolean had_error;
+} q3p_prt_parser_t;
+
+static void Q3P_PRT_Log (q3p_prt_parser_t *parser, int level, const char *fmt, ...)
+{
+	char message[1024];
+	va_list argptr;
+
+	if (!parser || parser->debug_level < level)
+		return;
+
+	va_start (argptr, fmt);
+	q_vsnprintf (message, sizeof (message), fmt, argptr);
+	va_end (argptr);
+	Con_Printf ("%s", message);
+}
+
+static void Q3P_PRT_Warn (q3p_prt_parser_t *parser, int level, const char *fmt, ...)
+{
+	char message[1024];
+	va_list argptr;
+
+	if (!parser)
+		return;
+	parser->warnings++;
+	if (parser->debug_level < level)
+		return;
+
+	va_start (argptr, fmt);
+	q_vsnprintf (message, sizeof (message), fmt, argptr);
+	va_end (argptr);
+
+	Con_Warning ("Q3P PRT WARNING: %s:%d:%d: %s (token='%s')\n",
+		parser->source_name, parser->token_line, parser->token_col, message, parser->token[0] ? parser->token : "<eof>");
+}
+
+static void Q3P_PRT_ComputeLineCol (const char *base, const char *point, int *line, int *col, const char **line_start)
+{
+	const char *scan;
+	int out_line = 1;
+	int out_col = 1;
+	const char *out_line_start = base;
+
+	for (scan = base; scan && scan < point && *scan; ++scan)
+	{
+		if (*scan == '\n')
+		{
+			out_line++;
+			out_col = 1;
+			out_line_start = scan + 1;
+		}
+		else
+		{
+			out_col++;
+		}
+	}
+
+	if (line)
+		*line = out_line;
+	if (col)
+		*col = out_col;
+	if (line_start)
+		*line_start = out_line_start;
+}
+
+static qboolean Q3P_PRT_NextToken (q3p_prt_parser_t *parser)
+{
+	const char *token_start;
+
+	if (!parser)
+		return false;
+
+	if (!(parser->cursor = COM_Parse (parser->cursor)))
+	{
+		parser->token[0] = '\0';
+		parser->token_start = parser->cursor;
+		Q3P_PRT_ComputeLineCol (parser->text_start, parser->cursor, &parser->token_line, &parser->token_col, NULL);
+		return false;
+	}
+
+	q_strlcpy (parser->token, com_token, sizeof (parser->token));
+	if (!parser->token[0])
+		return false;
+
+	token_start = parser->cursor - q_strlen (parser->token);
+	if (token_start < parser->text_start)
+		token_start = parser->text_start;
+	parser->token_start = token_start;
+	Q3P_PRT_ComputeLineCol (parser->text_start, parser->token_start, &parser->token_line, &parser->token_col, NULL);
+
+	Q3P_PRT_Log (parser, 3, "Q3P PRT TRACE: %s:%d:%d token='%s'\n", parser->source_name, parser->token_line, parser->token_col, parser->token);
+
+	return true;
+}
+
+static void Q3P_PRT_PrintErrorContext (q3p_prt_parser_t *parser)
+{
+	const char *line_start = NULL;
+	const char *line_end;
+	char snippet[256];
+	int line_len;
+	int col_in_snippet;
+	int i;
+
+	if (!parser || parser->debug_level < 1)
+		return;
+
+	Q3P_PRT_ComputeLineCol (parser->text_start, parser->token_start ? parser->token_start : parser->cursor,
+		NULL, NULL, &line_start);
+	if (!line_start)
+		line_start = parser->text_start;
+
+	for (line_end = line_start; *line_end && *line_end != '\n' && *line_end != '\r'; ++line_end)
+		;
+	line_len = (int)(line_end - line_start);
+	if (line_len > 200)
+		line_len = 200;
+	memcpy (snippet, line_start, line_len);
+	snippet[line_len] = '\0';
+
+	Con_Printf ("PRT CONTEXT: %s\n", snippet);
+
+	col_in_snippet = q_max (1, parser->token_col);
+	if (col_in_snippet > line_len + 1)
+		col_in_snippet = line_len + 1;
+	for (i = 1; i < col_in_snippet; ++i)
+		snippet[i - 1] = ' ';
+	snippet[col_in_snippet - 1] = '^';
+	snippet[col_in_snippet] = '\0';
+	Con_Printf ("PRT CONTEXT: %s\n", snippet);
+}
+
+static qboolean Q3P_PRT_Error (q3p_prt_parser_t *parser, const char *fmt, ...)
+{
+	char message[1024];
+	va_list argptr;
+
+	if (!parser)
+		return false;
+
+	parser->errors++;
+	parser->had_error = true;
+
+	va_start (argptr, fmt);
+	q_vsnprintf (message, sizeof (message), fmt, argptr);
+	va_end (argptr);
+
+	if (parser->debug_level >= 1)
+	{
+		Con_Warning ("PRT ERROR: %s:%d:%d: %s (token='%s')\n",
+			parser->source_name, parser->token_line, parser->token_col, message,
+			parser->token[0] ? parser->token : "<eof>");
+		Q3P_PRT_PrintErrorContext (parser);
+	}
+
+	return false;
+}
+
 static void Q3P_EffectDefSetDefaults (q3p_effectdef_t *def)
 {
 	memset (def, 0, sizeof (*def));
@@ -132,83 +303,152 @@ static q3p_named_effectdef_t *Q3P_FindOrAllocEffectDef (const char *name)
 	return &q3p_effect_defs[free_slot];
 }
 
-static void Q3P_ParseEffectDefText (const char *source_name, char *text)
+enum
 {
-	const char *cursor = text;
+	Q3P_KEY_MATERIAL,
+	Q3P_KEY_COUNT,
+	Q3P_KEY_LIFETIME_MIN,
+	Q3P_KEY_LIFETIME_RAND,
+	Q3P_KEY_SIZE,
+	Q3P_KEY_SIZE_RAND,
+	Q3P_KEY_SIZE_RAMP,
+	Q3P_KEY_ALPHA,
+	Q3P_KEY_ALPHA_RAMP,
+	Q3P_KEY_COLOR,
+	Q3P_KEY_GRAVITY,
+	Q3P_KEY_DRAG,
+	Q3P_KEY_RESTITUTION,
+	Q3P_KEY_MIN_BOUNCE_SPEED,
+	Q3P_KEY_ORG_JITTER,
+	Q3P_KEY_VEL_JITTER,
+	Q3P_KEY_VEL_SCALE,
+	Q3P_KEY_COLLIDE_WORLD,
+	Q3P_KEY_TOTAL
+};
 
-	while ((cursor = COM_Parse (cursor)) != NULL)
+static qboolean Q3P_PRT_MarkKeySeen (q3p_prt_parser_t *parser, unsigned int *seen_keys, int key_bit, const char *effect_name, const char *key_name)
+{
+	unsigned int mask = 1u << key_bit;
+
+	if (*seen_keys & mask)
+		Q3P_PRT_Warn (parser, 2, "duplicate key '%s' in effect '%s'; last value wins", key_name, effect_name);
+	*seen_keys |= mask;
+	return true;
+}
+
+static qboolean Q3P_ParseEffectDefText (q3p_prt_parser_t *parser, const char *source_name, char *text)
+{
+	parser->source_name = source_name;
+	parser->text_start = text;
+	parser->cursor = text;
+	parser->token_start = text;
+	parser->token[0] = '\0';
+
+	while (Q3P_PRT_NextToken (parser))
 	{
 		q3p_named_effectdef_t *entry;
 		q3p_effectdef_t def;
 		char effect_name[64];
+		unsigned int seen_keys = 0;
+		qboolean closed = false;
 
-		if (!com_token[0])
-			break;
-
-		q_strlcpy (effect_name, com_token, sizeof (effect_name));
+		q_strlcpy (effect_name, parser->token, sizeof (effect_name));
 		entry = Q3P_FindOrAllocEffectDef (effect_name);
 		if (!entry)
-		{
-			Con_Warning ("Q3P: effect def table full, skipping '%s' from %s\n", effect_name, source_name);
-			return;
-		}
+			return Q3P_PRT_Error (parser, "effect definition table full; cannot add '%s'", effect_name);
+
+		if (entry->def.loaded)
+			Q3P_PRT_Warn (parser, 1, "duplicate definition for '%s'; newer definition overrides older one", effect_name);
 
 		def = entry->def;
 
-		cursor = COM_Parse (cursor);
-		if (!cursor || strcmp (com_token, "{"))
-		{
-			Con_Warning ("Q3P: expected '{' after effect '%s' in %s\n", effect_name, source_name);
-			return;
-		}
+		if (!Q3P_PRT_NextToken (parser))
+			return Q3P_PRT_Error (parser, "expected '{' after effect '%s'", effect_name);
+		if (strcmp (parser->token, "{"))
+			return Q3P_PRT_Error (parser, "expected '{' after effect '%s'", effect_name);
 
-		while ((cursor = COM_Parse (cursor)) != NULL)
+		while (Q3P_PRT_NextToken (parser))
 		{
-			if (!strcmp (com_token, "}"))
+			if (!strcmp (parser->token, "}"))
+			{
+				closed = true;
 				break;
+			}
 
-			if (!q_strcasecmp (com_token, "material"))
+			if (!q_strcasecmp (parser->token, "material"))
 			{
-				if (!(cursor = COM_Parse (cursor))) break;
-				q_strlcpy (def.material, com_token, sizeof (def.material));
+				Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_MATERIAL, effect_name, "material");
+				if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'material' in effect '%s'", effect_name);
+				q_strlcpy (def.material, parser->token, sizeof (def.material));
 			}
-			else if (!q_strcasecmp (com_token, "count"))
+			else if (!q_strcasecmp (parser->token, "count"))
 			{
-				if (!(cursor = COM_Parse (cursor))) break;
-				def.count = q_max (1, Q_atoi (com_token));
+				int raw;
+				Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_COUNT, effect_name, "count");
+				if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'count' in effect '%s'", effect_name);
+				raw = Q_atoi (parser->token);
+				def.count = q_max (1, raw);
+				if (def.count != raw)
+					Q3P_PRT_Warn (parser, 2, "clamped count from %d to %d in effect '%s'", raw, def.count, effect_name);
 			}
-			else if (!q_strcasecmp (com_token, "lifetime_min")) { if (!(cursor = COM_Parse (cursor))) break; def.lifetime_min = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "lifetime_rand")) { if (!(cursor = COM_Parse (cursor))) break; def.lifetime_rand = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "size")) { if (!(cursor = COM_Parse (cursor))) break; def.size = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "size_rand")) { if (!(cursor = COM_Parse (cursor))) break; def.size_rand = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "size_ramp")) { if (!(cursor = COM_Parse (cursor))) break; def.size_ramp = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "alpha")) { if (!(cursor = COM_Parse (cursor))) break; def.alpha = CLAMP (0.f, Q_atof (com_token), 1.f); }
-			else if (!q_strcasecmp (com_token, "alpha_ramp")) { if (!(cursor = COM_Parse (cursor))) break; def.alpha_ramp = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "color")) { if (!(cursor = COM_Parse (cursor))) break; def.color = Q_atoi (com_token); }
-			else if (!q_strcasecmp (com_token, "gravity")) { if (!(cursor = COM_Parse (cursor))) break; def.gravity = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "drag")) { if (!(cursor = COM_Parse (cursor))) break; def.drag = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "restitution")) { if (!(cursor = COM_Parse (cursor))) break; def.restitution = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "min_bounce_speed")) { if (!(cursor = COM_Parse (cursor))) break; def.min_bounce_speed = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "org_jitter")) { if (!(cursor = COM_Parse (cursor))) break; def.org_jitter = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "vel_jitter")) { if (!(cursor = COM_Parse (cursor))) break; def.vel_jitter = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "vel_scale")) { if (!(cursor = COM_Parse (cursor))) break; def.vel_scale = Q_atof (com_token); }
-			else if (!q_strcasecmp (com_token, "collide_world")) { if (!(cursor = COM_Parse (cursor))) break; def.collide_world = Q_atoi (com_token) != 0; }
+			else if (!q_strcasecmp (parser->token, "lifetime_min")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_LIFETIME_MIN, effect_name, "lifetime_min"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'lifetime_min' in effect '%s'", effect_name); def.lifetime_min = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "lifetime_rand")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_LIFETIME_RAND, effect_name, "lifetime_rand"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'lifetime_rand' in effect '%s'", effect_name); def.lifetime_rand = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "size")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_SIZE, effect_name, "size"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'size' in effect '%s'", effect_name); def.size = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "size_rand")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_SIZE_RAND, effect_name, "size_rand"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'size_rand' in effect '%s'", effect_name); def.size_rand = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "size_ramp")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_SIZE_RAMP, effect_name, "size_ramp"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'size_ramp' in effect '%s'", effect_name); def.size_ramp = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "alpha"))
+			{
+				float raw;
+				Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_ALPHA, effect_name, "alpha");
+				if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'alpha' in effect '%s'", effect_name);
+				raw = Q_atof (parser->token);
+				def.alpha = CLAMP (0.f, raw, 1.f);
+				if (def.alpha != raw)
+					Q3P_PRT_Warn (parser, 2, "clamped alpha from %.3f to %.3f in effect '%s'", raw, def.alpha, effect_name);
+			}
+			else if (!q_strcasecmp (parser->token, "alpha_ramp")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_ALPHA_RAMP, effect_name, "alpha_ramp"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'alpha_ramp' in effect '%s'", effect_name); def.alpha_ramp = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "color")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_COLOR, effect_name, "color"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'color' in effect '%s'", effect_name); def.color = Q_atoi (parser->token); }
+			else if (!q_strcasecmp (parser->token, "gravity")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_GRAVITY, effect_name, "gravity"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'gravity' in effect '%s'", effect_name); def.gravity = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "drag")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_DRAG, effect_name, "drag"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'drag' in effect '%s'", effect_name); def.drag = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "restitution")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_RESTITUTION, effect_name, "restitution"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'restitution' in effect '%s'", effect_name); def.restitution = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "min_bounce_speed")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_MIN_BOUNCE_SPEED, effect_name, "min_bounce_speed"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'min_bounce_speed' in effect '%s'", effect_name); def.min_bounce_speed = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "org_jitter")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_ORG_JITTER, effect_name, "org_jitter"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'org_jitter' in effect '%s'", effect_name); def.org_jitter = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "vel_jitter")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_VEL_JITTER, effect_name, "vel_jitter"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'vel_jitter' in effect '%s'", effect_name); def.vel_jitter = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "vel_scale")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_VEL_SCALE, effect_name, "vel_scale"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'vel_scale' in effect '%s'", effect_name); def.vel_scale = Q_atof (parser->token); }
+			else if (!q_strcasecmp (parser->token, "collide_world")) { Q3P_PRT_MarkKeySeen (parser, &seen_keys, Q3P_KEY_COLLIDE_WORLD, effect_name, "collide_world"); if (!Q3P_PRT_NextToken (parser)) return Q3P_PRT_Error (parser, "missing value for key 'collide_world' in effect '%s'", effect_name); def.collide_world = Q_atoi (parser->token) != 0; }
 			else
 			{
-				Con_DWarning ("Q3P: unknown key '%s' in effect '%s' (%s)\n", com_token, effect_name, source_name);
-				cursor = COM_Parse (cursor);
+				Q3P_PRT_Warn (parser, 1, "unknown key '%s' in effect '%s'", parser->token, effect_name);
+				if (!Q3P_PRT_NextToken (parser))
+					return Q3P_PRT_Error (parser, "missing value after unknown key in effect '%s'", effect_name);
 			}
 		}
+
+		if (!closed)
+			return Q3P_PRT_Error (parser, "unexpected end of file while parsing effect '%s'", effect_name);
 
 		def.loaded = true;
 		entry->def = def;
+		parser->defs_parsed++;
+		Q3P_PRT_Log (parser, 2, "Q3P: loaded effect '%s' from %s\n", effect_name, source_name);
 	}
+
+	return !parser->had_error;
 }
 
 static void Q3P_LoadEffectDefs (void)
 {
 	searchpath_t *search;
 	int loaded = 0;
+	q3p_prt_parser_t parser;
+	double start_time;
+	double elapsed;
+	int active_defs = 0;
+	int i;
+
+	memset (&parser, 0, sizeof (parser));
+	parser.debug_level = q_max (0, (int)r_particles_prt_debug.value);
+	start_time = Sys_DoubleTime ();
 
 	memset (q3p_effect_defs, 0, sizeof (q3p_effect_defs));
 
@@ -228,10 +468,14 @@ static void Q3P_LoadEffectDefs (void)
 				buffer = COM_LoadMallocFile (path, NULL);
 				if (!buffer)
 					continue;
-				Q3P_ParseEffectDefText (path, (char *)buffer);
+				if (!Q3P_ParseEffectDefText (&parser, path, (char *)buffer))
+					parser.had_error = true;
 				Z_Free (buffer);
 				if (size > 0)
+				{
 					++loaded;
+					parser.files_loaded++;
+				}
 			}
 		}
 		else
@@ -253,15 +497,26 @@ static void Q3P_LoadEffectDefs (void)
 				buffer = COM_LoadMallocFile (rel, NULL);
 				if (!buffer)
 					continue;
-				Q3P_ParseEffectDefText (rel, (char *)buffer);
+				if (!Q3P_ParseEffectDefText (&parser, rel, (char *)buffer))
+					parser.had_error = true;
 				Z_Free (buffer);
 				++loaded;
+				parser.files_loaded++;
 			}
 		}
 	}
 
-	if (loaded > 0 && r_particles_prt_debug.value > 0.f)
-		Con_Printf ("Q3P: loaded %d .prt particle definition files\n", loaded);
+	for (i = 0; i < Q3P_MAX_EFFECT_DEFS; ++i)
+	{
+		if (q3p_effect_defs[i].used && q3p_effect_defs[i].def.loaded)
+			active_defs++;
+	}
+
+	elapsed = Sys_DoubleTime () - start_time;
+
+	Q3P_PRT_Log (&parser, 1, "Q3P: loaded %d .prt particle definition files\n", loaded);
+	Q3P_PRT_Log (&parser, 1, "Q3P PRT SUMMARY: files=%d defs=%d active_defs=%d warnings=%d errors=%d parse_ms=%.2f\n",
+		parser.files_loaded, parser.defs_parsed, active_defs, parser.warnings, parser.errors, elapsed * 1000.0);
 }
 
 qboolean Q3P_GetEffectDef (const char *name, q3p_effectdef_t *out_def)
