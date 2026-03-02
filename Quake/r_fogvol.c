@@ -50,9 +50,14 @@ typedef struct fog_light_gpu_s
 
 typedef struct fog_light_list_gpu_s
 {
-	int light_count[4];
-	fog_light_gpu_t lights[32];
+	int offset_count[4];
 } fog_light_list_gpu_t;
+
+typedef struct fog_light_lists_gpu_s
+{
+	fog_light_list_gpu_t volumes[MAX_FOGVOLUMES];
+	fog_light_gpu_t lights[MAX_FOGVOLUMES * 32];
+} fog_light_lists_gpu_t;
 
 typedef struct fog_lightgrid_gpu_s
 {
@@ -61,6 +66,7 @@ typedef struct fog_lightgrid_gpu_s
 
 COMPILE_TIME_ASSERT (fog_light_gpu_align16, (sizeof (fog_light_gpu_t) % 16) == 0);
 COMPILE_TIME_ASSERT (fog_light_list_gpu_align16, (sizeof (fog_light_list_gpu_t) % 16) == 0);
+COMPILE_TIME_ASSERT (fog_light_lists_gpu_align16, (sizeof (fog_light_lists_gpu_t) % 16) == 0);
 COMPILE_TIME_ASSERT (fog_lightgrid_gpu_align16, (sizeof (fog_lightgrid_gpu_t) % 16) == 0);
 
 typedef struct fogvol_light_candidate_s
@@ -729,7 +735,38 @@ static int R_FogVol_CompareLightCandidate (const void *a, const void *b)
 	return 0;
 }
 
-static int R_FogVol_BuildLightList (fog_light_gpu_t *out, int max_count)
+static float R_FogVol_DistanceToVolume (const fog_volume_t *volume, const vec3_t p)
+{
+	if (!volume)
+		return 999999.f;
+
+	if (volume->shape > 0)
+	{
+		vec3_t d;
+		VectorSubtract (p, volume->sphereCenter, d);
+		return q_max (0.f, VectorLength (d) - q_max (0.f, volume->sphereRadius));
+	}
+
+	{
+		float dx = q_max (q_max (volume->mins[0] - p[0], 0.f), p[0] - volume->maxs[0]);
+		float dy = q_max (q_max (volume->mins[1] - p[1], 0.f), p[1] - volume->maxs[1]);
+		float dz = q_max (q_max (volume->mins[2] - p[2], 0.f), p[2] - volume->maxs[2]);
+		return sqrtf (dx * dx + dy * dy + dz * dz);
+	}
+}
+
+static qboolean R_FogVol_LightOverlapsVolume (const fog_volume_t *volume, const vec3_t light_origin, float light_radius)
+{
+	float dist;
+
+	if (!volume || light_radius <= 0.f)
+		return false;
+
+	dist = R_FogVol_DistanceToVolume (volume, light_origin);
+	return dist <= light_radius;
+}
+
+static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, fog_light_gpu_t *out, int max_count)
 {
 	const dlight_t *const *active;
 	fogvol_light_candidate_t candidates[256];
@@ -743,7 +780,7 @@ static int R_FogVol_BuildLightList (fog_light_gpu_t *out, int max_count)
 	qboolean has_fog_bounds = false;
 	int copy_count;
 
-	if (!out || max_count <= 0)
+	if (!volume || !out || max_count <= 0)
 		return 0;
 	if (r_fogvolume_count <= 0)
 		return 0;
@@ -1553,7 +1590,7 @@ void R_FogVol_Render (void)
 	GLuint buf;
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
-	fog_light_list_gpu_t fog_lights;
+	fog_light_lists_gpu_t fog_lights;
 	fog_lightgrid_gpu_t fog_lightgrid;
 	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 8);
 	float inv_viewproj[16];
@@ -1655,10 +1692,24 @@ void R_FogVol_Render (void)
 
 	if (r_fogvol_light.value > 0.f)
 	{
-		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), (int)countof (fog_lights.lights));
-		int light_count = R_FogVol_BuildLightList (fog_lights.lights, max_lights);
-		fog_lights.light_count[0] = light_count;
-		fog_light_enabled = (light_count > 0);
+		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), 32);
+		int write_offset = 0;
+
+		for (int i = 0; i < r_fogvolume_count; ++i)
+		{
+			int remaining = (int)countof (fog_lights.lights) - write_offset;
+			int count = 0;
+			if (remaining > 0 && max_lights > 0)
+			{
+				int per_volume_cap = q_min (max_lights, remaining);
+				count = R_FogVol_BuildLightListForVolume (&r_fogvolumes[i], &fog_lights.lights[write_offset], per_volume_cap);
+			}
+
+			fog_lights.volumes[i].offset_count[0] = write_offset;
+			fog_lights.volumes[i].offset_count[1] = count;
+			write_offset += count;
+			fog_light_enabled = fog_light_enabled || (count > 0);
+		}
 	}
 
 	for (int i = 0; i < r_fogvolume_count; ++i)
@@ -1732,7 +1783,7 @@ void R_FogVol_Render (void)
 	if (glGetError () != GL_NO_ERROR)
 	{
 		fog_light_enabled = false;
-		fog_lights.light_count[0] = 0;
+		memset (&fog_lights, 0, sizeof (fog_lights));
 		GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
 		GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
 	}

@@ -61,10 +61,15 @@ struct FogLight
 	vec4 col_int;
 };
 
+struct FogLightList
+{
+	ivec4 offset_count; // x = global light offset, y = per-volume light count
+};
+
 layout(std140, binding=4) uniform FogLightsUBO
 {
-	ivec4 FogLightMeta; // x = light count
-	FogLight FogLights[MAX_FOGLIGHTS];
+	FogLightList FogLightLists[MAX_FOGVOLUMES];
+	FogLight FogLights[MAX_FOGVOLUMES * MAX_FOGLIGHTS];
 };
 
 layout(std140, binding=5) uniform FogLightgridUBO
@@ -578,9 +583,11 @@ void main()
 		? AnisotropicPhase(clamp(dot(viewDir, sunDir), -1.0, 1.0), ANISO_G_SUN)
 		: 1.0;
 	// PERF: Cache active light count and enabled flag to avoid UBO re-fetch in loop.
-	bool  doLights      = (FogLightEnabled != 0 && FogLightMeta.x > 0);
+	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
+	int lightOffset     = max(lightList.offset_count.x, 0);
+	int lightCount      = clamp(lightList.offset_count.y, 0, MAX_FOGLIGHTS);
+	bool  doLights      = (FogLightEnabled != 0 && lightCount > 0);
 	bool  doLightgrid   = (FogLightgridEnabled != 0);
-	int   lightCount    = FogLightMeta.x;
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated — they were
 	// accumulated but never consumed, silently wasting ALU every iteration.
@@ -644,15 +651,17 @@ void main()
 			for (int l = 0; l < MAX_FOGLIGHTS; ++l)
 			{
 				if (l >= lightCount) break;
-				vec3 lightVec = FogLights[l].pos_rad.xyz - p;
+				int lightIndex = lightOffset + l;
+				if (lightIndex >= MAX_FOGVOLUMES * MAX_FOGLIGHTS) break;
+				vec3 lightVec = FogLights[lightIndex].pos_rad.xyz - p;
 				float lightDist = length(lightVec);
-				float radius = max(FogLights[l].pos_rad.w, 1e-3);
+				float radius = max(FogLights[lightIndex].pos_rad.w, 1e-3);
 				float atten = clamp(1.0 - lightDist / radius, 0.0, 1.0);
 				atten *= atten; // quadratic falloff
 				if (atten < 1e-5) continue; // PERF: Skip lights with negligible contribution
 				vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
 				float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
-				lightScatter += FogLights[l].col_int.rgb * (atten * 0.25 * phaseLocal);
+				lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.25 * phaseLocal);
 			}
 			stepScatter += lightScatter * (1.0 - att);
 		}
