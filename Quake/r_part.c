@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "r_part_q3p.h"
 
 #define MAX_PARTICLES			16384	// default max # of particles at one
 										//  time
@@ -39,6 +40,85 @@ static float uvscale;
 static float texturescalefactor; //johnfitz -- compensate for apparent size of different particle textures
 
 cvar_t	r_particles = {"r_particles","2", CVAR_ARCHIVE}; //johnfitz
+cvar_t	r_particles_mode = {"r_particles_mode", "glquake", CVAR_ARCHIVE};
+cvar_t	r_particles_max = {"r_particles_max", "8192", CVAR_ARCHIVE};
+
+typedef enum
+{
+	PARTICLEMODE_CLASSIC,
+	PARTICLEMODE_GLQUAKE,
+	PARTICLEMODE_Q3P,
+	PARTICLEMODE_HYBRID
+} particlemode_t;
+
+static particlemode_t R_GetParticleMode (void)
+{
+	if (!q_strcasecmp (r_particles_mode.string, "classic"))
+		return PARTICLEMODE_CLASSIC;
+	if (!q_strcasecmp (r_particles_mode.string, "q3p"))
+		return PARTICLEMODE_Q3P;
+	if (!q_strcasecmp (r_particles_mode.string, "hybrid"))
+		return PARTICLEMODE_HYBRID;
+	return PARTICLEMODE_GLQUAKE;
+}
+
+static void R_ParticlesMode_Changed_f (cvar_t *var)
+{
+	if (q_strcasecmp (var->string, "classic")
+		&& q_strcasecmp (var->string, "glquake")
+		&& q_strcasecmp (var->string, "q3p")
+		&& q_strcasecmp (var->string, "hybrid"))
+	{
+		Con_Printf ("Unknown r_particles_mode '%s', reverting to glquake\n", var->string);
+		Cvar_SetQuick (var, "glquake");
+	}
+}
+
+static void R_Q3P_TestSpawn_f (void)
+{
+	int i;
+	int count = 64;
+	entity_t *viewent;
+	vec3_t right, up;
+
+	if (Cmd_Argc () > 1)
+		count = q_max (1, Q_atoi (Cmd_Argv (1)));
+
+	viewent = &cl_entities[cl.viewentity];
+	AngleVectors (cl.viewangles, NULL, right, up);
+
+	for (i = 0; i < count; ++i)
+	{
+		q3p_particle_t particle;
+		float jitter;
+
+		memset (&particle, 0, sizeof(particle));
+		particle.spawn_time = cl.time;
+		particle.lifetime = 1.0f + (rand() & 127) / 255.0f;
+		particle.size = 1.0f;
+		particle.size_ramp = 24.0f;
+		particle.alpha = 1.0f;
+		particle.alpha_ramp = -0.8f;
+		particle.color = 0x6f;
+		particle.gravity = 300.0f;
+		particle.drag = 0.5f;
+		q_strlcpy (particle.material, "*particle", sizeof(particle.material));
+
+		VectorCopy (viewent->origin, particle.org);
+		particle.org[2] += 20.0f;
+
+		jitter = ((rand() % 100) - 50) * 0.5f;
+		VectorScale (right, jitter, particle.vel);
+		jitter = ((rand() % 100) - 50) * 0.5f;
+		VectorMA (particle.vel, jitter, up, particle.vel);
+		particle.vel[2] += 120.0f + (rand() % 120);
+
+		if (!Q3P_Spawn (&particle))
+			break;
+	}
+
+	Con_Printf ("q3p_spawned %d particles (%d active)\n", i, Q3P_ActiveCount ());
+}
 
 typedef struct particlevert_t {
 	vec3_t		pos;
@@ -113,6 +193,13 @@ void R_InitParticles (void)
 	Cvar_RegisterVariable (&r_particles); //johnfitz
 	Cvar_SetCallback (&r_particles, R_SetParticleTexture_f);
 	R_SetParticleTexture_f (&r_particles); // set default
+	Cvar_RegisterVariable (&r_particles_mode);
+	Cvar_SetCallback (&r_particles_mode, R_ParticlesMode_Changed_f);
+	R_ParticlesMode_Changed_f (&r_particles_mode);
+	Cvar_RegisterVariable (&r_particles_max);
+
+	Q3P_Init ();
+	Cmd_AddCommand ("q3p_spawn", R_Q3P_TestSpawn_f);
 }
 
 /*
@@ -184,6 +271,7 @@ R_ClearParticles
 void R_ClearParticles (void)
 {
 	r_numactiveparticles = 0;
+	Q3P_Clear ();
 }
 
 /*
@@ -571,6 +659,13 @@ void CL_RunParticles (void)
 	extern	cvar_t	sv_gravity;
 
 	frametime = cl.time - cl.oldtime;
+
+	if (R_GetParticleMode () != PARTICLEMODE_CLASSIC && R_GetParticleMode () != PARTICLEMODE_GLQUAKE)
+		Q3P_Update (frametime);
+
+	if (R_GetParticleMode () == PARTICLEMODE_Q3P)
+		return;
+
 	time3 = frametime * 15;
 	time2 = frametime * 10;
 	time1 = frametime * 5;
@@ -686,6 +781,12 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	qboolean		dither, oit;
 	int				i;
 
+	if (R_GetParticleMode () != PARTICLEMODE_CLASSIC && R_GetParticleMode () != PARTICLEMODE_GLQUAKE)
+		Q3P_Draw (alpha, showtris);
+
+	if (R_GetParticleMode () == PARTICLEMODE_Q3P)
+		return;
+
 	if (!r_particles.value)
 		return;
 
@@ -759,4 +860,3 @@ void R_DrawParticles_ShowTris (void)
 {
 	R_DrawParticles_Real (false, true);
 }
-
