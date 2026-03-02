@@ -47,6 +47,7 @@ cvar_t	r_particles_cull_dist = {"r_particles_cull_dist", "4096", CVAR_ARCHIVE};
 cvar_t	r_particles_collision = {"r_particles_collision", "1", CVAR_ARCHIVE};
 cvar_t	r_particles_spawn_max = { "r_particles_spawn_max", "2048", CVAR_ARCHIVE};
 cvar_t	r_particles_debug = { "r_particles_debug", "0", CVAR_ARCHIVE};
+cvar_t	r_particles_prt_debug = { "r_particles_prt_debug", "0", CVAR_ARCHIVE};
 
 
 static int r_particles_debug_legacy_buckets[8];
@@ -608,6 +609,7 @@ void R_InitParticles (void)
 	Cvar_RegisterVariable (&r_particles_collision);
 	Cvar_RegisterVariable (&r_particles_spawn_max);
 	Cvar_RegisterVariable (&r_particles_debug);
+	Cvar_RegisterVariable (&r_particles_prt_debug);
 
 	Q3P_Init ();
 	Cmd_AddCommand ("q3p_spawn", R_Q3P_TestSpawn_f);
