@@ -111,6 +111,7 @@ extern	cvar_t	r_novis;
 extern	cvar_t	r_scale;
 extern	cvar_t	r_particles_mode;
 extern	cvar_t	r_particles_max;
+extern	cvar_t	r_particles_sort;
 
 extern	cvar_t	r_oit;
 extern	cvar_t	r_alphasort;

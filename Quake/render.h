@@ -170,6 +170,7 @@ void R_IWParticles_Init (void);
 void R_IWParticles_Shutdown (void);
 void R_IWParticles_NewMap (void);
 void R_IWParticles_Clear (void);
+void R_IWParticles_Draw (void);
 
 
 void R_InitDecals (void);

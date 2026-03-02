@@ -63,11 +63,13 @@ typedef struct emitter_instance_s
 
 extern cvar_t r_particles_mode;
 extern cvar_t r_particles_max;
+extern cvar_t r_particles_sort;
 
 void R_IWParticles_Init (void);
 void R_IWParticles_Shutdown (void);
 void R_IWParticles_NewMap (void);
 void R_IWParticles_Clear (void);
+void R_IWParticles_Draw (void);
 
 particle_mode_t R_ParticlesMode (void);
 qboolean R_ParticlesUseClassic (void);

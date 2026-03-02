@@ -4779,13 +4779,17 @@ void R_RenderScene (void)
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 	R_DrawDecals ();
 	R_DrawDLightPass ();
-	R_DrawParticles (false);
+	if (R_ParticlesUseClassic ())
+		R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
 	R_DrawWater (false);
 	R_BeginTranslucency ();
 	R_DrawWater (true);
 	R_DrawEntitiesOnList (true); //johnfitz -- true means this is the pass for alpha entities
-	R_DrawParticles (true);
+	if (R_ParticlesUseClassic ())
+		R_DrawParticles (true);
+	else if (R_ParticlesMode () == PARTICLE_MODE_Q3P)
+		R_IWParticles_Draw ();
 	R_EndTranslucency ();
 	R_ShowTris (); //johnfitz
 	R_ShowBoundingBoxes (); //johnfitz
