@@ -169,6 +169,10 @@ cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE 
 cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_dir = { "r_fogvol_sun_dir", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_sun_color = { "r_fogvol_sun_color", "0 0 0", CVAR_ARCHIVE };
+
+extern float skyflatcolor[3];
 
 extern cvar_t gl_farclip;
 
@@ -1147,6 +1151,8 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_shadow_strength);
 	Cvar_RegisterVariable (&r_fogvol_shadow_jitter);
 	Cvar_RegisterVariable (&r_fogvol_sun_dir);
+	Cvar_RegisterVariable (&r_fogvol_sun_scatter);
+	Cvar_RegisterVariable (&r_fogvol_sun_color);
 }
 
 void R_FogVol_Clear (void)
@@ -1804,6 +1810,9 @@ void R_FogVol_Render (void)
 	qboolean fog_lightgrid_has_data = false;
 	const lightgrid_t *lightgrid = NULL;
 	vec3_t shadow_dir;
+	vec3_t sun_color;
+	float sun_intensity = 1.f;
+	float sun_scatter = 0.f;
 	int shadow_samples;
 
 	/* Per-frame validity: only expose a fogvol composite texture after this
@@ -2035,6 +2044,27 @@ void R_FogVol_Render (void)
 	GL_Uniform1fFunc (20, r_fogvol_shadow_jitter.value > 0.f ? 1.f : 0.f);
 	GL_Uniform3fFunc (21, shadow_dir[0], shadow_dir[1], shadow_dir[2]);
 	GL_Uniform1iFunc (22, fog_lightgrid_enabled ? 1 : 0);
+	sun_scatter = q_max (0.f, r_fogvol_sun_scatter.value);
+	if (R_GetSun (NULL, NULL, sun_color, &sun_intensity))
+	{
+		/* worldspawn sun color/intensity are the preferred defaults. */
+	}
+	else
+	{
+		VectorSet (sun_color, skyflatcolor[0], skyflatcolor[1], skyflatcolor[2]);
+		sun_intensity = 1.f;
+		if (sun_color[0] <= 0.f && sun_color[1] <= 0.f && sun_color[2] <= 0.f)
+			VectorSet (sun_color, 1.f, 1.f, 1.f);
+	}
+	if (r_fogvol_sun_color.string && r_fogvol_sun_color.string[0])
+	{
+		vec3_t user_sun_color;
+		R_FogVol_ParseColor (r_fogvol_sun_color.string, user_sun_color);
+		if (user_sun_color[0] > 0.f || user_sun_color[1] > 0.f || user_sun_color[2] > 0.f)
+			VectorCopy (user_sun_color, sun_color);
+	}
+	GL_Uniform1fFunc (30, sun_scatter * q_max (0.f, sun_intensity));
+	GL_Uniform3fFunc (31, q_max (0.f, sun_color[0]), q_max (0.f, sun_color[1]), q_max (0.f, sun_color[2]));
 
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);
