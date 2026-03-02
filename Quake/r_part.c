@@ -189,6 +189,8 @@ static qboolean R_TrySpawnQ3PLegacyParticleEffect (const vec3_t org, const vec3_
 	int i;
 	const qboolean rocket_explosion = (count == 1024);
 	const char *material = rocket_explosion ? "explosion" : "bullet";
+	q3p_effectdef_t def;
+	qboolean has_def = Q3P_GetEffectDef (material, &def);
 	const float lifetime_min = rocket_explosion ? 0.45f : 0.10f;
 	const float lifetime_rand = rocket_explosion ? 0.20f : 0.40f;
 	const float size = rocket_explosion ? 8.0f : 1.25f;
@@ -200,45 +202,50 @@ static qboolean R_TrySpawnQ3PLegacyParticleEffect (const vec3_t org, const vec3_
 	if (!R_CanUseQ3PForLegacyParticleEffect ())
 		return false;
 
+	if (has_def)
+	{
+		count = q_max (1, def.count);
+	}
+
 	for (i = 0; i < count; ++i)
 	{
 		q3p_particle_t p;
 
 		memset (&p, 0, sizeof(p));
 		p.spawn_time = cl.time;
-		p.lifetime = lifetime_min + ((rand() & 255) / 255.0f) * lifetime_rand;
-		p.size = size + ((rand() & 255) / 255.0f) * size_rand;
-		p.size_ramp = p.size * 8.0f;
-		p.alpha = 1.0f;
-		p.alpha_ramp = alpha_ramp;
-		p.color = rocket_explosion ? ramp1[0] : color;
-		p.gravity = gravity;
-		p.drag = drag;
-		p.restitution = rocket_explosion ? 0.30f : 0.25f;
-		p.min_bounce_speed = rocket_explosion ? 25.f : 40.f;
-		p.flags = Q3P_PARTICLE_COLLIDE_WORLD;
+		p.lifetime = (has_def ? def.lifetime_min : lifetime_min) + ((rand() & 255) / 255.0f) * (has_def ? def.lifetime_rand : lifetime_rand);
+		p.size = (has_def ? def.size : size) + ((rand() & 255) / 255.0f) * (has_def ? def.size_rand : size_rand);
+		p.size_ramp = has_def ? def.size_ramp : p.size * 8.0f;
+		p.alpha = has_def ? def.alpha : 1.0f;
+		p.alpha_ramp = has_def ? def.alpha_ramp : alpha_ramp;
+		p.color = has_def ? def.color : (rocket_explosion ? ramp1[0] : color);
+		p.gravity = has_def ? def.gravity : gravity;
+		p.drag = has_def ? def.drag : drag;
+		p.restitution = has_def ? def.restitution : (rocket_explosion ? 0.30f : 0.25f);
+		p.min_bounce_speed = has_def ? def.min_bounce_speed : (rocket_explosion ? 25.f : 40.f);
+		p.flags = (has_def ? (def.collide_world ? Q3P_PARTICLE_COLLIDE_WORLD : 0) : Q3P_PARTICLE_COLLIDE_WORLD);
 
-		q_strlcpy (p.material, material, sizeof(p.material));
+		q_strlcpy (p.material, has_def ? def.material : material, sizeof(p.material));
 
 		if (rocket_explosion)
 		{
-			p.org[0] = org[0] + ((rand() % 32) - 16);
-			p.org[1] = org[1] + ((rand() % 32) - 16);
-			p.org[2] = org[2] + ((rand() % 32) - 16);
+			p.org[0] = org[0] + ((rand() % 32) - 16) * (has_def ? def.org_jitter / 16.f : 1.f);
+			p.org[1] = org[1] + ((rand() % 32) - 16) * (has_def ? def.org_jitter / 16.f : 1.f);
+			p.org[2] = org[2] + ((rand() % 32) - 16) * (has_def ? def.org_jitter / 16.f : 1.f);
 
-			p.vel[0] = (float)((rand() % 512) - 256);
-			p.vel[1] = (float)((rand() % 512) - 256);
-			p.vel[2] = (float)((rand() % 512) - 256);
+			p.vel[0] = (float)((rand() % 512) - 256) * (has_def ? def.vel_jitter / 256.f : 1.f);
+			p.vel[1] = (float)((rand() % 512) - 256) * (has_def ? def.vel_jitter / 256.f : 1.f);
+			p.vel[2] = (float)((rand() % 512) - 256) * (has_def ? def.vel_jitter / 256.f : 1.f);
 		}
 		else
 		{
-			p.org[0] = org[0] + ((rand() & 15) - 8);
-			p.org[1] = org[1] + ((rand() & 15) - 8);
-			p.org[2] = org[2] + ((rand() & 15) - 8);
+			p.org[0] = org[0] + ((rand() & 15) - 8) * (has_def ? def.org_jitter / 8.f : 1.f);
+			p.org[1] = org[1] + ((rand() & 15) - 8) * (has_def ? def.org_jitter / 8.f : 1.f);
+			p.org[2] = org[2] + ((rand() & 15) - 8) * (has_def ? def.org_jitter / 8.f : 1.f);
 
-			p.vel[0] = dir[0] * 15.f;
-			p.vel[1] = dir[1] * 15.f;
-			p.vel[2] = dir[2] * 15.f;
+			p.vel[0] = dir[0] * 15.f * (has_def ? def.vel_scale : 1.f) + (has_def ? ((rand() & 255) - 128) * (def.vel_jitter / 128.f) : 0.f);
+			p.vel[1] = dir[1] * 15.f * (has_def ? def.vel_scale : 1.f) + (has_def ? ((rand() & 255) - 128) * (def.vel_jitter / 128.f) : 0.f);
+			p.vel[2] = dir[2] * 15.f * (has_def ? def.vel_scale : 1.f) + (has_def ? ((rand() & 255) - 128) * (def.vel_jitter / 128.f) : 0.f);
 		}
 
 		if (!Q3P_Spawn (&p))
@@ -697,6 +704,8 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 	static int	tracercount;
 	qboolean	use_q3p;
 	const char	*trail_material = NULL;
+	q3p_effectdef_t trail_def;
+	qboolean	trail_has_def = false;
 	float		trail_lifetime = 0.f;
 	float		trail_size = 0.f;
 	float		trail_size_ramp = 0.f;
@@ -770,6 +779,9 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 		default:
 			break;
 		}
+
+		if (trail_material)
+			trail_has_def = Q3P_GetEffectDef (trail_material, &trail_def);
 	}
 
 	while (len > 0)
@@ -777,31 +789,37 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 		qboolean spawned_q3p = false;
 		len -= dec;
 
-		if (trail_material)
-		{
-			q3p_particle_t qp;
-			memset (&qp, 0, sizeof(qp));
-			qp.spawn_time = cl.time;
-			qp.lifetime = trail_lifetime;
-			qp.size = trail_size + ((rand() & 7) - 3) * 0.05f;
-			qp.size_ramp = trail_size_ramp;
-			qp.alpha = 1.0f;
-			qp.alpha_ramp = trail_alpha_ramp;
-			qp.color = trail_color;
-			qp.gravity = trail_gravity;
-			qp.drag = trail_drag;
-			if (type == 2 || type == 4)
+			if (trail_material)
 			{
-				qp.restitution = 0.2f;
-				qp.min_bounce_speed = 20.f;
-				qp.flags = Q3P_PARTICLE_COLLIDE_WORLD;
+				q3p_particle_t qp;
+				memset (&qp, 0, sizeof(qp));
+				qp.spawn_time = cl.time;
+				qp.lifetime = trail_has_def ? (trail_def.lifetime_min + ((rand() & 255) / 255.f) * trail_def.lifetime_rand) : trail_lifetime;
+				qp.size = trail_has_def ? (trail_def.size + ((rand() & 255) / 255.f) * trail_def.size_rand) : (trail_size + ((rand() & 7) - 3) * 0.05f);
+				qp.size_ramp = trail_has_def ? trail_def.size_ramp : trail_size_ramp;
+				qp.alpha = trail_has_def ? trail_def.alpha : 1.0f;
+				qp.alpha_ramp = trail_has_def ? trail_def.alpha_ramp : trail_alpha_ramp;
+				qp.color = trail_has_def ? trail_def.color : trail_color;
+				qp.gravity = trail_has_def ? trail_def.gravity : trail_gravity;
+				qp.drag = trail_has_def ? trail_def.drag : trail_drag;
+				if (type == 2 || type == 4)
+				{
+					qp.restitution = trail_has_def ? trail_def.restitution : 0.2f;
+					qp.min_bounce_speed = trail_has_def ? trail_def.min_bounce_speed : 20.f;
+					qp.flags = trail_has_def ? (trail_def.collide_world ? Q3P_PARTICLE_COLLIDE_WORLD : 0) : Q3P_PARTICLE_COLLIDE_WORLD;
+				}
+				q_strlcpy (qp.material, trail_has_def ? trail_def.material : trail_material, sizeof(qp.material));
+				for (j = 0; j < 3; ++j)
+					qp.org[j] = start[j] + ((rand() & 7) - 3) * (trail_has_def ? trail_def.org_jitter / 3.f : 1.f);
+				if (trail_has_def && trail_def.vel_jitter > 0.f)
+				{
+					qp.vel[0] = ((rand() & 255) - 128) * (trail_def.vel_jitter / 128.f);
+					qp.vel[1] = ((rand() & 255) - 128) * (trail_def.vel_jitter / 128.f);
+					qp.vel[2] = ((rand() & 255) - 128) * (trail_def.vel_jitter / 128.f);
+				}
+				if (Q3P_Spawn (&qp))
+					spawned_q3p = true;
 			}
-			q_strlcpy (qp.material, trail_material, sizeof(qp.material));
-			for (j = 0; j < 3; ++j)
-				qp.org[j] = start[j] + ((rand() & 7) - 3);
-			if (Q3P_Spawn (&qp))
-				spawned_q3p = true;
-		}
 
 		if (!spawned_q3p)
 		{

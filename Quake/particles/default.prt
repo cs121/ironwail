@@ -1,0 +1,87 @@
+impact_puff
+{
+	material impact_puff
+	count 20
+	lifetime_min 0.20
+	lifetime_rand 0.14
+	size 1.35
+	size_rand 0.65
+	size_ramp 8.0
+	alpha 1.0
+	alpha_ramp -3.0
+	color 111
+	gravity 260
+	drag 0.25
+	restitution 0.35
+	min_bounce_speed 35
+	org_jitter 8
+	vel_jitter 128
+	vel_scale 1.0
+	collide_world 1
+}
+
+smoke
+{
+	material smoke
+	count 1
+	lifetime_min 0.65
+	lifetime_rand 0.15
+	size 2.8
+	size_rand 0.35
+	size_ramp 10.0
+	alpha 1.0
+	alpha_ramp -1.35
+	color 109
+	gravity 0
+	drag 0.25
+	restitution 0
+	min_bounce_speed 0
+	org_jitter 3
+	vel_jitter 12
+	vel_scale 1.0
+	collide_world 0
+}
+
+bullet
+{
+	material bullet
+	count 1
+	lifetime_min 0.10
+	lifetime_rand 0.40
+	size 1.25
+	size_rand 0.75
+	size_ramp 8.0
+	alpha 1.0
+	alpha_ramp -3.0
+	color 111
+	gravity 300
+	drag 0.2
+	restitution 0.25
+	min_bounce_speed 40
+	org_jitter 8
+	vel_jitter 0
+	vel_scale 1.0
+	collide_world 1
+}
+
+explosion
+{
+	material explosion
+	count 1024
+	lifetime_min 0.45
+	lifetime_rand 0.20
+	size 8.0
+	size_rand 4.0
+	size_ramp 64.0
+	alpha 1.0
+	alpha_ramp -2.0
+	color 111
+	gravity 100
+	drag 0.5
+	restitution 0.30
+	min_bounce_speed 25
+	org_jitter 16
+	vel_jitter 256
+	vel_scale 1.0
+	collide_world 1
+}
