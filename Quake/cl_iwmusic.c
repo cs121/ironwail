@@ -101,12 +101,16 @@ static qboolean CL_IWMusic_DebugEnabled (void)
 static void CL_IWMusic_DPrintf (const char *fmt, ...)
 {
 	va_list argptr;
+	char msg[1024];
+
 	if (!CL_IWMusic_DebugEnabled())
 		return;
+
 	va_start(argptr, fmt);
-	Con_Printf("[iwmusic] ");
-	Con_VPrintf(fmt, argptr);
+	q_vsnprintf(msg, sizeof(msg), fmt, argptr);
 	va_end(argptr);
+
+	Con_Printf("[iwmusic] %s", msg);
 }
 
 static qboolean CL_IWMusic_ParseVec3 (const char *s, vec3_t out)
