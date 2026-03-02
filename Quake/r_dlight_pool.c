@@ -189,26 +189,6 @@ static float DLightPool_ScoreLight (dlight_t *dl, double time, const vec3_t view
 	return influence * lum * bias;
 }
 
-static int DLightPool_CompareScore (const void *a, const void *b)
-{
-	const dlight_t *dl_a = *(const dlight_t *const *)a;
-	const dlight_t *dl_b = *(const dlight_t *const *)b;
-
-	if (dl_a->last_score > dl_b->last_score)
-		return -1;
-	if (dl_a->last_score < dl_b->last_score)
-		return 1;
-	if (dl_a->spawn_time > dl_b->spawn_time)
-		return -1;
-	if (dl_a->spawn_time < dl_b->spawn_time)
-		return 1;
-	if (dl_a->id < dl_b->id)
-		return -1;
-	if (dl_a->id > dl_b->id)
-		return 1;
-	return 0;
-}
-
 static qboolean DLightPool_IsBetterScore (const dlight_t *candidate, const dlight_t *current)
 {
 	if (candidate->last_score > current->last_score)
@@ -512,6 +492,7 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 
 		if (selected < selection_max)
 		{
+			/* Keep the top-N lights in-place via insertion ordering; this avoids full-array sort work. */
 			int insert_at = selected;
 			while (insert_at > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[insert_at - 1]))
 			{
