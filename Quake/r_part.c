@@ -206,27 +206,271 @@ static qboolean R_CanUseQ3PForLegacyParticleEffect (void)
 	return mode == PARTICLEMODE_Q3P || mode == PARTICLEMODE_HYBRID;
 }
 
+typedef enum
+{
+	Q3P_LEGACY_JITTER_NONE,
+	Q3P_LEGACY_JITTER_EXPLOSION,
+	Q3P_LEGACY_JITTER_SPRAY,
+	Q3P_LEGACY_JITTER_TRAIL
+} q3p_legacy_jitter_policy_t;
+
+typedef enum
+{
+	Q3P_LEGACY_COLLISION_DEFAULT,
+	Q3P_LEGACY_COLLISION_WORLD,
+	Q3P_LEGACY_COLLISION_NONE
+} q3p_legacy_collision_policy_t;
+
+typedef struct
+{
+	float min;
+	float random;
+} q3p_legacy_range_t;
+
+typedef struct
+{
+	float base;
+	float random;
+	float ramp;
+} q3p_legacy_size_desc_t;
+
+typedef struct
+{
+	float start;
+	float ramp;
+} q3p_legacy_alpha_desc_t;
+
+typedef struct
+{
+	const char *mapping_key;
+	const char *material;
+	int count;
+	q3p_legacy_range_t lifetime;
+	q3p_legacy_size_desc_t size;
+	q3p_legacy_alpha_desc_t alpha;
+	float gravity;
+	float drag;
+	float restitution;
+	float min_bounce_speed;
+	int color;
+	q3p_legacy_jitter_policy_t jitter_policy;
+	q3p_legacy_collision_policy_t collision_policy;
+} q3p_legacy_effect_desc_t;
+
+typedef struct
+{
+	q3p_effectdef_t def;
+	qboolean has_override;
+} q3p_legacy_effect_state_t;
+
+static q3p_legacy_effect_state_t R_Q3P_BuildLegacyEffectState (const q3p_legacy_effect_desc_t *desc)
+{
+	q3p_legacy_effect_state_t state;
+
+	memset (&state, 0, sizeof (state));
+	if (!desc)
+		return state;
+
+	state.def.loaded = true;
+	state.def.count = desc->count;
+	state.def.lifetime_min = desc->lifetime.min;
+	state.def.lifetime_rand = desc->lifetime.random;
+	state.def.size = desc->size.base;
+	state.def.size_rand = desc->size.random;
+	state.def.size_ramp = desc->size.ramp;
+	state.def.alpha = desc->alpha.start;
+	state.def.alpha_ramp = desc->alpha.ramp;
+	state.def.color = desc->color;
+	state.def.gravity = desc->gravity;
+	state.def.drag = desc->drag;
+	state.def.restitution = desc->restitution;
+	state.def.min_bounce_speed = desc->min_bounce_speed;
+	state.def.org_jitter = 0.f;
+	state.def.vel_jitter = 0.f;
+	state.def.vel_scale = 1.f;
+	state.def.collide_world = (desc->collision_policy != Q3P_LEGACY_COLLISION_NONE);
+	q_strlcpy (state.def.material, desc->material, sizeof (state.def.material));
+
+	state.has_override = Q3P_GetEffectDef (desc->material, &state.def);
+	if (!state.has_override)
+		state.def.loaded = true;
+
+	return state;
+}
+
+static int R_Q3P_LegacyCollisionFlags (q3p_legacy_collision_policy_t policy, qboolean override_collide_world)
+{
+	switch (policy)
+	{
+	case Q3P_LEGACY_COLLISION_WORLD:
+		return Q3P_PARTICLE_COLLIDE_WORLD;
+	case Q3P_LEGACY_COLLISION_NONE:
+		return 0;
+	case Q3P_LEGACY_COLLISION_DEFAULT:
+	default:
+		return override_collide_world ? Q3P_PARTICLE_COLLIDE_WORLD : 0;
+	}
+}
+
+static const q3p_legacy_effect_desc_t *R_Q3P_GetLegacyParseParticleDesc (int count)
+{
+	static const q3p_legacy_effect_desc_t desc_explosion = {
+		"svc_particle.explosion",
+		"explosion",
+		1024,
+		{0.45f, 0.20f},
+		{8.0f, 4.0f, 64.0f},
+		{1.0f, -2.0f},
+		100.f,
+		0.5f,
+		0.30f,
+		25.f,
+		0,
+		Q3P_LEGACY_JITTER_EXPLOSION,
+		Q3P_LEGACY_COLLISION_WORLD
+	};
+	static const q3p_legacy_effect_desc_t desc_spray = {
+		"svc_particle.spray",
+		"bullet",
+		0,
+		{0.10f, 0.40f},
+		{1.25f, 0.75f, 10.0f},
+		{1.0f, -3.0f},
+		300.f,
+		0.2f,
+		0.25f,
+		40.f,
+		0,
+		Q3P_LEGACY_JITTER_SPRAY,
+		Q3P_LEGACY_COLLISION_WORLD
+	};
+
+	if (count == 1024)
+		return &desc_explosion;
+	return &desc_spray;
+}
+
+static const q3p_legacy_effect_desc_t *R_Q3P_GetRocketTrailDesc (int type)
+{
+	switch (type)
+	{
+	case 0:
+	{
+		static const q3p_legacy_effect_desc_t desc = {
+			"trail.rocket",
+			"smoke",
+			0,
+			{0.65f, 0.0f},
+			{2.8f, 0.0f, 10.0f},
+			{1.0f, -1.35f},
+			0.f,
+			0.25f,
+			0.f,
+			0.f,
+			0,
+			Q3P_LEGACY_JITTER_TRAIL,
+			Q3P_LEGACY_COLLISION_NONE
+		};
+		return &desc;
+	}
+	case 1:
+	{
+		static const q3p_legacy_effect_desc_t desc = {
+			"trail.smoke",
+			"smoke",
+			0,
+			{0.85f, 0.0f},
+			{2.5f, 0.0f, 9.5f},
+			{1.0f, -1.1f},
+			0.f,
+			0.35f,
+			0.f,
+			0.f,
+			0,
+			Q3P_LEGACY_JITTER_TRAIL,
+			Q3P_LEGACY_COLLISION_NONE
+		};
+		return &desc;
+	}
+	case 2:
+	{
+		static const q3p_legacy_effect_desc_t desc = {
+			"trail.blood_heavy",
+			"blood_heavy",
+			0,
+			{0.45f, 0.0f},
+			{1.35f, 0.0f, 1.5f},
+			{1.0f, -2.3f},
+			240.f,
+			0.05f,
+			0.2f,
+			20.f,
+			67,
+			Q3P_LEGACY_JITTER_TRAIL,
+			Q3P_LEGACY_COLLISION_WORLD
+		};
+		return &desc;
+	}
+	case 4:
+	{
+		static const q3p_legacy_effect_desc_t desc = {
+			"trail.blood_light",
+			"blood_light",
+			0,
+			{0.3f, 0.0f},
+			{1.1f, 0.0f, 1.0f},
+			{1.0f, -2.8f},
+			220.f,
+			0.05f,
+			0.2f,
+			20.f,
+			67,
+			Q3P_LEGACY_JITTER_TRAIL,
+			Q3P_LEGACY_COLLISION_WORLD
+		};
+		return &desc;
+	}
+	case 6:
+	{
+		static const q3p_legacy_effect_desc_t desc = {
+			"trail.voor",
+			"voor",
+			0,
+			{0.25f, 0.0f},
+			{2.0f, 0.0f, 2.0f},
+			{1.0f, -3.0f},
+			0.f,
+			0.05f,
+			0.f,
+			0.f,
+			9*16 + 9,
+			Q3P_LEGACY_JITTER_TRAIL,
+			Q3P_LEGACY_COLLISION_NONE
+		};
+		return &desc;
+	}
+	default:
+		return NULL;
+	}
+}
+
 static qboolean R_TrySpawnQ3PLegacyParticleEffect (const vec3_t org, const vec3_t dir, int color, int count)
 {
 	int i;
+	const q3p_legacy_effect_desc_t *desc = R_Q3P_GetLegacyParseParticleDesc (count);
+	q3p_legacy_effect_state_t effect;
 	const qboolean rocket_explosion = (count == 1024);
-	const char *material = rocket_explosion ? "explosion" : "bullet";
-	q3p_effectdef_t def;
-	qboolean has_def = Q3P_GetEffectDef (material, &def);
-	const float lifetime_min = rocket_explosion ? 0.45f : 0.10f;
-	const float lifetime_rand = rocket_explosion ? 0.20f : 0.40f;
-	const float size = rocket_explosion ? 8.0f : 1.25f;
-	const float size_rand = rocket_explosion ? 4.0f : 0.75f;
-	const float alpha_ramp = rocket_explosion ? -2.0f : -3.0f;
-	const float gravity = rocket_explosion ? 100.f : 300.f;
-	const float drag = rocket_explosion ? 0.5f : 0.2f;
 
 	if (!R_CanUseQ3PForLegacyParticleEffect ())
 		return false;
+	if (!desc)
+		return false;
 
-	if (has_def)
+	effect = R_Q3P_BuildLegacyEffectState (desc);
+
+	if (effect.has_override)
 	{
-		count = q_max (1, def.count);
+		count = q_max (1, effect.def.count);
 	}
 
 	for (i = 0; i < count; ++i)
@@ -235,39 +479,44 @@ static qboolean R_TrySpawnQ3PLegacyParticleEffect (const vec3_t org, const vec3_
 
 		memset (&p, 0, sizeof(p));
 		p.spawn_time = cl.time;
-		p.lifetime = (has_def ? def.lifetime_min : lifetime_min) + ((rand() & 255) / 255.0f) * (has_def ? def.lifetime_rand : lifetime_rand);
-		p.size = (has_def ? def.size : size) + ((rand() & 255) / 255.0f) * (has_def ? def.size_rand : size_rand);
-		p.size_ramp = has_def ? def.size_ramp : p.size * 8.0f;
-		p.alpha = has_def ? def.alpha : 1.0f;
-		p.alpha_ramp = has_def ? def.alpha_ramp : alpha_ramp;
-		p.color = has_def ? def.color : (rocket_explosion ? ramp1[0] : color);
-		p.gravity = has_def ? def.gravity : gravity;
-		p.drag = has_def ? def.drag : drag;
-		p.restitution = has_def ? def.restitution : (rocket_explosion ? 0.30f : 0.25f);
-		p.min_bounce_speed = has_def ? def.min_bounce_speed : (rocket_explosion ? 25.f : 40.f);
-		p.flags = (has_def ? (def.collide_world ? Q3P_PARTICLE_COLLIDE_WORLD : 0) : Q3P_PARTICLE_COLLIDE_WORLD);
+		p.lifetime = effect.def.lifetime_min + ((rand() & 255) / 255.0f) * effect.def.lifetime_rand;
+		p.size = effect.def.size + ((rand() & 255) / 255.0f) * effect.def.size_rand;
+		p.size_ramp = effect.def.size_ramp;
+		p.alpha = effect.def.alpha;
+		p.alpha_ramp = effect.def.alpha_ramp;
+		p.color = effect.has_override ? effect.def.color : (rocket_explosion ? ramp1[0] : color);
+		p.gravity = effect.def.gravity;
+		p.drag = effect.def.drag;
+		p.restitution = effect.def.restitution;
+		p.min_bounce_speed = effect.def.min_bounce_speed;
+		p.flags = R_Q3P_LegacyCollisionFlags (desc->collision_policy, effect.def.collide_world);
 
-		q_strlcpy (p.material, has_def ? def.material : material, sizeof(p.material));
+		q_strlcpy (p.material, effect.def.material, sizeof(p.material));
 
-		if (rocket_explosion)
+		switch (desc->jitter_policy)
 		{
-			p.org[0] = org[0] + ((rand() % 32) - 16) * (has_def ? def.org_jitter / 16.f : 1.f);
-			p.org[1] = org[1] + ((rand() % 32) - 16) * (has_def ? def.org_jitter / 16.f : 1.f);
-			p.org[2] = org[2] + ((rand() % 32) - 16) * (has_def ? def.org_jitter / 16.f : 1.f);
-
-			p.vel[0] = (float)((rand() % 512) - 256) * (has_def ? def.vel_jitter / 256.f : 1.f);
-			p.vel[1] = (float)((rand() % 512) - 256) * (has_def ? def.vel_jitter / 256.f : 1.f);
-			p.vel[2] = (float)((rand() % 512) - 256) * (has_def ? def.vel_jitter / 256.f : 1.f);
-		}
-		else
-		{
-			p.org[0] = org[0] + ((rand() & 15) - 8) * (has_def ? def.org_jitter / 8.f : 1.f);
-			p.org[1] = org[1] + ((rand() & 15) - 8) * (has_def ? def.org_jitter / 8.f : 1.f);
-			p.org[2] = org[2] + ((rand() & 15) - 8) * (has_def ? def.org_jitter / 8.f : 1.f);
-
-			p.vel[0] = dir[0] * 15.f * (has_def ? def.vel_scale : 1.f) + (has_def ? ((rand() & 255) - 128) * (def.vel_jitter / 128.f) : 0.f);
-			p.vel[1] = dir[1] * 15.f * (has_def ? def.vel_scale : 1.f) + (has_def ? ((rand() & 255) - 128) * (def.vel_jitter / 128.f) : 0.f);
-			p.vel[2] = dir[2] * 15.f * (has_def ? def.vel_scale : 1.f) + (has_def ? ((rand() & 255) - 128) * (def.vel_jitter / 128.f) : 0.f);
+		case Q3P_LEGACY_JITTER_EXPLOSION:
+			p.org[0] = org[0] + ((rand() % 32) - 16) * (effect.has_override ? effect.def.org_jitter / 16.f : 1.f);
+			p.org[1] = org[1] + ((rand() % 32) - 16) * (effect.has_override ? effect.def.org_jitter / 16.f : 1.f);
+			p.org[2] = org[2] + ((rand() % 32) - 16) * (effect.has_override ? effect.def.org_jitter / 16.f : 1.f);
+			p.vel[0] = (float)((rand() % 512) - 256) * (effect.has_override ? effect.def.vel_jitter / 256.f : 1.f);
+			p.vel[1] = (float)((rand() % 512) - 256) * (effect.has_override ? effect.def.vel_jitter / 256.f : 1.f);
+			p.vel[2] = (float)((rand() % 512) - 256) * (effect.has_override ? effect.def.vel_jitter / 256.f : 1.f);
+			break;
+		case Q3P_LEGACY_JITTER_SPRAY:
+			p.org[0] = org[0] + ((rand() & 15) - 8) * (effect.has_override ? effect.def.org_jitter / 8.f : 1.f);
+			p.org[1] = org[1] + ((rand() & 15) - 8) * (effect.has_override ? effect.def.org_jitter / 8.f : 1.f);
+			p.org[2] = org[2] + ((rand() & 15) - 8) * (effect.has_override ? effect.def.org_jitter / 8.f : 1.f);
+			p.vel[0] = dir[0] * 15.f * effect.def.vel_scale + (effect.has_override ? ((rand() & 255) - 128) * (effect.def.vel_jitter / 128.f) : 0.f);
+			p.vel[1] = dir[1] * 15.f * effect.def.vel_scale + (effect.has_override ? ((rand() & 255) - 128) * (effect.def.vel_jitter / 128.f) : 0.f);
+			p.vel[2] = dir[2] * 15.f * effect.def.vel_scale + (effect.has_override ? ((rand() & 255) - 128) * (effect.def.vel_jitter / 128.f) : 0.f);
+			break;
+		case Q3P_LEGACY_JITTER_NONE:
+		case Q3P_LEGACY_JITTER_TRAIL:
+		default:
+			VectorCopy (org, p.org);
+			VectorCopy (vec3_origin, p.vel);
+			break;
 		}
 
 		if (!Q3P_Spawn (&p))
@@ -727,16 +976,8 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 	int			dec;
 	static int	tracercount;
 	qboolean	use_q3p;
-	const char	*trail_material = NULL;
-	q3p_effectdef_t trail_def;
-	qboolean	trail_has_def = false;
-	float		trail_lifetime = 0.f;
-	float		trail_size = 0.f;
-	float		trail_size_ramp = 0.f;
-	float		trail_alpha_ramp = 0.f;
-	float		trail_gravity = 0.f;
-	float		trail_drag = 0.f;
-	int			trail_color = 0;
+	const q3p_legacy_effect_desc_t *trail_desc = NULL;
+	q3p_legacy_effect_state_t trail_effect;
 
 	VectorSubtract (end, start, vec);
 	len = VectorNormalize (vec);
@@ -751,61 +992,9 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 	use_q3p = R_CanUseQ3PForLegacyParticleEffect ();
 	if (use_q3p)
 	{
-		switch (type)
-		{
-		case 0:
-			trail_material = "smoke";
-			trail_lifetime = 0.65f;
-			trail_size = 2.8f;
-			trail_size_ramp = 10.0f;
-			trail_alpha_ramp = -1.35f;
-			trail_drag = 0.25f;
-			trail_color = ramp3[0];
-			break;
-		case 1:
-			trail_material = "smoke";
-			trail_lifetime = 0.85f;
-			trail_size = 2.5f;
-			trail_size_ramp = 9.5f;
-			trail_alpha_ramp = -1.1f;
-			trail_drag = 0.35f;
-			trail_color = ramp3[2];
-			break;
-		case 2:
-			trail_material = "blood_heavy";
-			trail_lifetime = 0.45f;
-			trail_size = 1.35f;
-			trail_size_ramp = 1.5f;
-			trail_alpha_ramp = -2.3f;
-			trail_gravity = 240.f;
-			trail_drag = 0.05f;
-			trail_color = 67;
-			break;
-		case 4:
-			trail_material = "blood_light";
-			trail_lifetime = 0.3f;
-			trail_size = 1.1f;
-			trail_size_ramp = 1.0f;
-			trail_alpha_ramp = -2.8f;
-			trail_gravity = 220.f;
-			trail_drag = 0.05f;
-			trail_color = 67;
-			break;
-		case 6:
-			trail_material = "voor";
-			trail_lifetime = 0.25f;
-			trail_size = 2.0f;
-			trail_size_ramp = 2.0f;
-			trail_alpha_ramp = -3.0f;
-			trail_drag = 0.05f;
-			trail_color = 9*16 + 9;
-			break;
-		default:
-			break;
-		}
-
-		if (trail_material)
-			trail_has_def = Q3P_GetEffectDef (trail_material, &trail_def);
+		trail_desc = R_Q3P_GetRocketTrailDesc (type);
+		if (trail_desc)
+			trail_effect = R_Q3P_BuildLegacyEffectState (trail_desc);
 	}
 
 	while (len > 0)
@@ -813,33 +1002,50 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 		qboolean spawned_q3p = false;
 		len -= dec;
 
-			if (trail_material)
+			if (trail_desc)
 			{
 				q3p_particle_t qp;
 				memset (&qp, 0, sizeof(qp));
 				qp.spawn_time = cl.time;
-				qp.lifetime = trail_has_def ? (trail_def.lifetime_min + ((rand() & 255) / 255.f) * trail_def.lifetime_rand) : trail_lifetime;
-				qp.size = trail_has_def ? (trail_def.size + ((rand() & 255) / 255.f) * trail_def.size_rand) : (trail_size + ((rand() & 7) - 3) * 0.05f);
-				qp.size_ramp = trail_has_def ? trail_def.size_ramp : trail_size_ramp;
-				qp.alpha = trail_has_def ? trail_def.alpha : 1.0f;
-				qp.alpha_ramp = trail_has_def ? trail_def.alpha_ramp : trail_alpha_ramp;
-				qp.color = trail_has_def ? trail_def.color : trail_color;
-				qp.gravity = trail_has_def ? trail_def.gravity : trail_gravity;
-				qp.drag = trail_has_def ? trail_def.drag : trail_drag;
-				if (type == 2 || type == 4)
+				qp.lifetime = trail_effect.def.lifetime_min + ((rand() & 255) / 255.f) * trail_effect.def.lifetime_rand;
+				qp.size = trail_effect.def.size + ((rand() & 7) - 3) * 0.05f;
+				if (trail_effect.def.size_rand > 0.f)
+					qp.size += ((rand() & 255) / 255.f) * trail_effect.def.size_rand;
+				qp.size_ramp = trail_effect.def.size_ramp;
+				qp.alpha = trail_effect.def.alpha;
+				qp.alpha_ramp = trail_effect.def.alpha_ramp;
+				qp.color = trail_effect.def.color;
+				if (!trail_effect.has_override)
 				{
-					qp.restitution = trail_has_def ? trail_def.restitution : 0.2f;
-					qp.min_bounce_speed = trail_has_def ? trail_def.min_bounce_speed : 20.f;
-					qp.flags = trail_has_def ? (trail_def.collide_world ? Q3P_PARTICLE_COLLIDE_WORLD : 0) : Q3P_PARTICLE_COLLIDE_WORLD;
+					if (type == 0)
+						qp.color = ramp3[0];
+					else if (type == 1)
+						qp.color = ramp3[2];
 				}
-				q_strlcpy (qp.material, trail_has_def ? trail_def.material : trail_material, sizeof(qp.material));
-				for (j = 0; j < 3; ++j)
-					qp.org[j] = start[j] + ((rand() & 7) - 3) * (trail_has_def ? trail_def.org_jitter / 3.f : 1.f);
-				if (trail_has_def && trail_def.vel_jitter > 0.f)
+				qp.gravity = trail_effect.def.gravity;
+				qp.drag = trail_effect.def.drag;
+				qp.restitution = trail_effect.def.restitution;
+				qp.min_bounce_speed = trail_effect.def.min_bounce_speed;
+				qp.flags = R_Q3P_LegacyCollisionFlags (trail_desc->collision_policy, trail_effect.def.collide_world);
+				q_strlcpy (qp.material, trail_effect.def.material, sizeof(qp.material));
+				switch (trail_desc->jitter_policy)
 				{
-					qp.vel[0] = ((rand() & 255) - 128) * (trail_def.vel_jitter / 128.f);
-					qp.vel[1] = ((rand() & 255) - 128) * (trail_def.vel_jitter / 128.f);
-					qp.vel[2] = ((rand() & 255) - 128) * (trail_def.vel_jitter / 128.f);
+				case Q3P_LEGACY_JITTER_TRAIL:
+					for (j = 0; j < 3; ++j)
+						qp.org[j] = start[j] + ((rand() & 7) - 3) * (trail_effect.has_override ? trail_effect.def.org_jitter / 3.f : 1.f);
+					break;
+				case Q3P_LEGACY_JITTER_NONE:
+				case Q3P_LEGACY_JITTER_EXPLOSION:
+				case Q3P_LEGACY_JITTER_SPRAY:
+				default:
+					VectorCopy (start, qp.org);
+					break;
+				}
+				if (trail_effect.has_override && trail_effect.def.vel_jitter > 0.f)
+				{
+					qp.vel[0] = ((rand() & 255) - 128) * (trail_effect.def.vel_jitter / 128.f);
+					qp.vel[1] = ((rand() & 255) - 128) * (trail_effect.def.vel_jitter / 128.f);
+					qp.vel[2] = ((rand() & 255) - 128) * (trail_effect.def.vel_jitter / 128.f);
 				}
 				if (Q3P_Spawn (&qp))
 					spawned_q3p = true;

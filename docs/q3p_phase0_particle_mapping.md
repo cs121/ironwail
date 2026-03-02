@@ -74,3 +74,25 @@ Der Laufweg ist unverändert und weiter konsistent:
   - Legacy-Rand-Color-Jitter `(color&~7)+(rand&7)` wird nicht 1:1 repliziert; q3p übernimmt den Basisfarbwert als `p.color`.
   - Legacy-Partikeltypen (`pt_slowgrav`, `pt_explode`, `pt_explode2`) werden durch q3p-Material-Presets (`bullet`/`explosion`) angenähert.
   - Bei erschöpftem q3p-Partikelpool wird der Spawn früh beendet (best-effort) statt auf Legacy zurückzufallen.
+
+
+## 6) Legacy-Mapping-Keys für den gemeinsamen Descriptor-Layer
+
+Die Legacy-Entry-Points verwenden jetzt gemeinsame Descriptor-Familien mit denselben Schlüsseln in Code und Design. Jeder Schlüssel trägt Material, Lifetime-Range, Size/Size-Ramp, Alpha-Ramp, Gravity/Drag sowie Jitter-/Collision-Policy.
+
+| Mapping-Key | Entry-Point | Legacy-Fall | Default-Material |
+|---|---|---|---|
+| `svc_particle.explosion` | `R_TrySpawnQ3PLegacyParticleEffect` | `count == 1024` (Rocket-Explosion) | `explosion` |
+| `svc_particle.spray` | `R_TrySpawnQ3PLegacyParticleEffect` | allgemeiner `(org,dir,color,count)`-Sprühpfad | `bullet` |
+| `trail.rocket` | `R_RocketTrail` | `type 0` Rocket Trail | `smoke` |
+| `trail.smoke` | `R_RocketTrail` | `type 1` Smoke Trail | `smoke` |
+| `trail.blood_heavy` | `R_RocketTrail` | `type 2` Blood Trail | `blood_heavy` |
+| `trail.blood_light` | `R_RocketTrail` | `type 4` Light Blood Trail | `blood_light` |
+| `trail.voor` | `R_RocketTrail` | `type 6` Vore Trail | `voor` |
+
+### Merge-/Override-Regel
+
+- Basiswerte kommen aus dem Legacy-Descriptor (familienbasiert, shared layer).
+- `Q3P_GetEffectDef(material)` bleibt die einzige Override-Quelle.
+- Wenn ein `.prt`-Override vorhanden ist, überschreibt es den Descriptor vollständig über den gemeinsamen Merge-Helper.
+- Ohne Override bleibt das Legacy-Fallback mit denselben Mapping-Keys und Policies aktiv.
