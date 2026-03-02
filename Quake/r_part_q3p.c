@@ -15,6 +15,7 @@ static int q3p_budgetparticles;
 static int q3p_spawned_counter;
 static int q3p_dropped_counter;
 static int q3p_culled_counter;
+static int q3p_culled_counter_frame;
 static float q3p_spawn_budget_time;
 static int q3p_spawn_budget_remaining;
 
@@ -632,6 +633,7 @@ void Q3P_Init (void)
 	q3p_spawned_counter = 0;
 	q3p_dropped_counter = 0;
 	q3p_culled_counter = 0;
+	q3p_culled_counter_frame = -1;
 	q3p_spawn_budget_time = -1.f;
 	q3p_spawn_budget_remaining = 0;
 	memset (q3p_emitters, 0, sizeof (q3p_emitters));
@@ -652,6 +654,7 @@ void Q3P_Shutdown (void)
 	q3p_spawned_counter = 0;
 	q3p_dropped_counter = 0;
 	q3p_culled_counter = 0;
+	q3p_culled_counter_frame = -1;
 	q3p_spawn_budget_time = -1.f;
 	q3p_spawn_budget_remaining = 0;
 	memset (q3p_emitters, 0, sizeof (q3p_emitters));
@@ -667,6 +670,7 @@ void Q3P_Clear (void)
 	q3p_spawned_counter = 0;
 	q3p_dropped_counter = 0;
 	q3p_culled_counter = 0;
+	q3p_culled_counter_frame = -1;
 	q3p_spawn_budget_time = -1.f;
 	q3p_spawn_budget_remaining = 0;
 }
@@ -735,12 +739,6 @@ void Q3P_Update (float frametime)
 			continue;
 		if (!Q3P_ParticleFinite (p))
 			continue;
-		if (Q3P_ShouldCullParticle (p))
-		{
-			++q3p_culled_counter;
-			continue;
-		}
-
 		p->size += p->size_ramp * frametime;
 		p->alpha += p->alpha_ramp * frametime;
 		p->alpha = CLAMP (0, p->alpha, 1);
@@ -889,6 +887,13 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 	if (q3p_numactive <= 0)
 		return;
 
+	/* Track render-time culls once per rendered frame (opaque pass). */
+	if (q3p_culled_counter_frame != r_framecount)
+	{
+		q3p_culled_counter = 0;
+		q3p_culled_counter_frame = r_framecount;
+	}
+
 	q3p_numdrawitems = 0;
 	for (i = 0; i < q3p_numactive; ++i)
 	{
@@ -897,6 +902,12 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 
 		if (!showtris && alpha != blend_group)
 			continue;
+		if (Q3P_ShouldCullParticle (p))
+		{
+			if (!showtris && !alpha)
+				++q3p_culled_counter;
+			continue;
+		}
 
 		q3p_drawitems[q3p_numdrawitems].particle_index = i;
 		q3p_drawitems[q3p_numdrawitems].blend_group = blend_group;
@@ -1010,6 +1021,7 @@ void Q3P_ResetDebugStats (void)
 	q3p_spawned_counter = 0;
 	q3p_dropped_counter = 0;
 	q3p_culled_counter = 0;
+	q3p_culled_counter_frame = -1;
 }
 
 int Q3P_AddWorldEmitter (const q3p_emitter_t *emitter)
