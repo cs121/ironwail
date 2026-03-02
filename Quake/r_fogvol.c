@@ -1514,6 +1514,40 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 			VectorCopy (v->maxs, bmaxs);
 		}
 
+		/* BUG FIX (C-SCISSOR-01): When the camera is inside the fog volume,
+		 * projecting the 8 AABB corners can produce a degenerate or zero-area
+		 * scissor rect (all corners behind near-plane → behind==8 → return false,
+		 * or clipped NDC rect that doesn't cover the screen centre).
+		 * This caused the fog to disappear entirely when looking away from the
+		 * volume's corners while standing inside it (Image 1 vs Image 2 bug).
+		 *
+		 * Fix: detect camera-inside early and return the full viewport immediately.
+		 * For sphere volumes use a radius check; for AABB volumes use component-wise
+		 * comparison against bmins/bmaxs (already computed above). */
+		{
+			qboolean cam_inside;
+			if (v->shape == 1)
+			{
+				vec3_t d;
+				VectorSubtract (r_refdef.vieworg, v->sphereCenter, d);
+				cam_inside = (DotProduct (d, d) < v->sphereRadius * v->sphereRadius);
+			}
+			else
+			{
+				cam_inside = (r_refdef.vieworg[0] >= bmins[0] && r_refdef.vieworg[0] <= bmaxs[0] &&
+				              r_refdef.vieworg[1] >= bmins[1] && r_refdef.vieworg[1] <= bmaxs[1] &&
+				              r_refdef.vieworg[2] >= bmins[2] && r_refdef.vieworg[2] <= bmaxs[2]);
+			}
+			if (cam_inside)
+			{
+				*x0 = view_x;
+				*y0 = view_y;
+				*x1 = view_x + view_w;
+				*y1 = view_y + view_h;
+				return true;
+			}
+		}
+
 		corners[0][0] = bmins[0]; corners[0][1] = bmins[1]; corners[0][2] = bmins[2];
 		corners[1][0] = bmaxs[0]; corners[1][1] = bmins[1]; corners[1][2] = bmins[2];
 		corners[2][0] = bmins[0]; corners[2][1] = bmaxs[1]; corners[2][2] = bmins[2];

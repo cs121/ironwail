@@ -254,15 +254,20 @@ static void R_Decals_LoadScripts (void)
 
 static decaldef_t *R_FindDecalDefByCategory (const char *category)
 {
+	/* Collect all valid matching defs, then pick one at random for variety. */
+	decaldef_t *matches[MAX_DECAL_DEFS];
+	int match_count = 0;
 	int i;
 	for (i = 0; i < num_decal_defs; ++i)
 	{
 		if (!decal_defs[i].valid)
 			continue;
 		if (!q_strcasecmp (decal_defs[i].category, category))
-			return &decal_defs[i];
+			matches[match_count++] = &decal_defs[i];
 	}
-	return NULL;
+	if (match_count == 0)
+		return NULL;
+	return matches[rand () % match_count];
 }
 
 static int R_DecalAllocInstance (int priority)
@@ -336,6 +341,10 @@ static int R_ClipPolyAxis (const decalvert_t *in, int count, decalvert_t *out, i
 			int k;
 			for (k = 0; k < 3; ++k)
 				v.pos[k] = a->pos[k] + (b->pos[k] - a->pos[k]) * t;
+			v.uv[0] = a->uv[0] + (b->uv[0] - a->uv[0]) * t;
+			v.uv[1] = a->uv[1] + (b->uv[1] - a->uv[1]) * t;
+			for (k = 0; k < 4; ++k)
+				v.color[k] = (byte)(a->color[k] + (b->color[k] - a->color[k]) * t);
 			out[out_count++] = v;
 		}
 	}
@@ -538,7 +547,7 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 		VectorCopy (surf->plane->normal, surf_normal);
 		if (surf->flags & SURF_PLANEBACK)
 			VectorInverse (surf_normal);
-		d = fabsf (DotProduct (origin, surf_normal) - (surf->flags & SURF_PLANEBACK ? -surf->plane->dist : surf->plane->dist));
+		d = fabsf (DotProduct (origin, surf_normal) - surf->plane->dist);
 		if (d > radius + 2.f)
 			continue;
 
