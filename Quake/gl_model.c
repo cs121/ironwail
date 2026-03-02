@@ -3559,6 +3559,13 @@ static void Mod_FindUsedTextures (qmodel_t *mod)
 	//Con_Printf("%s: %d/%d textures\n", mod->name, count, mod->numtextures);
 }
 
+static void ValidateClipnodeChildIndex (int child, int childslot, int nodeindex, int totalcount)
+{
+	if (child >= 0 && child >= totalcount)
+		Host_Error ("Mod_LoadClipnodes: clipnode %d child[%d] index %d out of bounds (count %d)",
+			nodeindex, childslot, child, totalcount);
+}
+
 /*
 =================
 Mod_LoadClipnodes
@@ -3638,7 +3645,9 @@ static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 
 			out->children[0] = LittleLong(inl->children[0]);
 			out->children[1] = LittleLong(inl->children[1]);
-			//Spike: FIXME: bounds check
+
+			ValidateClipnodeChildIndex (out->children[0], 0, i, count);
+			ValidateClipnodeChildIndex (out->children[1], 1, i, count);
 		}
 	}
 	else
@@ -3660,6 +3669,9 @@ static void Mod_LoadClipnodes (lump_t *l, qboolean bsp2)
 				out->children[0] -= 65536;
 			if (out->children[1] >= count)
 				out->children[1] -= 65536;
+
+			ValidateClipnodeChildIndex (out->children[0], 0, i, count);
+			ValidateClipnodeChildIndex (out->children[1], 1, i, count);
 			//johnfitz
 		}
 	}
