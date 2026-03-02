@@ -491,7 +491,10 @@ void main()
 	vec3  rd     = normalize(worldPos - ro);
 	float tScene = length(worldPos - ro);
 	if (IsSkyDepth(depth))
-		tScene = FogDepthParams.y;
+		tScene = 2048.0; // Sky has no real geometry — cap fog path length to avoid
+		                 // sky pixels accumulating far_clip worth of density, which
+		                 // makes open areas look disproportionately foggier than
+		                 // enclosed rooms when sky is visible.
 
 	float tEnter, tExit;
 	if (volume.extra.x > 0.5)
