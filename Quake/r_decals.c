@@ -488,7 +488,7 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 	mleaf_t *leaf;
 	vec3_t n;
 	float radius, alpha, rot;
-	int i, inst_idx, first_vert;
+	int i, inst_idx, first_vert, temp_count;
 	decalinst_t *inst;
 
 	if (!r_decals.value || !cl.worldmodel || !category)
@@ -496,10 +496,6 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 
 	def = R_FindDecalDefByCategory (category);
 	if (!def)
-		return;
-
-	inst_idx = R_DecalAllocInstance (def->priority);
-	if (inst_idx < 0)
 		return;
 
 	VectorCopy (normal, n);
@@ -526,6 +522,7 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 		if (first_vert + MAX_POLY_VERTS >= MAX_DECAL_VERTS)
 			return;
 	}
+	temp_count = 0;
 
 	for (i = 0; i < leaf->nummarksurfaces; ++i)
 	{
@@ -545,14 +542,18 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 		if (d > radius + 2.f)
 			continue;
 
-		if (decal_vert_cursor + MAX_POLY_VERTS >= MAX_DECAL_VERTS)
+		if (first_vert + temp_count + MAX_POLY_VERTS >= MAX_DECAL_VERTS)
 			break;
 
-		added = R_ProjectDecalToSurface (surf, origin, rot, radius, alpha, def->color, decal_vert_cursor);
-		decal_vert_cursor += added;
+		added = R_ProjectDecalToSurface (surf, origin, rot, radius, alpha, def->color, first_vert + temp_count);
+		temp_count += added;
 	}
 
-	if (decal_vert_cursor == first_vert)
+	if (temp_count <= 0)
+		return;
+
+	inst_idx = R_DecalAllocInstance (def->priority);
+	if (inst_idx < 0)
 		return;
 
 	inst = &decal_instances[inst_idx];
@@ -564,7 +565,8 @@ void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t
 	inst->blend = def->blend;
 	inst->texture = def->texture;
 	inst->first_vert = first_vert;
-	inst->num_verts = decal_vert_cursor - first_vert;
+	inst->num_verts = temp_count;
+	decal_vert_cursor = first_vert + temp_count;
 	decal_inst_count++;
 }
 
