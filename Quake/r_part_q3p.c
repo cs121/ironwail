@@ -179,7 +179,7 @@ static qboolean Q3P_PRT_NextToken (q3p_prt_parser_t *parser)
 	if (!parser->token[0])
 		return false;
 
-	token_start = parser->cursor - q_strlen (parser->token);
+	token_start = parser->cursor - strlen (parser->token);
 	if (token_start < parser->text_start)
 		token_start = parser->text_start;
 	parser->token_start = token_start;
