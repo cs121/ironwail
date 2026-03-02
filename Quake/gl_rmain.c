@@ -34,6 +34,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern gltexture_t *lightmap_dir_texture;
 extern cvar_t r_sun_light;
+extern cvar_t r_sun_visibility;
 
 qboolean	r_cache_thrash;		// compatability
 
@@ -3491,7 +3492,7 @@ void R_SetupView (void)
         r_framedata.colorspace_params[3] = 0.f;
         r_framedata.shader_params[0] = r_shader_debug.value;
         r_framedata.shader_params[1] = r_tcgen_debug.value;
-        r_framedata.shader_params[2] = 0.f;
+        r_framedata.shader_params[2] = CLAMP (0.f, r_sun_visibility.value, 1.f);
         r_framedata.shader_params[3] = 0.f;
 
 	{

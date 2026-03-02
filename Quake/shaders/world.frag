@@ -521,7 +521,11 @@ void main()
 			float ndotl = max(dot(surface_normal, sun_to_surface), 0.0);
 			if (ndotl > 0.0)
 			{
-				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl;
+				/* Minimal stopgap visibility: sky surfaces always receive full sun,
+				 * non-sky surfaces get a conservative attenuation from ShaderParams.z
+				 * (driven by cvar r_sun_visibility, clamped to [0,1] on CPU). */
+				float sun_visibility = ((in_flags & CF_MAT_SKY) != 0u) ? 1.0 : ShaderParams.z;
+				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl * sun_visibility;
 				total_light += max(min(sun_contrib, 1.0 - total_light), 0.0);
 			}
 		}
