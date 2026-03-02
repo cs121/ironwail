@@ -36,8 +36,8 @@ Particle material MVP contract (quad/beam path):
   and tcMod {scroll,scale,rotate,turb,stretch}.
 - Deferred (non-MVP): alphaFunc, tcGen environment/lightmap, q3 sky/fog/deform,
   and advanced stage directives outside the list above.
-- Degradation strategy: any unsupported stage falls back to safe default particle
-  rendering; when r_particles_shader_strict=1, emit debug diagnostics for the skip.
+- Degradation strategy: unsupported particle stages are classified via material shader
+  policy (tolerant: skip/fallback, strict: hard-fail for non-MVP directives).
 */
 
 typedef struct shader_cache_s

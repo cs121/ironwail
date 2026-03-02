@@ -159,6 +159,19 @@ typedef struct mat_tcmod_s
 	float args[4];
 } mat_tcmod_t;
 
+typedef enum
+{
+	MAT_PARTICLE_STAGE_SUPPORTED = 0,
+	MAT_PARTICLE_STAGE_SKIPPED,
+	MAT_PARTICLE_STAGE_HARD_FAIL
+} mat_particle_stage_support_t;
+
+typedef enum
+{
+	MAT_PARTICLE_POLICY_TOLERANT = 0,
+	MAT_PARTICLE_POLICY_STRICT
+} mat_particle_policy_t;
+
 typedef struct mat_texmatrix_s
 {
 	float m[3][3];
@@ -298,5 +311,7 @@ void Mat_Shader_Remove (const shader_material_t *material);
 void Mat_Shader_MarkKeywordSeen (const char *keyword, mat_shader_keyword_scope_t scope);
 void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file, unsigned int line);
 qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, char *reason, size_t reason_size);
+mat_particle_stage_support_t Mat_Shader_ClassifyParticleStage (const mat_shader_stage_t *stage,
+	mat_particle_policy_t policy, char *reason, size_t reason_size);
 
 #endif // MAT_SHADER_H
