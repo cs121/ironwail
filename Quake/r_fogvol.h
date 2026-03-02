@@ -2,6 +2,7 @@
 #define R_FOGVOL_H
 
 #define MAX_FOGVOLUMES 64
+#define MAX_FOGLIGHTS 31 /* keep FogLightsUBO under 64KB std140 limit on NVIDIA */
 
 typedef struct fog_volume_s
 {
