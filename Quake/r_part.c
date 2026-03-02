@@ -45,6 +45,7 @@ cvar_t	r_particles_max = {"r_particles_max", "8192", CVAR_ARCHIVE};
 cvar_t	r_particles_sort = {"r_particles_sort", "0", CVAR_ARCHIVE};
 cvar_t	r_particles_cull_dist = {"r_particles_cull_dist", "4096", CVAR_ARCHIVE};
 cvar_t	r_particles_collision = {"r_particles_collision", "1", CVAR_ARCHIVE};
+cvar_t	r_particles_spawn_max = { "r_particles_spawn_max", "2048", CVAR_ARCHIVE};
 
 typedef enum
 {
@@ -124,6 +125,56 @@ static void R_Q3P_TestSpawn_f (void)
 	}
 
 	Con_Printf ("q3p_spawned %d particles (%d active)\n", i, Q3P_ActiveCount ());
+}
+
+
+static void R_Q3P_DebugStats_f (void)
+{
+	q3p_debug_stats_t stats;
+
+	Q3P_GetDebugStats (&stats);
+	Con_Printf ("q3p: active=%d spawned=%d dropped=%d culled=%d\n",
+		stats.active, stats.spawned, stats.dropped, stats.culled);
+}
+
+static void R_Q3P_ResetStats_f (void)
+{
+	Q3P_ResetDebugStats ();
+	Con_Printf ("q3p: debug stats reset\n");
+}
+
+static void R_Q3P_AddWorldEmitter_f (void)
+{
+	q3p_emitter_t e;
+
+	if (Cmd_Argc () < 4)
+	{
+		Con_Printf ("usage: q3p_emitter_add <x> <y> <z> [rate] [spread] [material] [color] [lifetime] [cull_dist]\n");
+		return;
+	}
+
+	memset (&e, 0, sizeof (e));
+	e.org[0] = Q_atof (Cmd_Argv (1));
+	e.org[1] = Q_atof (Cmd_Argv (2));
+	e.org[2] = Q_atof (Cmd_Argv (3));
+	e.rate = (Cmd_Argc () > 4) ? q_max (0.f, Q_atof (Cmd_Argv (4))) : 48.f;
+	e.spread = (Cmd_Argc () > 5) ? q_max (0.f, Q_atof (Cmd_Argv (5))) : 128.f;
+	q_strlcpy (e.material, (Cmd_Argc () > 6) ? Cmd_Argv (6) : "fog_dust", sizeof (e.material));
+	e.color = (Cmd_Argc () > 7) ? Q_atoi (Cmd_Argv (7)) : 0x6f;
+	e.lifetime = (Cmd_Argc () > 8) ? q_max (0.1f, Q_atof (Cmd_Argv (8))) : 3.5f;
+	e.cull_dist = (Cmd_Argc () > 9) ? q_max (0.f, Q_atof (Cmd_Argv (9))) : q_max (r_particles_cull_dist.value, 1024.f);
+	e.size = 14.f;
+	e.alpha = 0.45f;
+	e.gravity = -2.f;
+	e.drag = 0.2f;
+
+	if (Q3P_AddWorldEmitter (&e) < 0)
+	{
+		Con_Warning ("q3p: failed to add world emitter (limit reached)\n");
+		return;
+	}
+
+	Con_Printf ("q3p: world emitter added at %.1f %.1f %.1f\n", e.org[0], e.org[1], e.org[2]);
 }
 
 static qboolean R_CanUseQ3PForLegacyParticleEffect (void)
@@ -277,9 +328,14 @@ void R_InitParticles (void)
 	Cvar_RegisterVariable (&r_particles_sort);
 	Cvar_RegisterVariable (&r_particles_cull_dist);
 	Cvar_RegisterVariable (&r_particles_collision);
+	Cvar_RegisterVariable (&r_particles_spawn_max);
 
 	Q3P_Init ();
 	Cmd_AddCommand ("q3p_spawn", R_Q3P_TestSpawn_f);
+	Cmd_AddCommand ("q3p_stats", R_Q3P_DebugStats_f);
+	Cmd_AddCommand ("q3p_stats_reset", R_Q3P_ResetStats_f);
+	Cmd_AddCommand ("q3p_emitter_add", R_Q3P_AddWorldEmitter_f);
+	Cmd_AddCommand ("q3p_emitter_clear", Q3P_ClearWorldEmitters);
 }
 
 /*
@@ -352,6 +408,7 @@ void R_ClearParticles (void)
 {
 	r_numactiveparticles = 0;
 	Q3P_Clear ();
+	Q3P_ClearWorldEmitters ();
 }
 
 /*

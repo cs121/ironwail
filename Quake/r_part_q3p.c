@@ -6,10 +6,20 @@ extern cvar_t r_particles_sort;
 extern cvar_t r_particles_shader_strict;
 extern cvar_t r_particles_cull_dist;
 extern cvar_t r_particles_collision;
+extern cvar_t r_particles_spawn_max;
 
 static q3p_particle_t *q3p_particles;
 static int q3p_maxparticles;
 static int q3p_numactive;
+static int q3p_budgetparticles;
+static int q3p_spawned_counter;
+static int q3p_dropped_counter;
+static int q3p_culled_counter;
+static float q3p_spawn_budget_time;
+static int q3p_spawn_budget_remaining;
+
+#define Q3P_MAX_WORLD_EMITTERS 128
+static q3p_emitter_t q3p_emitters[Q3P_MAX_WORLD_EMITTERS];
 
 #define Q3P_MATERIAL_DEFAULT_REF "*particle"
 #define Q3P_PARTICLE_SHADER_PREFIX "particles/"
@@ -49,6 +59,49 @@ static q3p_drawitem_t *q3p_drawitems;
 static q3p_particlevert_t *q3p_partverts;
 static int q3p_numdrawitems;
 static int q3p_numpartverts;
+
+
+static void Q3P_RefreshBudget (void)
+{
+	int target = q_max (1, (int)r_particles_max.value);
+
+	if (!q3p_particles)
+		return;
+	if (target > q3p_maxparticles)
+		target = q3p_maxparticles;
+	q3p_budgetparticles = target;
+	if (q3p_numactive > q3p_budgetparticles)
+	{
+		q3p_dropped_counter += q3p_numactive - q3p_budgetparticles;
+		q3p_numactive = q3p_budgetparticles;
+	}
+}
+
+static void Q3P_RefreshSpawnBudget (void)
+{
+	int per_frame = q_max (0, (int)r_particles_spawn_max.value);
+
+	if (q3p_spawn_budget_time != cl.time)
+	{
+		q3p_spawn_budget_time = cl.time;
+		q3p_spawn_budget_remaining = per_frame;
+	}
+}
+
+static qboolean Q3P_TestPointFrustum (const vec3_t point, float radius)
+{
+	int i;
+
+	for (i = 0; i < 4; ++i)
+	{
+		if (DotProduct (point, frustum[i].normal) - frustum[i].dist <= -radius)
+			return false;
+	}
+
+	return true;
+}
+
+static void Q3P_UpdateEmitters (float frametime);
 
 static float Q3P_Clamp01 (float value)
 {
@@ -312,13 +365,20 @@ static qboolean Q3P_TraceWorld (const vec3_t start, const vec3_t end, trace_t *t
 static qboolean Q3P_ShouldCullParticle (const q3p_particle_t *p)
 {
 	float cull_dist = q_max (0.f, r_particles_cull_dist.value);
+	float radius = q_max (0.5f, p->size * 0.5f);
 	vec3_t to_particle;
 
-	if (cull_dist <= 0.f)
-		return false;
+	if (cull_dist > 0.f)
+	{
+		VectorSubtract (p->org, r_origin, to_particle);
+		if (DotProduct (to_particle, to_particle) > cull_dist * cull_dist)
+			return true;
+	}
 
-	VectorSubtract (p->org, r_origin, to_particle);
-	return DotProduct (to_particle, to_particle) > cull_dist * cull_dist;
+	if (!Q3P_TestPointFrustum (p->org, radius))
+		return true;
+
+	return false;
 }
 
 static int Q3P_DrawSortCmp (const void *a, const void *b)
@@ -358,7 +418,14 @@ void Q3P_Init (void)
 	q3p_numactive = 0;
 	q3p_numdrawitems = 0;
 	q3p_numpartverts = 0;
+	q3p_spawned_counter = 0;
+	q3p_dropped_counter = 0;
+	q3p_culled_counter = 0;
+	q3p_spawn_budget_time = -1.f;
+	q3p_spawn_budget_remaining = 0;
+	memset (q3p_emitters, 0, sizeof (q3p_emitters));
 	memset (q3p_material_cache, 0, sizeof (q3p_material_cache));
+	Q3P_RefreshBudget ();
 }
 
 void Q3P_Shutdown (void)
@@ -370,7 +437,14 @@ void Q3P_Shutdown (void)
 	q3p_numactive = 0;
 	q3p_numdrawitems = 0;
 	q3p_numpartverts = 0;
+	q3p_spawned_counter = 0;
+	q3p_dropped_counter = 0;
+	q3p_culled_counter = 0;
+	q3p_spawn_budget_time = -1.f;
+	q3p_spawn_budget_remaining = 0;
+	memset (q3p_emitters, 0, sizeof (q3p_emitters));
 	memset (q3p_material_cache, 0, sizeof (q3p_material_cache));
+	Q3P_RefreshBudget ();
 }
 
 void Q3P_Clear (void)
@@ -378,6 +452,11 @@ void Q3P_Clear (void)
 	q3p_numactive = 0;
 	q3p_numdrawitems = 0;
 	q3p_numpartverts = 0;
+	q3p_spawned_counter = 0;
+	q3p_dropped_counter = 0;
+	q3p_culled_counter = 0;
+	q3p_spawn_budget_time = -1.f;
+	q3p_spawn_budget_remaining = 0;
 }
 
 qboolean Q3P_Spawn (const q3p_particle_t *particle)
@@ -389,9 +468,22 @@ qboolean Q3P_Spawn (const q3p_particle_t *particle)
 		return false;
 	if (!q3p_particles)
 		Q3P_Init ();
-	if (q3p_numactive >= q3p_maxparticles)
-		return false;
 
+	Q3P_RefreshBudget ();
+	Q3P_RefreshSpawnBudget ();
+	if (q3p_spawn_budget_remaining <= 0)
+	{
+		++q3p_dropped_counter;
+		return false;
+	}
+	if (q3p_numactive >= q3p_budgetparticles)
+	{
+		++q3p_dropped_counter;
+		return false;
+	}
+
+	--q3p_spawn_budget_remaining;
+	++q3p_spawned_counter;
 	dst = &q3p_particles[q3p_numactive++];
 	*dst = *particle;
 	cache_entry = Q3P_ResolveMaterialCached (particle->material);
@@ -414,7 +506,12 @@ void Q3P_Update (float frametime)
 	q3p_particle_t *p;
 	qboolean collision_enabled = r_particles_collision.value > 0.f;
 
-	if (!q3p_particles || q3p_numactive <= 0)
+	if (!q3p_particles)
+		return;
+
+	Q3P_RefreshBudget ();
+	Q3P_UpdateEmitters (frametime);
+	if (q3p_numactive <= 0)
 		return;
 
 	for (i = active = 0, p = q3p_particles; i < q3p_numactive; ++i, ++p)
@@ -427,7 +524,10 @@ void Q3P_Update (float frametime)
 		if (!Q3P_ParticleFinite (p))
 			continue;
 		if (Q3P_ShouldCullParticle (p))
+		{
+			++q3p_culled_counter;
 			continue;
+		}
 
 		p->size += p->size_ramp * frametime;
 		p->alpha += p->alpha_ramp * frametime;
@@ -480,6 +580,68 @@ void Q3P_Update (float frametime)
 	q3p_numactive = active;
 }
 
+static float Q3P_RandUnit (void)
+{
+	return (float)(rand () & 0x7fff) / 32767.0f;
+}
+
+static void Q3P_UpdateEmitters (float frametime)
+{
+	int i;
+
+	for (i = 0; i < Q3P_MAX_WORLD_EMITTERS; ++i)
+	{
+		q3p_emitter_t *e = &q3p_emitters[i];
+		int spawn_count;
+		int j;
+
+		if (!e->active)
+			continue;
+		if (e->cull_dist > 0.f)
+		{
+			vec3_t d;
+			VectorSubtract (e->org, r_origin, d);
+			if (DotProduct (d, d) > e->cull_dist * e->cull_dist)
+				continue;
+		}
+		if (!Q3P_TestPointFrustum (e->org, q_max (e->spread, 16.f)))
+			continue;
+
+		e->time_accum += frametime * q_max (0.f, e->rate);
+		spawn_count = (int)e->time_accum;
+		e->time_accum -= spawn_count;
+		if (e->burst > 0)
+			spawn_count += e->burst;
+		e->burst = 0;
+
+		for (j = 0; j < spawn_count; ++j)
+		{
+			q3p_particle_t p;
+			memset (&p, 0, sizeof (p));
+			p.spawn_time = cl.time;
+			p.lifetime = q_max (0.05f, e->lifetime * (0.7f + 0.6f * Q3P_RandUnit ()));
+			p.size = q_max (0.1f, e->size * (0.6f + 0.8f * Q3P_RandUnit ()));
+			p.size_ramp = p.size * 0.5f;
+			p.alpha = CLAMP (0.f, e->alpha, 1.f);
+			p.alpha_ramp = -0.35f;
+			p.color = e->color;
+			p.gravity = e->gravity;
+			p.drag = e->drag;
+			p.restitution = 0.f;
+			p.min_bounce_speed = 0.f;
+			p.flags = 0;
+			q_strlcpy (p.material, e->material[0] ? e->material : "fog_dust", sizeof (p.material));
+			p.org[0] = e->org[0] + (Q3P_RandUnit () * 2.f - 1.f) * e->spread;
+			p.org[1] = e->org[1] + (Q3P_RandUnit () * 2.f - 1.f) * e->spread;
+			p.org[2] = e->org[2] + (Q3P_RandUnit () * 2.f - 1.f) * e->spread * 0.5f;
+			p.vel[0] = (Q3P_RandUnit () * 2.f - 1.f) * 8.f;
+			p.vel[1] = (Q3P_RandUnit () * 2.f - 1.f) * 8.f;
+			p.vel[2] = 3.f + Q3P_RandUnit () * 8.f;
+			Q3P_Spawn (&p);
+		}
+	}
+}
+
 static void Q3P_FlushParticleBatch (void)
 {
 	GLuint buf;
@@ -507,7 +669,12 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 	unsigned saved_state;
 	GLubyte white[4] = {255, 255, 255, 255};
 
-	if (!q3p_particles || q3p_numactive <= 0)
+	if (!q3p_particles)
+		return;
+
+	Q3P_RefreshBudget ();
+
+	if (q3p_numactive <= 0)
 		return;
 
 	q3p_numdrawitems = 0;
@@ -613,4 +780,47 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 int Q3P_ActiveCount (void)
 {
 	return q3p_numactive;
+}
+
+void Q3P_GetDebugStats (q3p_debug_stats_t *stats)
+{
+	if (!stats)
+		return;
+
+	stats->active = q3p_numactive;
+	stats->spawned = q3p_spawned_counter;
+	stats->dropped = q3p_dropped_counter;
+	stats->culled = q3p_culled_counter;
+}
+
+void Q3P_ResetDebugStats (void)
+{
+	q3p_spawned_counter = 0;
+	q3p_dropped_counter = 0;
+	q3p_culled_counter = 0;
+}
+
+int Q3P_AddWorldEmitter (const q3p_emitter_t *emitter)
+{
+	int i;
+
+	if (!emitter)
+		return -1;
+
+	for (i = 0; i < Q3P_MAX_WORLD_EMITTERS; ++i)
+	{
+		if (q3p_emitters[i].active)
+			continue;
+		q3p_emitters[i] = *emitter;
+		q3p_emitters[i].active = true;
+		q3p_emitters[i].time_accum = 0.f;
+		return i;
+	}
+
+	return -1;
+}
+
+void Q3P_ClearWorldEmitters (void)
+{
+	memset (q3p_emitters, 0, sizeof (q3p_emitters));
 }

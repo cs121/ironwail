@@ -28,12 +28,28 @@ enum
 };
 
 typedef struct q3p_emitter_s {
+	qboolean active;
+	vec3_t	org;
+	float	spread;
+	float	cull_dist;
+	float	time_accum;
+	float	lifetime;
+	float	size;
+	float	alpha;
+	float	gravity;
+	float	drag;
+	int		color;
+	char	material[64];
 	float	rate;
 	int		burst;
-	qboolean triggered;
-	int		entity_num;
-	qboolean local_space;
 } q3p_emitter_t;
+
+typedef struct q3p_debug_stats_s {
+	int active;
+	int spawned;
+	int dropped;
+	int culled;
+} q3p_debug_stats_t;
 
 void Q3P_Init (void);
 void Q3P_Shutdown (void);
@@ -42,5 +58,9 @@ qboolean Q3P_Spawn (const q3p_particle_t *particle);
 void Q3P_Update (float frametime);
 void Q3P_Draw (qboolean alpha, qboolean showtris);
 int Q3P_ActiveCount (void);
+void Q3P_GetDebugStats (q3p_debug_stats_t *stats);
+void Q3P_ResetDebugStats (void);
+int Q3P_AddWorldEmitter (const q3p_emitter_t *emitter);
+void Q3P_ClearWorldEmitters (void);
 
 #endif
