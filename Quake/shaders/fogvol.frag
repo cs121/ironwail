@@ -107,6 +107,8 @@ layout(location=26) uniform float FogDomainWarpMaxDist;
 layout(location=27) uniform int   FogCheckerboard;
 layout(location=28) uniform int   FogHalfRes;
 layout(location=29) uniform int   FogLightSubsample;
+layout(location=30) uniform float FogSunScatter;
+layout(location=31) uniform vec3  FogSunColor;
 
 layout(location=0) out vec4 FragColor;
 
@@ -600,6 +602,11 @@ void main()
 	float phaseSun      = (sunDirLenSq > 1e-6)
 		? AnisotropicPhase(clamp(dot(viewDir, sunDir), -1.0, 1.0), ANISO_G_SUN)
 		: 1.0;
+	float sunScatterStrength = max(FogSunScatter, 0.0);
+	vec3 sunScatterColor = max(FogSunColor, vec3(0.0));
+	vec3 sunRadiance = (sunDirLenSq > 1e-6 && sunScatterStrength > 0.0)
+		? (sunScatterColor * (sunScatterStrength * phaseSun))
+		: vec3(0.0);
 	// PERF: Cache active light count and enabled flag to avoid UBO re-fetch in loop.
 	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
 	int lightOffset     = max(lightList.offset_count.x, 0);
@@ -660,7 +667,7 @@ void main()
 			: 1.0;
 
 		// phaseSun is already precomputed per-ray (constant for all steps on same ray).
-		vec3  stepScatter = (1.0 - att) * scatterColor * phaseSun;
+		vec3  stepScatter = (1.0 - att) * (scatterColor * phaseSun + sunRadiance * transmittance);
 		if (doLightgrid)
 		{
 			// Static/emissive world contribution comes from the baked lightgrid
