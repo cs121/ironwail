@@ -725,11 +725,72 @@ static int R_FogVol_BuildLightList (fog_light_gpu_t *out, int max_count)
 {
 	const dlight_t *const *active;
 	fogvol_light_candidate_t candidates[256];
+	const fog_volume_t *visible_volumes[MAX_FOGVOLUMES];
+	float visible_volume_screen_weight[MAX_FOGVOLUMES];
+	vec3_t fog_bounds_mins;
+	vec3_t fog_bounds_maxs;
 	int active_count = 0;
 	int candidate_count = 0;
+	int visible_count = 0;
+	qboolean has_fog_bounds = false;
 	int copy_count;
 
 	if (!out || max_count <= 0)
+		return 0;
+	if (r_fogvolume_count <= 0)
+		return 0;
+
+	VectorSet (fog_bounds_mins, 0.f, 0.f, 0.f);
+	VectorSet (fog_bounds_maxs, 0.f, 0.f, 0.f);
+
+	for (int i = 0; i < r_fogvolume_count; ++i)
+	{
+		const fog_volume_t *vol = &r_fogvolumes[i];
+		vec3_t bmins, bmaxs;
+		int sx0, sy0, sx1, sy1;
+
+		if (vol->shape == 1)
+		{
+			for (int a = 0; a < 3; ++a)
+			{
+				bmins[a] = vol->sphereCenter[a] - vol->sphereRadius;
+				bmaxs[a] = vol->sphereCenter[a] + vol->sphereRadius;
+			}
+		}
+		else
+		{
+			VectorCopy (vol->mins, bmins);
+			VectorCopy (vol->maxs, bmaxs);
+		}
+
+		if (!has_fog_bounds)
+		{
+			VectorCopy (bmins, fog_bounds_mins);
+			VectorCopy (bmaxs, fog_bounds_maxs);
+			has_fog_bounds = true;
+		}
+		else
+		{
+			for (int a = 0; a < 3; ++a)
+			{
+				fog_bounds_mins[a] = q_min (fog_bounds_mins[a], bmins[a]);
+				fog_bounds_maxs[a] = q_max (fog_bounds_maxs[a], bmaxs[a]);
+			}
+		}
+
+		if (R_FogVol_ProjectAABBToScreenRect (vol, &sx0, &sy0, &sx1, &sy1, true) && visible_count < MAX_FOGVOLUMES)
+		{
+			float view_area = (float)(q_max (1, r_refdef.vrect.width) * q_max (1, r_refdef.vrect.height));
+			float rect_area = (float)q_max (1, (sx1 - sx0) * (sy1 - sy0));
+			visible_volumes[visible_count] = vol;
+			/* Optional screen weighting: favour fog regions occupying more of the
+			 * current frame while keeping an in-world overlap requirement. */
+			visible_volume_screen_weight[visible_count] = CLAMP (0.1f, rect_area / view_area, 1.f);
+			visible_count++;
+		}
+	}
+
+	if (visible_count <= 0)
 		return 0;
 
 	active = DLightPool_GetActiveList (&active_count);
@@ -741,6 +802,7 @@ static int R_FogVol_BuildLightList (fog_light_gpu_t *out, int max_count)
 		const dlight_t *dl = active[i];
 		vec3_t to_light;
 		float dist2;
+		float overlap_score = 0.f;
 		float intensity;
 		float radius;
 		float score;
@@ -756,20 +818,78 @@ static int R_FogVol_BuildLightList (fog_light_gpu_t *out, int max_count)
 		if (intensity <= 0.f)
 			continue;
 
-		VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
-		dist2 = DotProduct (to_light, to_light);
-		/* BUG FIX (C-03): Original cull was dist2 > (radius + farclip)^2, which
-		 * is far too permissive — it accepted lights across the whole scene.
-		 * Use a tighter range: beyond 2x radius the quadratic attenuation gives
-		 * at most 25% contribution, beyond 3x it's <11%.  Use a 3x radius cull
-		 * so distant unimportant lights are rejected early without scoring. */
+		/* Keep an emergency cheap cull for pathological light counts. Cull by
+		 * distance to aggregate fog bounds (not by camera distance), so lights
+		 * near visible fog remain eligible even when far from the viewer. */
+		if (active_count > 192 && has_fog_bounds)
 		{
-			float cull_range = radius * 3.f;
-			if (dist2 > cull_range * cull_range)
+			float fog_dist = 0.f;
+			for (int a = 0; a < 3; ++a)
+			{
+				if (dl->origin[a] < fog_bounds_mins[a])
+				{
+					float d = fog_bounds_mins[a] - dl->origin[a];
+					fog_dist += d * d;
+				}
+				else if (dl->origin[a] > fog_bounds_maxs[a])
+				{
+					float d = dl->origin[a] - fog_bounds_maxs[a];
+					fog_dist += d * d;
+				}
+			}
+			if (fog_dist > (radius * 4.f) * (radius * 4.f))
 				continue;
 		}
 
-		score = (intensity * radius) / (dist2 + 1.f);
+		for (int v = 0; v < visible_count; ++v)
+		{
+			const fog_volume_t *vol = visible_volumes[v];
+			float overlap = 0.f;
+
+			if (vol->shape == 1)
+			{
+				vec3_t delta;
+				float center_dist;
+				float sum_radius = radius + q_max (0.f, vol->sphereRadius);
+				VectorSubtract (dl->origin, vol->sphereCenter, delta);
+				center_dist = VectorLength (delta);
+				if (center_dist < sum_radius && sum_radius > 0.f)
+					overlap = 1.f - (center_dist / sum_radius);
+			}
+			else
+			{
+				float dist_to_box = 0.f;
+				for (int a = 0; a < 3; ++a)
+				{
+					if (dl->origin[a] < vol->mins[a])
+					{
+						float d = vol->mins[a] - dl->origin[a];
+						dist_to_box += d * d;
+					}
+					else if (dl->origin[a] > vol->maxs[a])
+					{
+						float d = dl->origin[a] - vol->maxs[a];
+						dist_to_box += d * d;
+					}
+				}
+				dist_to_box = sqrtf (dist_to_box);
+				if (dist_to_box < radius)
+					overlap = 1.f - (dist_to_box / q_max (1.f, radius));
+			}
+
+			overlap_score += overlap * visible_volume_screen_weight[v];
+		}
+
+		if (overlap_score <= 0.f)
+			continue;
+
+		VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
+		dist2 = DotProduct (to_light, to_light);
+
+		score = overlap_score * intensity * radius;
+		/* Preserve a soft view weighting for tie-breaking, but avoid camera-only
+		 * rejection so fog-relevant distant lights can still be selected. */
+		score *= 1.f / (1.f + 0.0025f * sqrtf (dist2));
 		if (score <= 0.f)
 			continue;
 
