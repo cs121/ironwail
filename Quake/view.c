@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // view.c -- player eye positioning
 
 #include "quakedef.h"
+#include "cl_iwmusic.h"
 #include "cl_postfx.h"
 
 /*
@@ -313,6 +314,7 @@ void V_ParseDamage (void)
 		from[i] = MSG_ReadCoord (cl.protocolflags);
 
 	count = blood*0.5 + armor*0.5;
+	CL_IWMusic_NotifyDamage ();
 	if (count < 10)
 		count = 10;
 
