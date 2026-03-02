@@ -633,6 +633,11 @@ void R_DrawDecals (void)
 {
 	decalinst_t *draw[MAX_DECAL_INSTANCES];
 	int draw_count = 0;
+	int batch_vcount = 0;
+	int batch_icount = 0;
+	decalblend_t batch_blend = DECAL_BLEND_ALPHA;
+	gltexture_t *batch_texture = NULL;
+	qboolean batch_active = false;
 	int i;
 
 	if (!r_decals.value)
@@ -658,47 +663,86 @@ void R_DrawDecals (void)
 	GL_UseProgram (glprogs.decal);
 	GL_PolygonOffset (OFFSET_DECAL);
 
+#define FLUSH_DECAL_BATCH() \
+	do \
+	{ \
+		if (batch_active && batch_vcount > 0 && batch_icount > 0) \
+		{ \
+			GLuint vbo, ibo; \
+			GLbyte *ofs; \
+			unsigned blendstate = GLS_BLEND_ALPHA; \
+			if (batch_blend == DECAL_BLEND_ADD) \
+				blendstate = GLS_BLEND_ADD; \
+			else if (batch_blend == DECAL_BLEND_MUL) \
+				blendstate = GLS_BLEND_MULTIPLY; \
+			GL_SetState (blendstate | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3)); \
+			GL_Bind (GL_TEXTURE0, batch_texture); \
+			GL_Upload (GL_ARRAY_BUFFER, decal_draw_verts, sizeof (decalvert_t) * batch_vcount, &vbo, &ofs); \
+			GL_BindBuffer (GL_ARRAY_BUFFER, vbo); \
+			GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (decalvert_t), ofs + offsetof (decalvert_t, pos)); \
+			GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof (decalvert_t), ofs + offsetof (decalvert_t, uv)); \
+			GL_VertexAttribPointerFunc (2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof (decalvert_t), ofs + offsetof (decalvert_t, color)); \
+			GL_Upload (GL_ELEMENT_ARRAY_BUFFER, decal_indexes, sizeof (GLushort) * batch_icount, &ibo, &ofs); \
+			GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, ibo); \
+			glDrawElements (GL_TRIANGLES, batch_icount, GL_UNSIGNED_SHORT, ofs); \
+			batch_vcount = 0; \
+			batch_icount = 0; \
+		} \
+	} while (0)
+
 	for (i = 0; i < draw_count; ++i)
 	{
-		GLuint vbo, ibo;
-		GLbyte *ofs;
 		int vcount = draw[i]->num_verts;
-		int j, icount = 0;
+		int local_icount;
+		int j;
+		int batch_base;
 		float fade_alpha = R_DecalFadeAlpha (draw[i], &decal_defs[draw[i]->def_index]);
-		unsigned blendstate = GLS_BLEND_ALPHA;
 
-		if (draw[i]->blend == DECAL_BLEND_ADD)
-			blendstate = GLS_BLEND_ADD;
-		else if (draw[i]->blend == DECAL_BLEND_MUL)
-			blendstate = GLS_BLEND_MULTIPLY;
+		if (vcount < 3)
+			continue;
 
-		GL_SetState (blendstate | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3));
-		GL_Bind (GL_TEXTURE0, draw[i]->texture);
+		local_icount = (vcount - 2) * 3;
 
-		for (j = 2; j < vcount; ++j)
+		if (!batch_active)
 		{
-			decal_indexes[icount++] = 0;
-			decal_indexes[icount++] = (GLushort)(j - 1);
-			decal_indexes[icount++] = (GLushort)j;
+			batch_active = true;
+			batch_blend = draw[i]->blend;
+			batch_texture = draw[i]->texture;
 		}
+		else if (batch_blend != draw[i]->blend || batch_texture != draw[i]->texture)
+		{
+			FLUSH_DECAL_BATCH ();
+			batch_blend = draw[i]->blend;
+			batch_texture = draw[i]->texture;
+		}
+
+		if (batch_vcount + vcount > MAX_DECAL_VERTS || batch_icount + local_icount > MAX_DECAL_INDEXES)
+			FLUSH_DECAL_BATCH ();
+
+		if (vcount > MAX_DECAL_VERTS || local_icount > MAX_DECAL_INDEXES)
+			continue;
+
+		batch_base = batch_vcount;
 
 		for (j = 0; j < vcount; ++j)
 		{
 			const decalvert_t *src = &decal_verts[draw[i]->first_vert + j];
-			decalvert_t *dst = &decal_draw_verts[draw[i]->first_vert + j];
+			decalvert_t *dst = &decal_draw_verts[batch_vcount + j];
 			*dst = *src;
 			dst->color[3] = (byte) (src->color[3] * fade_alpha);
 		}
+		batch_vcount += vcount;
 
-		GL_Upload (GL_ARRAY_BUFFER, &decal_draw_verts[draw[i]->first_vert], sizeof (decalvert_t) * vcount, &vbo, &ofs);
-		GL_BindBuffer (GL_ARRAY_BUFFER, vbo);
-		GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (decalvert_t), ofs + offsetof (decalvert_t, pos));
-		GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof (decalvert_t), ofs + offsetof (decalvert_t, uv));
-		GL_VertexAttribPointerFunc (2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof (decalvert_t), ofs + offsetof (decalvert_t, color));
-		GL_Upload (GL_ELEMENT_ARRAY_BUFFER, decal_indexes, sizeof (GLushort) * icount, &ibo, &ofs);
-		GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, ibo);
-		glDrawElements (GL_TRIANGLES, icount, GL_UNSIGNED_SHORT, ofs);
+		for (j = 2; j < vcount; ++j)
+		{
+			decal_indexes[batch_icount++] = (GLushort)batch_base;
+			decal_indexes[batch_icount++] = (GLushort)(batch_base + j - 1);
+			decal_indexes[batch_icount++] = (GLushort)(batch_base + j);
+		}
 	}
+
+	FLUSH_DECAL_BATCH ();
+#undef FLUSH_DECAL_BATCH
 
 	GL_PolygonOffset (OFFSET_NONE);
 	GL_EndGroup ();
