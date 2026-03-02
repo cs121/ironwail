@@ -2040,7 +2040,7 @@ void R_FogVol_Render (void)
 		goto done;
 	}
 
-	if (has_drawn && r_fogvol_temporal_alpha.value > 0.f && glprogs.fogvol_temporal && final_tex)
+	if (r_fogvol_temporal_alpha.value > 0.f && glprogs.fogvol_temporal && final_tex)
 	{
 		int history_valid = (r_fogvol_history_width == fog_width && r_fogvol_history_height == fog_height);
 		int history_src = r_fogvol_history_index;
@@ -2064,10 +2064,8 @@ void R_FogVol_Render (void)
 
 		R_FogVol_UseProgram (glprogs.fogvol_temporal);
 		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-		/* BUG FIX #5: Removed unreachable same-index guards.  history_src and
-		 * history_dst are always opposite values after the init block above, so
-		 * the guards `if (history_src == history_dst)` were dead code that
-		 * masked logical errors.  Rely on the invariant being maintained above. */
+		/* history_src and history_dst are always opposite values after the init
+		 * block above; keep relying on that invariant. */
 		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, history_fbo[history_src]);
 		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);
 		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE read=COLOR_ATTACHMENT0");
