@@ -97,6 +97,9 @@ cvar_t r_fogvol_upsample_k = { "r_fogvol_upsample_k", "25", CVAR_ARCHIVE };
 cvar_t r_fogvol_upsample_taps = { "r_fogvol_upsample_taps", "4", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps_scale_halfres = { "r_fogvol_steps_scale_halfres", "0.5", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_noise_subsample = { "r_fogvol_noise_subsample", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_noise_lod_switch_dist = { "r_fogvol_noise_lod_switch_dist", "64", CVAR_ARCHIVE };
+cvar_t r_fogvol_domainwarp_dist = { "r_fogvol_domainwarp_dist", "128", CVAR_ARCHIVE };
 cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes_dumpstate = { "r_fogvol_testvolumes_dumpstate", "0", CVAR_NONE };
@@ -108,6 +111,8 @@ cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.0
 cvar_t r_fogvol_temporal_confidence_min_alpha = { "r_fogvol_temporal_confidence_min_alpha", "0.05", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_disocclusion_bias = { "r_fogvol_temporal_disocclusion_bias", "0.5", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_clamp_strength = { "r_fogvol_temporal_clamp_strength", "1.5", CVAR_ARCHIVE };
+cvar_t r_fogvol_checkerboard = { "r_fogvol_checkerboard", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_light_subsample = { "r_fogvol_light_subsample", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
@@ -976,6 +981,9 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_upsample_taps);
 	Cvar_RegisterVariable (&r_fogvol_steps_scale_halfres);
 	Cvar_RegisterVariable (&r_fogvol_noise);
+	Cvar_RegisterVariable (&r_fogvol_noise_subsample);
+	Cvar_RegisterVariable (&r_fogvol_noise_lod_switch_dist);
+	Cvar_RegisterVariable (&r_fogvol_domainwarp_dist);
 	Cvar_RegisterVariable (&r_fogvol_noisemode);
 	Cvar_RegisterVariable (&r_fogvol_testvolumes);
 	Cvar_RegisterVariable (&r_fogvol_testvolumes_dumpstate);
@@ -987,6 +995,8 @@ void R_FogVol_Init (void)
 	Cvar_RegisterVariable (&r_fogvol_temporal_confidence_min_alpha);
 	Cvar_RegisterVariable (&r_fogvol_temporal_disocclusion_bias);
 	Cvar_RegisterVariable (&r_fogvol_temporal_clamp_strength);
+	Cvar_RegisterVariable (&r_fogvol_checkerboard);
+	Cvar_RegisterVariable (&r_fogvol_light_subsample);
 	Cvar_RegisterVariable (&r_fogvol_jitter);
 	Cvar_RegisterVariable (&r_fogvol_debug);
 	Cvar_RegisterVariable (&r_fogvol_density_scale);
@@ -1800,6 +1810,13 @@ void R_FogVol_Render (void)
 	GL_Uniform1iFunc (5, (int)Q_rint (r_fogvol_noisemode.value));
 	GL_Uniform1iFunc (6, r_fogvol_physblend.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (7, r_fogvol_jitter.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (23, r_framecount);
+	GL_Uniform1iFunc (24, r_fogvol_noise_subsample.value > 0.f ? 1 : 0);
+	GL_Uniform1fFunc (25, q_max (1.f, r_fogvol_noise_lod_switch_dist.value));
+	GL_Uniform1fFunc (26, q_max (0.f, r_fogvol_domainwarp_dist.value));
+	GL_Uniform1iFunc (27, r_fogvol_checkerboard.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (28, use_halfres ? 1 : 0);
+	GL_Uniform1iFunc (29, r_fogvol_light_subsample.value > 0.f ? 1 : 0);
 	GL_UniformMatrix4fvFunc (4, 1, GL_FALSE, inv_viewproj);
 	GL_Uniform3fFunc (8, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
 	GL_Uniform4fFunc (9, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
@@ -2085,6 +2102,7 @@ void R_FogVol_Render (void)
 			q_max (0.1f, r_fogvol_temporal_clamp_strength.value),
 			0.f);
 		GL_Uniform1iFunc (9, velocity_tex != 0 ? 1 : 0);
+		GL_Uniform1iFunc (10, r_fogvol_checkerboard.value > 0.f ? 1 : 0);
 		if (mode == 1)
 			Con_DPrintf ("FOGVOL debug COMPOSITE final_tex=%u history_tex=%u depth_tex=%u velocity_tex=%u dst_tex=%u conf[min=%.3f disocc=%.3f clamp=%.3f]\n",
 				final_tex, history_tex[history_src], depth_tex, velocity_tex, framebufs.fogvol.composite_tex[composite_dst],

@@ -47,6 +47,9 @@ extern cvar_t r_fogvol_upsample_taps;
  * not exported — violates BEST PRACTICE #11. */
 extern cvar_t r_fogvol_steps_scale_halfres;
 extern cvar_t r_fogvol_noise;
+extern cvar_t r_fogvol_noise_subsample;
+extern cvar_t r_fogvol_noise_lod_switch_dist;
+extern cvar_t r_fogvol_domainwarp_dist;
 extern cvar_t r_fogvol_noisemode;
 extern cvar_t r_fogvol_physblend;
 extern cvar_t r_fogvol_blendmode;
@@ -56,6 +59,8 @@ extern cvar_t r_fogvol_temporal_depth_reject;
 extern cvar_t r_fogvol_temporal_confidence_min_alpha;
 extern cvar_t r_fogvol_temporal_disocclusion_bias;
 extern cvar_t r_fogvol_temporal_clamp_strength;
+extern cvar_t r_fogvol_checkerboard;
+extern cvar_t r_fogvol_light_subsample;
 extern cvar_t r_fogvol_jitter;
 extern cvar_t r_fogvol_debug;
 extern cvar_t r_fogvol_density_scale;
