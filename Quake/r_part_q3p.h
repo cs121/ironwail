@@ -15,10 +15,17 @@ typedef struct q3p_particle_s {
 	vec3_t	vel;
 	float	gravity;
 	float	drag;
+	float	restitution;
+	float	min_bounce_speed;
 	int		flags;
 	char	material[64];
 	unsigned material_id;
 } q3p_particle_t;
+
+enum
+{
+	Q3P_PARTICLE_COLLIDE_WORLD = 1 << 0
+};
 
 typedef struct q3p_emitter_s {
 	float	rate;

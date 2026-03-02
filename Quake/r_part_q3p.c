@@ -4,6 +4,8 @@
 extern cvar_t r_particles_max;
 extern cvar_t r_particles_sort;
 extern cvar_t r_particles_shader_strict;
+extern cvar_t r_particles_cull_dist;
+extern cvar_t r_particles_collision;
 
 static q3p_particle_t *q3p_particles;
 static int q3p_maxparticles;
@@ -284,6 +286,41 @@ static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *
 	return NULL;
 }
 
+
+static qboolean Q3P_ParticleFinite (const q3p_particle_t *p)
+{
+	return !IS_NAN (p->org[0]) && !IS_NAN (p->org[1]) && !IS_NAN (p->org[2])
+		&& !IS_NAN (p->vel[0]) && !IS_NAN (p->vel[1]) && !IS_NAN (p->vel[2])
+		&& !IS_NAN (p->alpha) && !IS_NAN (p->size);
+}
+
+static qboolean Q3P_TraceWorld (const vec3_t start, const vec3_t end, trace_t *trace)
+{
+	vec3_t start_copy, end_copy;
+
+	if (!cl.worldmodel)
+		return false;
+
+	memset (trace, 0, sizeof (*trace));
+	trace->fraction = 1.f;
+	VectorCopy (start, start_copy);
+	VectorCopy (end, end_copy);
+	SV_RecursiveHullCheck (cl.worldmodel->hulls, 0, 0.f, 1.f, start_copy, end_copy, trace);
+	return true;
+}
+
+static qboolean Q3P_ShouldCullParticle (const q3p_particle_t *p)
+{
+	float cull_dist = q_max (0.f, r_particles_cull_dist.value);
+	vec3_t to_particle;
+
+	if (cull_dist <= 0.f)
+		return false;
+
+	VectorSubtract (p->org, r_origin, to_particle);
+	return DotProduct (to_particle, to_particle) > cull_dist * cull_dist;
+}
+
 static int Q3P_DrawSortCmp (const void *a, const void *b)
 {
 	const q3p_drawitem_t *da = (const q3p_drawitem_t *)a;
@@ -375,6 +412,7 @@ void Q3P_Update (float frametime)
 {
 	int i, active;
 	q3p_particle_t *p;
+	qboolean collision_enabled = r_particles_collision.value > 0.f;
 
 	if (!q3p_particles || q3p_numactive <= 0)
 		return;
@@ -382,17 +420,57 @@ void Q3P_Update (float frametime)
 	for (i = active = 0, p = q3p_particles; i < q3p_numactive; ++i, ++p)
 	{
 		float age = cl.time - p->spawn_time;
+		vec3_t prevorg, nextorg;
 
 		if (age < 0 || age >= p->lifetime)
+			continue;
+		if (!Q3P_ParticleFinite (p))
+			continue;
+		if (Q3P_ShouldCullParticle (p))
 			continue;
 
 		p->size += p->size_ramp * frametime;
 		p->alpha += p->alpha_ramp * frametime;
 		p->alpha = CLAMP (0, p->alpha, 1);
 
-		VectorMA (p->org, frametime, p->vel, p->org);
+		VectorCopy (p->org, prevorg);
+		VectorMA (p->org, frametime, p->vel, nextorg);
 		p->vel[2] -= p->gravity * frametime;
 		VectorScale (p->vel, q_max (0.f, 1.f - p->drag * frametime), p->vel);
+
+		if (collision_enabled && (p->flags & Q3P_PARTICLE_COLLIDE_WORLD))
+		{
+			trace_t trace;
+			if (Q3P_TraceWorld (prevorg, nextorg, &trace) && trace.fraction < 1.f)
+			{
+				float vn;
+				vec3_t vnormal;
+				float speed;
+
+				VectorCopy (trace.endpos, p->org);
+				vn = DotProduct (p->vel, trace.plane.normal);
+				VectorScale (trace.plane.normal, vn, vnormal);
+				VectorMA (p->vel, -(1.f + CLAMP (0.f, p->restitution, 1.f)), vnormal, p->vel);
+				p->org[0] += trace.plane.normal[0] * 0.5f;
+				p->org[1] += trace.plane.normal[1] * 0.5f;
+				p->org[2] += trace.plane.normal[2] * 0.5f;
+
+				speed = VectorLength (p->vel);
+				if (speed < q_max (0.f, p->min_bounce_speed))
+					continue;
+			}
+			else
+			{
+				VectorCopy (nextorg, p->org);
+			}
+		}
+		else
+		{
+			VectorCopy (nextorg, p->org);
+		}
+
+		if (!Q3P_ParticleFinite (p))
+			continue;
 
 		if (i != active)
 			q3p_particles[active] = *p;
