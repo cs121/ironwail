@@ -216,6 +216,8 @@ void S_Init (void)
 	known_sfx = (sfx_t *) Hunk_AllocName (MAX_SFX*sizeof(sfx_t), "sfx_t");
 	num_sfx = 0;
 
+	S_InitWavinfoMutex ();
+
 	snd_initialized = true;
 
 	S_Startup ();
@@ -247,6 +249,7 @@ void S_Shutdown (void)
 	snd_blocked = 0;
 
 	S_CodecShutdown();
+	S_ShutdownWavinfoMutex ();
 
 	SNDDMA_Shutdown();
 	shm = NULL;

@@ -186,8 +186,9 @@ void S_LocalSound (const char *name);
 sfxcache_t *S_LoadSound (sfx_t *s);
 
 wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength);
+void S_InitWavinfoMutex (void);
+void S_ShutdownWavinfoMutex (void);
 
 void SND_InitScaletable (void);
 
 #endif	/* __QUAKE_SOUND__ */
-
