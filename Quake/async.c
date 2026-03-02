@@ -457,6 +457,7 @@ void Jobs_Shutdown (void)
 	}
 	jobs_num_threads = 0;
 
+	/* Detach the completion queue under lock, then free nodes after unlock. */
 	SDL_LockMutex (fs_mutex);
 	comp = fs_comp_head;
 	fs_comp_head = fs_comp_tail = NULL;
