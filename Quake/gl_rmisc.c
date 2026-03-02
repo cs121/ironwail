@@ -886,6 +886,7 @@ R_NewGame -- johnfitz -- handle a game switch
 static qboolean r_worldspawn_has_sun = false;
 r_sun_t r_sun;
 cvar_t r_sun_light = { "r_sun_light", "0", CVAR_ARCHIVE };
+// Enables dynamic directional sunlight from parsed worldspawn sun keys (not baked lightmaps).
 
 static void R_ResetSunState (void)
 {
@@ -973,6 +974,9 @@ static void R_ParseWorldspawn (void)
 {
 	char key[128], value[4096];
 	const char *data;
+	qboolean sun_dir_parsed = false;
+	qboolean sun_intensity_parsed = false;
+	qboolean sun_color_parsed = false;
 
 	map_fallbackalpha = r_wateralpha.value;
 	R_ResetSunState ();
@@ -1003,30 +1007,70 @@ static void R_ParseWorldspawn (void)
 		data = COM_ParseEx(data, CPE_ALLOWTRUNC);
 		if (!data)
 			return; // error
-                q_strlcpy(value, com_token, sizeof(value));
+		q_strlcpy(value, com_token, sizeof(value));
 
-if (!strcmp("wateralpha", key))
-map_wateralpha = atof(value);
+		if (!strcmp("wateralpha", key))
+			map_wateralpha = atof(value);
 
-if (!strcmp("sunlight", key) || !strcmp("sun_mangle", key))
-{
-	r_worldspawn_has_sun = true;
-	r_sun.enabled = true;
-}
+		if (!strcmp("sun_mangle", key))
+		{
+			vec3_t ang;
+			if (sscanf(value, "%f %f %f", &ang[0], &ang[1], &ang[2]) == 3)
+			{
+				AngleVectors (ang, r_sun.dir, NULL, NULL);
+				if (DotProduct (r_sun.dir, r_sun.dir) > 1e-6f)
+				{
+					VectorNormalize (r_sun.dir);
+					sun_dir_parsed = true;
+				}
+			}
+		}
 
-if (!strcmp("telealpha", key))
-map_telealpha = atof(value);
+		if (!strcmp("sunlight", key))
+		{
+			char *endptr;
+			float intensity = strtof (value, &endptr);
 
-if (!strcmp("slimealpha", key))
-map_slimealpha = atof(value);
+			while (endptr && *endptr == ' ')
+				endptr++;
+			if (endptr && endptr != value && *endptr == '\0')
+			{
+				r_sun.intensity = q_max (0.f, intensity);
+				sun_intensity_parsed = true;
+			}
+		}
 
-}
+		if (!strcmp("sunlight_color", key) || !strcmp("sun_color", key) || !strcmp("suncolour", key))
+		{
+			vec3_t color;
+			if (sscanf(value, "%f %f %f", &color[0], &color[1], &color[2]) == 3)
+			{
+				r_sun.color[0] = q_max (0.f, color[0]);
+				r_sun.color[1] = q_max (0.f, color[1]);
+				r_sun.color[2] = q_max (0.f, color[2]);
+				sun_color_parsed = true;
+			}
+		}
 
-map_fallbackalpha = CLAMP(0.f, map_fallbackalpha, 1.f);
-map_wateralpha = CLAMP(0.f, map_wateralpha, 1.f);
-map_lavaalpha = 1.0f;
-map_telealpha = CLAMP(0.f, map_telealpha, 1.f);
-map_slimealpha = CLAMP(0.f, map_slimealpha, 1.f);
+		if (!strcmp("telealpha", key))
+			map_telealpha = atof(value);
+
+		if (!strcmp("slimealpha", key))
+			map_slimealpha = atof(value);
+
+	}
+
+	if (sun_dir_parsed || sun_intensity_parsed || sun_color_parsed)
+	{
+		r_worldspawn_has_sun = true;
+		r_sun.enabled = true;
+	}
+
+	map_fallbackalpha = CLAMP(0.f, map_fallbackalpha, 1.f);
+	map_wateralpha = CLAMP(0.f, map_wateralpha, 1.f);
+	map_lavaalpha = 1.0f;
+	map_telealpha = CLAMP(0.f, map_telealpha, 1.f);
+	map_slimealpha = CLAMP(0.f, map_slimealpha, 1.f);
 
 }
 
