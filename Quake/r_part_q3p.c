@@ -8,6 +8,7 @@ extern cvar_t r_particles_shader_strict;
 extern cvar_t r_particles_cull_dist;
 extern cvar_t r_particles_collision;
 extern cvar_t r_particles_spawn_max;
+extern cvar_t r_particles_prt_debug;
 
 static q3p_particle_t *q3p_particles;
 static int q3p_maxparticles;
@@ -259,7 +260,7 @@ static void Q3P_LoadEffectDefs (void)
 		}
 	}
 
-	if (loaded > 0)
+	if (loaded > 0 && r_particles_prt_debug.value > 0.f)
 		Con_Printf ("Q3P: loaded %d .prt particle definition files\n", loaded);
 }
 
