@@ -2384,10 +2384,13 @@ void GL_PostProcess (void)
 	inv_scale = r_refdef.scale > 0 ? 1.f / (float)r_refdef.scale : 1.f;
 
 	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
-	ssao_intensity = R_SanitizeSSAOValue (r_ssao_intensity.value, 0.f, 0.f, 1.f);
+	/* Keep SSAO intensity aligned with the cvar's intended tuning range.
+	 * Clamping to 1.0 made the default 1.5 weaker than expected and could make
+	 * user configs look like SSAO had no effect when toggled on. */
+	ssao_intensity = R_SanitizeSSAOValue (r_ssao_intensity.value, 1.5f, 0.f, 8.f);
 	{
 		int debug_cvar = (int)Q_rint (r_ssao_debug.value);
-		int debug_mode_i = (debug_cvar > 0) ? CLAMP (1, debug_cvar, 11) : -1;
+		int debug_mode_i = (debug_cvar > 0) ? CLAMP (1, debug_cvar, 14) : -1;
 		ssao_debug_mode = (debug_mode_i > 0) ? (float)debug_mode_i : -1.f;
 	}
 	if (ssao_texture == 0)
