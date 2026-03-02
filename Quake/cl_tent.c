@@ -253,6 +253,9 @@ static qboolean CL_TEntTrySpawnQ3P (const char *material, const vec3_t pos, cons
 		p.color = color;
 		p.gravity = gravity;
 		p.drag = drag;
+		p.restitution = 0.35f;
+		p.min_bounce_speed = 35.f;
+		p.flags = Q3P_PARTICLE_COLLIDE_WORLD;
 
 		q_strlcpy (p.material, material, sizeof(p.material));
 
@@ -278,14 +281,14 @@ static qboolean CL_TEntRunImpactDispatcher (int type, const vec3_t pos)
 	switch (type)
 	{
 	case TE_SPIKE:
-		return CL_TEntTrySpawnQ3P ("bullet", pos, vel_zero, 10, 0.20f, 0.10f, 1.25f, 0.5f, -3.0f, 300.f, 0.2f, 0x6f);
+		return CL_TEntTrySpawnQ3P ("sparks", pos, vel_zero, 10, 0.16f, 0.08f, 0.9f, 0.4f, -4.0f, 420.f, 0.35f, 0x6f);
 	case TE_SUPERSPIKE:
 	case TE_GUNSHOT:
-		return CL_TEntTrySpawnQ3P ("bullet", pos, vel_zero, 20, 0.20f, 0.10f, 1.25f, 0.5f, -3.0f, 300.f, 0.2f, 0x6f);
+		return CL_TEntTrySpawnQ3P ("impact_puff", pos, vel_zero, 20, 0.20f, 0.14f, 1.35f, 0.65f, -3.0f, 260.f, 0.25f, 0x6f);
 	case TE_EXPLOSION:
-		return CL_TEntTrySpawnQ3P ("explosion", pos, vel_zero, 96, 0.45f, 0.20f, 8.0f, 4.0f, -2.0f, 100.f, 0.5f, 0x6f);
+		return CL_TEntTrySpawnQ3P ("debris", pos, vel_zero, 96, 0.50f, 0.24f, 2.2f, 1.8f, -1.4f, 220.f, 0.35f, 0x6f);
 	case TE_EXPLOSION2:
-		return CL_TEntTrySpawnQ3P ("explosion", pos, vel_zero, 96, 0.45f, 0.20f, 8.0f, 4.0f, -2.0f, 100.f, 0.5f, 0x6f);
+		return CL_TEntTrySpawnQ3P ("debris", pos, vel_zero, 96, 0.50f, 0.24f, 2.2f, 1.8f, -1.4f, 220.f, 0.35f, 0x6f);
 	default:
 		break;
 	}

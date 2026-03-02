@@ -43,6 +43,8 @@ cvar_t	r_particles = {"r_particles","2", CVAR_ARCHIVE}; //johnfitz
 cvar_t	r_particles_mode = {"r_particles_mode", "glquake", CVAR_ARCHIVE};
 cvar_t	r_particles_max = {"r_particles_max", "8192", CVAR_ARCHIVE};
 cvar_t	r_particles_sort = {"r_particles_sort", "0", CVAR_ARCHIVE};
+cvar_t	r_particles_cull_dist = {"r_particles_cull_dist", "4096", CVAR_ARCHIVE};
+cvar_t	r_particles_collision = {"r_particles_collision", "1", CVAR_ARCHIVE};
 
 typedef enum
 {
@@ -103,6 +105,9 @@ static void R_Q3P_TestSpawn_f (void)
 		particle.color = 0x6f;
 		particle.gravity = 300.0f;
 		particle.drag = 0.5f;
+		particle.restitution = 0.35f;
+		particle.min_bounce_speed = 30.0f;
+		particle.flags = Q3P_PARTICLE_COLLIDE_WORLD;
 		q_strlcpy (particle.material, "*particle", sizeof(particle.material));
 
 		VectorCopy (viewent->origin, particle.org);
@@ -158,6 +163,9 @@ static qboolean R_TrySpawnQ3PLegacyParticleEffect (const vec3_t org, const vec3_
 		p.color = rocket_explosion ? ramp1[0] : color;
 		p.gravity = gravity;
 		p.drag = drag;
+		p.restitution = rocket_explosion ? 0.30f : 0.25f;
+		p.min_bounce_speed = rocket_explosion ? 25.f : 40.f;
+		p.flags = Q3P_PARTICLE_COLLIDE_WORLD;
 
 		q_strlcpy (p.material, material, sizeof(p.material));
 
@@ -267,6 +275,8 @@ void R_InitParticles (void)
 	R_ParticlesMode_Changed_f (&r_particles_mode);
 	Cvar_RegisterVariable (&r_particles_max);
 	Cvar_RegisterVariable (&r_particles_sort);
+	Cvar_RegisterVariable (&r_particles_cull_dist);
+	Cvar_RegisterVariable (&r_particles_collision);
 
 	Q3P_Init ();
 	Cmd_AddCommand ("q3p_spawn", R_Q3P_TestSpawn_f);
@@ -671,6 +681,26 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 			trail_drag = 0.35f;
 			trail_color = ramp3[2];
 			break;
+		case 2:
+			trail_material = "blood_heavy";
+			trail_lifetime = 0.45f;
+			trail_size = 1.35f;
+			trail_size_ramp = 1.5f;
+			trail_alpha_ramp = -2.3f;
+			trail_gravity = 240.f;
+			trail_drag = 0.05f;
+			trail_color = 67;
+			break;
+		case 4:
+			trail_material = "blood_light";
+			trail_lifetime = 0.3f;
+			trail_size = 1.1f;
+			trail_size_ramp = 1.0f;
+			trail_alpha_ramp = -2.8f;
+			trail_gravity = 220.f;
+			trail_drag = 0.05f;
+			trail_color = 67;
+			break;
 		case 6:
 			trail_material = "voor";
 			trail_lifetime = 0.25f;
@@ -703,6 +733,12 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 			qp.color = trail_color;
 			qp.gravity = trail_gravity;
 			qp.drag = trail_drag;
+			if (type == 2 || type == 4)
+			{
+				qp.restitution = 0.2f;
+				qp.min_bounce_speed = 20.f;
+				qp.flags = Q3P_PARTICLE_COLLIDE_WORLD;
+			}
 			q_strlcpy (qp.material, trail_material, sizeof(qp.material));
 			for (j = 0; j < 3; ++j)
 				qp.org[j] = start[j] + ((rand() & 7) - 3);
