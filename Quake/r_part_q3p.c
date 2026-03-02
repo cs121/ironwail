@@ -57,6 +57,7 @@ typedef struct q3p_drawitem_s {
 	int particle_index;
 	int blend_group;
 	unsigned material_id;
+	const q3p_material_cache_entry_t *material_entry;
 	float depth;
 } q3p_drawitem_t;
 
@@ -979,6 +980,8 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 	for (i = 0; i < q3p_numactive; ++i)
 	{
 		q3p_particle_t *p = &q3p_particles[i];
+		const q3p_material_cache_entry_t *entry = Q3P_ResolveMaterialCached (p->material);
+		unsigned material_id = p->material_id;
 		int blend_group = p->alpha < 1.f;
 
 		if (!showtris && alpha != blend_group)
@@ -990,9 +993,13 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 			continue;
 		}
 
+		if (entry)
+			material_id = entry->resolved_material_id;
+
 		q3p_drawitems[q3p_numdrawitems].particle_index = i;
 		q3p_drawitems[q3p_numdrawitems].blend_group = blend_group;
-		q3p_drawitems[q3p_numdrawitems].material_id = p->material_id;
+		q3p_drawitems[q3p_numdrawitems].material_id = material_id;
+		q3p_drawitems[q3p_numdrawitems].material_entry = entry;
 		q3p_drawitems[q3p_numdrawitems].depth = DotProduct (p->org, vpn) - DotProduct (r_origin, vpn);
 		++q3p_numdrawitems;
 	}
@@ -1004,7 +1011,7 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 
 	for (i = 0; i < q3p_numdrawitems; ++i)
 	{
-		const q3p_material_cache_entry_t *entry = Q3P_ResolveMaterialCached (q3p_particles[q3p_drawitems[i].particle_index].material);
+		const q3p_material_cache_entry_t *entry = q3p_drawitems[i].material_entry;
 		if (entry && entry->supported_stage_count > max_stage_count)
 			max_stage_count = entry->supported_stage_count;
 	}
@@ -1038,17 +1045,18 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 		q3p_numpartverts = 0;
 		for (i = 0; i < q3p_numdrawitems; ++i)
 		{
+			q3p_drawitem_t *drawitem = &q3p_drawitems[i];
 			q3p_particle_t *p = &q3p_particles[q3p_drawitems[i].particle_index];
 			q3p_particlevert_t *v;
 			const GLubyte *c = showtris ? white : (const GLubyte *)&d_8to24table[p->color & 0xff];
-			const q3p_material_cache_entry_t *entry = Q3P_ResolveMaterialCached (p->material);
+			const q3p_material_cache_entry_t *entry = drawitem->material_entry;
 
 			if (!entry || stage_index >= entry->supported_stage_count)
 				continue;
 
-			if (!current_entry || p->material_id != current_material)
+			if (!current_entry || drawitem->material_id != current_material)
 			{
-				current_material = p->material_id;
+				current_material = drawitem->material_id;
 				current_entry = entry;
 				current_stage = (entry->material && stage_index < (int)VEC_SIZE (entry->material->stages))
 					? &entry->material->stages[stage_index]
