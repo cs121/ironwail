@@ -15,10 +15,12 @@ layout(location=1) in vec4 in_color;
 layout(location=0) out vec2 out_uv;
 layout(location=1) out vec4 out_color;
 layout(location=2) out vec3 out_pos;
+layout(location=3) out vec2 out_stage_uv;
 
 layout(location=0) uniform vec3 Params;
 #define ProjScale	Params.xy
 #define UVScale	Params.z
+layout(location=1) uniform mat3 StageTexMatrix;
 
 void main()
 {
@@ -37,6 +39,7 @@ void main()
 
 	out_pos = in_pos - EyePos; // FIXME: use corner position
 	out_uv = corner * UVScale;
+	out_stage_uv = (StageTexMatrix * vec3(corner * 0.5 + 0.5, 1.0)).xy;
 	out_color = in_color;
 #if OIT
 	out_color.a *= 0.9;
