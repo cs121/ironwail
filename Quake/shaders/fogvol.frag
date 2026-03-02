@@ -67,6 +67,11 @@ layout(std140, binding=4) uniform FogLightsUBO
 	FogLight FogLights[MAX_FOGLIGHTS];
 };
 
+layout(std140, binding=5) uniform FogLightgridUBO
+{
+	vec4 FogLightgridProbeRGB[8];
+};
+
 layout(location=0)  uniform int   FogSteps;
 layout(location=1)  uniform int   FogNoiseEnabled;
 layout(location=2)  uniform int   FogDebugMode;
@@ -89,6 +94,7 @@ layout(location=18) uniform int   FogShadowSamples;
 layout(location=19) uniform float FogShadowStrength;
 layout(location=20) uniform float FogShadowJitter;
 layout(location=21) uniform vec3  FogShadowDir;
+layout(location=22) uniform int   FogLightgridEnabled;
 
 layout(location=0) out vec4 FragColor;
 
@@ -339,6 +345,20 @@ bool PointInsideVolume(vec3 p, FogVolume volume)
 	return all(greaterThanEqual(p, volume.mins.xyz)) && all(lessThanEqual(p, volume.maxs.xyz));
 }
 
+vec3 SampleFogLightgrid(vec3 p, FogVolume volume)
+{
+	vec3 size = max(volume.maxs.xyz - volume.mins.xyz, vec3(1e-3));
+	vec3 local = clamp((p - volume.mins.xyz) / size, 0.0, 1.0);
+
+	vec3 c00 = mix(FogLightgridProbeRGB[0].rgb, FogLightgridProbeRGB[1].rgb, local.x);
+	vec3 c10 = mix(FogLightgridProbeRGB[2].rgb, FogLightgridProbeRGB[3].rgb, local.x);
+	vec3 c01 = mix(FogLightgridProbeRGB[4].rgb, FogLightgridProbeRGB[5].rgb, local.x);
+	vec3 c11 = mix(FogLightgridProbeRGB[6].rgb, FogLightgridProbeRGB[7].rgb, local.x);
+	vec3 c0 = mix(c00, c10, local.y);
+	vec3 c1 = mix(c01, c11, local.y);
+	return mix(c0, c1, local.z);
+}
+
 // PERF: lod=0 full quality (near), lod=1 coarse (far). Caller passes based on distance.
 float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, float noiseScalePre, vec3 flowPre, int lod)
 {
@@ -559,6 +579,7 @@ void main()
 		: 1.0;
 	// PERF: Cache active light count and enabled flag to avoid UBO re-fetch in loop.
 	bool  doLights      = (FogLightEnabled != 0 && FogLightMeta.x > 0);
+	bool  doLightgrid   = (FogLightgridEnabled != 0);
 	int   lightCount    = FogLightMeta.x;
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated — they were
@@ -604,6 +625,14 @@ void main()
 
 		// phaseSun is already precomputed per-ray (constant for all steps on same ray).
 		vec3  stepScatter = (1.0 - att) * scatterColor * phaseSun;
+		if (doLightgrid)
+		{
+			// Static/emissive world contribution comes from the baked lightgrid
+			// probe data; explicit fog volume emissive remains handled separately
+			// by FogEmissiveEnabled/volume.extra.z below.
+			vec3 staticScatter = SampleFogLightgrid(p, volume);
+			stepScatter += staticScatter * (1.0 - att);
+		}
 
 		if (doLights)
 		{
