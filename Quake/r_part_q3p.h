@@ -17,6 +17,7 @@ typedef struct q3p_particle_s {
 	float	drag;
 	int		flags;
 	char	material[64];
+	unsigned material_id;
 } q3p_particle_t;
 
 typedef struct q3p_emitter_s {
