@@ -235,6 +235,21 @@ static qboolean CL_TEntTrySpawnQ3P (const char *material, const vec3_t pos, cons
 	float alpha_ramp, float gravity, float drag, int color)
 {
 	int i;
+	q3p_effectdef_t def;
+	qboolean has_def = Q3P_GetEffectDef (material, &def);
+
+	if (has_def)
+	{
+		count = q_max (1, def.count);
+		lifetime_min = def.lifetime_min;
+		lifetime_rand = def.lifetime_rand;
+		size = def.size;
+		size_rand = def.size_rand;
+		alpha_ramp = def.alpha_ramp;
+		gravity = def.gravity;
+		drag = def.drag;
+		color = def.color;
+	}
 
 	if (!CL_TEntCanUseQ3P ())
 		return false;
@@ -246,26 +261,26 @@ static qboolean CL_TEntTrySpawnQ3P (const char *material, const vec3_t pos, cons
 		memset (&p, 0, sizeof(p));
 		p.spawn_time = cl.time;
 		p.lifetime = lifetime_min + ((rand() & 255) / 255.0f) * lifetime_rand;
-		p.size = size + ((rand() & 255) / 255.0f) * size_rand;
-		p.size_ramp = p.size * 8.0f;
-		p.alpha = 1.0f;
-		p.alpha_ramp = alpha_ramp;
-		p.color = color;
-		p.gravity = gravity;
-		p.drag = drag;
-		p.restitution = 0.35f;
-		p.min_bounce_speed = 35.f;
-		p.flags = Q3P_PARTICLE_COLLIDE_WORLD;
+			p.size = size + ((rand() & 255) / 255.0f) * size_rand;
+			p.size_ramp = has_def ? def.size_ramp : p.size * 8.0f;
+			p.alpha = has_def ? def.alpha : 1.0f;
+			p.alpha_ramp = alpha_ramp;
+			p.color = color;
+			p.gravity = gravity;
+			p.drag = drag;
+			p.restitution = has_def ? def.restitution : 0.35f;
+			p.min_bounce_speed = has_def ? def.min_bounce_speed : 35.f;
+			p.flags = (has_def ? (def.collide_world ? Q3P_PARTICLE_COLLIDE_WORLD : 0) : Q3P_PARTICLE_COLLIDE_WORLD);
 
-		q_strlcpy (p.material, material, sizeof(p.material));
+			q_strlcpy (p.material, has_def ? def.material : material, sizeof(p.material));
 
-		p.org[0] = pos[0] + ((rand() & 15) - 8);
-		p.org[1] = pos[1] + ((rand() & 15) - 8);
-		p.org[2] = pos[2] + ((rand() & 15) - 8);
+			p.org[0] = pos[0] + ((rand() & 15) - 8) * (has_def ? def.org_jitter / 8.f : 1.f);
+			p.org[1] = pos[1] + ((rand() & 15) - 8) * (has_def ? def.org_jitter / 8.f : 1.f);
+			p.org[2] = pos[2] + ((rand() & 15) - 8) * (has_def ? def.org_jitter / 8.f : 1.f);
 
-		p.vel[0] = vel_base[0] + (float)((rand() & 255) - 128);
-		p.vel[1] = vel_base[1] + (float)((rand() & 255) - 128);
-		p.vel[2] = vel_base[2] + (float)((rand() & 255) - 128);
+			p.vel[0] = vel_base[0] * (has_def ? def.vel_scale : 1.f) + (float)((rand() & 255) - 128) * (has_def ? def.vel_jitter / 128.f : 1.f);
+			p.vel[1] = vel_base[1] * (has_def ? def.vel_scale : 1.f) + (float)((rand() & 255) - 128) * (has_def ? def.vel_jitter / 128.f : 1.f);
+			p.vel[2] = vel_base[2] * (has_def ? def.vel_scale : 1.f) + (float)((rand() & 255) - 128) * (has_def ? def.vel_jitter / 128.f : 1.f);
 
 		if (!Q3P_Spawn (&p))
 			return false;

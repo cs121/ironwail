@@ -60,6 +60,217 @@ static q3p_particlevert_t *q3p_partverts;
 static int q3p_numdrawitems;
 static int q3p_numpartverts;
 
+#define Q3P_MAX_EFFECT_DEFS 256
+typedef struct q3p_named_effectdef_s {
+	qboolean used;
+	char name[64];
+	q3p_effectdef_t def;
+} q3p_named_effectdef_t;
+
+static q3p_named_effectdef_t q3p_effect_defs[Q3P_MAX_EFFECT_DEFS];
+
+static void Q3P_EffectDefSetDefaults (q3p_effectdef_t *def)
+{
+	memset (def, 0, sizeof (*def));
+	def->count = 1;
+	def->lifetime_min = 0.2f;
+	def->lifetime_rand = 0.0f;
+	def->size = 1.0f;
+	def->size_rand = 0.0f;
+	def->size_ramp = 0.0f;
+	def->alpha = 1.0f;
+	def->alpha_ramp = -1.0f;
+	def->color = 0x6f;
+	def->gravity = 0.0f;
+	def->drag = 0.0f;
+	def->restitution = 0.0f;
+	def->min_bounce_speed = 0.0f;
+	def->org_jitter = 0.0f;
+	def->vel_jitter = 0.0f;
+	def->vel_scale = 1.0f;
+	def->collide_world = false;
+	q_strlcpy (def->material, "*particle", sizeof (def->material));
+}
+
+static q3p_named_effectdef_t *Q3P_FindOrAllocEffectDef (const char *name)
+{
+	int i;
+	int free_slot = -1;
+
+	for (i = 0; i < Q3P_MAX_EFFECT_DEFS; ++i)
+	{
+		if (q3p_effect_defs[i].used)
+		{
+			if (!q_strcasecmp (q3p_effect_defs[i].name, name))
+				return &q3p_effect_defs[i];
+		}
+		else if (free_slot < 0)
+		{
+			free_slot = i;
+		}
+	}
+
+	if (free_slot < 0)
+		return NULL;
+
+	q3p_effect_defs[free_slot].used = true;
+	q_strlcpy (q3p_effect_defs[free_slot].name, name, sizeof (q3p_effect_defs[free_slot].name));
+	Q3P_EffectDefSetDefaults (&q3p_effect_defs[free_slot].def);
+	return &q3p_effect_defs[free_slot];
+}
+
+static void Q3P_ParseEffectDefText (const char *source_name, char *text)
+{
+	const char *cursor = text;
+
+	while ((cursor = COM_Parse (cursor)) != NULL)
+	{
+		q3p_named_effectdef_t *entry;
+		q3p_effectdef_t def;
+		char effect_name[64];
+
+		if (!com_token[0])
+			break;
+
+		q_strlcpy (effect_name, com_token, sizeof (effect_name));
+		entry = Q3P_FindOrAllocEffectDef (effect_name);
+		if (!entry)
+		{
+			Con_Warning ("Q3P: effect def table full, skipping '%s' from %s\n", effect_name, source_name);
+			return;
+		}
+
+		def = entry->def;
+
+		cursor = COM_Parse (cursor);
+		if (!cursor || q_strcmp (com_token, "{"))
+		{
+			Con_Warning ("Q3P: expected '{' after effect '%s' in %s\n", effect_name, source_name);
+			return;
+		}
+
+		while ((cursor = COM_Parse (cursor)) != NULL)
+		{
+			if (!q_strcmp (com_token, "}"))
+				break;
+
+			if (!q_strcasecmp (com_token, "material"))
+			{
+				if (!(cursor = COM_Parse (cursor))) break;
+				q_strlcpy (def.material, com_token, sizeof (def.material));
+			}
+			else if (!q_strcasecmp (com_token, "count"))
+			{
+				if (!(cursor = COM_Parse (cursor))) break;
+				def.count = q_max (1, Q_atoi (com_token));
+			}
+			else if (!q_strcasecmp (com_token, "lifetime_min")) { if (!(cursor = COM_Parse (cursor))) break; def.lifetime_min = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "lifetime_rand")) { if (!(cursor = COM_Parse (cursor))) break; def.lifetime_rand = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "size")) { if (!(cursor = COM_Parse (cursor))) break; def.size = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "size_rand")) { if (!(cursor = COM_Parse (cursor))) break; def.size_rand = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "size_ramp")) { if (!(cursor = COM_Parse (cursor))) break; def.size_ramp = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "alpha")) { if (!(cursor = COM_Parse (cursor))) break; def.alpha = CLAMP (0.f, Q_atof (com_token), 1.f); }
+			else if (!q_strcasecmp (com_token, "alpha_ramp")) { if (!(cursor = COM_Parse (cursor))) break; def.alpha_ramp = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "color")) { if (!(cursor = COM_Parse (cursor))) break; def.color = Q_atoi (com_token); }
+			else if (!q_strcasecmp (com_token, "gravity")) { if (!(cursor = COM_Parse (cursor))) break; def.gravity = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "drag")) { if (!(cursor = COM_Parse (cursor))) break; def.drag = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "restitution")) { if (!(cursor = COM_Parse (cursor))) break; def.restitution = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "min_bounce_speed")) { if (!(cursor = COM_Parse (cursor))) break; def.min_bounce_speed = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "org_jitter")) { if (!(cursor = COM_Parse (cursor))) break; def.org_jitter = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "vel_jitter")) { if (!(cursor = COM_Parse (cursor))) break; def.vel_jitter = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "vel_scale")) { if (!(cursor = COM_Parse (cursor))) break; def.vel_scale = Q_atof (com_token); }
+			else if (!q_strcasecmp (com_token, "collide_world")) { if (!(cursor = COM_Parse (cursor))) break; def.collide_world = Q_atoi (com_token) != 0; }
+			else
+			{
+				Con_DWarning ("Q3P: unknown key '%s' in effect '%s' (%s)\n", com_token, effect_name, source_name);
+				cursor = COM_Parse (cursor);
+			}
+		}
+
+		def.loaded = true;
+		entry->def = def;
+	}
+}
+
+static void Q3P_LoadEffectDefs (void)
+{
+	searchpath_t *search;
+	int loaded = 0;
+
+	memset (q3p_effect_defs, 0, sizeof (q3p_effect_defs));
+
+	for (search = com_searchpaths; search; search = search->next)
+	{
+		if (search->pack)
+		{
+			int i;
+			for (i = 0; i < search->pack->numfiles; ++i)
+			{
+				const char *path = search->pack->files[i].name;
+				byte *buffer;
+				size_t size = (size_t)search->pack->files[i].filelen;
+
+				if (q_strncasecmp (path, "particles/", 10) || q_strcasecmp (COM_FileGetExtension (path), "prt"))
+					continue;
+				buffer = COM_LoadMallocFile (path, NULL);
+				if (!buffer)
+					continue;
+				Q3P_ParseEffectDefText (path, (char *)buffer);
+				Z_Free (buffer);
+				if (size > 0)
+					++loaded;
+			}
+		}
+		else
+		{
+			char folder[MAX_OSPATH];
+			findfile_t *find;
+
+			if ((size_t)q_snprintf (folder, sizeof (folder), "%s/particles", search->filename) >= sizeof (folder))
+				continue;
+
+			for (find = Sys_FindFirst (folder, "prt"); find; find = Sys_FindNext (find))
+			{
+				char rel[MAX_QPATH];
+				byte *buffer;
+
+				if (find->attribs & FA_DIRECTORY)
+					continue;
+				q_snprintf (rel, sizeof (rel), "particles/%s", find->name);
+				buffer = COM_LoadMallocFile (rel, NULL);
+				if (!buffer)
+					continue;
+				Q3P_ParseEffectDefText (rel, (char *)buffer);
+				Z_Free (buffer);
+				++loaded;
+			}
+		}
+	}
+
+	if (loaded > 0)
+		Con_Printf ("Q3P: loaded %d .prt particle definition files\n", loaded);
+}
+
+qboolean Q3P_GetEffectDef (const char *name, q3p_effectdef_t *out_def)
+{
+	int i;
+
+	if (!name || !name[0] || !out_def)
+		return false;
+
+	for (i = 0; i < Q3P_MAX_EFFECT_DEFS; ++i)
+	{
+		if (!q3p_effect_defs[i].used)
+			continue;
+		if (q_strcasecmp (q3p_effect_defs[i].name, name))
+			continue;
+		*out_def = q3p_effect_defs[i].def;
+		return out_def->loaded;
+	}
+
+	return false;
+}
+
 
 static void Q3P_RefreshBudget (void)
 {
@@ -425,6 +636,7 @@ void Q3P_Init (void)
 	q3p_spawn_budget_remaining = 0;
 	memset (q3p_emitters, 0, sizeof (q3p_emitters));
 	memset (q3p_material_cache, 0, sizeof (q3p_material_cache));
+	Q3P_LoadEffectDefs ();
 	Q3P_RefreshBudget ();
 }
 

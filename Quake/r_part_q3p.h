@@ -51,6 +51,28 @@ typedef struct q3p_debug_stats_s {
 	int culled;
 } q3p_debug_stats_t;
 
+typedef struct q3p_effectdef_s {
+	qboolean loaded;
+	int		count;
+	float	lifetime_min;
+	float	lifetime_rand;
+	float	size;
+	float	size_rand;
+	float	size_ramp;
+	float	alpha;
+	float	alpha_ramp;
+	int		color;
+	float	gravity;
+	float	drag;
+	float	restitution;
+	float	min_bounce_speed;
+	float	org_jitter;
+	float	vel_jitter;
+	float	vel_scale;
+	qboolean collide_world;
+	char	material[64];
+} q3p_effectdef_t;
+
 void Q3P_Init (void);
 void Q3P_Shutdown (void);
 void Q3P_Clear (void);
@@ -62,5 +84,6 @@ void Q3P_GetDebugStats (q3p_debug_stats_t *stats);
 void Q3P_ResetDebugStats (void);
 int Q3P_AddWorldEmitter (const q3p_emitter_t *emitter);
 void Q3P_ClearWorldEmitters (void);
+qboolean Q3P_GetEffectDef (const char *name, q3p_effectdef_t *out_def);
 
 #endif
