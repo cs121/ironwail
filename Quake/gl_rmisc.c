@@ -255,6 +255,8 @@ qboolean use_simd;
 
 extern gltexture_t *playertextures[MAX_SCOREBOARD]; //johnfitz
 
+static qboolean r_gl_nocolors_enabled;
+
 extern char r_showbboxes_filter_strings[MAXCMDLINE];
 extern qboolean r_showbboxes_filter_byindex;
 
@@ -362,6 +364,35 @@ GL_Fullbrights_f -- johnfitz
 static void GL_Fullbrights_f (cvar_t *var)
 {
 	TexMgr_ReloadNobrightImages ();
+}
+
+/*
+====================
+GL_NoColors_f
+====================
+*/
+static void GL_NoColors_f (cvar_t *var)
+{
+	const qboolean gl_nocolors_enabled = (var->value != 0.0f);
+
+	if (r_gl_nocolors_enabled && !gl_nocolors_enabled)
+	{
+		int i;
+		for (i = 0; i < cl.maxclients; i++)
+		{
+			entity_t *e = &cl_entities[1 + i];
+
+			if (!e->model)
+				continue;
+
+			if (playertextures[i])
+				R_TranslatePlayerSkin (i);
+			else
+				R_TranslateNewPlayerSkin (i);
+		}
+	}
+
+	r_gl_nocolors_enabled = gl_nocolors_enabled;
 }
 
 /*
@@ -728,6 +759,8 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&gl_polyblend);
 	Cvar_RegisterVariable (&gl_playermip);
 	Cvar_RegisterVariable (&gl_nocolors);
+	Cvar_SetCallback (&gl_nocolors, GL_NoColors_f);
+	r_gl_nocolors_enabled = (gl_nocolors.value != 0.0f);
 
 	//johnfitz -- new cvars
 	Cvar_RegisterVariable (&r_clearcolor);
