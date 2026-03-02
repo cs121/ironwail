@@ -491,10 +491,7 @@ void main()
 	vec3  rd     = normalize(worldPos - ro);
 	float tScene = length(worldPos - ro);
 	if (IsSkyDepth(depth))
-		tScene = 2048.0; // Sky has no real geometry — cap fog path length to avoid
-		                 // sky pixels accumulating far_clip worth of density, which
-		                 // makes open areas look disproportionately foggier than
-		                 // enclosed rooms when sky is visible.
+		tScene = FogDepthParams.y;
 
 	float tEnter, tExit;
 	if (volume.extra.x > 0.5)
@@ -692,7 +689,7 @@ void main()
 					if (atten < 1e-5) continue;
 					vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
 					float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
-					lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.25 * phaseLocal);
+					lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * phaseLocal);
 				}
 				lightScatterPrev = lightScatter;
 			}
