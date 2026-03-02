@@ -436,6 +436,30 @@ static qboolean Q3P_ParseEffectDefText (q3p_prt_parser_t *parser, const char *so
 	return !parser->had_error;
 }
 
+static qboolean Q3P_LoadAndParseEffectDefFile (q3p_prt_parser_t *parser, const char *path)
+{
+	byte *buffer;
+	qboolean ok = true;
+
+	buffer = COM_LoadMallocFile (path, NULL);
+	if (!buffer)
+		return false;
+
+	if (buffer[0] == '\0')
+	{
+		Q3P_PRT_Warn (parser, 1, "Q3P: skipping empty .prt file '%s'\n", path);
+		ok = false;
+	}
+	else if (!Q3P_ParseEffectDefText (parser, path, (char *)buffer))
+	{
+		parser->had_error = true;
+		ok = false;
+	}
+
+	free (buffer);
+	return ok;
+}
+
 static void Q3P_LoadEffectDefs (void)
 {
 	searchpath_t *search;
@@ -460,18 +484,10 @@ static void Q3P_LoadEffectDefs (void)
 			for (i = 0; i < search->pack->numfiles; ++i)
 			{
 				const char *path = search->pack->files[i].name;
-				byte *buffer;
-				size_t size = (size_t)search->pack->files[i].filelen;
 
 				if (q_strncasecmp (path, "particles/", 10) || q_strcasecmp (COM_FileGetExtension (path), "prt"))
 					continue;
-				buffer = COM_LoadMallocFile (path, NULL);
-				if (!buffer)
-					continue;
-				if (!Q3P_ParseEffectDefText (&parser, path, (char *)buffer))
-					parser.had_error = true;
-				Z_Free (buffer);
-				if (size > 0)
+				if (Q3P_LoadAndParseEffectDefFile (&parser, path))
 				{
 					++loaded;
 					parser.files_loaded++;
@@ -489,19 +505,15 @@ static void Q3P_LoadEffectDefs (void)
 			for (find = Sys_FindFirst (folder, "prt"); find; find = Sys_FindNext (find))
 			{
 				char rel[MAX_QPATH];
-				byte *buffer;
 
 				if (find->attribs & FA_DIRECTORY)
 					continue;
 				q_snprintf (rel, sizeof (rel), "particles/%s", find->name);
-				buffer = COM_LoadMallocFile (rel, NULL);
-				if (!buffer)
-					continue;
-				if (!Q3P_ParseEffectDefText (&parser, rel, (char *)buffer))
-					parser.had_error = true;
-				Z_Free (buffer);
-				++loaded;
-				parser.files_loaded++;
+				if (Q3P_LoadAndParseEffectDefFile (&parser, rel))
+				{
+					++loaded;
+					parser.files_loaded++;
+				}
 			}
 		}
 	}
