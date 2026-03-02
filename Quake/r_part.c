@@ -42,6 +42,7 @@ static float texturescalefactor; //johnfitz -- compensate for apparent size of d
 cvar_t	r_particles = {"r_particles","2", CVAR_ARCHIVE}; //johnfitz
 cvar_t	r_particles_mode = {"r_particles_mode", "glquake", CVAR_ARCHIVE};
 cvar_t	r_particles_max = {"r_particles_max", "8192", CVAR_ARCHIVE};
+cvar_t	r_particles_sort = {"r_particles_sort", "0", CVAR_ARCHIVE};
 
 typedef enum
 {
@@ -197,6 +198,7 @@ void R_InitParticles (void)
 	Cvar_SetCallback (&r_particles_mode, R_ParticlesMode_Changed_f);
 	R_ParticlesMode_Changed_f (&r_particles_mode);
 	Cvar_RegisterVariable (&r_particles_max);
+	Cvar_RegisterVariable (&r_particles_sort);
 
 	Q3P_Init ();
 	Cmd_AddCommand ("q3p_spawn", R_Q3P_TestSpawn_f);
@@ -781,7 +783,7 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	qboolean		dither, oit;
 	int				i;
 
-	if (R_GetParticleMode () != PARTICLEMODE_CLASSIC && R_GetParticleMode () != PARTICLEMODE_GLQUAKE)
+	if (R_GetParticleMode () == PARTICLEMODE_Q3P || R_GetParticleMode () == PARTICLEMODE_HYBRID)
 		Q3P_Draw (alpha, showtris);
 
 	if (R_GetParticleMode () == PARTICLEMODE_Q3P)
