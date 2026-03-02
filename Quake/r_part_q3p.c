@@ -352,7 +352,7 @@ static void Q3P_SetStageTexMatrixUniform (const mat_texmatrix_t *matrix)
 		m[6] = matrix->m[0][2]; m[7] = matrix->m[1][2]; m[8] = matrix->m[2][2];
 	}
 
-	GL_UniformMatrix3fvFunc (1, 1, GL_FALSE, m);
+	GL_Uniform3fvFunc (1, 3, m);
 }
 
 static void Q3P_EvalStageColorMul (const mat_shader_stage_t *stage, float particle_alpha, vec4_t out)
@@ -401,7 +401,7 @@ static gltexture_t *Q3P_ResolveStageTexture (const mat_shader_stage_t *stage)
 	const char *path = NULL;
 
 	if (!stage)
-		return particletexture;
+		return notexture;
 
 	switch (stage->map_type)
 	{
@@ -419,7 +419,7 @@ static gltexture_t *Q3P_ResolveStageTexture (const mat_shader_stage_t *stage)
 	if (!path || !path[0])
 		path = stage->map_path;
 	if (!path || !path[0])
-		return particletexture;
+		return notexture;
 
 	return TexMgr_FindTexture (cl.worldmodel, path);
 }
@@ -1066,7 +1066,7 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 				if (q3p_numpartverts)
 					Q3P_FlushParticleBatch ();
 
-				GL_Bind (GL_TEXTURE0, current_stage ? Q3P_ResolveStageTexture (current_stage) : particletexture);
+				GL_Bind (GL_TEXTURE0, current_stage ? Q3P_ResolveStageTexture (current_stage) : notexture);
 				Q3P_SetStageTexMatrixUniform (current_stage ? MatStage_EvalTexMatrix ((mat_shader_stage_t *)current_stage, cl.time) : NULL);
 				Q3P_EvalStageColorMul (current_stage, 1.f, stage_mul);
 				GL_Uniform4fFunc (2, stage_mul[0], stage_mul[1], stage_mul[2], stage_mul[3]);
