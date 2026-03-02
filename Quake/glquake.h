@@ -389,9 +389,9 @@ extern overflowtimes_t dev_overflows; //this stores the last time overflow messa
 #define CONSOLE_RESPAM_TIME 3 // seconds between repeated warning messages
 
 //johnfitz -- moved here from r_brush.c
-extern int gl_lightmap_format, lightmap_bytes;
+extern int gl_lightmap_format, gl_lightmap_type, lightmap_bytes;
 extern int lightmap_block_width, lightmap_block_height;
-extern cvar_t gl_lightmap_atlas_size;
+extern cvar_t gl_lightmap_atlas_size, gl_lightmap_format_cvar;
 void GL_OnLightmapAtlasSizeChanged (cvar_t *var);
 
 typedef struct lightmap_s

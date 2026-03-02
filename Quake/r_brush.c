@@ -33,11 +33,13 @@ extern cvar_t r_lightingdir;
 extern cvar_t r_facenormals_enable;
 
 cvar_t gl_lightmap_atlas_size = { "gl_lightmap_atlas_size", "1024", CVAR_ARCHIVE };
+cvar_t gl_lightmap_format_cvar = { "gl_lightmap_format", "0", CVAR_ARCHIVE };
 
 int     lightmap_block_width = 256;
 int     lightmap_block_height = 256;
 
 int		gl_lightmap_format;
+int		gl_lightmap_type;
 int		lightmap_bytes;
 static const int	lightmap_padding = 2;
 
@@ -87,6 +89,45 @@ void GL_OnLightmapAtlasSizeChanged (cvar_t *var)
 }
 
 
+
+static unsigned GL_PackLightmapColor (byte r, byte g, byte b, byte a)
+{
+	switch (gl_lightmap_format)
+	{
+	case GL_BGRA:
+		return b | (g << 8) | (r << 16) | (a << 24);
+	case GL_RGBA:
+	default:
+		return r | (g << 8) | (b << 16) | (a << 24);
+	}
+}
+
+static int GL_SelectLightmapFormat (void)
+{
+	int requested = (int)gl_lightmap_format_cvar.value;
+	int selected;
+
+	if (requested == 0)
+	{
+		selected = GL_BGRA;
+	}
+	else if (requested == 1)
+	{
+		selected = GL_RGBA;
+	}
+	else if (requested == 2)
+	{
+		selected = GL_BGRA;
+	}
+	else
+	{
+		Con_DWarning ("gl_lightmap_format %d is invalid, falling back to GL_RGBA\n", requested);
+		Cvar_SetValueQuick (&gl_lightmap_format_cvar, 1);
+		selected = GL_RGBA;
+	}
+
+	return selected;
+}
 
 /*
 ===============
@@ -324,7 +365,7 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 	{
 		if (luxdst)
 		{
-			unsigned dir = 0x7f7f7fff;
+			unsigned dir = GL_PackLightmapColor (0x7f, 0x7f, 0x7f, 0xff);
 			for (t = 0; t < tmax; t++)
 			{
 				unsigned *luxrow = luxdst + t * rowstride;
@@ -353,14 +394,14 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 			switch (taps)
 			{
 			case 1:
-				row[s] = pix[0] | (pix[1] << 8) | (pix[2] << 16) | 0xff000000u;
+				row[s] = GL_PackLightmapColor (pix[0], pix[1], pix[2], 0xff);
 				break;
 
 			case 2:
 			{
 				const byte *pix1 = samples + facesize + idx;
-				row[s] = pix[0] | (pix[1] << 8) | (pix[2] << 16) | 0xff000000u;
-				row[s + smax] = pix1[0] | (pix1[1] << 8) | (pix1[2] << 16) | 0xff000000u;
+				row[s] = GL_PackLightmapColor (pix[0], pix[1], pix[2], 0xff);
+				row[s + smax] = GL_PackLightmapColor (pix1[0], pix1[1], pix1[2], 0xff);
 				break;
 			}
 
@@ -384,11 +425,11 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 
 			if (luxrow)
 			{
-				unsigned dir = 0x7f7f7fff;
+				unsigned dir = GL_PackLightmapColor (0x7f, 0x7f, 0x7f, 0xff);
 				if (luxsamples)
 				{
 					const byte *lux = luxsamples + idx;
-					dir = lux[0] | (lux[1] << 8) | (lux[2] << 16) | 0xff000000u;
+					dir = GL_PackLightmapColor (lux[0], lux[1], lux[2], 0xff);
 				}
 				for (int tap = 0; tap < taps; tap++)
 					luxrow[s + tap * smax] = dir;
@@ -579,7 +620,8 @@ void GL_BuildLightmaps (void)
 	GL_FreeLightmapData ();
 
 	use_lightdir = (r_lightingdir.value > 0.f) && cl.worldmodel->lightdirdata;
-	gl_lightmap_format = GL_RGBA;//FIXME: hardcoded for now!
+	gl_lightmap_format = GL_SelectLightmapFormat ();
+	gl_lightmap_type = GL_UNSIGNED_BYTE;
 
 	switch (gl_lightmap_format)
 	{
@@ -590,8 +632,14 @@ void GL_BuildLightmaps (void)
 		lightmap_bytes = 4;
 		break;
 	default:
-		Sys_Error ("GL_BuildLightmaps: bad lightmap format");
+		Con_DWarning ("GL_BuildLightmaps: unsupported lightmap format %d, falling back to GL_RGBA\n", gl_lightmap_format);
+		gl_lightmap_format = GL_RGBA;
+		gl_lightmap_type = GL_UNSIGNED_BYTE;
+		lightmap_bytes = 4;
+		break;
 	}
+
+	Con_DPrintf ("Lightmap upload format: %s (policy %d)\n", gl_lightmap_format == GL_BGRA ? "GL_BGRA" : "GL_RGBA", (int)gl_lightmap_format_cvar.value);
 
 	lightmap_block_width = lightmap_block_height = GL_SanitizeAtlasSize ((int)gl_lightmap_atlas_size.value);
 	// allocate lightmap blocks
@@ -639,18 +687,18 @@ void GL_BuildLightmaps (void)
 	}
 
 	// fill reserved texel
-	lightmap_data[0] = 0xff808080u;
+	lightmap_data[0] = GL_PackLightmapColor (0x80, 0x80, 0x80, 0xff);
 	if (lightmap_dir_data)
-		lightmap_dir_data[0] = 0x7f7f7fff;
+		lightmap_dir_data[0] = GL_PackLightmapColor (0x7f, 0x7f, 0x7f, 0xff);
 
 	// unlit map? fill with 50% grey
 	if (!cl.worldmodel->lightdata)
 	{
 		for (i = 1; i < lmsize; i++)
 		{
-			lightmap_data[i] = 0xff808080u;
+			lightmap_data[i] = GL_PackLightmapColor (0x80, 0x80, 0x80, 0xff);
 			if (lightmap_dir_data)
-				lightmap_dir_data[i] = 0x7f7f7fff;
+				lightmap_dir_data[i] = GL_PackLightmapColor (0x7f, 0x7f, 0x7f, 0xff);
 		}
 	}
 
