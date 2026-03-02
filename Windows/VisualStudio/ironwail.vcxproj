@@ -317,6 +317,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\r_fogvol.c" />
     <ClCompile Include="..\..\Quake\r_postfx.c" />
     <ClCompile Include="..\..\Quake\r_part.c" />
+    <ClCompile Include="..\..\Quake\r_part_q3p.c" />
     <ClCompile Include="..\..\Quake\r_sprite.c" />
     <ClCompile Include="..\..\Quake\r_world.c" />
     <ClCompile Include="..\..\Quake\sbar.c" />
