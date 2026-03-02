@@ -106,6 +106,25 @@ typedef struct pending_snd_job_s
 static pending_snd_job_t *pending_snd_jobs;
 static SDL_mutex *wavinfo_mutex;
 
+void S_InitWavinfoMutex (void)
+{
+	if (wavinfo_mutex)
+		return;
+
+	wavinfo_mutex = SDL_CreateMutex ();
+	if (!wavinfo_mutex)
+		Sys_Error ("S_InitWavinfoMutex: couldn\'t create mutex");
+}
+
+void S_ShutdownWavinfoMutex (void)
+{
+	if (wavinfo_mutex)
+	{
+		SDL_DestroyMutex (wavinfo_mutex);
+		wavinfo_mutex = NULL;
+	}
+}
+
 static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer);
 
 static pending_snd_job_t *S_FindPendingSoundJob (sfx_t *s)
@@ -130,19 +149,9 @@ static void S_LoadSoundDecodeJob (void *userdata)
 	byte *src;
 	byte *dst;
 
-	if (!wavinfo_mutex)
-		wavinfo_mutex = SDL_CreateMutex ();
-
-	if (wavinfo_mutex)
-	{
-		SDL_LockMutex (wavinfo_mutex);
-		job->info = GetWavinfo (job->name, job->file_data, (int) job->file_len);
-		SDL_UnlockMutex (wavinfo_mutex);
-	}
-	else
-	{
-		job->info = GetWavinfo (job->name, job->file_data, (int) job->file_len);
-	}
+	SDL_LockMutex (wavinfo_mutex);
+	job->info = GetWavinfo (job->name, job->file_data, (int) job->file_len);
+	SDL_UnlockMutex (wavinfo_mutex);
 
 	if (job->info.channels != 1 || (job->info.width != 1 && job->info.width != 2))
 	{
