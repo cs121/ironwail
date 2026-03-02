@@ -97,7 +97,7 @@ COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
 
-static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add)
+static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_delta)
 {
         if (!r_lightgrid_debug.value)
         {
@@ -116,14 +116,14 @@ static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_add)
 
         r_lightgrid_debug_sample_reported = true;
 
-        Con_Printf ("r_lightgrid_debug: %s probe rgb=(%.2f %.2f %.2f) ao=%.2f ambient_add=(%.1f %.1f %.1f)\n",
+        Con_Printf ("r_lightgrid_debug: %s probe rgb=(%.2f %.2f %.2f) ao=%.2f ambient_delta=(%.1f %.1f %.1f)\n",
                 e->model ? e->model->name : "<no model>",
                 e->lightcache.lightgrid_color[0], e->lightcache.lightgrid_color[1], e->lightcache.lightgrid_color[2],
                 e->lightcache.lightgrid_ao,
-                ambient_add[0], ambient_add[1], ambient_add[2]);
+                ambient_delta[0], ambient_delta[1], ambient_delta[2]);
 }
 
-static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, vec3_t dlightcolor)
+static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor)
 {
         vec3_t          gridcolor;
 
@@ -135,19 +135,16 @@ static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor, ve
                 return;
 
         {
-                vec3_t ambient_add;
+                vec3_t ambient_delta;
                 for (int i = 0; i < 3; i++)
                 {
-                        ambientcolor[i] -= gridcolor[i];
-                        if (ambientcolor[i] < 0.f)
-                                ambientcolor[i] = 0.f;
-
-                        ambientcolor[i] += gridcolor[i];
-
-                        ambient_add[i] = gridcolor[i];
+                        const float before = fmaxf (ambientcolor[i], 0.f);
+                        const float after = fmaxf (before, gridcolor[i]);
+                        ambientcolor[i] = after;
+                        ambient_delta[i] = after - before;
                 }
 
-                R_DebugLightgridSample (e, ambient_add);
+                R_DebugLightgridSample (e, ambient_delta);
         }
 }
 
@@ -425,7 +422,7 @@ void R_SetupAliasLighting (entity_t     *e)
                 }
         }
 
-        R_ApplyLightgridLighting (e, ambientcolor, dlightcolor);
+        R_ApplyLightgridLighting (e, ambientcolor);
 
         // viewmodel lighting is typically darker because world lights aren't placed for a free camera
 	if (e == &cl.viewent)
