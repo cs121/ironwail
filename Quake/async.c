@@ -408,19 +408,22 @@ void FS_PumpAsyncCompletions (void)
 	{
 		fs_completion_t *next = list->next;
 		qboolean canceled;
+		qboolean stale;
 
 		SDL_LockMutex (fs_mutex);
-		/*
-		 * A completion is canceled only if its exact handle id was canceled.
-		 * Generation mismatches are still treated as stale and dropped.
-		 */
-		canceled = FS_TakeCanceledIdLocked (list->id) || list->generation != fs_generation;
+		canceled = FS_TakeCanceledIdLocked (list->id);
+		stale = list->generation != fs_generation;
 		SDL_UnlockMutex (fs_mutex);
 
-		if (!canceled)
+		if (!canceled && !stale)
 			list->cb (list->user, list->data, list->len, list->status);
-		else if (list->data)
-			free (list->data);
+		else
+		{
+			if (stale)
+				list->cb (list->user, NULL, 0, -1);
+			if (list->data)
+				free (list->data);
+		}
 		free (list);
 		list = next;
 	}

@@ -106,6 +106,21 @@ typedef struct pending_snd_job_s
 static pending_snd_job_t *pending_snd_jobs;
 static SDL_mutex *wavinfo_mutex;
 
+static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer);
+
+static pending_snd_job_t *S_FindPendingSoundJob (sfx_t *s)
+{
+	pending_snd_job_t *job;
+
+	for (job = pending_snd_jobs; job; job = job->next)
+	{
+		if (job->sfx == s)
+			return job;
+	}
+
+	return NULL;
+}
+
 static void S_LoadSoundDecodeJob (void *userdata)
 {
 	pending_snd_job_t *job = (pending_snd_job_t *) userdata;
@@ -115,9 +130,19 @@ static void S_LoadSoundDecodeJob (void *userdata)
 	byte *src;
 	byte *dst;
 
-	SDL_LockMutex (wavinfo_mutex);
-	job->info = GetWavinfo (job->name, job->file_data, (int) job->file_len);
-	SDL_UnlockMutex (wavinfo_mutex);
+	if (!wavinfo_mutex)
+		wavinfo_mutex = SDL_CreateMutex ();
+
+	if (wavinfo_mutex)
+	{
+		SDL_LockMutex (wavinfo_mutex);
+		job->info = GetWavinfo (job->name, job->file_data, (int) job->file_len);
+		SDL_UnlockMutex (wavinfo_mutex);
+	}
+	else
+	{
+		job->info = GetWavinfo (job->name, job->file_data, (int) job->file_len);
+	}
 
 	if (job->info.channels != 1 || (job->info.width != 1 && job->info.width != 2))
 	{
@@ -232,10 +257,7 @@ S_LoadSound
 sfxcache_t *S_LoadSound (sfx_t *s)
 {
 	char	namebuffer[256];
-	byte	*data;
-	wavinfo_t	info;
-	int		len;
-	float	stepscale;
+	pending_snd_job_t *job;
 	sfxcache_t	*sc;
 
 // see if still in memory
@@ -248,6 +270,44 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 // load it in
 	q_strlcpy(namebuffer, "sound/", sizeof(namebuffer));
 	q_strlcat(namebuffer, s->name, sizeof(namebuffer));
+
+	job = S_FindPendingSoundJob (s);
+	if (job)
+	{
+		if (!job->done)
+			return NULL;
+		sc = S_CommitPendingSound (job);
+		if (sc)
+			return sc;
+		return S_LoadSoundSync (s, namebuffer);
+	}
+
+	if (Host_AsyncAssetsEnabled ())
+	{
+		job = (pending_snd_job_t *) calloc (1, sizeof (*job));
+		if (!job)
+			Sys_Error ("S_LoadSound: out of memory");
+
+		job->sfx = s;
+		q_strlcpy (job->name, s->name, sizeof (job->name));
+
+		job->next = pending_snd_jobs;
+		pending_snd_jobs = job;
+
+		FS_AsyncRead (namebuffer, S_AsyncReadComplete, job);
+		return NULL;
+	}
+
+	return S_LoadSoundSync (s, namebuffer);
+}
+
+static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer)
+{
+	byte	*data;
+	wavinfo_t	info;
+	int		len;
+	float	stepscale;
+	sfxcache_t	*sc;
 
 //	Con_Printf ("loading %s\n",namebuffer);
 
@@ -502,4 +562,3 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 
 	return info;
 }
-
