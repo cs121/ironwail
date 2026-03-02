@@ -159,6 +159,7 @@ extern cvar_t gl_farclip;
 static int r_fogvol_history_index = 0;
 static int r_fogvol_history_width = 0;
 static int r_fogvol_history_height = 0;
+static qboolean r_fogvol_composite_valid = false;
 
 
 void R_FogVol_ClearHistory (void)
@@ -166,6 +167,7 @@ void R_FogVol_ClearHistory (void)
 	r_fogvol_history_index = 0;
 	r_fogvol_history_width = 0;
 	r_fogvol_history_height = 0;
+	r_fogvol_composite_valid = false;
 
 	if (!framebufs.fogvol.history_fbo[0] || !framebufs.fogvol.history_fbo[1])
 		return;
@@ -1187,6 +1189,9 @@ qboolean R_FogVol_CanRenderGlobal (void)
  * Returns 0 if fogvol did not render this frame (no active volumes). */
 GLuint R_FogVol_GetCompositeTex (void)
 {
+	if (!r_fogvol_composite_valid)
+		return 0;
+
 	GLuint tex = framebufs.fogvol.composite_tex[r_fogvol_history_index];
 	return tex;
 }
@@ -1674,6 +1679,10 @@ void R_FogVol_Render (void)
 	const lightgrid_t *lightgrid = NULL;
 	vec3_t shadow_dir;
 	int shadow_samples;
+
+	/* Per-frame validity: only expose a fogvol composite texture after this
+	 * frame actually produced one. */
+	r_fogvol_composite_valid = false;
 
 	if (!glprogs.fogvol)
 		return;
@@ -2228,6 +2237,8 @@ void R_FogVol_Render (void)
 				GL_COLOR_BUFFER_BIT, GL_NEAREST);
 			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		}
+
+		r_fogvol_composite_valid = true;
 	}
 
 	if (mode == 1)

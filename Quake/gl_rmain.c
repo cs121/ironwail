@@ -2469,9 +2469,9 @@ void GL_PostProcess (void)
 	 * postprocess.frag samples this to derive per-pixel volumetric transmittance and
 	 * suppress AO where fog is dense — replacing the inaccurate analytical fog formula
 	 * (exp2(-density*dist^2)) which cannot model spatial noise or color variation.
-	 * composite_tex[0] holds the upsampled full-res fogvol output from R_FogVol_Render.
-	 * Passing 0 when fogvol is inactive leaves the binding as the previous frame's tex
-	 * or driver default (black), which FogVolTransmittance treats as transmittance=1. */
+	 * The existing fogvol_active gating is preserved; R_FogVol_GetCompositeTex() now
+	 * returns 0 when no valid composite was produced this frame, preventing stale
+	 * texture handles from scene/context transitions being rebound here. */
 	{
 		GLuint fogvol_composite = 0;
 		float  fogvol_active    = 0.f;
