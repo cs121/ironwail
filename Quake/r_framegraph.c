@@ -4,6 +4,10 @@
 
 #include "r_fogvol.h"
 
+void R_SetupView (void);
+void R_RenderScene (void);
+void R_WarpScaleView (void);
+
 /*
  * Framegraph pass order and data dependencies
  * ------------------------------------------
