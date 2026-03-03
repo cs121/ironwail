@@ -29,6 +29,7 @@ typedef struct fog_volume_s
 	int enabled;
 	float height;
 	float heightScale;
+	float edgeSoftness;
 } fog_volume_t;
 
 typedef struct froxel_grid_s

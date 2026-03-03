@@ -53,6 +53,7 @@ struct FogVolume
 	vec4 wind_turbulence;
 	vec4 misc;
 	vec4 extra;
+	vec4 params2;
 };
 
 layout(std140, binding=2) uniform FogVolumeUBO
@@ -357,6 +358,14 @@ float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
 	return smoothstep(0.0, edgeThickness, edgeDist);
 }
 
+float FogEdgeSoftnessMask(float edgeDist, float falloff, float edgeSoftness)
+{
+	if (edgeSoftness <= 0.0)
+		return 1.0;
+	float softnessWidth = max(1.0, max(falloff, 0.0)) * clamp(edgeSoftness, 0.0, 1.0);
+	return smoothstep(0.0, softnessWidth, max(edgeDist, 0.0));
+}
+
 bool PointInsideVolume(vec3 p, FogVolume volume)
 {
 	if (volume.extra.x > 0.5)
@@ -381,16 +390,21 @@ vec3 SampleFogLightgrid(vec3 p, FogVolume volume)
 // PERF: lod=0 full quality (near), lod=1 coarse (far). Caller passes based on distance.
 float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, float noiseScalePre, vec3 flowPre, int lod, float marchDist)
 {
+	float edgeDist;
 	float edgeFade;
+	float edgeSoftness = clamp(volume.params2.x, 0.0, 1.0);
 	if (volume.extra.x > 0.5)
 	{
-		float d = volume.sphere.w - length(p - volume.sphere.xyz);
-		edgeFade = (falloff <= 0.0) ? 1.0 : smoothstep(0.0, falloff, d);
+		edgeDist = volume.sphere.w - length(p - volume.sphere.xyz);
+		edgeFade = (falloff <= 0.0) ? 1.0 : smoothstep(0.0, falloff, edgeDist);
 	}
 	else
 	{
+		vec3 d = min(p - volume.mins.xyz, volume.maxs.xyz - p);
+		edgeDist = min(d.x, min(d.y, d.z));
 		edgeFade = FogEdgeFade(p, volume.mins.xyz, volume.maxs.xyz, falloff);
 	}
+	edgeFade *= FogEdgeSoftnessMask(edgeDist, falloff, edgeSoftness);
 
 	// PERF: If edgeFade is zero, density is zero regardless of noise — skip noise entirely.
 	if (edgeFade < 1e-5)
