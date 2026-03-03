@@ -447,6 +447,8 @@ cvar_t	r_godrays_max_shift = { "r_godrays_max_shift", "0.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_reset_on_teleport = { "r_godrays_reset_on_teleport", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug_source = { "r_godrays_debug_source", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_volumetric = { "r_godrays_volumetric", "1", CVAR_ARCHIVE };
+cvar_t	r_godrays_vol_pow = { "r_godrays_vol_pow", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_vignette = { "r_vignette", "0.15", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.8", CVAR_ARCHIVE };
@@ -1745,6 +1747,14 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	float light_y = R_SanitizeGodraysValue (r_godrays_light_y.value, 0.5f, 0.f, 1.f);
 	float stabilized_x = light_x;
 	float stabilized_y = light_y;
+	GLuint volumetric_tex = 0;
+	float volumetric_enabled = 0.f;
+
+	if (r_godrays_volumetric.value > 0.f && r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
+	{
+		volumetric_tex = R_FogVol_GetCompositeTex ();
+		volumetric_enabled = (volumetric_tex != 0) ? 1.f : 0.f;
+	}
 
 	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
 
@@ -1790,8 +1800,10 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_UseProgram (glprogs.godrays);
 			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
+			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, volumetric_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
+			GL_Uniform4fFunc (2, volumetric_enabled, q_max (0.f, r_godrays_vol_pow.value), volumetric_enabled, 0.f);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 			first_pass = false;
@@ -1824,8 +1836,10 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_UseProgram (glprogs.godrays);
 			GL_SetState ((first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
+			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, volumetric_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
+			GL_Uniform4fFunc (2, volumetric_enabled, q_max (0.f, r_godrays_vol_pow.value), volumetric_enabled, 0.f);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 		}
