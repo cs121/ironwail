@@ -24,7 +24,11 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "cl_postfx.h"
 #include "r_postfx.h"
+#include "r_framegraph.h"
 #include "r_fogvol.h"
+#include "r_godrays.h"
+#include "r_ssao.h"
+#include "r_tonemap.h"
 #include "gl_lightgrid.h"
 #include "mat_shader.h"
 #include <float.h>
@@ -52,7 +56,7 @@ static int r_fogvol_draw_called = 0;
  * fading to AO=1.0.
  * Fix: save fog params just before Fog_DisableGFog and pass them explicitly to
  * ssao.frag via uniform 14 .yzw (previously unused, only .x = max_distance). */
-static float r_ssao_saved_fog[4]; /* xyz=fog color, w=fog density */
+static r_ssao_fog_state_t r_ssao_fog_state;
 static qboolean r_ssao_invalid_warned = false;
 
 float r_autoexposure_debug_exposure = 1.f;
@@ -83,14 +87,6 @@ static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 static qboolean r_dlight_buffered_frame = false;
-
-typedef struct godrays_stabilization_s
-{
-	qboolean	valid;
-	vec2_t		smoothed_pos;
-	double		last_time;
-	vec3_t		last_viewangles;
-} godrays_stabilization_t;
 
 static godrays_stabilization_t r_godrays_stabilization;
 
@@ -137,21 +133,6 @@ static qboolean R_IsUnderwaterContents (int contents)
 	return contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA;
 }
 
-static float GL_TemperedOverbright (float overbright)
-{
-	if (overbright <= 1.f)
-		return 1.f;
-
-	/*
-	* Compress the raw 2^n scaling so the boost favours highlights over the
-	* rest of the scene.  A sub-linear exponent keeps very bright areas hot
-	* while easing off on mid and dark tones to avoid washing out the image.
-	*/
-	const float exponent = 0.75f;
-	float tempered = powf (overbright, exponent);
-
-	return q_max (tempered, 1.f);
-}
 
 //johnfitz -- rendering statistics
 int rs_brushpolys, rs_aliaspolys, rs_skypolys;
@@ -1260,23 +1241,6 @@ static void R_CompositeDlightBuffer (void)
 	}
 }
 
-static float R_SanitizeSSAOValue (float value, float fallback, float minval, float maxval)
-{
-#if defined(_MSC_VER)
-	if (_finite (value) == 0)
-		return fallback;
-#else
-	if (!isfinite (value))
-		return fallback;
-#endif
-
-	if (value < minval)
-		return minval;
-	if (value > maxval)
-		return maxval;
-	return value;
-}
-
 static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
 {
 	if ((r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f) && r_ssao_debug.value <= 0.f)
@@ -1295,9 +1259,9 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 	int samples = (int)Q_rint (r_ssao_samples.value);
 	samples = CLAMP (4, samples, SSAO_MAX_SAMPLES);
-	float radius = R_SanitizeSSAOValue (r_ssao_radius.value, 24.f, 0.01f, 8192.f);
-	float bias = R_SanitizeSSAOValue (r_ssao_bias.value, 0.02f, 0.f, 1.f) * radius;
-	float power = R_SanitizeSSAOValue (r_ssao_power.value, 1.f, 0.01f, 8.f);
+	float radius = R_SSAO_SanitizeValue (r_ssao_radius.value, 24.f, 0.01f, 8192.f);
+	float bias = R_SSAO_SanitizeValue (r_ssao_bias.value, 0.02f, 0.f, 1.f) * radius;
+	float power = R_SSAO_SanitizeValue (r_ssao_power.value, 1.f, 0.01f, 8.f);
 	float min_ao = CLAMP (0.f, r_ssao_min.value, 1.f);
 	qboolean use_halfres = (r_ssao_halfres.value > 0.f && r_ssao_force_fullres.value <= 0.f);
 	int index = use_halfres ? 1 : 0;
@@ -1324,7 +1288,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	float noise_enabled = (r_ssao_noise.value > 0.f) ? 1.f : 0.f;
 	float noise_seed = (r_ssao_freeze_noise.value > 0.f) ? 0.f : (float)r_framecount;
 	int noise_mode = (int)Q_rint (r_ssao_noise_mode.value);
-	float noise_scale = R_SanitizeSSAOValue (r_ssao_noise_scale.value, 1.f, 0.1f, 64.f);
+	float noise_scale = R_SSAO_SanitizeValue (r_ssao_noise_scale.value, 1.f, 0.1f, 64.f);
 	noise_mode = CLAMP (0, noise_mode, 2);
 	if (noise_enabled <= 0.5f)
 		noise_mode = 0;
@@ -1332,7 +1296,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		noise_mode = 1;
 	int normal_source = (int)Q_rint (r_ssao_normalsource.value);
 	normal_source = CLAMP (0, normal_source, 1);
-	float max_distance = R_SanitizeSSAOValue (r_ssao_max_distance.value, 1024.f, 1.f, 65536.f);
+	float max_distance = R_SSAO_SanitizeValue (r_ssao_max_distance.value, 1024.f, 1.f, 65536.f);
 	static qboolean ssao_logged = false;
 	if (!ssao_logged)
 	{
@@ -1397,13 +1361,13 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform1iFunc (11, normal_source);
 	GL_Uniform1iFunc (12, 0);
 	GL_Uniform1iFunc (13, noise_mode);
-	/* BUG FIX #1: Pass saved fog density (r_ssao_saved_fog[3]) as uniform 14.y
+	/* BUG FIX #1: Pass saved fog density (r_ssao_fog_state.density) as uniform 14.y
 	 * so ssao.frag FogTransmittanceFromViewPos uses the correct scene fog density
 	 * instead of the zero value left by Fog_DisableGFog. The ssao.frag u_fogParams
 	 * layout(location=14) must read .y as fog density instead of the UBO Fog.w.
 	 * .zw pass fog color rgb (xy = color.rg, see ssao.frag for usage). */
-	GL_Uniform4fFunc (14, max_distance, r_ssao_saved_fog[3],
-		r_ssao_saved_fog[0] * 0.299f + r_ssao_saved_fog[1] * 0.587f + r_ssao_saved_fog[2] * 0.114f,
+	GL_Uniform4fFunc (14, max_distance, r_ssao_fog_state.density,
+		r_ssao_fog_state.color[0] * 0.299f + r_ssao_fog_state.color[1] * 0.587f + r_ssao_fog_state.color[2] * 0.114f,
 		0.f);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_LogErrorIfDeveloper ("SSAO draw");
@@ -1463,165 +1427,18 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 void R_ResetGodraysStabilization (void)
 {
-	r_godrays_stabilization.valid = false;
-	r_godrays_stabilization.smoothed_pos[0] = 0.f;
-	r_godrays_stabilization.smoothed_pos[1] = 0.f;
-	r_godrays_stabilization.last_time = 0.0;
-	VectorClear (r_godrays_stabilization.last_viewangles);
+	R_Godrays_ResetStabilization (&r_godrays_stabilization);
 }
 
-static float R_SanitizeGodraysValue (float value, float fallback, float minval, float maxval)
+static void R_GetGodraysSkyParams_Current (godrays_sky_params_t *params)
 {
-#if defined(_MSC_VER)
-	if (_finite (value) == 0)
-		return fallback;
-#else
-	if (!isfinite (value))
-		return fallback;
-#endif
-
-	if (value < minval)
-		return minval;
-	if (value > maxval)
-		return maxval;
-	return value;
-}
-
-static void R_ParseGodraysSkyTint (vec3_t out_tint)
-{
-	float r = 1.f;
-	float g = 1.f;
-	float b = 1.f;
-
-	if (r_godrays_sky_tint.string && r_godrays_sky_tint.string[0])
-	{
-		if (sscanf (r_godrays_sky_tint.string, "%f %f %f", &r, &g, &b) != 3)
-		{
-			r = 1.f;
-			g = 1.f;
-			b = 1.f;
-		}
-	}
-
-	out_tint[0] = q_max (0.f, r);
-	out_tint[1] = q_max (0.f, g);
-	out_tint[2] = q_max (0.f, b);
-}
-
-typedef struct godrays_sky_params_s
-{
-	qboolean enabled;
-	float threshold;
-	float intensity;
-	float softness;
-	vec3_t tint;
-} godrays_sky_params_t;
-
-static void R_GetGodraysSkyParams (godrays_sky_params_t *params)
-{
-	if (!params)
-		return;
-
-	params->enabled = (r_godrays_sky_enable.value > 0.f);
-	params->threshold = R_SanitizeGodraysValue (r_godrays_sky_threshold.value, 0.05f, 0.f, 1.f);
-	params->intensity = q_max (0.f, r_godrays_sky_intensity.value);
-	params->softness = R_SanitizeGodraysValue (r_godrays_sky_softness.value, 1.5f, 0.f, FLT_MAX);
-	R_ParseGodraysSkyTint (params->tint);
-}
-
-static qboolean R_GodraysReady (void)
-{
-	if (!cl.worldmodel)
-		return false;
-	if (r_framecount <= 1)
-		return false;
-	if (!cl.worldmodel->textures || !cl.worldmodel->usedtextures || cl.worldmodel->numtextures <= 0)
-		return false;
-
-	return true;
-}
-
-static void GL_GetGodraysLightPos (int width, int height, float raw_x, float raw_y, float *out_x, float *out_y)
-{
-	raw_x = R_SanitizeGodraysValue (raw_x, 0.5f, 0.f, 1.f);
-	raw_y = R_SanitizeGodraysValue (raw_y, 0.5f, 0.f, 1.f);
-	vec2_t raw = { raw_x, raw_y };
-	float stabilize = R_SanitizeGodraysValue (r_godrays_stabilize.value, 0.f, 0.f, 1.f);
-	float smooth_rate = R_SanitizeGodraysValue (r_godrays_smooth_rate.value, 0.f, 0.f, FLT_MAX);
-	float stabilize_strength = R_SanitizeGodraysValue (r_godrays_stabilize_strength.value, 0.5f, 0.f, 1.f);
-	// max shift is expressed in pixels per frame when stabilize_max_px is set,
-	// otherwise fall back to the legacy max_shift (pixels per second).
-	float max_shift = R_SanitizeGodraysValue (r_godrays_stabilize_max_px.value, 0.f, 0.f, FLT_MAX);
-	qboolean should_reset = !r_godrays_stabilization.valid;
-
-	if (!should_reset && r_godrays_reset_on_teleport.value > 0.f)
-	{
-		float yaw_delta = fabsf (AngleDifference (r_refdef.viewangles[YAW], r_godrays_stabilization.last_viewangles[YAW]));
-		float pitch_delta = fabsf (AngleDifference (r_refdef.viewangles[PITCH], r_godrays_stabilization.last_viewangles[PITCH]));
-		vec2_t delta = {
-			raw[0] - r_godrays_stabilization.smoothed_pos[0],
-			raw[1] - r_godrays_stabilization.smoothed_pos[1]
-		};
-		float delta_len = sqrtf (delta[0] * delta[0] + delta[1] * delta[1]);
-
-		if (yaw_delta > 45.f || pitch_delta > 35.f || delta_len > 0.35f)
-			should_reset = true;
-	}
-
-	if (should_reset)
-	{
-		r_godrays_stabilization.smoothed_pos[0] = raw[0];
-		r_godrays_stabilization.smoothed_pos[1] = raw[1];
-	}
-	else
-	{
-		float dt = (float)(cl.time - r_godrays_stabilization.last_time);
-		if (dt < 0.f)
-			dt = 0.f;
-
-		vec2_t delta = {
-			raw[0] - r_godrays_stabilization.smoothed_pos[0],
-			raw[1] - r_godrays_stabilization.smoothed_pos[1]
-		};
-
-		float alpha = 1.f;
-		if (stabilize_strength > 0.f)
-		{
-			float t = q_max (0.f, dt) * 60.f;
-			alpha = 1.f - powf (1.f - stabilize_strength, t);
-		}
-		else if (smooth_rate > 0.f && dt > 0.f)
-			alpha = 1.f - expf (-dt * smooth_rate);
-
-		vec2_t step = { delta[0] * alpha, delta[1] * alpha };
-		if (max_shift <= 0.f && dt > 0.f)
-			max_shift = R_SanitizeGodraysValue (r_godrays_max_shift.value, 0.f, 0.f, FLT_MAX) * dt;
-
-		if (max_shift > 0.f && width > 0 && height > 0)
-		{
-			float max_step = max_shift;
-			vec2_t step_px = { step[0] * (float)width, step[1] * (float)height };
-			float step_len = sqrtf (step_px[0] * step_px[0] + step_px[1] * step_px[1]);
-			if (step_len > max_step && step_len > 0.f)
-			{
-				float scale = max_step / step_len;
-				step_px[0] *= scale;
-				step_px[1] *= scale;
-				step[0] = step_px[0] / (float)width;
-				step[1] = step_px[1] / (float)height;
-			}
-		}
-
-		r_godrays_stabilization.smoothed_pos[0] += step[0];
-		r_godrays_stabilization.smoothed_pos[1] += step[1];
-	}
-
-	r_godrays_stabilization.last_time = cl.time;
-	VectorCopy (r_refdef.viewangles, r_godrays_stabilization.last_viewangles);
-	r_godrays_stabilization.valid = true;
-
-	*out_x = CLAMP (0.f, raw[0] + (r_godrays_stabilization.smoothed_pos[0] - raw[0]) * stabilize, 1.f);
-	*out_y = CLAMP (0.f, raw[1] + (r_godrays_stabilization.smoothed_pos[1] - raw[1]) * stabilize, 1.f);
+	R_Godrays_GetSkyParams (
+		r_godrays_sky_enable.value,
+		r_godrays_sky_threshold.value,
+		r_godrays_sky_intensity.value,
+		r_godrays_sky_softness.value,
+		r_godrays_sky_tint.string,
+		params);
 }
 
 static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
@@ -1644,7 +1461,7 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 
 	godrays_sky_params_t sky_params;
 
-	R_GetGodraysSkyParams (&sky_params);
+	R_GetGodraysSkyParams_Current (&sky_params);
 
 	if (draw_sky && glprogs.godrays_source_sky && sky_params.enabled)
 	{
@@ -1733,32 +1550,32 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 		return fallback;
 	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
 		return fallback;
-	if (!R_GodraysReady ())
+	if (!R_Godrays_IsReady (cl.worldmodel, r_framecount))
 		return fallback;
 
 	godrays_sky_params_t sky_params;
 	qboolean emit_sky;
 
-	R_GetGodraysSkyParams (&sky_params);
+	R_GetGodraysSkyParams_Current (&sky_params);
 	emit_sky = (glprogs.godrays_source_sky != 0 && sky_params.enabled);
 	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);
 	if (!emit_sky && !emit_brush)
 		return fallback;
 
-	float samples_value = R_SanitizeGodraysValue (r_godrays_samples.value, 48.f, 1.f, 128.f);
+	float samples_value = R_Godrays_SanitizeValue (r_godrays_samples.value, 48.f, 1.f, 128.f);
 	int samples = (int)Q_rint (samples_value);
 	samples = CLAMP (8, samples, 128);
 
-	float threshold = R_SanitizeGodraysValue (r_godrays_threshold.value, 0.f, 0.f, FLT_MAX);
-	float density = R_SanitizeGodraysValue (r_godrays_density.value, 0.9f, 0.f, FLT_MAX);
-	float weight = R_SanitizeGodraysValue (r_godrays_weight.value, 0.015f, 0.f, FLT_MAX);
-	float decay = R_SanitizeGodraysValue (r_godrays_decay.value, 0.97f, 0.f, FLT_MAX);
-	float exposure = R_SanitizeGodraysValue (r_godrays_exposure.value, 1.f, 0.f, FLT_MAX);
-	float softness = R_SanitizeGodraysValue (r_godrays_blur.value, 1.5f, 0.f, FLT_MAX);
-	float sharpness = R_SanitizeGodraysValue (r_godrays_light_sharpness.value, 1.25f, 0.f, FLT_MAX);
-	float max_radius = R_SanitizeGodraysValue (r_godrays_max_radius.value, 1.f, 0.f, 1.f);
-	float light_x = R_SanitizeGodraysValue (r_godrays_light_x.value, 0.5f, 0.f, 1.f);
-	float light_y = R_SanitizeGodraysValue (r_godrays_light_y.value, 0.5f, 0.f, 1.f);
+	float threshold = R_Godrays_SanitizeValue (r_godrays_threshold.value, 0.f, 0.f, FLT_MAX);
+	float density = R_Godrays_SanitizeValue (r_godrays_density.value, 0.9f, 0.f, FLT_MAX);
+	float weight = R_Godrays_SanitizeValue (r_godrays_weight.value, 0.015f, 0.f, FLT_MAX);
+	float decay = R_Godrays_SanitizeValue (r_godrays_decay.value, 0.97f, 0.f, FLT_MAX);
+	float exposure = R_Godrays_SanitizeValue (r_godrays_exposure.value, 1.f, 0.f, FLT_MAX);
+	float softness = R_Godrays_SanitizeValue (r_godrays_blur.value, 1.5f, 0.f, FLT_MAX);
+	float sharpness = R_Godrays_SanitizeValue (r_godrays_light_sharpness.value, 1.25f, 0.f, FLT_MAX);
+	float max_radius = R_Godrays_SanitizeValue (r_godrays_max_radius.value, 1.f, 0.f, 1.f);
+	float light_x = R_Godrays_SanitizeValue (r_godrays_light_x.value, 0.5f, 0.f, 1.f);
+	float light_y = R_Godrays_SanitizeValue (r_godrays_light_y.value, 0.5f, 0.f, 1.f);
 	float stabilized_x = light_x;
 	float stabilized_y = light_y;
 	medium_scatter_source_t medium = { 0, 0.f };
@@ -1772,7 +1589,22 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 		volumetric_enabled = medium.valid;
 	}
 
-	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
+	{
+		r_godrays_stabilize_input_t stabilize_input;
+		stabilize_input.width = width;
+		stabilize_input.height = height;
+		stabilize_input.raw_x = light_x;
+		stabilize_input.raw_y = light_y;
+		VectorCopy (r_refdef.viewangles, stabilize_input.viewangles);
+		stabilize_input.time = cl.time;
+		stabilize_input.stabilize = R_Godrays_SanitizeValue (r_godrays_stabilize.value, 0.f, 0.f, 1.f);
+		stabilize_input.smooth_rate = R_Godrays_SanitizeValue (r_godrays_smooth_rate.value, 0.f, 0.f, FLT_MAX);
+		stabilize_input.stabilize_strength = R_Godrays_SanitizeValue (r_godrays_stabilize_strength.value, 0.5f, 0.f, 1.f);
+		stabilize_input.stabilize_max_px = R_Godrays_SanitizeValue (r_godrays_stabilize_max_px.value, 0.f, 0.f, FLT_MAX);
+		stabilize_input.max_shift_per_sec = r_godrays_max_shift.value;
+		stabilize_input.reset_on_teleport = (r_godrays_reset_on_teleport.value > 0.f);
+		R_Godrays_ComputeLightPos (&r_godrays_stabilization, &stabilize_input, &stabilized_x, &stabilized_y);
+	}
 
 	GL_BeginGroup ("Godrays scatter");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
@@ -2400,11 +2232,11 @@ void GL_PostProcess (void)
 		postfx_lut_strength = 0.f;
 	}
 
-	godrays_enabled = (r_godrays.value > 0.f && R_GodraysReady ());
+	godrays_enabled = (r_godrays.value > 0.f && R_Godrays_IsReady (cl.worldmodel, r_framecount));
 	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
 	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
 	godrays_debug_enabled = (godrays_debug > 0.f || godrays_debug_source > 0.f);
-	godrays_preview = (godrays_enabled || (godrays_debug_enabled && R_GodraysReady ()));
+	godrays_preview = (godrays_enabled || (godrays_debug_enabled && R_Godrays_IsReady (cl.worldmodel, r_framecount)));
 	if (!godrays_preview)
 	{
 		godrays_debug = 0.f;
@@ -2416,7 +2248,7 @@ void GL_PostProcess (void)
 	if (godrays_preview)
 	{
 		/* Keep source debug useful even when scatter generation is disabled/unsupported. */
-		if (godrays_debug_source > 0.f && R_GodraysReady ())
+		if (godrays_debug_source > 0.f && R_Godrays_IsReady (cl.worldmodel, r_framecount))
 			GL_GenerateGodraysSource (
 				(glprogs.godrays_source_sky != 0 && r_godrays_sky_enable.value > 0.f),
 				(r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f));
@@ -2436,7 +2268,7 @@ void GL_PostProcess (void)
 	/* Keep SSAO intensity aligned with the cvar's intended tuning range.
 	 * Clamping to 1.0 made the default 1.5 weaker than expected and could make
 	 * user configs look like SSAO had no effect when toggled on. */
-	ssao_intensity = R_SanitizeSSAOValue (r_ssao_intensity.value, 1.5f, 0.f, 8.f);
+	ssao_intensity = R_SSAO_SanitizeValue (r_ssao_intensity.value, 1.5f, 0.f, 8.f);
 	{
 		int debug_cvar = (int)Q_rint (r_ssao_debug.value);
 		int debug_mode_i = (debug_cvar > 0) ? CLAMP (1, debug_cvar, 14) : -1;
@@ -2565,11 +2397,11 @@ void GL_PostProcess (void)
 		postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
 	/* BUG FIX #1: uniform 24 .w was unused (0). Now carries scene fog density from
-	 * r_ssao_saved_fog[3] so postprocess.frag SampleSSAO fog-damping works correctly.
+	 * r_ssao_fog_state.density so postprocess.frag SampleSSAO fog-damping works correctly.
 	 * r_ssao_saved_fog is captured in R_RenderView before Fog_DisableGFog zeros the
 	 * density in r_framedata.fogdata[3]. postprocess.frag must read scene fog density
 	 * from uniform 24.w instead of Fog.w (UBO). */
-	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, r_ssao_saved_fog[3]);
+	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, r_ssao_fog_state.density);
 	{
 		int quality = (int)Q_rint (r_post_damage_dv_quality.value);
 		dv_quality = (float)CLAMP (0, quality, 2);
@@ -3489,7 +3321,7 @@ void R_SetupView (void)
 
 		if (overbright > 1.f)
 		{
-			overbright = GL_TemperedOverbright (overbright);
+			overbright = R_Tonemap_TemperedOverbright (overbright);
 
 			float console_vis = GL_ConsoleVisibility ();
 			if (console_vis > 0.f)
@@ -4868,7 +4700,7 @@ void R_WarpScaleView (void)
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
 	need_depth_resolve = (fbodest == framebufs.composite.fbo)
 		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || r_fogvol.value > 0.f
-			|| (R_GodraysReady () && (r_godrays.value > 0.f || r_godrays_debug.value > 0.f || r_godrays_debug_source.value > 0.f)));
+			|| (R_Godrays_IsReady (cl.worldmodel, r_framecount) && (r_godrays.value > 0.f || r_godrays_debug.value > 0.f || r_godrays_debug_source.value > 0.f)));
 
 	if (msaa)
 	{
@@ -5008,29 +4840,17 @@ void R_RenderView (void)
         else if (gl_finish.value)
                 glFinish ();
 
-	R_SetupView (); //johnfitz -- this does everything that should be done once per frame
-	R_UpdateDecals ();
-        Fog_EnableGFog ();
-        R_RenderScene ();
-        R_WarpScaleView ();
-        r_fogvol_update_called++;
-        if (r_gl_state_validate.value > 0.f)
-                Con_DPrintf ("fogvol_update_called=%d r_fogvol=%.1f\n", r_fogvol_update_called, r_fogvol.value);
-        R_FogVol_BuildList ();
-        r_fogvol_draw_called++;
-        if (r_gl_state_validate.value > 0.f)
-                Con_DPrintf ("fogvol_draw_called=%d r_fogvol=%.1f\n", r_fogvol_draw_called, r_fogvol.value);
-        R_FogVol_Render ();
-        /* BUG FIX #1: Capture fog params while r_framedata.fogdata is still valid.
-         * GL_GenerateSSAOTexture (called later in GL_PostProcess) uses these for
-         * fog-damped AO; after Fog_DisableGFog the density is zeroed out. */
-        r_ssao_saved_fog[0] = r_framedata.fogdata[0];
-        r_ssao_saved_fog[1] = r_framedata.fogdata[1];
-        r_ssao_saved_fog[2] = r_framedata.fogdata[2];
-        r_ssao_saved_fog[3] = r_framedata.fogdata[3];
-        Fog_DisableGFog (); // Leave fog disabled for 2D overlays
-
-	r_frame_rendered_this_update = true;
+	r_framegraph_state_t framegraph_state;
+	framegraph_state.fogvol_update_called = &r_fogvol_update_called;
+	framegraph_state.fogvol_draw_called = &r_fogvol_draw_called;
+	framegraph_state.frame_rendered_this_update = &r_frame_rendered_this_update;
+	framegraph_state.ssao_fog_state = &r_ssao_fog_state;
+	R_FrameGraph_RenderView (&framegraph_state);
+	if (r_gl_state_validate.value > 0.f)
+	{
+		Con_DPrintf ("fogvol_update_called=%d r_fogvol=%.1f\n", r_fogvol_update_called, r_fogvol.value);
+		Con_DPrintf ("fogvol_draw_called=%d r_fogvol=%.1f\n", r_fogvol_draw_called, r_fogvol.value);
+	}
 
 	//johnfitz -- modified r_speeds output
 	time2 = Sys_DoubleTime ();
