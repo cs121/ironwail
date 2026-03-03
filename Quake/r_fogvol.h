@@ -109,6 +109,12 @@ void R_FogVol_ClearHistory (void);
 void R_FogVol_LogEndFrameState (void);
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num);
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres);
+/* Feature-level gate: fogvol is enabled by cvar and all global render resources/programs are ready this frame. */
+qboolean R_FogVol_IsEnabledForFrame (void);
+/* Output-level gate: fogvol produced a valid composite texture this frame (safe to sample now). */
+qboolean R_FogVol_HasValidComposite (void);
+/* PostFX gate: fogvol should contribute to postprocess passes this frame. */
+qboolean R_FogVol_ShouldAffectPostFX (void);
 qboolean R_FogVol_CanRenderGlobal (void);
 /* Returns the composite texture that received the fogvol temporal output this
  * frame. Use this for SSAO suppression — it is the correct per-pixel fog density
