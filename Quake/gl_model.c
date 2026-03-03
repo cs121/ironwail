@@ -2816,9 +2816,14 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 			{
 				uint8_t style = *cursor++;
 				uint8_t color[3];
-				color[0] = *cursor++;
-				color[1] = *cursor++;
-				color[2] = *cursor++;
+				/*
+				 * LIGHTGRID_OCTREE stores sample colors in BGR byte order.
+				 * Keep the runtime representation in RGB to match the rest of
+				 * the renderer (fog volume, alias lighting, debug output).
+				 */
+				color[2] = *cursor++; /* B */
+				color[1] = *cursor++; /* G */
+				color[0] = *cursor++; /* R */
 
 				if (!chosen_set)
 				{
