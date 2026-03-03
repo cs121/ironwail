@@ -412,14 +412,17 @@ cvar_t	r_ssao_max_distance = { "r_ssao_max_distance", "1024", CVAR_ARCHIVE };
 cvar_t	r_ssao_validate = { "r_ssao_validate", "0", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
-/* Sky contribution for godrays is controlled only by r_godray_sky_enable.
- * If it is <= 0, sky source generation is fully disabled (hard off). */
+/*
+ * Godrays sky parameter schema:
+ * - Canonical CVars are exclusively r_godrays_sky_*.
+ * - Legacy compatibility aliases (r_godray_sky_*) remain registered and are
+ *   synchronized during cvar init/runtime so old configs keep working.
+ * - Rendering code reads only canonical CVars via R_GetGodraysSkyParams().
+ */
 cvar_t	r_godrays_emit_emissive = { "r_godrays_emit_emissive", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_lighttex = { "r_godrays_emit_lighttex", "1", CVAR_ARCHIVE };
-cvar_t	r_godray_sky_enable = { "r_godray_sky_enable", "1", CVAR_ARCHIVE };
-cvar_t	r_godray_sky_threshold = { "r_godray_sky_threshold", "0.05", CVAR_ARCHIVE };
-cvar_t	r_godray_sky_intensity = { "r_godray_sky_intensity", "1.0", CVAR_ARCHIVE };
-cvar_t	r_godray_sky_blur = { "r_godray_sky_blur", "1.5", CVAR_ARCHIVE };
+cvar_t	r_godrays_sky_enable = { "r_godrays_sky_enable", "1", CVAR_ARCHIVE };
+cvar_t	r_godrays_sky_threshold = { "r_godrays_sky_threshold", "0.05", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_intensity = { "r_godrays_sky_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_tint = { "r_godrays_sky_tint", "1 1 1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emissive_intensity = { "r_godrays_emissive_intensity", "1.0", CVAR_ARCHIVE };
@@ -436,6 +439,10 @@ cvar_t	r_godrays_decay = { "r_godrays_decay", "0.97", CVAR_ARCHIVE };
 cvar_t	r_godrays_exposure = { "r_godrays_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_threshold = { "r_godrays_threshold", "0.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_softness = { "r_godrays_sky_softness", "1.5", CVAR_ARCHIVE };
+cvar_t	r_godray_sky_enable = { "r_godray_sky_enable", "1", CVAR_NONE };
+cvar_t	r_godray_sky_threshold = { "r_godray_sky_threshold", "0.05", CVAR_NONE };
+cvar_t	r_godray_sky_intensity = { "r_godray_sky_intensity", "1.0", CVAR_NONE };
+cvar_t	r_godray_sky_blur = { "r_godray_sky_blur", "1.5", CVAR_NONE };
 cvar_t	r_godrays_light_sharpness = { "r_godrays_light_sharpness", "1.25", CVAR_ARCHIVE };
 cvar_t	r_godrays_max_radius = { "r_godrays_max_radius", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_light_x = { "r_godrays_light_x", "0.5", CVAR_ARCHIVE };
@@ -1550,6 +1557,27 @@ static void R_ParseGodraysSkyTint (vec3_t out_tint)
 	out_tint[2] = q_max (0.f, b);
 }
 
+typedef struct godrays_sky_params_s
+{
+	qboolean enabled;
+	float threshold;
+	float intensity;
+	float softness;
+	vec3_t tint;
+} godrays_sky_params_t;
+
+static void R_GetGodraysSkyParams (godrays_sky_params_t *params)
+{
+	if (!params)
+		return;
+
+	params->enabled = (r_godrays_sky_enable.value > 0.f);
+	params->threshold = R_SanitizeGodraysValue (r_godrays_sky_threshold.value, 0.05f, 0.f, 1.f);
+	params->intensity = q_max (0.f, r_godrays_sky_intensity.value);
+	params->softness = R_SanitizeGodraysValue (r_godrays_sky_softness.value, 1.5f, 0.f, FLT_MAX);
+	R_ParseGodraysSkyTint (params->tint);
+}
+
 static qboolean R_GodraysReady (void)
 {
 	if (!cl.worldmodel)
@@ -1663,11 +1691,13 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 	}
 
-	if (draw_sky && glprogs.godrays_source_sky && r_godray_sky_enable.value > 0.f)
+	godrays_sky_params_t sky_params;
+
+	R_GetGodraysSkyParams (&sky_params);
+
+	if (draw_sky && glprogs.godrays_source_sky && sky_params.enabled)
 	{
-		float sky_intensity = q_max (0.f, r_godray_sky_intensity.value) * q_max (0.f, r_godrays_sky_intensity.value);
-		float sky_threshold = R_SanitizeGodraysValue (r_godray_sky_threshold.value, 0.05f, 0.f, 1.f);
-		vec3_t tint;
+		float sky_intensity = sky_params.intensity;
 		float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 		float sky_depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
 
@@ -1678,12 +1708,11 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 		if (sky_intensity <= 0.f)
 			sky_intensity = 1.f;
 
-		R_ParseGodraysSkyTint (tint);
 		GL_UseProgram (glprogs.godrays_source_sky);
 		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-		GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, sky_threshold);
-		GL_Uniform4fFunc (1, tint[0], tint[1], tint[2], 0.f);
+		GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, sky_params.threshold);
+		GL_Uniform4fFunc (1, sky_params.tint[0], sky_params.tint[1], sky_params.tint[2], 0.f);
 		GL_Uniform4fFunc (2, mask_knee, 0.f, 0.f, 0.f);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 	}
@@ -1727,8 +1756,11 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	if (!R_GodraysReady ())
 		return fallback;
 
-	qboolean emit_sky = (glprogs.godrays_source_sky != 0
-		&& r_godray_sky_enable.value > 0.f);
+	godrays_sky_params_t sky_params;
+	qboolean emit_sky;
+
+	R_GetGodraysSkyParams (&sky_params);
+	emit_sky = (glprogs.godrays_source_sky != 0 && sky_params.enabled);
 	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);
 	if (!emit_sky && !emit_brush)
 		return fallback;
@@ -1771,9 +1803,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 
 	{
 		qboolean first_pass = true;
-		float sky_softness = R_SanitizeGodraysValue (r_godray_sky_blur.value, 1.5f, 0.f, FLT_MAX);
-		if (sky_softness <= 0.f)
-			sky_softness = R_SanitizeGodraysValue (r_godrays_sky_softness.value, 1.5f, 0.f, FLT_MAX);
+		float sky_softness = sky_params.softness;
 
 		if (emit_sky)
 		{
@@ -2412,7 +2442,7 @@ void GL_PostProcess (void)
 		/* Keep source debug useful even when scatter generation is disabled/unsupported. */
 		if (godrays_debug_source > 0.f && R_GodraysReady ())
 			GL_GenerateGodraysSource (
-				(glprogs.godrays_source_sky != 0 && r_godray_sky_enable.value > 0.f),
+				(glprogs.godrays_source_sky != 0 && r_godrays_sky_enable.value > 0.f),
 				(r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f));
 
 		if (godrays_enabled || godrays_debug > 0.f)
