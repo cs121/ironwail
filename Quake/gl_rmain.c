@@ -428,6 +428,8 @@ cvar_t	r_godrays_emissive_threshold = { "r_godrays_emissive_threshold", "0.4", C
 cvar_t	r_godrays_light_threshold = { "r_godrays_light_threshold", "0.6", CVAR_ARCHIVE };
 cvar_t	r_godrays_mask_knee = { "r_godrays_mask_knee", "0.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_blur = { "r_godrays_blur", "1.5", CVAR_ARCHIVE };
+/* When enabled, light-texture godray stages are emitted only if the texture/stage/material
+ * name contains a light token (light, lamp, glow, flare, neon, torch, lantern). */
 cvar_t	r_godrays_lighttex_name_match = { "r_godrays_lighttex_name_match", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_samples = { "r_godrays_samples", "48", CVAR_ARCHIVE };
 cvar_t	r_godrays_density = { "r_godrays_density", "0.9", CVAR_ARCHIVE };

@@ -501,6 +501,47 @@ static unsigned R_StageOutputCallFlags (const mat_shader_stage_t *stage)
 	return flags;
 }
 
+static qboolean R_GodraysNameContainsLightToken (const char *name)
+{
+	static const char *const tokens[] = {
+		"light",
+		"lamp",
+		"glow",
+		"flare",
+		"neon",
+		"torch",
+		"lantern"
+	};
+
+	if (!name || !name[0])
+		return false;
+
+	for (size_t i = 0; i < countof (tokens); ++i)
+	{
+		if (q_strcasestr (name, tokens[i]))
+			return true;
+	}
+
+	return false;
+}
+
+static qboolean R_GodraysLighttexNameMatches (const texture_t *t, const mat_shader_stage_t *stage)
+{
+	if (r_godrays_lighttex_name_match.value <= 0.f)
+		return true;
+
+	if (R_GodraysNameContainsLightToken (t ? t->name : NULL))
+		return true;
+	if (R_GodraysNameContainsLightToken (t ? t->shader_map : NULL))
+		return true;
+	if (R_GodraysNameContainsLightToken (stage ? stage->map_path : NULL))
+		return true;
+	if (R_GodraysNameContainsLightToken (t && t->shader ? t->shader->name : NULL))
+		return true;
+
+	return false;
+}
+
 qboolean R_TextureEmitsGodrays (texture_t *t)
 {
 	if (!t)
@@ -516,18 +557,23 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 	{
 		size_t stage_count = VEC_SIZE (t->shader->stages);
 		qboolean has_godray = false;
+		qboolean has_light_match = false;
 		qboolean has_emissive = false;
 
 		for (size_t i = 0; i < stage_count; ++i)
 		{
 			const mat_shader_stage_t *stage = &t->shader->stages[i];
 			if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
+			{
 				has_godray = true;
+				if (R_GodraysLighttexNameMatches (t, stage))
+					has_light_match = true;
+			}
 			if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
 				has_emissive = true;
 		}
 
-		if (has_godray && r_godrays_emit_lighttex.value > 0.f)
+		if (has_godray && has_light_match && r_godrays_emit_lighttex.value > 0.f)
 			return true;
 		if (has_godray && has_emissive && r_godrays_emit_emissive.value > 0.f)
 			return true;
@@ -1337,7 +1383,8 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 						fb = NULL;
 				}
 
-				if (r_godrays_emit_lighttex.value > 0.f)
+				if (r_godrays_emit_lighttex.value > 0.f
+					&& R_GodraysLighttexNameMatches (t, stage))
 					extra_flags |= CALLFLAG_GODRAYS_LIGHT;
 
 				if (wants_emissive && r_godrays_emit_emissive.value > 0.f)
