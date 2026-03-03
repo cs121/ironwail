@@ -1444,7 +1444,7 @@ static const fogvol_entity_key_dispatch_t *R_FogVol_FindEntityKeyDispatch (const
 {
 	int i;
 
-	for (i = 0; i < (int)ARRAY_SIZE (fogvol_entity_key_dispatch); ++i)
+	for (i = 0; i < (int)countof (fogvol_entity_key_dispatch); ++i)
 	{
 		if (!strcmp (fogvol_entity_key_dispatch[i].key, key))
 			return &fogvol_entity_key_dispatch[i];
