@@ -412,7 +412,8 @@ cvar_t	r_ssao_max_distance = { "r_ssao_max_distance", "1024", CVAR_ARCHIVE };
 cvar_t	r_ssao_validate = { "r_ssao_validate", "0", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
-cvar_t	r_godrays_emit_sky = { "r_godrays_emit_sky", "1", CVAR_ARCHIVE };
+/* Sky contribution for godrays is controlled only by r_godray_sky_enable.
+ * If it is <= 0, sky source generation is fully disabled (hard off). */
 cvar_t	r_godrays_emit_emissive = { "r_godrays_emit_emissive", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_emit_lighttex = { "r_godrays_emit_lighttex", "1", CVAR_ARCHIVE };
 cvar_t	r_godray_sky_enable = { "r_godray_sky_enable", "1", CVAR_ARCHIVE };
@@ -1662,7 +1663,7 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 	}
 
-	if (draw_sky && glprogs.godrays_source_sky)
+	if (draw_sky && glprogs.godrays_source_sky && r_godray_sky_enable.value > 0.f)
 	{
 		float sky_intensity = q_max (0.f, r_godray_sky_intensity.value) * q_max (0.f, r_godrays_sky_intensity.value);
 		float sky_threshold = R_SanitizeGodraysValue (r_godray_sky_threshold.value, 0.05f, 0.f, 1.f);
@@ -1726,7 +1727,8 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	if (!R_GodraysReady ())
 		return fallback;
 
-	qboolean emit_sky = (glprogs.godrays_source_sky != 0);
+	qboolean emit_sky = (glprogs.godrays_source_sky != 0
+		&& r_godray_sky_enable.value > 0.f);
 	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);
 	if (!emit_sky && !emit_brush)
 		return fallback;
@@ -2395,7 +2397,9 @@ void GL_PostProcess (void)
 	{
 		/* Keep source debug useful even when scatter generation is disabled/unsupported. */
 		if (godrays_debug_source > 0.f && R_GodraysReady ())
-			GL_GenerateGodraysSource (true, true);
+			GL_GenerateGodraysSource (
+				(glprogs.godrays_source_sky != 0 && r_godray_sky_enable.value > 0.f),
+				(r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f));
 
 		if (godrays_enabled || godrays_debug > 0.f)
 			godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);

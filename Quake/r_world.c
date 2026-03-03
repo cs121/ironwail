@@ -26,7 +26,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "mat_shader.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
-extern cvar_t r_godrays_emit_sky;
 extern cvar_t r_godrays_emit_emissive;
 extern cvar_t r_godrays_emit_lighttex;
 extern cvar_t r_godrays_lighttex_name_match;
@@ -542,7 +541,7 @@ qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 	if (!s)
 		return false;
 
-	if ((s->flags & SURF_DRAWSKY) && r_godrays_emit_sky.value > 0.f && r_godray_sky_enable.value > 0.f)
+	if ((s->flags & SURF_DRAWSKY) && r_godray_sky_enable.value > 0.f)
 	{
 		if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
 		{
