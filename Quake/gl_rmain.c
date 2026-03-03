@@ -415,8 +415,8 @@ cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 /*
  * Godrays sky parameter schema:
  * - Canonical CVars are exclusively r_godrays_sky_*.
- * - Legacy compatibility aliases (r_godray_sky_*) remain registered and are
- *   synchronized during cvar init/runtime so old configs keep working.
+ * - Legacy compatibility aliases (r_godray_sky_*) remain registered as
+ *   one-way parse/set shims into canonical CVars for old configs.
  * - Rendering code reads only canonical CVars via R_GetGodraysSkyParams().
  */
 cvar_t	r_godrays_emit_emissive = { "r_godrays_emit_emissive", "1", CVAR_ARCHIVE };

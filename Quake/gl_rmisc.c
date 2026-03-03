@@ -520,34 +520,14 @@ float GL_WaterAlphaForTextureType (textype_t type)
 }
 
 
-static qboolean r_godrays_sky_cvar_sync_active;
-
-static void R_GodraysSyncCanonicalSkyFromLegacy (cvar_t *unused)
+static void R_GodraysMigrateLegacySkyToCanonical (cvar_t *unused)
 {
 	(void)unused;
 
-	if (r_godrays_sky_cvar_sync_active)
-		return;
-	r_godrays_sky_cvar_sync_active = true;
 	Cvar_SetQuick (&r_godrays_sky_enable, r_godray_sky_enable.string);
 	Cvar_SetQuick (&r_godrays_sky_threshold, r_godray_sky_threshold.string);
 	Cvar_SetQuick (&r_godrays_sky_intensity, r_godray_sky_intensity.string);
 	Cvar_SetQuick (&r_godrays_sky_softness, r_godray_sky_blur.string);
-	r_godrays_sky_cvar_sync_active = false;
-}
-
-static void R_GodraysSyncLegacySkyFromCanonical (cvar_t *unused)
-{
-	(void)unused;
-
-	if (r_godrays_sky_cvar_sync_active)
-		return;
-	r_godrays_sky_cvar_sync_active = true;
-	Cvar_SetQuick (&r_godray_sky_enable, r_godrays_sky_enable.string);
-	Cvar_SetQuick (&r_godray_sky_threshold, r_godrays_sky_threshold.string);
-	Cvar_SetQuick (&r_godray_sky_intensity, r_godrays_sky_intensity.string);
-	Cvar_SetQuick (&r_godray_sky_blur, r_godrays_sky_softness.string);
-	r_godrays_sky_cvar_sync_active = false;
 }
 
 
@@ -763,17 +743,13 @@ Cvar_RegisterVariable (&r_godrays_decay);
 Cvar_RegisterVariable (&r_godrays_exposure);
 Cvar_RegisterVariable (&r_godrays_threshold);
 Cvar_RegisterVariable (&r_godrays_sky_softness);
-	/* Legacy r_godray_sky_* aliases stay available, but canonical r_godrays_sky_* owns runtime reads. */
-	Cvar_SetCallback (&r_godray_sky_enable, R_GodraysSyncCanonicalSkyFromLegacy);
-	Cvar_SetCallback (&r_godray_sky_threshold, R_GodraysSyncCanonicalSkyFromLegacy);
-	Cvar_SetCallback (&r_godray_sky_intensity, R_GodraysSyncCanonicalSkyFromLegacy);
-	Cvar_SetCallback (&r_godray_sky_blur, R_GodraysSyncCanonicalSkyFromLegacy);
-	Cvar_SetCallback (&r_godrays_sky_enable, R_GodraysSyncLegacySkyFromCanonical);
-	Cvar_SetCallback (&r_godrays_sky_threshold, R_GodraysSyncLegacySkyFromCanonical);
-	Cvar_SetCallback (&r_godrays_sky_intensity, R_GodraysSyncLegacySkyFromCanonical);
-	Cvar_SetCallback (&r_godrays_sky_softness, R_GodraysSyncLegacySkyFromCanonical);
-	/* One-time migration at init: legacy values (if present in old cfg) seed canonical cvars. */
-	R_GodraysSyncCanonicalSkyFromLegacy (NULL);
+	/* Legacy r_godray_sky_* aliases are parse/set shims that write canonical r_godrays_sky_* values. */
+	Cvar_SetCallback (&r_godray_sky_enable, R_GodraysMigrateLegacySkyToCanonical);
+	Cvar_SetCallback (&r_godray_sky_threshold, R_GodraysMigrateLegacySkyToCanonical);
+	Cvar_SetCallback (&r_godray_sky_intensity, R_GodraysMigrateLegacySkyToCanonical);
+	Cvar_SetCallback (&r_godray_sky_blur, R_GodraysMigrateLegacySkyToCanonical);
+	/* Startup migration: values restored into legacy names seed canonical cvars once. */
+	R_GodraysMigrateLegacySkyToCanonical (NULL);
 Cvar_RegisterVariable (&r_godrays_light_sharpness);
 Cvar_RegisterVariable (&r_godrays_max_radius);
 Cvar_RegisterVariable (&r_godrays_light_x);
