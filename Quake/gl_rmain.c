@@ -2222,6 +2222,20 @@ static float GL_UpdateAutoExposure (void)
 }
 
 
+static void GL_PostProcess_SetFogVolUniforms (void)
+{
+	GLuint fogvol_composite = 0;
+	float fogvol_active = 0.f;
+
+	if (R_FogVol_HasValidComposite ())
+	{
+		fogvol_composite = R_FogVol_GetCompositeTex ();
+		fogvol_active = 1.f;
+	}
+	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, fogvol_composite);
+	GL_Uniform4fFunc (28, fogvol_active, 0.f, 0.f, 0.f);
+}
+
 void GL_PostProcess (void)
 {
 	int palidx, variant;
@@ -2500,17 +2514,7 @@ void GL_PostProcess (void)
 	 * The existing fogvol_active gating is preserved; R_FogVol_GetCompositeTex() now
 	 * returns 0 when no valid composite was produced this frame, preventing stale
 	 * texture handles from scene/context transitions being rebound here. */
-	{
-		GLuint fogvol_composite = 0;
-		float  fogvol_active    = 0.f;
-		if (R_FogVol_HasValidComposite ())
-		{
-			fogvol_composite = R_FogVol_GetCompositeTex ();
-			fogvol_active    = 1.f;
-		}
-		GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, fogvol_composite);
-		GL_Uniform4fFunc (28, fogvol_active, 0.f, 0.f, 0.f);
-	}
+	GL_PostProcess_SetFogVolUniforms ();
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 	{
