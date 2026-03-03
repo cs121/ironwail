@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_dlight_pool.h"
 #include <assert.h>
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct fog_volume_gpu_s
@@ -1323,6 +1324,161 @@ static qboolean R_FogVol_ParseVector (const char *value, vec3_t out)
 	return value && sscanf (value, "%f %f %f", &out[0], &out[1], &out[2]) == 3;
 }
 
+typedef struct fogvol_entity_parse_state_s
+{
+	qboolean is_fog_volume;
+	char modelname[64];
+	vec3_t origin;
+	qboolean has_origin;
+} fogvol_entity_parse_state_t;
+
+typedef enum fogvol_entity_key_type_e
+{
+	FOGVOL_ENTITY_KEY_FLOAT,
+	FOGVOL_ENTITY_KEY_INT,
+	FOGVOL_ENTITY_KEY_VEC3,
+	FOGVOL_ENTITY_KEY_COLOR,
+	FOGVOL_ENTITY_KEY_SPECIAL
+} fogvol_entity_key_type_t;
+
+typedef void (*fogvol_entity_special_setter_fn_t) (fog_volume_t *volume, fogvol_entity_parse_state_t *state, const char *value);
+
+typedef struct fogvol_entity_key_dispatch_s
+{
+	const char *key;
+	fogvol_entity_key_type_t type;
+	size_t offset;
+	fogvol_entity_special_setter_fn_t special_setter;
+} fogvol_entity_key_dispatch_t;
+
+static void R_FogVol_EntitySetFloat (fog_volume_t *volume, size_t offset, const char *value)
+{
+	float *field = (float *)((char *)volume + offset);
+	*field = atof (value);
+}
+
+static void R_FogVol_EntitySetInt (fog_volume_t *volume, size_t offset, const char *value)
+{
+	int *field = (int *)((char *)volume + offset);
+	*field = atoi (value);
+}
+
+static void R_FogVol_EntitySetVec3 (fog_volume_t *volume, size_t offset, const char *value)
+{
+	vec3_t *field = (vec3_t *)((char *)volume + offset);
+	R_FogVol_ParseVector (value, *field);
+}
+
+static void R_FogVol_EntitySetColor (fog_volume_t *volume, size_t offset, const char *value)
+{
+	vec3_t *field = (vec3_t *)((char *)volume + offset);
+	R_FogVol_ParseColor (value, *field);
+}
+
+static void R_FogVol_EntitySetClassname (fog_volume_t *volume, fogvol_entity_parse_state_t *state, const char *value)
+{
+	(void)volume;
+	if (!strcmp (value, "func_fog_volume") || !strcmp (value, "trigger_fog_volume"))
+		state->is_fog_volume = true;
+}
+
+static void R_FogVol_EntitySetModel (fog_volume_t *volume, fogvol_entity_parse_state_t *state, const char *value)
+{
+	(void)volume;
+	q_strlcpy (state->modelname, value, sizeof (state->modelname));
+}
+
+static void R_FogVol_EntitySetOrigin (fog_volume_t *volume, fogvol_entity_parse_state_t *state, const char *value)
+{
+	(void)volume;
+	state->has_origin = R_FogVol_ParseVector (value, state->origin);
+}
+
+static void R_FogVol_EntitySetShape (fog_volume_t *volume, fogvol_entity_parse_state_t *state, const char *value)
+{
+	(void)state;
+	if (!q_strcasecmp (value, "sphere") || atoi (value) == 1)
+		volume->shape = 1;
+	else
+		volume->shape = 0;
+}
+
+/* Supported fog volume entity keys:
+ *   classname, model, origin
+ *   color
+ *   density, falloff, maxdist, priority
+ *   noise_scale, noise_amount, noise_bias, velocity, mode
+ *   shape, radius, center
+ *   blendmode, emissive
+ *   wind_dir, wind_speed, turbulence
+ *   height, height_scale */
+static const fogvol_entity_key_dispatch_t fogvol_entity_key_dispatch[] = {
+	{"classname", FOGVOL_ENTITY_KEY_SPECIAL, 0, R_FogVol_EntitySetClassname},
+	{"model", FOGVOL_ENTITY_KEY_SPECIAL, 0, R_FogVol_EntitySetModel},
+	{"origin", FOGVOL_ENTITY_KEY_SPECIAL, 0, R_FogVol_EntitySetOrigin},
+	{"color", FOGVOL_ENTITY_KEY_COLOR, offsetof (fog_volume_t, color), NULL},
+	{"density", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, density), NULL},
+	{"falloff", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, falloff), NULL},
+	{"maxdist", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, maxDistance), NULL},
+	{"priority", FOGVOL_ENTITY_KEY_INT, offsetof (fog_volume_t, priority), NULL},
+	{"noise_scale", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, noiseScale), NULL},
+	{"noise_amount", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, noiseAmount), NULL},
+	{"noise_bias", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, noiseBias), NULL},
+	{"velocity", FOGVOL_ENTITY_KEY_VEC3, offsetof (fog_volume_t, velocity), NULL},
+	{"mode", FOGVOL_ENTITY_KEY_INT, offsetof (fog_volume_t, mode), NULL},
+	{"shape", FOGVOL_ENTITY_KEY_SPECIAL, 0, R_FogVol_EntitySetShape},
+	{"radius", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, sphereRadius), NULL},
+	{"center", FOGVOL_ENTITY_KEY_VEC3, offsetof (fog_volume_t, sphereCenter), NULL},
+	{"blendmode", FOGVOL_ENTITY_KEY_INT, offsetof (fog_volume_t, blendMode), NULL},
+	{"emissive", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, emissiveStrength), NULL},
+	{"wind_dir", FOGVOL_ENTITY_KEY_VEC3, offsetof (fog_volume_t, windDir), NULL},
+	{"wind_speed", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, windSpeed), NULL},
+	{"turbulence", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, turbulence), NULL},
+	{"height", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, height), NULL},
+	{"height_scale", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, heightScale), NULL},
+};
+
+static const fogvol_entity_key_dispatch_t *R_FogVol_FindEntityKeyDispatch (const char *key)
+{
+	int i;
+
+	for (i = 0; i < (int)ARRAY_SIZE (fogvol_entity_key_dispatch); ++i)
+	{
+		if (!strcmp (fogvol_entity_key_dispatch[i].key, key))
+			return &fogvol_entity_key_dispatch[i];
+	}
+
+	return NULL;
+}
+
+static void R_FogVol_ApplyEntityKey (const fogvol_entity_key_dispatch_t *dispatch, fog_volume_t *volume, fogvol_entity_parse_state_t *state, const char *value)
+{
+	if (!dispatch)
+		return;
+
+	switch (dispatch->type)
+	{
+	case FOGVOL_ENTITY_KEY_FLOAT:
+		R_FogVol_EntitySetFloat (volume, dispatch->offset, value);
+		break;
+	case FOGVOL_ENTITY_KEY_INT:
+		R_FogVol_EntitySetInt (volume, dispatch->offset, value);
+		break;
+	case FOGVOL_ENTITY_KEY_VEC3:
+		R_FogVol_EntitySetVec3 (volume, dispatch->offset, value);
+		break;
+	case FOGVOL_ENTITY_KEY_COLOR:
+		R_FogVol_EntitySetColor (volume, dispatch->offset, value);
+		break;
+	case FOGVOL_ENTITY_KEY_SPECIAL:
+		if (dispatch->special_setter)
+			dispatch->special_setter (volume, state, value);
+		break;
+	default:
+		break;
+	}
+}
+
 static float R_FogVol_PointDistance (const vec3_t point, const fog_volume_t *volume)
 {
 	/* BUG FIX (C-07): Declare all locals at the top of the function so this
@@ -1457,10 +1613,7 @@ void R_FogVol_ParseEntities (void)
 	while (data && com_token[0])
 	{
 		fog_volume_t volume;
-		qboolean is_fog_volume = false;
-		char modelname[64] = "";
-		vec3_t origin = {0.f, 0.f, 0.f};
-		qboolean has_origin = false;
+		fogvol_entity_parse_state_t parse_state;
 
 		if (com_token[0] != '{')
 			break;
@@ -1485,6 +1638,7 @@ void R_FogVol_ParseEntities (void)
 		volume.enabled = 1;
 		volume.height = 0.f;
 		volume.heightScale = 0.f;
+		memset (&parse_state, 0, sizeof (parse_state));
 
 		while (1)
 		{
@@ -1507,118 +1661,22 @@ void R_FogVol_ParseEntities (void)
 			if (!data)
 				return;
 			q_strlcpy (value, com_token, sizeof (value));
-
-			if (!strcmp (key, "classname"))
-			{
-				if (!strcmp (value, "func_fog_volume") || !strcmp (value, "trigger_fog_volume"))
-					is_fog_volume = true;
-			}
-			else if (!strcmp (key, "model"))
-			{
-				q_strlcpy (modelname, value, sizeof (modelname));
-			}
-			else if (!strcmp (key, "origin"))
-			{
-				has_origin = R_FogVol_ParseVector (value, origin);
-			}
-			else if (!strcmp (key, "_color") || !strcmp (key, "color"))
-			{
-				R_FogVol_ParseColor (value, volume.color);
-			}
-			else if (!strcmp (key, "density"))
-			{
-				volume.density = atof (value);
-			}
-			else if (!strcmp (key, "falloff"))
-			{
-				volume.falloff = atof (value);
-			}
-			else if (!strcmp (key, "maxdist"))
-			{
-				volume.maxDistance = atof (value);
-			}
-			else if (!strcmp (key, "priority"))
-			{
-				volume.priority = atoi (value);
-			}
-			else if (!strcmp (key, "noise_scale"))
-			{
-				volume.noiseScale = atof (value);
-			}
-			else if (!strcmp (key, "noise_amount"))
-			{
-				volume.noiseAmount = atof (value);
-			}
-			else if (!strcmp (key, "noise_bias"))
-			{
-				volume.noiseBias = atof (value);
-			}
-			else if (!strcmp (key, "velocity"))
-			{
-				R_FogVol_ParseVector (value, volume.velocity);
-			}
-			else if (!strcmp (key, "mode"))
-			{
-				volume.mode = atoi (value);
-			}
-			else if (!strcmp (key, "shape"))
-			{
-				if (!q_strcasecmp (value, "sphere") || atoi (value) == 1)
-					volume.shape = 1;
-				else
-					volume.shape = 0;
-			}
-			else if (!strcmp (key, "radius"))
-			{
-				volume.sphereRadius = atof (value);
-			}
-			else if (!strcmp (key, "center"))
-			{
-				R_FogVol_ParseVector (value, volume.sphereCenter);
-			}
-			else if (!strcmp (key, "blendmode"))
-			{
-				volume.blendMode = atoi (value);
-			}
-			else if (!strcmp (key, "emissive"))
-			{
-				volume.emissiveStrength = atof (value);
-			}
-			else if (!strcmp (key, "wind_dir"))
-			{
-				R_FogVol_ParseVector (value, volume.windDir);
-			}
-			else if (!strcmp (key, "wind_speed"))
-			{
-				volume.windSpeed = atof (value);
-			}
-			else if (!strcmp (key, "turbulence"))
-			{
-				volume.turbulence = atof (value);
-			}
-			else if (!strcmp (key, "height"))
-			{
-				volume.height = atof (value);
-			}
-			else if (!strcmp (key, "height_scale"))
-			{
-				volume.heightScale = atof (value);
-			}
+			R_FogVol_ApplyEntityKey (R_FogVol_FindEntityKeyDispatch (key), &volume, &parse_state, value);
 		}
 
-		if (is_fog_volume && modelname[0])
+		if (parse_state.is_fog_volume && parse_state.modelname[0])
 		{
-			qmodel_t *model = Mod_ForName (modelname, false);
+			qmodel_t *model = Mod_ForName (parse_state.modelname, false);
 			if (model && model->type == mod_brush)
 			{
 				vec3_t mins;
 				vec3_t maxs;
 				VectorCopy (model->mins, mins);
 				VectorCopy (model->maxs, maxs);
-				if (has_origin)
+				if (parse_state.has_origin)
 				{
-					VectorAdd (mins, origin, mins);
-					VectorAdd (maxs, origin, maxs);
+					VectorAdd (mins, parse_state.origin, mins);
+					VectorAdd (maxs, parse_state.origin, maxs);
 				}
 				VectorCopy (mins, volume.mins);
 				VectorCopy (maxs, volume.maxs);
