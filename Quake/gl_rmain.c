@@ -342,16 +342,6 @@ cvar_t	r_ssao_max_distance = { "r_ssao_max_distance", "1024", CVAR_ARCHIVE };
 cvar_t	r_ssao_validate = { "r_ssao_validate", "0", CVAR_ARCHIVE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
-/*
- * Godrays sky parameter schema:
- * - Canonical CVars are exclusively r_godrays_sky_*.
- * - Legacy compatibility aliases (r_godray_sky_*) remain registered as
- *   one-way parse/set shims into canonical CVars for old configs.
- * - Rendering code reads only canonical CVars via R_GetGodraysSkyParams().
- */
-cvar_t	r_godrays_emit_emissive = { "r_godrays_emit_emissive", "1", CVAR_ARCHIVE };
-cvar_t	r_godrays_emit_lighttex = { "r_godrays_emit_lighttex", "1", CVAR_ARCHIVE };
-cvar_t	r_godrays_sky_enable = { "r_godrays_sky_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_threshold = { "r_godrays_sky_threshold", "0.05", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_intensity = { "r_godrays_sky_intensity", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_tint = { "r_godrays_sky_tint", "1 1 1", CVAR_ARCHIVE };
@@ -370,24 +360,8 @@ cvar_t	r_godrays_weight = { "r_godrays_weight", "0.015", CVAR_ARCHIVE };
 cvar_t	r_godrays_decay = { "r_godrays_decay", "0.97", CVAR_ARCHIVE };
 cvar_t	r_godrays_exposure = { "r_godrays_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_threshold = { "r_godrays_threshold", "0.0", CVAR_ARCHIVE };
-cvar_t	r_godrays_sky_softness = { "r_godrays_sky_softness", "1.5", CVAR_ARCHIVE };
-cvar_t	r_godray_sky_enable = { "r_godray_sky_enable", "1", CVAR_NONE };
-cvar_t	r_godray_sky_threshold = { "r_godray_sky_threshold", "0.05", CVAR_NONE };
-cvar_t	r_godray_sky_intensity = { "r_godray_sky_intensity", "1.0", CVAR_NONE };
-cvar_t	r_godray_sky_blur = { "r_godray_sky_blur", "1.5", CVAR_NONE };
-cvar_t	r_godrays_light_sharpness = { "r_godrays_light_sharpness", "1.25", CVAR_ARCHIVE };
-cvar_t	r_godrays_max_radius = { "r_godrays_max_radius", "1.0", CVAR_ARCHIVE };
-cvar_t	r_godrays_light_x = { "r_godrays_light_x", "0.5", CVAR_ARCHIVE };
-cvar_t	r_godrays_light_y = { "r_godrays_light_y", "1", CVAR_ARCHIVE };
-cvar_t	r_godrays_stabilize = { "r_godrays_stabilize", "0.0", CVAR_ARCHIVE };
-cvar_t	r_godrays_stabilize_strength = { "r_godrays_stabilize_strength", "0.5", CVAR_ARCHIVE };
-cvar_t	r_godrays_stabilize_max_px = { "r_godrays_stabilize_max_px", "0.0", CVAR_ARCHIVE };
-cvar_t	r_godrays_smooth_rate = { "r_godrays_smooth_rate", "8.0", CVAR_ARCHIVE };
-cvar_t	r_godrays_max_shift = { "r_godrays_max_shift", "0.0", CVAR_ARCHIVE };
-cvar_t	r_godrays_reset_on_teleport = { "r_godrays_reset_on_teleport", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_debug_source = { "r_godrays_debug_source", "0", CVAR_ARCHIVE };
-cvar_t	r_godrays_volumetric = { "r_godrays_volumetric", "1", CVAR_ARCHIVE };
 cvar_t	r_godrays_vol_pow = { "r_godrays_vol_pow", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_vignette = { "r_vignette", "0.15", CVAR_ARCHIVE };
@@ -1433,10 +1407,10 @@ void R_ResetGodraysStabilization (void)
 static void R_GetGodraysSkyParams_Current (godrays_sky_params_t *params)
 {
 	R_Godrays_GetSkyParams (
-		r_godrays_sky_enable.value,
+		r_godrays.value,
 		r_godrays_sky_threshold.value,
 		r_godrays_sky_intensity.value,
-		r_godrays_sky_softness.value,
+		r_godrays_blur.value,
 		r_godrays_sky_tint.string,
 		params);
 }
@@ -1558,7 +1532,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 
 	R_GetGodraysSkyParams_Current (&sky_params);
 	emit_sky = (glprogs.godrays_source_sky != 0 && sky_params.enabled);
-	qboolean emit_brush = ((r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f) && glprogs.godrays_source);
+	qboolean emit_brush = glprogs.godrays_source;
 	if (!emit_sky && !emit_brush)
 		return fallback;
 
@@ -1572,17 +1546,17 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	float decay = R_Godrays_SanitizeValue (r_godrays_decay.value, 0.97f, 0.f, FLT_MAX);
 	float exposure = R_Godrays_SanitizeValue (r_godrays_exposure.value, 1.f, 0.f, FLT_MAX);
 	float softness = R_Godrays_SanitizeValue (r_godrays_blur.value, 1.5f, 0.f, FLT_MAX);
-	float sharpness = R_Godrays_SanitizeValue (r_godrays_light_sharpness.value, 1.25f, 0.f, FLT_MAX);
-	float max_radius = R_Godrays_SanitizeValue (r_godrays_max_radius.value, 1.f, 0.f, 1.f);
-	float light_x = R_Godrays_SanitizeValue (r_godrays_light_x.value, 0.5f, 0.f, 1.f);
-	float light_y = R_Godrays_SanitizeValue (r_godrays_light_y.value, 0.5f, 0.f, 1.f);
+	float sharpness = 1.25f;
+	float max_radius = 1.f;
+	float light_x = 0.5f;
+	float light_y = 0.5f;
 	float stabilized_x = light_x;
 	float stabilized_y = light_y;
 	medium_scatter_source_t medium = { 0, 0.f };
 	GLuint volumetric_tex = 0;
 	float volumetric_enabled = 0.f;
 
-	if (r_godrays_volumetric.value > 0.f)
+	if (r_godrays.value > 0.f)
 	{
 		medium = GL_GetMediumScatterSource ();
 		volumetric_tex = medium.texture;
@@ -1597,12 +1571,12 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 		stabilize_input.raw_y = light_y;
 		VectorCopy (r_refdef.viewangles, stabilize_input.viewangles);
 		stabilize_input.time = cl.time;
-		stabilize_input.stabilize = R_Godrays_SanitizeValue (r_godrays_stabilize.value, 0.f, 0.f, 1.f);
-		stabilize_input.smooth_rate = R_Godrays_SanitizeValue (r_godrays_smooth_rate.value, 0.f, 0.f, FLT_MAX);
-		stabilize_input.stabilize_strength = R_Godrays_SanitizeValue (r_godrays_stabilize_strength.value, 0.5f, 0.f, 1.f);
-		stabilize_input.stabilize_max_px = R_Godrays_SanitizeValue (r_godrays_stabilize_max_px.value, 0.f, 0.f, FLT_MAX);
-		stabilize_input.max_shift_per_sec = r_godrays_max_shift.value;
-		stabilize_input.reset_on_teleport = (r_godrays_reset_on_teleport.value > 0.f);
+		stabilize_input.stabilize = 0.f;
+		stabilize_input.smooth_rate = 8.f;
+		stabilize_input.stabilize_strength = 0.5f;
+		stabilize_input.stabilize_max_px = 0.f;
+		stabilize_input.max_shift_per_sec = 0.f;
+		stabilize_input.reset_on_teleport = true;
 		R_Godrays_ComputeLightPos (&r_godrays_stabilization, &stabilize_input, &stabilized_x, &stabilized_y);
 	}
 
@@ -2250,8 +2224,8 @@ void GL_PostProcess (void)
 		/* Keep source debug useful even when scatter generation is disabled/unsupported. */
 		if (godrays_debug_source > 0.f && R_Godrays_IsReady (cl.worldmodel, r_framecount))
 			GL_GenerateGodraysSource (
-				(glprogs.godrays_source_sky != 0 && r_godrays_sky_enable.value > 0.f),
-				(r_godrays_emit_emissive.value > 0.f || r_godrays_emit_lighttex.value > 0.f));
+				(glprogs.godrays_source_sky != 0),
+				true);
 
 		if (godrays_enabled || godrays_debug > 0.f)
 			godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);
