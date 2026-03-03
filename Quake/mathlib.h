@@ -140,6 +140,7 @@ void ScaleMatrix(float matrix[16], float x, float y, float z);
 void IdentityMatrix(float matrix[16]);
 void ApplyScale(float matrix[16], float x, float y, float z);
 void ApplyTranslation(float matrix[16], float x, float y, float z);
+qboolean Mat4_Inverse(const float in[16], float out[16]);
 void MatrixTranspose4x3(const float src[16], float dst[12]);
 void ProjectVector(const vec3_t src, const float matrix[16], vec3_t dst);
 
@@ -173,4 +174,3 @@ qboolean RayVsBox (const vec3_t org, const vec3_t rcpdelta, const vec3_t mins, c
 /*==========================================================================*/
 
 #endif	/* __MATHLIB_H */
-
