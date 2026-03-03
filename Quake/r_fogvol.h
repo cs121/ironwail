@@ -98,6 +98,7 @@ extern cvar_t r_fogvol_shadow_samples;
 extern cvar_t r_fogvol_shadow_strength;
 extern cvar_t r_fogvol_shadow_jitter;
 
+void R_FogVol_RegisterCvars (void);
 void R_FogVol_Init (void);
 void R_FogVol_Clear (void);
 void R_FogVol_ParseEntities (void);

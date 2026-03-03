@@ -24,8 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cl_postfx.h"
 
 void R_PostFX_Init (void);
-void R_PostFX_ReloadLUTs (void);
-void R_PostFX_ReloadLUTs_f (cvar_t *var);
+void R_PostFX_RegisterCvars (void);
 void R_PostFX_GetState (postfx_state_t *out_state);
 GLuint R_PostFX_GetLUTTexture (void);
 int R_PostFX_GetLUTSize (void);

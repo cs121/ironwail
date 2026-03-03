@@ -1228,7 +1228,7 @@ static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, const f
 	return copy_count;
 }
 
-void R_FogVol_Init (void)
+void R_FogVol_RegisterCvars (void)
 {
 	for (size_t i = 0; i < countof (fogvol_cvar_table); ++i)
 	{
@@ -1243,6 +1243,10 @@ void R_FogVol_Init (void)
 #endif
 		Cvar_RegisterVariable (reg->var);
 	}
+}
+
+void R_FogVol_Init (void)
+{
 }
 
 void R_FogVol_Clear (void)
