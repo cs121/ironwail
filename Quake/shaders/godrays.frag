@@ -1,14 +1,14 @@
-// FogVol Composite Contract:
-//   RGB = fog radiance composited over scene color (display-space contribution).
+// Medium Scatter/Transmittance Contract:
+//   RGB = medium in-scatter/radiance composited over scene color (display-space contribution).
 //   A   = fog coverage proxy = 1.0 - transmittance (0=no fog medium, 1=opaque medium).
-//   Valid only when CPU marks fogvol composite as ready for this frame.
+//   Valid only when the CPU marks the current medium source as ready for this frame.
 
 layout(binding=0) uniform sampler2D MaskTexture;
-layout(binding=1) uniform sampler2D VolumetricTexture;
+layout(binding=1) uniform sampler2D MediumTexture;
 
 layout(location=0) uniform vec4 LightParams; // xy: light position, z: density, w: weight
 layout(location=1) uniform vec4 ScatterParams; // x: decay, y: exposure, z: max radius, w: samples
-layout(location=2) uniform vec4 VolumetricParams; // x: enable, y: medium exponent, z: texture valid
+layout(location=2) uniform vec4 MediumParams; // x: enable, y: medium exponent, z: texture valid
 
 layout(location=0) out vec4 outColor;
 
@@ -37,15 +37,15 @@ void main()
         vec3 volColor = vec3(0.0);
         float volMedium = 1.0;
 
-        if (VolumetricParams.x > 0.5 && VolumetricParams.z > 0.5)
+        if (MediumParams.x > 0.5 && MediumParams.z > 0.5)
         {
-                vec4 vol = texture(VolumetricTexture, uv);
+                vec4 vol = texture(MediumTexture, uv);
                 volColor = max(vol.rgb, vec3(0.0));
-                // Godrays volumetric coupling uses FogVol alpha directly as medium
+                // Godrays medium coupling uses MediumTexture alpha directly as medium
                 // strength proxy (A = 1 - transmittance), then applies an optional
-                // artistic shaping exponent (VolumetricParams.y).
+                // artistic shaping exponent (MediumParams.y).
                 volMedium = clamp(vol.a, 0.0, 1.0);
-                volMedium = pow(volMedium, max(VolumetricParams.y, 0.0));
+                volMedium = pow(volMedium, max(MediumParams.y, 0.0));
         }
 
         for (int i = 0; i < 128; ++i)
@@ -59,7 +59,7 @@ void main()
                 illuminationDecay *= decay;
         }
 
-        if (VolumetricParams.x > 0.5 && VolumetricParams.z > 0.5)
+        if (MediumParams.x > 0.5 && MediumParams.z > 0.5)
         {
                 float volLum = dot(volColor, vec3(0.299, 0.587, 0.114));
                 vec3 volTint = (volLum > 1e-4) ? (volColor / volLum) : vec3(1.0);

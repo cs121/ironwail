@@ -1709,6 +1709,35 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 	GL_EndGroup ();
 }
 
+
+typedef struct medium_scatter_source_s {
+	GLuint texture;
+	float valid;
+} medium_scatter_source_t;
+
+static medium_scatter_source_t GL_GetMediumScatterSource (void)
+{
+	medium_scatter_source_t medium = { 0, 0.f };
+
+	/*
+	 * Medium scatter/transmittance texture contract (shared by postprocess + godrays):
+	 *  - RGB: medium in-scatter/radiance already composited in display space.
+	 *  - A:   medium coverage proxy = 1 - transmittance.
+	 *         Expected normalized range: [0, 1] where 0 means no medium and 1 means
+	 *         fully opaque medium for this pixel.
+	 *  - valid: CPU-side frame validity gate. Only sample texture when valid > 0.5.
+	 *
+	 * Compatibility layer: FogVol is the first implementation of this interface.
+	 */
+	if (R_FogVol_HasValidComposite ())
+	{
+		medium.texture = R_FogVol_GetCompositeTex ();
+		medium.valid = 1.f;
+	}
+
+	return medium;
+}
+
 static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 {
 	int width = framebufs.godrays.width;
@@ -1749,13 +1778,15 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	float light_y = R_SanitizeGodraysValue (r_godrays_light_y.value, 0.5f, 0.f, 1.f);
 	float stabilized_x = light_x;
 	float stabilized_y = light_y;
+	medium_scatter_source_t medium = { 0, 0.f };
 	GLuint volumetric_tex = 0;
 	float volumetric_enabled = 0.f;
 
-	if (r_godrays_volumetric.value > 0.f && R_FogVol_HasValidComposite ())
+	if (r_godrays_volumetric.value > 0.f)
 	{
-		volumetric_tex = R_FogVol_GetCompositeTex ();
-		volumetric_enabled = 1.f;
+		medium = GL_GetMediumScatterSource ();
+		volumetric_tex = medium.texture;
+		volumetric_enabled = medium.valid;
 	}
 
 	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
@@ -2222,18 +2253,12 @@ static float GL_UpdateAutoExposure (void)
 }
 
 
-static void GL_PostProcess_SetFogVolUniforms (void)
+static void GL_PostProcess_SetMediumScatterUniforms (void)
 {
-	GLuint fogvol_composite = 0;
-	float fogvol_active = 0.f;
+	medium_scatter_source_t medium = GL_GetMediumScatterSource ();
 
-	if (R_FogVol_HasValidComposite ())
-	{
-		fogvol_composite = R_FogVol_GetCompositeTex ();
-		fogvol_active = 1.f;
-	}
-	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, fogvol_composite);
-	GL_Uniform4fFunc (28, fogvol_active, 0.f, 0.f, 0.f);
+	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, medium.texture);
+	GL_Uniform4fFunc (28, medium.valid, 0.f, 0.f, 0.f);
 }
 
 void GL_PostProcess (void)
@@ -2507,14 +2532,10 @@ void GL_PostProcess (void)
 	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, godrays_source);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, ssao_texture);
 	GL_BindNative (GL_TEXTURE9, GL_TEXTURE_2D_ARRAY, R_PostFX_GetLUTTexture ());
-	/* Bind fogvol composite texture at slot 10 for SSAO suppression in postprocess.frag.
-	 * postprocess.frag samples this to derive per-pixel volumetric transmittance and
-	 * suppress AO where fog is dense — replacing the inaccurate analytical fog formula
-	 * (exp2(-density*dist^2)) which cannot model spatial noise or color variation.
-	 * The existing fogvol_active gating is preserved; R_FogVol_GetCompositeTex() now
-	 * returns 0 when no valid composite was produced this frame, preventing stale
-	 * texture handles from scene/context transitions being rebound here. */
-	GL_PostProcess_SetFogVolUniforms ();
+	/* Bind medium scatter/transmittance texture at slot 10 for SSAO suppression
+	 * in postprocess.frag. The current implementation sources FogVol composite via
+	 * GL_GetMediumScatterSource(), preserving validity gating and stale-handle safety. */
+	GL_PostProcess_SetMediumScatterUniforms ();
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 	{
