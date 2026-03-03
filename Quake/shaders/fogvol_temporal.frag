@@ -33,6 +33,11 @@
 //     (compile-time) but flagged.
 // ───────────────────────────────────────────────────────────────────────────
 
+// FogVol Composite Contract:
+//   RGB = fog radiance composited over scene color (display-space contribution).
+//   A   = fog coverage proxy = 1.0 - transmittance (0=no fog medium, 1=opaque medium).
+//   Valid only when CPU marks fogvol composite as ready for this frame.
+
 #include "frame_uniforms.glsl"
 
 layout(binding=0) uniform sampler2D FogCurrent;

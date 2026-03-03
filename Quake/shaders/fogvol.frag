@@ -28,6 +28,11 @@
 //     misleading future readers; keep only tau / transmittance / accum.
 // ───────────────────────────────────────────────────────────────────────────
 
+// FogVol Composite Contract:
+//   RGB = fog radiance composited over scene color (display-space contribution).
+//   A   = fog coverage proxy = 1.0 - transmittance (0=no fog medium, 1=opaque medium).
+//   Valid only when CPU marks fogvol composite as ready for this frame.
+
 #include "frame_uniforms.glsl"
 
 #define MAX_FOGVOLUMES 64

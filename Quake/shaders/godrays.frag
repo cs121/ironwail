@@ -1,3 +1,8 @@
+// FogVol Composite Contract:
+//   RGB = fog radiance composited over scene color (display-space contribution).
+//   A   = fog coverage proxy = 1.0 - transmittance (0=no fog medium, 1=opaque medium).
+//   Valid only when CPU marks fogvol composite as ready for this frame.
+
 layout(binding=0) uniform sampler2D MaskTexture;
 layout(binding=1) uniform sampler2D VolumetricTexture;
 
@@ -36,6 +41,9 @@ void main()
         {
                 vec4 vol = texture(VolumetricTexture, uv);
                 volColor = max(vol.rgb, vec3(0.0));
+                // Godrays volumetric coupling uses FogVol alpha directly as medium
+                // strength proxy (A = 1 - transmittance), then applies an optional
+                // artistic shaping exponent (VolumetricParams.y).
                 volMedium = clamp(vol.a, 0.0, 1.0);
                 volMedium = pow(volMedium, max(VolumetricParams.y, 0.0));
         }

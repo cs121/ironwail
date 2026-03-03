@@ -304,6 +304,8 @@ static int r_fogvol_history_index = 0;
 static int r_fogvol_history_width = 0;
 static int r_fogvol_history_height = 0;
 static qboolean r_fogvol_composite_valid = false;
+static int r_fogvol_alpha_extreme_streak = 0;
+static int r_fogvol_alpha_extreme_last_frame = -1;
 
 
 void R_FogVol_ClearHistory (void)
@@ -512,6 +514,50 @@ static void R_FogVol_SetReadBufferDebug (GLenum buf, const char *marker)
 {
 	glReadBuffer (buf);
 	R_FogVol_LogBufferMarker (marker);
+}
+
+static void R_FogVol_DebugCheckCompositeAlphaDynamics (int fog_width, int fog_height)
+{
+	float alpha_sample = 0.f;
+	int px;
+	int py;
+	GLint prev_read_fbo = 0;
+	GLint prev_read_buf = 0;
+
+	if (r_fogvol_debug.value <= 0.f && developer.value <= 0.f)
+		return;
+
+	if (!r_fogvol_composite_valid || fog_width <= 0 || fog_height <= 0)
+	{
+		r_fogvol_alpha_extreme_streak = 0;
+		return;
+	}
+
+	if (r_fogvol_alpha_extreme_last_frame >= 0 && r_framecount != r_fogvol_alpha_extreme_last_frame + 1)
+		r_fogvol_alpha_extreme_streak = 0;
+	r_fogvol_alpha_extreme_last_frame = r_framecount;
+
+	px = fog_width / 2;
+	py = fog_height / 2;
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &prev_read_fbo);
+	glGetIntegerv (GL_READ_BUFFER, &prev_read_buf);
+	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
+	glReadBuffer (GL_COLOR_ATTACHMENT0);
+	glReadPixels (px, py, 1, 1, GL_ALPHA, GL_FLOAT, &alpha_sample);
+	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, (GLuint)prev_read_fbo);
+	glReadBuffer ((GLenum)prev_read_buf);
+
+	if (alpha_sample <= 0.001f || alpha_sample >= 0.999f)
+		++r_fogvol_alpha_extreme_streak;
+	else
+		r_fogvol_alpha_extreme_streak = 0;
+
+	if (r_fogvol_alpha_extreme_streak >= 8 && (r_fogvol_alpha_extreme_streak % 32) == 8)
+	{
+		Con_DPrintf (
+			"FOGVOL_WARN composite alpha appears static/extreme for %d frames (sample=%.3f at center). Contract expects dynamic A=1-transmittance where fog is present.\n",
+			r_fogvol_alpha_extreme_streak, alpha_sample);
+	}
 }
 
 static void R_FogVol_LogPipelineState (const char *marker)
@@ -2543,6 +2589,7 @@ void R_FogVol_Render (void)
 		}
 
 		r_fogvol_composite_valid = true;
+		R_FogVol_DebugCheckCompositeAlphaDynamics (fog_width, fog_height);
 	}
 
 	if (mode == 1)

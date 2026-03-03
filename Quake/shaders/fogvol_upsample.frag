@@ -34,6 +34,11 @@
 //     clamp bounds.
 // ───────────────────────────────────────────────────────────────────────────
 
+// FogVol Composite Contract:
+//   RGB = fog radiance composited over scene color (display-space contribution).
+//   A   = fog coverage proxy = 1.0 - transmittance (0=no fog medium, 1=opaque medium).
+//   Valid only when CPU marks fogvol composite as ready for this frame.
+
 layout(binding=0) uniform sampler2D FogColor;
 layout(binding=1) uniform sampler2D SceneDepth;
 
