@@ -727,9 +727,10 @@ static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int 
         }
 }
 
-static void Mod_DecodeRgbeLighting(byte *dst, const byte *src, int samples)
+static void Mod_DecodeRgbeLighting(byte *dst, const byte *src, int samples, qboolean bgr)
 {
-        /* Radiance RGBE stores channels as R, G, B, exponent. */
+        /* Radiance RGBE stores channels as R, G, B, exponent.
+         * Some KEX/rerelease assets may instead store B, G, R, exponent. */
         for (int i = 0; i < samples; i++, dst += 3, src += 4)
         {
                 int e = src[3];
@@ -741,9 +742,9 @@ static void Mod_DecodeRgbeLighting(byte *dst, const byte *src, int samples)
 
                 float scale = exp2f((float)(e - 128));
 
-                float R = (src[0] / 256.0f) * scale;
+                float R = ((bgr ? src[2] : src[0]) / 256.0f) * scale;
                 float G = (src[1] / 256.0f) * scale;
-                float B = (src[2] / 256.0f) * scale;
+                float B = ((bgr ? src[0] : src[2]) / 256.0f) * scale;
 
                 dst[0] = CLAMP(0, (int)(R * 255.0f), 255);
                 dst[1] = CLAMP(0, (int)(G * 255.0f), 255);
@@ -1820,10 +1821,45 @@ static void Mod_LoadLighting (lump_t *l)
 				if (8+l->filelen*3 == com_filesize)
 				{
 					Con_Printf("loaded %s lighting (ldr)\n", lighting_source);
-					loadmodel->lightdata = data + 8;
+
+					if (bsp_lightmap_bgr)
+					{
+						byte *tmp = (byte *)malloc(l->filelen * 3);
+						byte *hunkbuf;
+						const byte *src;
+						byte *dst;
+
+						if (!tmp)
+						{
+							Hunk_FreeToLowMark(mark);
+							Sys_Error("Mod_LoadLighting: failed to allocate %d bytes for BGR swap",
+								l->filelen * 3);
+						}
+
+						src = data + 8;
+						dst = tmp;
+						for (int s = 0; s < l->filelen; s++, src += 3, dst += 3)
+						{
+							dst[0] = src[2];
+							dst[1] = src[1];
+							dst[2] = src[0];
+						}
+
+						Hunk_FreeToLowMark(mark);
+						hunkbuf = (byte *)Hunk_AllocName(l->filelen * 3, litfilename);
+						memcpy(hunkbuf, tmp, l->filelen * 3);
+						free(tmp);
+						loadmodel->lightdata = hunkbuf;
+						lightmap_source_name = "LIT_V1_BGR->RGB";
+					}
+					else
+					{
+						loadmodel->lightdata = data + 8;
+						lightmap_source_name = "LIT_V1";
+					}
+
 					loadmodel->lightdatasamples = l->filelen;
 					loadmodel->litfile = true;
-					lightmap_source_name = "LIT_V1";
 					Con_Printf("LIT: loaded %s (%u texels) from %s\n",
 						lightmap_source_name, loadmodel->lightdatasamples, lighting_source);
 					goto loadlightdir;
@@ -1851,7 +1887,7 @@ static void Mod_LoadLighting (lump_t *l)
                                         decoded = (byte *)Hunk_AllocName(l->filelen * 3, litfilename);
 
                                         Con_Printf("loaded %s lighting (hdr)\n", lighting_source);
-                                        Mod_DecodeRgbeLighting(decoded, rgbe, l->filelen);
+                                        Mod_DecodeRgbeLighting(decoded, rgbe, l->filelen, bsp_lightmap_bgr);
 
                                         free(rgbe);
 
@@ -1909,7 +1945,7 @@ static void Mod_LoadLighting (lump_t *l)
 		{
 			byte *decoded = (byte *)Hunk_AllocName(remastered_lump_samples * 3, litfilename);
 
-			Mod_DecodeRgbeLighting(decoded, src, remastered_lump_samples);
+			Mod_DecodeRgbeLighting(decoded, src, remastered_lump_samples, bsp_lightmap_bgr);
 			loadmodel->lightdata = decoded;
 			loadmodel->lightdatasamples = remastered_lump_samples;
 			loadmodel->litfile = true;
