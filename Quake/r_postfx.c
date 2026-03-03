@@ -28,7 +28,60 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 static GLuint r_postfx_lut_tex;
 static int r_postfx_lut_size;
 
+static void R_PostFX_ReloadLUTs (void);
+static void R_PostFX_ReloadLUTs_f (cvar_t *var);
+
+extern cvar_t r_postfx;
+extern cvar_t r_polyblend_legacy;
+extern cvar_t r_postfx_pickup;
+extern cvar_t r_postfx_pickup_exposure;
+extern cvar_t r_postfx_pickup_bloom;
+extern cvar_t r_postfx_pickup_duration;
+extern cvar_t r_postfx_damage;
+extern cvar_t r_postfx_damage_vignette;
+extern cvar_t r_postfx_damage_vignette_softness;
+extern cvar_t r_postfx_damage_desat;
+extern cvar_t r_postfx_damage_exposure;
+extern cvar_t r_postfx_damage_duration;
+extern cvar_t r_postfx_damage_accum_window;
+extern cvar_t r_postfx_damage_accum_scale;
+extern cvar_t r_post_damage_doublevision;
+extern cvar_t r_post_damage_dv_strength;
+extern cvar_t r_post_damage_dv_px;
+extern cvar_t r_post_damage_dv_freq;
+extern cvar_t r_post_damage_trauma_scale;
+extern cvar_t r_post_damage_trauma_decay;
+extern cvar_t r_post_damage_dv_quality;
+extern cvar_t r_post_damage_dv_debug;
+extern cvar_t r_postfx_powerup;
+extern cvar_t r_postfx_powerup_lut_strength;
+extern cvar_t r_postfx_powerup_ramp_in;
+extern cvar_t r_postfx_powerup_ramp_out;
+extern cvar_t r_postfx_underwater;
+extern cvar_t r_postfx_underwater_grade_strength;
+extern cvar_t r_postfx_underwater_fog_strength;
+extern cvar_t r_postfx_underwater_ramp_in;
+extern cvar_t r_postfx_underwater_ramp_out;
+extern cvar_t r_postfx_underwater_fog_water_r;
+extern cvar_t r_postfx_underwater_fog_water_g;
+extern cvar_t r_postfx_underwater_fog_water_b;
+extern cvar_t r_postfx_underwater_fog_slime_r;
+extern cvar_t r_postfx_underwater_fog_slime_g;
+extern cvar_t r_postfx_underwater_fog_slime_b;
+extern cvar_t r_postfx_underwater_fog_lava_r;
+extern cvar_t r_postfx_underwater_fog_lava_g;
+extern cvar_t r_postfx_underwater_fog_lava_b;
+extern cvar_t r_postfx_quad;
+extern cvar_t r_postfx_quad_emissive_boost;
+extern cvar_t r_postfx_quad_bloom_boost;
+extern cvar_t r_postfx_quad_pulse_speed;
+extern cvar_t r_postfx_quad_pulse_intensity;
+extern cvar_t r_postfx_bloom_mode;
 extern cvar_t r_postfx_lut;
+extern cvar_t r_postfx_lut_strength_powerup;
+extern cvar_t r_postfx_lut_strength_underwater;
+extern cvar_t r_postfx_lut_debug_id;
+extern cvar_t r_postfx_debug;
 
 static const char *const postfx_lut_files[PFX_LUT_COUNT] =
 {
@@ -75,7 +128,7 @@ static void R_PostFX_GenerateIdentityLUT (byte *buffer, int size)
 	}
 }
 
-void R_PostFX_ReloadLUTs (void)
+static void R_PostFX_ReloadLUTs (void)
 {
 	int i;
 	int width;
@@ -160,12 +213,68 @@ void R_PostFX_ReloadLUTs (void)
 	r_postfx_lut_size = size;
 }
 
+void R_PostFX_RegisterCvars (void)
+{
+	Cvar_RegisterVariable (&r_postfx);
+	Cvar_RegisterVariable (&r_polyblend_legacy);
+	Cvar_RegisterVariable (&r_postfx_pickup);
+	Cvar_RegisterVariable (&r_postfx_pickup_exposure);
+	Cvar_RegisterVariable (&r_postfx_pickup_bloom);
+	Cvar_RegisterVariable (&r_postfx_pickup_duration);
+	Cvar_RegisterVariable (&r_postfx_damage);
+	Cvar_RegisterVariable (&r_postfx_damage_vignette);
+	Cvar_RegisterVariable (&r_postfx_damage_vignette_softness);
+	Cvar_RegisterVariable (&r_postfx_damage_desat);
+	Cvar_RegisterVariable (&r_postfx_damage_exposure);
+	Cvar_RegisterVariable (&r_postfx_damage_duration);
+	Cvar_RegisterVariable (&r_postfx_damage_accum_window);
+	Cvar_RegisterVariable (&r_postfx_damage_accum_scale);
+	Cvar_RegisterVariable (&r_post_damage_doublevision);
+	Cvar_RegisterVariable (&r_post_damage_dv_strength);
+	Cvar_RegisterVariable (&r_post_damage_dv_px);
+	Cvar_RegisterVariable (&r_post_damage_dv_freq);
+	Cvar_RegisterVariable (&r_post_damage_trauma_scale);
+	Cvar_RegisterVariable (&r_post_damage_trauma_decay);
+	Cvar_RegisterVariable (&r_post_damage_dv_quality);
+	Cvar_RegisterVariable (&r_post_damage_dv_debug);
+	Cvar_RegisterVariable (&r_postfx_powerup);
+	Cvar_RegisterVariable (&r_postfx_powerup_lut_strength);
+	Cvar_RegisterVariable (&r_postfx_powerup_ramp_in);
+	Cvar_RegisterVariable (&r_postfx_powerup_ramp_out);
+	Cvar_RegisterVariable (&r_postfx_underwater);
+	Cvar_RegisterVariable (&r_postfx_underwater_grade_strength);
+	Cvar_RegisterVariable (&r_postfx_underwater_fog_strength);
+	Cvar_RegisterVariable (&r_postfx_underwater_ramp_in);
+	Cvar_RegisterVariable (&r_postfx_underwater_ramp_out);
+	Cvar_RegisterVariable (&r_postfx_underwater_fog_water_r);
+	Cvar_RegisterVariable (&r_postfx_underwater_fog_water_g);
+	Cvar_RegisterVariable (&r_postfx_underwater_fog_water_b);
+	Cvar_RegisterVariable (&r_postfx_underwater_fog_slime_r);
+	Cvar_RegisterVariable (&r_postfx_underwater_fog_slime_g);
+	Cvar_RegisterVariable (&r_postfx_underwater_fog_slime_b);
+	Cvar_RegisterVariable (&r_postfx_underwater_fog_lava_r);
+	Cvar_RegisterVariable (&r_postfx_underwater_fog_lava_g);
+	Cvar_RegisterVariable (&r_postfx_underwater_fog_lava_b);
+	Cvar_RegisterVariable (&r_postfx_quad);
+	Cvar_RegisterVariable (&r_postfx_quad_emissive_boost);
+	Cvar_RegisterVariable (&r_postfx_quad_bloom_boost);
+	Cvar_RegisterVariable (&r_postfx_quad_pulse_speed);
+	Cvar_RegisterVariable (&r_postfx_quad_pulse_intensity);
+	Cvar_RegisterVariable (&r_postfx_bloom_mode);
+	Cvar_RegisterVariable (&r_postfx_lut);
+	Cvar_SetCallback (&r_postfx_lut, R_PostFX_ReloadLUTs_f);
+	Cvar_RegisterVariable (&r_postfx_lut_strength_powerup);
+	Cvar_RegisterVariable (&r_postfx_lut_strength_underwater);
+	Cvar_RegisterVariable (&r_postfx_lut_debug_id);
+	Cvar_RegisterVariable (&r_postfx_debug);
+}
+
 void R_PostFX_Init (void)
 {
 	R_PostFX_ReloadLUTs ();
 }
 
-void R_PostFX_ReloadLUTs_f (cvar_t *var)
+static void R_PostFX_ReloadLUTs_f (cvar_t *var)
 {
 	(void)var;
 	R_PostFX_ReloadLUTs ();

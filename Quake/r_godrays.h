@@ -41,5 +41,6 @@ void R_Godrays_GetSkyParams (float sky_enable, float sky_threshold, float sky_in
 qboolean R_Godrays_IsReady (const qmodel_t *worldmodel, int framecount);
 void R_Godrays_ResetStabilization (godrays_stabilization_t *stabilization);
 void R_Godrays_ComputeLightPos (godrays_stabilization_t *stabilization, const r_godrays_stabilize_input_t *input, float *out_x, float *out_y);
+void R_Godrays_RegisterCvars (void);
 
 #endif

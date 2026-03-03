@@ -4,6 +4,107 @@
 #include <math.h>
 #include <stdio.h>
 
+extern cvar_t r_godrays;
+extern cvar_t r_godrays_emit_emissive;
+extern cvar_t r_godrays_emit_lighttex;
+extern cvar_t r_godray_sky_enable;
+extern cvar_t r_godray_sky_threshold;
+extern cvar_t r_godray_sky_intensity;
+extern cvar_t r_godray_sky_blur;
+extern cvar_t r_godrays_sky_enable;
+extern cvar_t r_godrays_sky_threshold;
+extern cvar_t r_godrays_sky_intensity;
+extern cvar_t r_godrays_sky_tint;
+extern cvar_t r_godrays_emissive_intensity;
+extern cvar_t r_godrays_lighttex_intensity;
+extern cvar_t r_godrays_emissive_threshold;
+extern cvar_t r_godrays_light_threshold;
+extern cvar_t r_godrays_mask_knee;
+extern cvar_t r_godrays_blur;
+extern cvar_t r_godrays_lighttex_name_match;
+extern cvar_t r_godrays_samples;
+extern cvar_t r_godrays_density;
+extern cvar_t r_godrays_weight;
+extern cvar_t r_godrays_decay;
+extern cvar_t r_godrays_exposure;
+extern cvar_t r_godrays_threshold;
+extern cvar_t r_godrays_sky_softness;
+extern cvar_t r_godrays_light_sharpness;
+extern cvar_t r_godrays_max_radius;
+extern cvar_t r_godrays_light_x;
+extern cvar_t r_godrays_light_y;
+extern cvar_t r_godrays_stabilize;
+extern cvar_t r_godrays_stabilize_strength;
+extern cvar_t r_godrays_stabilize_max_px;
+extern cvar_t r_godrays_smooth_rate;
+extern cvar_t r_godrays_max_shift;
+extern cvar_t r_godrays_reset_on_teleport;
+extern cvar_t r_godrays_debug;
+extern cvar_t r_godrays_debug_source;
+extern cvar_t r_godrays_volumetric;
+extern cvar_t r_godrays_vol_pow;
+
+static void R_GodraysMigrateLegacySkyToCanonical (cvar_t *unused)
+{
+	(void)unused;
+
+	Cvar_SetQuick (&r_godrays_sky_enable, r_godray_sky_enable.string);
+	Cvar_SetQuick (&r_godrays_sky_threshold, r_godray_sky_threshold.string);
+	Cvar_SetQuick (&r_godrays_sky_intensity, r_godray_sky_intensity.string);
+	Cvar_SetQuick (&r_godrays_sky_softness, r_godray_sky_blur.string);
+}
+
+void R_Godrays_RegisterCvars (void)
+{
+	Cvar_RegisterVariable (&r_godrays);
+	Cvar_RegisterVariable (&r_godrays_emit_emissive);
+	Cvar_RegisterVariable (&r_godrays_emit_lighttex);
+	Cvar_RegisterVariable (&r_godray_sky_enable);
+	Cvar_RegisterVariable (&r_godray_sky_threshold);
+	Cvar_RegisterVariable (&r_godray_sky_intensity);
+	Cvar_RegisterVariable (&r_godray_sky_blur);
+	Cvar_RegisterVariable (&r_godrays_sky_enable);
+	Cvar_RegisterVariable (&r_godrays_sky_threshold);
+	Cvar_RegisterVariable (&r_godrays_sky_intensity);
+	Cvar_RegisterVariable (&r_godrays_sky_tint);
+	Cvar_RegisterVariable (&r_godrays_emissive_intensity);
+	Cvar_RegisterVariable (&r_godrays_lighttex_intensity);
+	Cvar_RegisterVariable (&r_godrays_emissive_threshold);
+	Cvar_RegisterVariable (&r_godrays_light_threshold);
+	Cvar_RegisterVariable (&r_godrays_mask_knee);
+	Cvar_RegisterVariable (&r_godrays_blur);
+	Cvar_RegisterVariable (&r_godrays_lighttex_name_match);
+	Cvar_RegisterVariable (&r_godrays_samples);
+	Cvar_RegisterVariable (&r_godrays_density);
+	Cvar_RegisterVariable (&r_godrays_weight);
+	Cvar_RegisterVariable (&r_godrays_decay);
+	Cvar_RegisterVariable (&r_godrays_exposure);
+	Cvar_RegisterVariable (&r_godrays_threshold);
+	Cvar_RegisterVariable (&r_godrays_sky_softness);
+	/* Legacy r_godray_sky_* aliases are parse/set shims that write canonical r_godrays_sky_* values. */
+	Cvar_SetCallback (&r_godray_sky_enable, R_GodraysMigrateLegacySkyToCanonical);
+	Cvar_SetCallback (&r_godray_sky_threshold, R_GodraysMigrateLegacySkyToCanonical);
+	Cvar_SetCallback (&r_godray_sky_intensity, R_GodraysMigrateLegacySkyToCanonical);
+	Cvar_SetCallback (&r_godray_sky_blur, R_GodraysMigrateLegacySkyToCanonical);
+	/* Startup migration: values restored into legacy names seed canonical cvars once. */
+	R_GodraysMigrateLegacySkyToCanonical (NULL);
+	Cvar_RegisterVariable (&r_godrays_light_sharpness);
+	Cvar_RegisterVariable (&r_godrays_max_radius);
+	Cvar_RegisterVariable (&r_godrays_light_x);
+	Cvar_RegisterVariable (&r_godrays_light_y);
+	Cvar_RegisterVariable (&r_godrays_stabilize);
+	Cvar_RegisterVariable (&r_godrays_stabilize_strength);
+	Cvar_RegisterVariable (&r_godrays_stabilize_max_px);
+	Cvar_RegisterVariable (&r_godrays_smooth_rate);
+	Cvar_RegisterVariable (&r_godrays_max_shift);
+	Cvar_RegisterVariable (&r_godrays_reset_on_teleport);
+	Cvar_RegisterVariable (&r_godrays_debug);
+	Cvar_RegisterVariable (&r_godrays_debug_source);
+	Cvar_RegisterVariable (&r_godrays_volumetric);
+	Cvar_RegisterVariable (&r_godrays_vol_pow);
+}
+
+
 float R_Godrays_SanitizeValue (float value, float fallback, float minval, float maxval)
 {
 #if defined(_MSC_VER)
