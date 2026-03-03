@@ -1,3 +1,5 @@
+#include "quakedef.h"
+
 #include "r_ssao.h"
 
 #include <math.h>

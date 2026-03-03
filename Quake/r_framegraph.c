@@ -1,3 +1,5 @@
+#include "quakedef.h"
+
 #include "r_framegraph.h"
 
 #include "r_fogvol.h"
