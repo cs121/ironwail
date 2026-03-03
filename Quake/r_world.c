@@ -26,10 +26,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "mat_shader.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
-extern cvar_t r_godrays_emit_emissive;
-extern cvar_t r_godrays_emit_lighttex;
+extern cvar_t r_godrays;
 extern cvar_t r_godrays_lighttex_name_match;
-extern cvar_t r_godrays_sky_enable;
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_oit;
 
@@ -573,9 +571,7 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 				has_emissive = true;
 		}
 
-		if (has_godray && has_light_match && r_godrays_emit_lighttex.value > 0.f)
-			return true;
-		if (has_godray && has_emissive && r_godrays_emit_emissive.value > 0.f)
+		if (has_godray && (has_light_match || has_emissive))
 			return true;
 	}
 
@@ -587,7 +583,7 @@ qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 	if (!s)
 		return false;
 
-	if ((s->flags & SURF_DRAWSKY) && r_godrays_sky_enable.value > 0.f)
+	if ((s->flags & SURF_DRAWSKY) && r_godrays.value > 0.f)
 	{
 		if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
 		{
@@ -1383,11 +1379,10 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 						fb = NULL;
 				}
 
-				if (r_godrays_emit_lighttex.value > 0.f
-					&& R_GodraysLighttexNameMatches (t, stage))
+				if (R_GodraysLighttexNameMatches (t, stage))
 					extra_flags |= CALLFLAG_GODRAYS_LIGHT;
 
-				if (wants_emissive && r_godrays_emit_emissive.value > 0.f)
+				if (wants_emissive)
 				{
 					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
 					extra_flags |= CALLFLAG_MAT_EMISSIVE;

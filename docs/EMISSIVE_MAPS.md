@@ -27,8 +27,8 @@ automatically bind and apply the glow contribution when the matching base
 texture is loaded.
 
 ## Godrays source name filtering
-- `r_godrays_emit_lighttex` controls whether materials that declare `godraySource` output
-  can contribute to the godrays source pass.
+- Materials that declare `godraySource` output can contribute to the godrays
+  source pass whenever `r_godrays 1` is enabled.
 - `r_godrays_lighttex_name_match` adds an additional safety/name filter for that light-texture
   path: when set to `1` (default), the material is used only if one of these names contains
   a light token (`light`, `lamp`, `glow`, `flare`, `neon`, `torch`, `lantern`):
