@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_lightgrid.h"
 #include "r_fogvol.h"
 #include "r_dlight_pool.h"
+#include <assert.h>
 #include <math.h>
 #include <stdint.h>
 
@@ -190,6 +191,110 @@ cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_dir = { "r_fogvol_sun_dir", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_color = { "r_fogvol_sun_color", "0 0 0", CVAR_ARCHIVE };
+
+typedef struct fogvol_cvar_reg_s
+{
+	cvar_t *var;
+	const char *category;
+	const char *default_value;
+} fogvol_cvar_reg_t;
+
+static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
+	{&r_fogvol, "core", "0"},
+	{&r_fogvol_steps, "quality", "32"},
+	{&r_fogvol_maxsteps, "quality", "128"},
+	{&r_fogvol_stepsize, "quality", "0"},
+	{&r_fogvol_halfres, "quality", "0"},
+	{&r_fogvol_upsample, "quality", "1"},
+	{&r_fogvol_upsample_k, "quality", "25"},
+	{&r_fogvol_upsample_taps, "quality", "4"},
+	{&r_fogvol_steps_scale_halfres, "quality", "0.5"},
+	{&r_fogvol_noise, "noise", "1"},
+	{&r_fogvol_noise_subsample, "noise", "1"},
+	{&r_fogvol_noise_lod_switch_dist, "noise", "64"},
+	{&r_fogvol_domainwarp_dist, "noise", "128"},
+	{&r_fogvol_noisemode, "noise", "0"},
+	{&r_fogvol_testvolumes, "debug", "0"},
+	{&r_fogvol_testvolumes_dumpstate, "debug", "0"},
+	{&r_fogvol_physblend, "core", "1"},
+	{&r_fogvol_blendmode, "core", "0"},
+	{&r_fogvol_emissive, "lighting", "1"},
+	{&r_fogvol_temporal_alpha, "temporal", "0.9"},
+	{&r_fogvol_temporal_depth_reject, "temporal", "0.01"},
+	{&r_fogvol_temporal_confidence_min_alpha, "temporal", "0.05"},
+	{&r_fogvol_temporal_disocclusion_bias, "temporal", "0.5"},
+	{&r_fogvol_temporal_clamp_strength, "temporal", "1.5"},
+	{&r_fogvol_checkerboard, "quality", "0"},
+	{&r_fogvol_light_subsample, "lighting", "1"},
+	{&r_fogvol_jitter, "quality", "1"},
+	{&r_fogvol_debug, "debug", "0"},
+	{&r_fogvol_inject_debug, "debug", "0"},
+	{&r_fogvol_density_scale, "core", "1"},
+	{&r_fogvol_sigma_max, "core", "4"},
+	{&r_fogvol_globalfog, "global", "1"},
+	{&r_fogvol_globalfog_density_scale, "global", "0.05"},
+	{&r_fogvol_globalfog_falloff, "global", "64"},
+	{&r_fogvol_globalfog_noise_scale, "global", "0.02"},
+	{&r_fogvol_globalfog_noise_amount, "global", "0.4"},
+	{&r_fogvol_globalfog_noise_bias, "global", "0.0"},
+	{&r_fogvol_globalfog_velocity_x, "global", "0"},
+	{&r_fogvol_globalfog_velocity_y, "global", "0"},
+	{&r_fogvol_globalfog_velocity_z, "global", "0"},
+	{&r_fogvol_globalfog_height, "global", "0"},
+	{&r_fogvol_globalfog_height_scale, "global", "0"},
+	{&r_fogvol_globalfog_priority, "global", "-1"},
+	{&r_fogvol_light, "lighting", "0"},
+	{&r_fogvol_lightgrid, "lighting", "1"},
+	{&r_fogvol_light_max, "lighting", "16"},
+	{&r_fogvol_light_stats, "debug", "0"},
+	{&r_fogvol_shadow, "lighting", "1"},
+	{&r_fogvol_shadow_samples, "lighting", "2"},
+	{&r_fogvol_shadow_strength, "lighting", "0.8"},
+	{&r_fogvol_shadow_jitter, "lighting", "1"},
+	{&r_fogvol_sun_dir, "lighting", "1"},
+	{&r_fogvol_sun_scatter, "lighting", "0"},
+	{&r_fogvol_sun_color, "lighting", "0 0 0"},
+};
+
+/* NOTE: Keep this mapping synchronized with shaders/fogvol.frag layout(location=...). */
+enum
+{
+	FOGVOL_U_STEPS = 0,
+	FOGVOL_U_NOISE_ENABLED = 1,
+	FOGVOL_U_DEBUG_MODE = 2,
+	FOGVOL_U_VOLUME_INDEX = 3,
+	FOGVOL_U_INV_VIEWPROJ = 4,
+	FOGVOL_U_NOISE_MODE = 5,
+	FOGVOL_U_PHYS_BLEND = 6,
+	FOGVOL_U_JITTER_ENABLED = 7,
+	FOGVOL_U_CAMERA_POS_WS = 8,
+	FOGVOL_U_VIEWPORT_PARAMS = 9,
+	FOGVOL_U_DEPTH_SCALE = 10,
+	FOGVOL_U_VIEW_PARAMS = 11,
+	FOGVOL_U_DEPTH_PARAMS = 12,
+	FOGVOL_U_DENSITY_PARAMS = 13,
+	FOGVOL_U_EMISSIVE_ENABLED = 14,
+	FOGVOL_U_BLEND_MODE_DEFAULT = 15,
+	FOGVOL_U_LIGHT_ENABLED = 16,
+	FOGVOL_U_SHADOW_ENABLED = 17,
+	FOGVOL_U_SHADOW_SAMPLES = 18,
+	FOGVOL_U_SHADOW_STRENGTH = 19,
+	FOGVOL_U_SHADOW_JITTER = 20,
+	FOGVOL_U_SHADOW_DIR = 21,
+	FOGVOL_U_LIGHTGRID_ENABLED = 22,
+	FOGVOL_U_FRAME_INDEX = 23,
+	FOGVOL_U_NOISE_SUBSAMPLE = 24,
+	FOGVOL_U_NOISE_LOD_SWITCH_DIST = 25,
+	FOGVOL_U_DOMAIN_WARP_MAX_DIST = 26,
+	FOGVOL_U_CHECKERBOARD = 27,
+	FOGVOL_U_HALFRES = 28,
+	FOGVOL_U_LIGHT_SUBSAMPLE = 29,
+	FOGVOL_U_SUN_SCATTER = 30,
+	FOGVOL_U_SUN_COLOR = 31,
+	FOGVOL_U_COUNT = 32
+};
+
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_SUN_COLOR == 31);
 
 extern float skyflatcolor[3];
 
@@ -1129,60 +1234,19 @@ static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, const f
 
 void R_FogVol_Init (void)
 {
-	Cvar_RegisterVariable (&r_fogvol);
-	Cvar_RegisterVariable (&r_fogvol_steps);
-	Cvar_RegisterVariable (&r_fogvol_maxsteps);
-	Cvar_RegisterVariable (&r_fogvol_stepsize);
-	Cvar_RegisterVariable (&r_fogvol_halfres);
-	Cvar_RegisterVariable (&r_fogvol_upsample);
-	Cvar_RegisterVariable (&r_fogvol_upsample_k);
-	Cvar_RegisterVariable (&r_fogvol_upsample_taps);
-	Cvar_RegisterVariable (&r_fogvol_steps_scale_halfres);
-	Cvar_RegisterVariable (&r_fogvol_noise);
-	Cvar_RegisterVariable (&r_fogvol_noise_subsample);
-	Cvar_RegisterVariable (&r_fogvol_noise_lod_switch_dist);
-	Cvar_RegisterVariable (&r_fogvol_domainwarp_dist);
-	Cvar_RegisterVariable (&r_fogvol_noisemode);
-	Cvar_RegisterVariable (&r_fogvol_testvolumes);
-	Cvar_RegisterVariable (&r_fogvol_testvolumes_dumpstate);
-	Cvar_RegisterVariable (&r_fogvol_physblend);
-	Cvar_RegisterVariable (&r_fogvol_blendmode);
-	Cvar_RegisterVariable (&r_fogvol_emissive);
-	Cvar_RegisterVariable (&r_fogvol_temporal_alpha);
-	Cvar_RegisterVariable (&r_fogvol_temporal_depth_reject);
-	Cvar_RegisterVariable (&r_fogvol_temporal_confidence_min_alpha);
-	Cvar_RegisterVariable (&r_fogvol_temporal_disocclusion_bias);
-	Cvar_RegisterVariable (&r_fogvol_temporal_clamp_strength);
-	Cvar_RegisterVariable (&r_fogvol_checkerboard);
-	Cvar_RegisterVariable (&r_fogvol_light_subsample);
-	Cvar_RegisterVariable (&r_fogvol_jitter);
-	Cvar_RegisterVariable (&r_fogvol_debug);
-	Cvar_RegisterVariable (&r_fogvol_inject_debug);
-	Cvar_RegisterVariable (&r_fogvol_density_scale);
-	Cvar_RegisterVariable (&r_fogvol_sigma_max);
-	Cvar_RegisterVariable (&r_fogvol_globalfog);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_density_scale);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_falloff);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_noise_scale);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_noise_amount);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_noise_bias);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_velocity_x);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_velocity_y);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_velocity_z);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_height);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_height_scale);
-	Cvar_RegisterVariable (&r_fogvol_globalfog_priority);
-	Cvar_RegisterVariable (&r_fogvol_light);
-	Cvar_RegisterVariable (&r_fogvol_lightgrid);
-	Cvar_RegisterVariable (&r_fogvol_light_max);
-	Cvar_RegisterVariable (&r_fogvol_light_stats);
-	Cvar_RegisterVariable (&r_fogvol_shadow);
-	Cvar_RegisterVariable (&r_fogvol_shadow_samples);
-	Cvar_RegisterVariable (&r_fogvol_shadow_strength);
-	Cvar_RegisterVariable (&r_fogvol_shadow_jitter);
-	Cvar_RegisterVariable (&r_fogvol_sun_dir);
-	Cvar_RegisterVariable (&r_fogvol_sun_scatter);
-	Cvar_RegisterVariable (&r_fogvol_sun_color);
+	for (size_t i = 0; i < countof (fogvol_cvar_table); ++i)
+	{
+		const fogvol_cvar_reg_t *reg = &fogvol_cvar_table[i];
+#if !defined(NDEBUG)
+		assert (reg->var != NULL);
+		assert (reg->category != NULL);
+		assert (reg->default_value != NULL);
+		assert (reg->var->name != NULL);
+		assert (reg->var->string != NULL);
+		assert (!q_strcasecmp (reg->var->string, reg->default_value));
+#endif
+		Cvar_RegisterVariable (reg->var);
+	}
 }
 
 void R_FogVol_Clear (void)
@@ -1817,6 +1881,87 @@ void R_FogVol_DrawDebug2D (void)
 {
 }
 
+static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfres,
+	int glwidth, int glheight, float depth_scale_x, float depth_scale_y,
+	const float *inv_viewproj, float view_x, float view_y, float view_w, float view_h,
+	float depth_near, float depth_far, float depth_sky_cutoff,
+	qboolean fog_light_enabled, qboolean fog_lightgrid_enabled)
+{
+	vec3_t shadow_dir;
+	vec3_t sun_color;
+	float sun_intensity;
+	float sun_scatter;
+	int shadow_samples;
+
+#if !defined(NDEBUG)
+	assert (FOGVOL_U_COUNT == 32);
+#endif
+	GL_Uniform1iFunc (FOGVOL_U_STEPS, steps);
+	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_DEBUG_MODE, mode);
+	GL_Uniform1iFunc (FOGVOL_U_NOISE_MODE, (int)Q_rint (r_fogvol_noisemode.value));
+	GL_Uniform1iFunc (FOGVOL_U_PHYS_BLEND, r_fogvol_physblend.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_JITTER_ENABLED, r_fogvol_jitter.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_FRAME_INDEX, r_framecount);
+	GL_Uniform1iFunc (FOGVOL_U_NOISE_SUBSAMPLE, r_fogvol_noise_subsample.value > 0.f ? 1 : 0);
+	GL_Uniform1fFunc (FOGVOL_U_NOISE_LOD_SWITCH_DIST, q_max (1.f, r_fogvol_noise_lod_switch_dist.value));
+	GL_Uniform1fFunc (FOGVOL_U_DOMAIN_WARP_MAX_DIST, q_max (0.f, r_fogvol_domainwarp_dist.value));
+	GL_Uniform1iFunc (FOGVOL_U_CHECKERBOARD, r_fogvol_checkerboard.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_HALFRES, use_halfres ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_LIGHT_SUBSAMPLE, r_fogvol_light_subsample.value > 0.f ? 1 : 0);
+	GL_UniformMatrix4fvFunc (FOGVOL_U_INV_VIEWPROJ, 1, GL_FALSE, inv_viewproj);
+	GL_Uniform3fFunc (FOGVOL_U_CAMERA_POS_WS, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
+	GL_Uniform4fFunc (FOGVOL_U_VIEWPORT_PARAMS, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
+	GL_Uniform2fFunc (FOGVOL_U_DEPTH_SCALE, depth_scale_x, depth_scale_y);
+	GL_Uniform4fFunc (FOGVOL_U_VIEW_PARAMS,
+		use_halfres ? 0.f : view_x,
+		use_halfres ? 0.f : view_y,
+		1.f / view_w, 1.f / view_h);
+	GL_Uniform4fFunc (FOGVOL_U_DEPTH_PARAMS, depth_near, depth_far, gl_clipcontrol_able ? 1.f : 0.f, depth_sky_cutoff);
+	GL_Uniform2fFunc (FOGVOL_U_DENSITY_PARAMS, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
+	GL_Uniform1iFunc (FOGVOL_U_EMISSIVE_ENABLED, r_fogvol_emissive.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_BLEND_MODE_DEFAULT, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
+	GL_Uniform1iFunc (FOGVOL_U_LIGHT_ENABLED, fog_light_enabled ? 1 : 0);
+	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
+	if (r_fogvol_sun_dir.value > 0.f && R_GetSun (shadow_dir, NULL, NULL, NULL))
+	{
+		/* Convention: r_sun.dir points from scene toward the sun (light source).
+		 * Fog shadow marching moves from sample point toward the blocker, so use
+		 * the same direction without flipping to keep shader/CPU conventions aligned. */
+	}
+	else
+	{
+		VectorScale (vpn, -1.f, shadow_dir);
+	}
+	if (VectorLength (shadow_dir) < 0.001f)
+		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
+	else
+		VectorNormalize (shadow_dir);
+	GL_Uniform1iFunc (FOGVOL_U_SHADOW_ENABLED, r_fogvol_shadow.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_SHADOW_SAMPLES, shadow_samples);
+	GL_Uniform1fFunc (FOGVOL_U_SHADOW_STRENGTH, CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f));
+	GL_Uniform1fFunc (FOGVOL_U_SHADOW_JITTER, r_fogvol_shadow_jitter.value > 0.f ? 1.f : 0.f);
+	GL_Uniform3fFunc (FOGVOL_U_SHADOW_DIR, shadow_dir[0], shadow_dir[1], shadow_dir[2]);
+	GL_Uniform1iFunc (FOGVOL_U_LIGHTGRID_ENABLED, fog_lightgrid_enabled ? 1 : 0);
+	sun_scatter = q_max (0.f, r_fogvol_sun_scatter.value);
+	if (!R_GetSun (NULL, NULL, sun_color, &sun_intensity))
+	{
+		VectorSet (sun_color, skyflatcolor[0], skyflatcolor[1], skyflatcolor[2]);
+		sun_intensity = 1.f;
+		if (sun_color[0] <= 0.f && sun_color[1] <= 0.f && sun_color[2] <= 0.f)
+			VectorSet (sun_color, 1.f, 1.f, 1.f);
+	}
+	if (r_fogvol_sun_color.string && r_fogvol_sun_color.string[0])
+	{
+		vec3_t user_sun_color;
+		R_FogVol_ParseColor (r_fogvol_sun_color.string, user_sun_color);
+		if (user_sun_color[0] > 0.f || user_sun_color[1] > 0.f || user_sun_color[2] > 0.f)
+			VectorCopy (user_sun_color, sun_color);
+	}
+	GL_Uniform1fFunc (FOGVOL_U_SUN_SCATTER, sun_scatter * q_max (0.f, sun_intensity));
+	GL_Uniform3fFunc (FOGVOL_U_SUN_COLOR, q_max (0.f, sun_color[0]), q_max (0.f, sun_color[1]), q_max (0.f, sun_color[2]));
+}
+
 void R_FogVol_Render (void)
 {
 	static int last_dumpstate = -1;
@@ -1862,11 +2007,6 @@ void R_FogVol_Render (void)
 	qboolean fog_lightgrid_enabled = false;
 	qboolean fog_lightgrid_has_data = false;
 	const lightgrid_t *lightgrid = NULL;
-	vec3_t shadow_dir;
-	vec3_t sun_color;
-	float sun_intensity = 1.f;
-	float sun_scatter = 0.f;
-	int shadow_samples;
 	fogvol_visible_volume_t visible_volumes[MAX_FOGVOLUMES];
 	fogvol_light_candidate_t frame_candidates[256];
 	fogvol_light_stats_t light_stats;
@@ -2068,89 +2208,11 @@ void R_FogVol_Render (void)
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	GL_Uniform1iFunc (0, steps);
-	GL_Uniform1iFunc (1, r_fogvol_noise.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (2, mode);
-	GL_Uniform1iFunc (5, (int)Q_rint (r_fogvol_noisemode.value));
-	GL_Uniform1iFunc (6, r_fogvol_physblend.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (7, r_fogvol_jitter.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (23, r_framecount);
-	GL_Uniform1iFunc (24, r_fogvol_noise_subsample.value > 0.f ? 1 : 0);
-	GL_Uniform1fFunc (25, q_max (1.f, r_fogvol_noise_lod_switch_dist.value));
-	GL_Uniform1fFunc (26, q_max (0.f, r_fogvol_domainwarp_dist.value));
-	GL_Uniform1iFunc (27, r_fogvol_checkerboard.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (28, use_halfres ? 1 : 0);
-	GL_Uniform1iFunc (29, r_fogvol_light_subsample.value > 0.f ? 1 : 0);
-	GL_UniformMatrix4fvFunc (4, 1, GL_FALSE, inv_viewproj);
-	GL_Uniform3fFunc (8, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
-	GL_Uniform4fFunc (9, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
-	GL_Uniform2fFunc (10, depth_scale_x, depth_scale_y);
-	/* BUG FIX (halfres distortion): In halfres mode the fog viewport is placed
-	 * at (0,0) so gl_FragCoord.xy starts from (0,0), not (view_x,view_y).
-	 * FogDepthScale already maps fragcoord to full-res pixel space, so
-	 * screenPos = fragcoord * DepthScale correctly ranges over [0,glwidth) even
-	 * in halfres.  The shader computes viewUv as
-	 *   (screenPos - FogViewParams.xy) * FogViewParams.zw
-	 * In fullres the viewport IS at (view_x,view_y), so screenPos starts there
-	 * and subtracting view_x/view_y gives (0,0) at the view origin — correct.
-	 * In halfres screenPos starts at (0,0), so passing view_x/view_y shifts the
-	 * entire UV mapping into negative territory, causing the visible warping.
-	 * Fix: pass xy=(0,0) in halfres; zw=(1/view_w,1/view_h) is unchanged since
-	 * screenPos is already in full-res-equivalent coordinates. */
-	GL_Uniform4fFunc (11,
-		use_halfres ? 0.f : view_x,
-		use_halfres ? 0.f : view_y,
-		1.f / view_w, 1.f / view_h);
-	GL_Uniform4fFunc (12, depth_near, depth_far, gl_clipcontrol_able ? 1.f : 0.f, depth_sky_cutoff);
-	GL_Uniform2fFunc (13, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
-	GL_Uniform1iFunc (14, r_fogvol_emissive.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (15, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
-	GL_Uniform1iFunc (16, fog_light_enabled ? 1 : 0);
-	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
-	if (r_fogvol_sun_dir.value > 0.f && R_GetSun (shadow_dir, NULL, NULL, NULL))
-	{
-		/* Convention: r_sun.dir points from scene toward the sun (light source).
-		 * Fog shadow marching moves from sample point toward the blocker, so use
-		 * the same direction without flipping to keep shader/CPU conventions aligned. */
-	}
-	else
-	{
-		VectorScale (vpn, -1.f, shadow_dir);
-	}
-	/* BUG FIX (C-09): Length check must happen BEFORE VectorNormalize.
-	 * VectorNormalize on a zero-vector causes division-by-zero / NaN.
-	 * Only normalize when the vector is non-degenerate. */
-	if (VectorLength (shadow_dir) < 0.001f)
-		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
-	else
-		VectorNormalize (shadow_dir);
-	GL_Uniform1iFunc (17, r_fogvol_shadow.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (18, shadow_samples);
-	GL_Uniform1fFunc (19, CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f));
-	GL_Uniform1fFunc (20, r_fogvol_shadow_jitter.value > 0.f ? 1.f : 0.f);
-	GL_Uniform3fFunc (21, shadow_dir[0], shadow_dir[1], shadow_dir[2]);
-	GL_Uniform1iFunc (22, fog_lightgrid_enabled ? 1 : 0);
-	sun_scatter = q_max (0.f, r_fogvol_sun_scatter.value);
-	if (R_GetSun (NULL, NULL, sun_color, &sun_intensity))
-	{
-		/* worldspawn sun color/intensity are the preferred defaults. */
-	}
-	else
-	{
-		VectorSet (sun_color, skyflatcolor[0], skyflatcolor[1], skyflatcolor[2]);
-		sun_intensity = 1.f;
-		if (sun_color[0] <= 0.f && sun_color[1] <= 0.f && sun_color[2] <= 0.f)
-			VectorSet (sun_color, 1.f, 1.f, 1.f);
-	}
-	if (r_fogvol_sun_color.string && r_fogvol_sun_color.string[0])
-	{
-		vec3_t user_sun_color;
-		R_FogVol_ParseColor (r_fogvol_sun_color.string, user_sun_color);
-		if (user_sun_color[0] > 0.f || user_sun_color[1] > 0.f || user_sun_color[2] > 0.f)
-			VectorCopy (user_sun_color, sun_color);
-	}
-	GL_Uniform1fFunc (30, sun_scatter * q_max (0.f, sun_intensity));
-	GL_Uniform3fFunc (31, q_max (0.f, sun_color[0]), q_max (0.f, sun_color[1]), q_max (0.f, sun_color[2]));
+	R_FogVol_SetShaderUniforms (steps, mode, use_halfres,
+		glwidth, glheight, depth_scale_x, depth_scale_y,
+		inv_viewproj, view_x, view_y, view_w, view_h,
+		depth_near, depth_far, depth_sky_cutoff,
+		fog_light_enabled, fog_lightgrid_enabled);
 
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);
@@ -2297,7 +2359,7 @@ void R_FogVol_Render (void)
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 		GL_SetScissorEnabled (true);
 		glScissor (x0, y0, x1 - x0, y1 - y0);
-		GL_Uniform1iFunc (3, i);
+		GL_Uniform1iFunc (FOGVOL_U_VOLUME_INDEX, i);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 		GL_SetScissorEnabled (false);
 
