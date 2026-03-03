@@ -116,6 +116,13 @@ qboolean R_FogVol_HasValidComposite (void);
 /* PostFX gate: fogvol should contribute to postprocess passes this frame. */
 qboolean R_FogVol_ShouldAffectPostFX (void);
 qboolean R_FogVol_CanRenderGlobal (void);
+/*
+ * FogVol Composite Contract (for CPU + shader users):
+ *  - RGB: fog radiance already composited over the scene color (display-space contribution).
+ *  - A:   fog coverage proxy = 1 - transmittance (a.k.a. integrated fog density/opacity).
+ *         0.0 = no volumetric medium on this pixel, 1.0 = fully opaque medium.
+ *  - Validity: sample only when R_FogVol_HasValidComposite() is true for the frame.
+ */
 /* Returns the composite texture that received the fogvol temporal output this
  * frame. Use this for SSAO suppression — it is the correct per-pixel fog density
  * source for spatial/noisy volumetric fog that cannot be modelled analytically. */

@@ -1,3 +1,8 @@
+// FogVol Composite Contract:
+//   RGB = fog radiance composited over scene color (display-space contribution).
+//   A   = fog coverage proxy = 1.0 - transmittance (0=no fog medium, 1=opaque medium).
+//   Valid only when CPU marks fogvol composite as ready for this frame.
+
 layout(binding=0) uniform sampler2D GammaTexture;
 layout(binding=1) uniform usampler3D PaletteLUT;
 layout(binding=2) uniform sampler2D DepthTexture;
@@ -8,10 +13,9 @@ layout(binding=6) uniform sampler2D GodraysMaskTexture;
 layout(binding=7) uniform sampler2D GodraysSourceTexture;
 layout(binding=8) uniform sampler2D SSAOTexture;
 layout(binding=9) uniform sampler2DArray PostFXLUT;
-// Fog volume composite texture (halfres, upsampled to full-res by fogvol pass).
-// RGB = composited fog color as blended into the scene. Used to derive per-pixel
-// volumetric transmittance for SSAO suppression. Binding is left unbound (→ black)
-// when fogvol is inactive, giving transmittance=1.0 and no suppression.
+// FogVol composite texture input for post effects.
+// Sample alpha (A = 1-transmittance) for fog-aware suppression logic.
+// Binding may be left unbound when fogvol is inactive; callers must gate via CPU validity.
 layout(binding=10) uniform sampler2D FogVolTexture;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
