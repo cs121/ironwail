@@ -1330,8 +1330,10 @@ static void R_FogVol_AddGlobalFog (void)
 	R_FogVol_AddVolume (&volume);
 }
 
-qboolean R_FogVol_CanRenderGlobal (void)
+qboolean R_FogVol_IsEnabledForFrame (void)
 {
+	if (r_fogvol.value <= 0.f)
+		return false;
 	if (Fog_GetDensity () <= 0.f)
 		return false;
 	if (!glprogs.fogvol)
@@ -1343,17 +1345,38 @@ qboolean R_FogVol_CanRenderGlobal (void)
 	return true;
 }
 
+qboolean R_FogVol_HasValidComposite (void)
+{
+	if (!R_FogVol_IsEnabledForFrame ())
+		return false;
+	if (!r_fogvol_composite_valid)
+		return false;
+	if (framebufs.fogvol.composite_tex[r_fogvol_history_index] == 0)
+		return false;
+	return true;
+}
+
+qboolean R_FogVol_ShouldAffectPostFX (void)
+{
+	return R_FogVol_IsEnabledForFrame ();
+}
+
+qboolean R_FogVol_CanRenderGlobal (void)
+{
+	return R_FogVol_IsEnabledForFrame ();
+}
+
 /* Returns the fogvol composite texture that was rendered this frame.
  * After R_FogVol_Render(), r_fogvol_history_index points to the slot that
  * received the temporal composite output — that is the most recent result.
- * Returns 0 if fogvol did not render this frame (no active volumes). */
+ * Returns 0 if fogvol did not render this frame (no active volumes).
+ * Semantics: returns a non-zero texture only when output is valid this frame. */
 GLuint R_FogVol_GetCompositeTex (void)
 {
-	if (!r_fogvol_composite_valid)
+	if (!R_FogVol_HasValidComposite ())
 		return 0;
 
-	GLuint tex = framebufs.fogvol.composite_tex[r_fogvol_history_index];
-	return tex;
+	return framebufs.fogvol.composite_tex[r_fogvol_history_index];
 }
 
 void R_FogVol_ParseEntities (void)

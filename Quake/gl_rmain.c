@@ -1750,10 +1750,10 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	GLuint volumetric_tex = 0;
 	float volumetric_enabled = 0.f;
 
-	if (r_godrays_volumetric.value > 0.f && r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
+	if (r_godrays_volumetric.value > 0.f && R_FogVol_HasValidComposite ())
 	{
 		volumetric_tex = R_FogVol_GetCompositeTex ();
-		volumetric_enabled = (volumetric_tex != 0) ? 1.f : 0.f;
+		volumetric_enabled = 1.f;
 	}
 
 	GL_GetGodraysLightPos (width, height, light_x, light_y, &stabilized_x, &stabilized_y);
@@ -2499,10 +2499,10 @@ void GL_PostProcess (void)
 	{
 		GLuint fogvol_composite = 0;
 		float  fogvol_active    = 0.f;
-		if (r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
+		if (R_FogVol_HasValidComposite ())
 		{
 			fogvol_composite = R_FogVol_GetCompositeTex ();
-			fogvol_active    = (fogvol_composite != 0) ? 1.f : 0.f;
+			fogvol_active    = 1.f;
 		}
 		GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, fogvol_composite);
 		GL_Uniform4fFunc (28, fogvol_active, 0.f, 0.f, 0.f);
@@ -3240,7 +3240,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (R_DoFEnabled ())
 		return true;
 
-	if (r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
+	if (R_FogVol_ShouldAffectPostFX ())
 		return true;
 
 	return false;
@@ -3271,7 +3271,7 @@ qboolean GL_NeedsPostprocess (void)
 		return true;
 	if (r_godrays.value > 0.f)
 		return true;
-	if (r_fogvol.value > 0.f && R_FogVol_CanRenderGlobal ())
+	if (R_FogVol_ShouldAffectPostFX ())
 		return true;
 	return false;
 }
