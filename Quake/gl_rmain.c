@@ -133,6 +133,31 @@ static qboolean R_IsUnderwaterContents (int contents)
 	return contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA;
 }
 
+static int R_ResolveUnderwaterContents (int view_contents, qboolean forced, const vec3_t vieworg)
+{
+	vec3_t probe;
+	mleaf_t *leaf;
+	int i;
+
+	if (R_IsUnderwaterContents (view_contents) || !forced || !cl.worldmodel)
+		return view_contents;
+
+	VectorCopy (vieworg, probe);
+	for (i = 0; i < 32; ++i)
+	{
+		probe[2] -= 8.f;
+		leaf = Mod_PointInLeaf (probe, cl.worldmodel);
+		if (!leaf)
+			break;
+		if (R_IsUnderwaterContents (leaf->contents))
+			return leaf->contents;
+		if (leaf->contents == CONTENTS_SOLID)
+			break;
+	}
+
+	return view_contents;
+}
+
 
 //johnfitz -- rendering statistics
 int rs_brushpolys, rs_aliaspolys, rs_skypolys;
@@ -3415,19 +3440,24 @@ void R_SetupView (void)
 	r_oldviewleaf = r_viewleaf;
 	r_viewleaf = Mod_PointInLeaf (r_origin, cl.worldmodel);
 
-	V_SetContentsColor (r_viewleaf->contents);
-	V_CalcBlend ();
-
 	//johnfitz -- calculate r_fovx and r_fovy here
 	r_fovx = r_refdef.fov_x;
 	r_fovy = r_refdef.fov_y;
 	water_warp = false;
 	{
-		int contents = r_viewleaf->contents;
+		int view_contents = r_viewleaf->contents;
+		int contents = view_contents;
 		qboolean submerged = R_IsUnderwaterContents (contents);
 		qboolean forced = (cl.forceunderwater || M_ForcedUnderwater ());
 		qboolean underwater_active = (submerged || forced);
 		qboolean underwater_postfx_active = underwater_active;
+
+		contents = R_ResolveUnderwaterContents (view_contents, forced, r_origin);
+		submerged = R_IsUnderwaterContents (contents);
+		underwater_active = (submerged || forced);
+
+		V_SetContentsColor (contents);
+		V_CalcBlend ();
 
 		if (r_waterwarp.value && underwater_active)
 		{
