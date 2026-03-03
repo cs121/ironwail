@@ -2379,7 +2379,12 @@ void GL_PostProcess (void)
 	godrays_source = 0;
 	if (godrays_preview)
 	{
-		godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);
+		/* Keep source debug useful even when scatter generation is disabled/unsupported. */
+		if (godrays_debug_source > 0.f && R_GodraysReady ())
+			GL_GenerateGodraysSource (true, true);
+
+		if (godrays_enabled || godrays_debug > 0.f)
+			godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);
 		godrays_source = framebufs.godrays.source_tex;
 	}
 
