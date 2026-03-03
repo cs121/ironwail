@@ -69,6 +69,7 @@ static cvar_t	external_ents = {"external_ents", "1", CVAR_ARCHIVE};
 static cvar_t	external_vis = {"external_vis", "1", CVAR_ARCHIVE};
 static cvar_t	gl_loadlitfiles = {"gl_loadlitfiles", "1", CVAR_ARCHIVE};
 static cvar_t	external_lits_dir = {"external_lits_dir", "", CVAR_ARCHIVE};
+static cvar_t	gl_bsp_lightmap_bgr = {"gl_bsp_lightmap_bgr", "-1", CVAR_ARCHIVE};
 static cvar_t	mod_ignorelmscale = {"mod_ignorelmscale", "0", 0};
 cvar_t			load_lightgrid_octree = {"load_lightgrid_octree", "", CVAR_NONE};
 cvar_t			r_md5 = {"r_md5", "1", CVAR_ARCHIVE};
@@ -152,6 +153,7 @@ void Mod_Init (void)
 	Cvar_RegisterVariable (&external_vis);
 	Cvar_RegisterVariable (&external_ents);
 	Cvar_RegisterVariable (&gl_loadlitfiles);
+	Cvar_RegisterVariable (&gl_bsp_lightmap_bgr);
 	Cvar_RegisterVariable (&external_lits_dir);
 	Cvar_RegisterVariable (&mod_ignorelmscale);
 	Cvar_RegisterVariable (&r_md5);
@@ -742,6 +744,35 @@ static void Mod_DecodeRgbeLighting(byte *dst, const byte *src, int samples)
                 dst[1] = CLAMP(0, (int)(G * 255.0f), 255);
                 dst[2] = CLAMP(0, (int)(B * 255.0f), 255);
         }
+}
+
+static qboolean Mod_ShouldAutoSwapBspLighting(const qmodel_t *mod)
+{
+	if (!mod || mod->bspversion != BSPVERSION)
+		return false;
+
+	/* Quake remaster/KEX maps use an IBSP wrapper with version 29. */
+	if (com_filesize >= 8 && !strncmp((const char *)mod_base, "IBSP", 4))
+		return true;
+
+	/* Fallback for custom installs that mount rerelease content directly. */
+	if (strstr(com_gamedir, "rerelease") || strstr(com_gamedir, "RERELEASE"))
+		return true;
+
+	return false;
+}
+
+static qboolean Mod_RgbExponentLooksLikeAlpha(const byte *src, int samples)
+{
+	int full_alpha = 0;
+
+	for (int i = 0; i < samples; i++)
+	{
+		if (src[i * 4 + 3] >= 250)
+			full_alpha++;
+	}
+
+	return samples > 0 && full_alpha > (samples * 9) / 10;
 }
 
 static void Q1BSPX_MarkUsed(const char *lumpname)
@@ -1689,6 +1720,9 @@ static void Mod_LoadLighting (lump_t *l)
 	const char *lighting_source;
 	unsigned int path_id;
 	int	bspxsize, bspx_lighting_size, bspx_rgb_size, bspx_dlit_size;
+	int remastered_lump_samples;
+	qboolean bsp_lightmap_bgr = false;
+	const char *lightmap_source_name = "NONE";
 
 	loadmodel->lightdata = NULL;
 	loadmodel->lightdatasamples = 0;
@@ -1703,6 +1737,11 @@ static void Mod_LoadLighting (lump_t *l)
 	bspx_lighting = Q1BSPX_FindLump("LIGHTING", &bspx_lighting_size);
 	bspx_rgblighting = Q1BSPX_FindLump("RGBLIGHTING", &bspx_rgb_size);
 	bspx_dlit = Q1BSPX_FindLump("DLIT", &bspx_dlit_size);
+
+	if (gl_bsp_lightmap_bgr.value > 0.f)
+		bsp_lightmap_bgr = true;
+	else if (gl_bsp_lightmap_bgr.value < 0.f)
+		bsp_lightmap_bgr = Mod_ShouldAutoSwapBspLighting(loadmodel);
 
 	/*
 	 * Lighting source precedence for loadmodel->lightdata:
@@ -1775,6 +1814,7 @@ static void Mod_LoadLighting (lump_t *l)
 					loadmodel->lightdata = data + 8;
 					loadmodel->lightdatasamples = l->filelen;
 					loadmodel->litfile = true;
+					lightmap_source_name = "LIT_V1";
 					goto loadlightdir;
                                 }
 				Hunk_FreeToLowMark(mark);
@@ -1807,6 +1847,7 @@ static void Mod_LoadLighting (lump_t *l)
                                         loadmodel->lightdata = decoded;
                                         loadmodel->lightdatasamples = l->filelen;
                                         loadmodel->litfile = true;
+					lightmap_source_name = "LIT_V2_RGBE";
 
                                         goto loadlightdir;
                                 }
@@ -1825,6 +1866,49 @@ static void Mod_LoadLighting (lump_t *l)
 			Con_Printf("Corrupt .lit file (old version?), ignoring\n");
 		}
 	}
+	/*
+	 * Quake Remastered BSP29 stores colored lightmaps in 4-byte BGRA-like records
+	 * in the LIGHTING lump. Detect and convert to RGB here so uploads stay GL_RGB.
+	 */
+	remastered_lump_samples = (l->filelen > 0 && (l->filelen % 4) == 0) ? (l->filelen / 4) : 0;
+	if (!loadmodel->lightdata && bsp_lightmap_bgr && remastered_lump_samples > 0)
+	{
+		const byte *src = mod_base + l->fileofs;
+
+		if (!Mod_RgbExponentLooksLikeAlpha(src, remastered_lump_samples))
+		{
+			loadmodel->lightdata = (byte *)Hunk_AllocName(remastered_lump_samples * 3, litfilename);
+			loadmodel->lightdatasamples = remastered_lump_samples;
+			loadmodel->litfile = true;
+			out = loadmodel->lightdata;
+
+			for (i = 0; i < remastered_lump_samples; i++)
+			{
+				const byte *pix = src + i * 4;
+				/* BGRA/BGRX -> RGB, keep alpha/exponent byte ignored. */
+				*out++ = pix[2];
+				*out++ = pix[1];
+				*out++ = pix[0];
+			}
+
+			lightmap_source_name = "REMASTERED_BGRA";
+			goto loadlightdir;
+		}
+		else
+		{
+			byte *decoded = (byte *)Hunk_AllocName(remastered_lump_samples * 3, litfilename);
+
+			Mod_DecodeRgbeLighting(decoded, src, remastered_lump_samples);
+			loadmodel->lightdata = decoded;
+			loadmodel->lightdatasamples = remastered_lump_samples;
+			loadmodel->litfile = true;
+			loadmodel->flags |= MOD_HDRLIGHTING;
+			lightmap_source_name = "REMASTERED_RGBE";
+			goto loadlightdir;
+		}
+	}
+
+
 	// LordHavoc: no .lit found, expand the white lighting data to color
 	if (!l->filelen && !(bspx_lighting && bspx_lighting_size > 0))
 		goto loadlightdir;
@@ -1841,6 +1925,7 @@ static void Mod_LoadLighting (lump_t *l)
                         Q1BSPX_DecodeE5BGR9Lighting(loadmodel->lightdata, (const unsigned int *)in, samples);
                         Q1BSPX_MarkUsed("LIGHTING_E5BGR9");
 					Con_Printf("loaded BSPX HDR lighting (E5BGR9)\n");
+					lightmap_source_name = "BSPX_LIGHTING_E5BGR9";
                         goto loadlightdir;
                 }
                 else if (in)
@@ -1861,6 +1946,7 @@ static void Mod_LoadLighting (lump_t *l)
                         Q1BSPX_MarkUsed("RGBLIGHTING");
 
 					Con_Printf("loaded BSPX lighting (%d samples)\n", samples);
+					lightmap_source_name = "BSPX_RGBLIGHTING";
                         goto loadlightdir;
                 }
                 else if (bspx_rgblighting)
@@ -1907,6 +1993,7 @@ static void Mod_LoadLighting (lump_t *l)
                         }
 
                         Q1BSPX_MarkUsed("DLIT");
+					lightmap_source_name = "BSPX_DLIT";
                         goto loadlightdir;
                 }
         }
@@ -1927,6 +2014,7 @@ static void Mod_LoadLighting (lump_t *l)
 			*out++ = d;
 		}
 		Q1BSPX_MarkUsed("LIGHTING");
+		lightmap_source_name = "BSPX_LIGHTING";
 		goto loadlightdir;
 	}
 
@@ -1951,6 +2039,7 @@ static void Mod_LoadLighting (lump_t *l)
                         *out++ = ((q64_b0 & 0x07) << 5) + ((q64_b1 & 0xc0) >> 5);/* 0b00000111, 0b11000000 */
                         *out++ = (q64_b1 & 0x3f) << 2;/* 0b00111111 */
                 }
+                lightmap_source_name = "BSP_Q64";
                 goto loadlightdir;
         }
 
@@ -1968,6 +2057,7 @@ static void Mod_LoadLighting (lump_t *l)
 			*out++ = d;
 			*out++ = d;
 		}
+		lightmap_source_name = "BSP_LIGHTING";
 		goto loadlightdir;
 	}
 
@@ -2010,6 +2100,11 @@ loadlightdir:
 			}
 		}
 	}
+
+	Con_DPrintf("Lightmap: source=%s fmt=%s texels=%d\n",
+		lightmap_source_name,
+		bsp_lightmap_bgr ? "BGR->RGB" : "RGB",
+		loadmodel->lightdatasamples);
 	return;
 }
 /*
