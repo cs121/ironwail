@@ -657,6 +657,23 @@ static void VID_ApplyVSync (void)
 }
 
 /*
+=====================
+VID_RecreateRenderTargets
+=====================
+*/
+static void VID_RecreateRenderTargets (const char *reason, qboolean delete_existing)
+{
+	if (reason && *reason)
+		Con_DPrintf ("Recreating render targets (%s)\n", reason);
+
+	if (delete_existing)
+		GL_DeleteFrameBuffers ();
+
+	GL_CreateFrameBuffers ();
+	R_FogVol_ClearHistory ();
+}
+
+/*
 =================
 VID_VSync_f
 
@@ -677,12 +694,10 @@ Called when vid_fsaa changes
 */
 static void VID_FSAA_f (cvar_t *cvar)
 {
-        if (!host_initialized)
-                return;
-        GL_DeleteFrameBuffers ();
-        GL_CreateFrameBuffers ();
-	R_FogVol_ClearHistory ();
-        gl_lodbias.callback (&gl_lodbias);
+	if (!host_initialized)
+		return;
+	VID_RecreateRenderTargets ("vid_fsaa changed", true);
+	gl_lodbias.callback (&gl_lodbias);
 }
 
 /*
@@ -778,8 +793,7 @@ static void VID_Restart (void)
 	//conwidth and conheight need to be recalculated
 	VID_RecalcInterfaceSize ();
 
-	GL_CreateFrameBuffers ();
-	R_FogVol_ClearHistory ();
+	VID_RecreateRenderTargets ("vid_restart", false);
 //
 // keep cvars in line with actual mode
 //
@@ -1382,10 +1396,9 @@ static void GL_Init (void)
 	}
 	//johnfitz
 
-        GL_CreateShaders ();
-        GL_CreateFrameBuffers ();
-	R_FogVol_ClearHistory ();
-        GLLight_CreateResources ();
+	GL_CreateShaders ();
+	VID_RecreateRenderTargets ("gl_init", false);
+	GLLight_CreateResources ();
 	GLPalette_CreateResources ();
 
 	GL_ClearBufferBindings ();
@@ -1400,11 +1413,11 @@ GL_BeginRendering -- sets values of glx, gly, glwidth, glheight
 */
 void GL_BeginRendering (int *x, int *y, int *width, int *height)
 {
-        if (vid.resized)
-        {
-                vid.resized = false;
-                vid.recalc_refdef = true;
-                if (vid_saveresize.value)
+	if (vid.resized)
+	{
+		vid.resized = false;
+		vid.recalc_refdef = true;
+		if (vid_saveresize.value)
 		{
 			qboolean was_locked = vid_locked;
 			vid_locked = true; // avoid "vid_width will be applied after a vid_restart" spam
@@ -1412,11 +1425,9 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 			Cvar_SetValueQuick (&vid_height, vid.height);
 			vid_locked = was_locked;
 		}
-                VID_RecalcInterfaceSize ();
-                GL_DeleteFrameBuffers ();
-                GL_CreateFrameBuffers ();
-	R_FogVol_ClearHistory ();
-                }
+		VID_RecalcInterfaceSize ();
+		VID_RecreateRenderTargets ("window resized", true);
+	}
 
 	*x = *y = 0;
 	*width = vid.width;
