@@ -25,3 +25,16 @@ other details that should glow regardless of scene lighting.
 After adding emissive textures, launch the game normally. The renderer will
 automatically bind and apply the glow contribution when the matching base
 texture is loaded.
+
+## Godrays source name filtering
+- `r_godrays_emit_lighttex` controls whether materials that declare `godraySource` output
+  can contribute to the godrays source pass.
+- `r_godrays_lighttex_name_match` adds an additional safety/name filter for that light-texture
+  path: when set to `1` (default), the material is used only if one of these names contains
+  a light token (`light`, `lamp`, `glow`, `flare`, `neon`, `torch`, `lantern`):
+  - BSP texture name,
+  - resolved shader map path (`map`),
+  - stage map path, or
+  - shader material name.
+- Set `r_godrays_lighttex_name_match 0` to disable this filter and allow all `godraySource`
+  stages to emit via the light-texture path.
