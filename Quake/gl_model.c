@@ -699,6 +699,8 @@ static qboolean Q1BSPX_IsProcessed(const char *lumpname)
         return usage && (usage->used || usage->unsupported);
 }
 
+static void *Q1BSPX_FindLump(const char *lumpname, int *lumpsize);
+
 static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int samples)
 {
         /* E5BGR9 bit layout: [31:27]=exp [26:18]=R [17:9]=G [8:0]=B.
