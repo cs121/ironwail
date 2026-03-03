@@ -41,6 +41,7 @@ typedef struct fog_volume_gpu_s
 	float wind_turbulence[4];
 	float misc[4];
 	float extra[4];
+	float params2[4];
 } fog_volume_gpu_t;
 
 COMPILE_TIME_ASSERT (fog_volume_gpu_align16, (sizeof (fog_volume_gpu_t) % 16) == 0);
@@ -1269,6 +1270,7 @@ static void R_FogVol_ClampVolume (fog_volume_t *volume)
 	volume->emissiveStrength = CLAMP (0.f, volume->emissiveStrength, 16.f);
 	volume->shape = CLAMP (0, volume->shape, 2);
 	volume->blendMode = CLAMP (-1, volume->blendMode, 1);
+	volume->edgeSoftness = CLAMP (0.f, volume->edgeSoftness, 1.f);
 }
 
 static void R_FogVol_AddVolume (const fog_volume_t *volume)
@@ -1410,7 +1412,7 @@ static void R_FogVol_EntitySetShape (fog_volume_t *volume, fogvol_entity_parse_s
  *   shape, radius, center
  *   blendmode, emissive
  *   wind_dir, wind_speed, turbulence
- *   height, height_scale */
+ *   height, height_scale, edge_softness */
 static const fogvol_entity_key_dispatch_t fogvol_entity_key_dispatch[] = {
 	{"classname", FOGVOL_ENTITY_KEY_SPECIAL, 0, R_FogVol_EntitySetClassname},
 	{"model", FOGVOL_ENTITY_KEY_SPECIAL, 0, R_FogVol_EntitySetModel},
@@ -1435,6 +1437,7 @@ static const fogvol_entity_key_dispatch_t fogvol_entity_key_dispatch[] = {
 	{"turbulence", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, turbulence), NULL},
 	{"height", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, height), NULL},
 	{"height_scale", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, heightScale), NULL},
+	{"edge_softness", FOGVOL_ENTITY_KEY_FLOAT, offsetof (fog_volume_t, edgeSoftness), NULL},
 };
 
 static const fogvol_entity_key_dispatch_t *R_FogVol_FindEntityKeyDispatch (const char *key)
@@ -1545,6 +1548,7 @@ static void R_FogVol_AddGlobalFog (void)
 	volume.enabled = 1;
 	volume.height = r_fogvol_globalfog_height.value;
 	volume.heightScale = r_fogvol_globalfog_height_scale.value;
+	volume.edgeSoftness = 0.f;
 
 	R_FogVol_AddVolume (&volume);
 }
@@ -1637,6 +1641,7 @@ void R_FogVol_ParseEntities (void)
 		volume.enabled = 1;
 		volume.height = 0.f;
 		volume.heightScale = 0.f;
+		volume.edgeSoftness = 0.f;
 		memset (&parse_state, 0, sizeof (parse_state));
 
 		while (1)
@@ -1730,6 +1735,7 @@ void R_FogVol_AddTestVolumes (void)
 	volume.maxDistance = 0.f;
 	volume.priority   = 0;
 	volume.enabled    = 1;
+	volume.edgeSoftness = 0.f;
 	/* Place the box 100..260 units ahead, 96 units wide, 80 units tall.
 	 * Compute proper axis-aligned bounds from the oriented corners. */
 	{
@@ -2232,6 +2238,11 @@ void R_FogVol_Render (void)
 		gpu->extra[1] = (float)((v->blendMode >= 0) ? v->blendMode : (int)Q_rint (r_fogvol_blendmode.value));
 		gpu->extra[2] = v->emissiveStrength;
 		gpu->extra[3] = v->heightScale;
+
+		gpu->params2[0] = v->edgeSoftness;
+		gpu->params2[1] = 0.f;
+		gpu->params2[2] = 0.f;
+		gpu->params2[3] = 0.f;
 	}
 
 	GL_Upload (GL_UNIFORM_BUFFER, gpu_volumes, sizeof (fog_volume_gpu_t) * r_fogvolume_count, &buf, &ofs);
