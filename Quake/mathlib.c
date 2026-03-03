@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // mathlib.c -- math primitives
 
 #include "quakedef.h"
+#include <assert.h>
 
 vec3_t vec3_origin = {0,0,0};
 vec4_t vec4_origin = {0,0,0,0};
@@ -723,6 +724,86 @@ void MatrixMultiply(float left[16], float right[16])
 			}
 		}
 	}
+}
+
+static qboolean Mat4_InverseImpl (const float in[16], float out[16])
+{
+	float inv[16];
+	float det;
+
+	inv[0] = in[5] * in[10] * in[15] - in[5] * in[11] * in[14] - in[9] * in[6] * in[15] +
+		in[9] * in[7] * in[14] + in[13] * in[6] * in[11] - in[13] * in[7] * in[10];
+	inv[4] = -in[4] * in[10] * in[15] + in[4] * in[11] * in[14] + in[8] * in[6] * in[15]
+		- in[8] * in[7] * in[14] - in[12] * in[6] * in[11] + in[12] * in[7] * in[10];
+	inv[8] = in[4] * in[9] * in[15] - in[4] * in[11] * in[13] - in[8] * in[5] * in[15]
+		+ in[8] * in[7] * in[13] + in[12] * in[5] * in[11] - in[12] * in[7] * in[9];
+	inv[12] = -in[4] * in[9] * in[14] + in[4] * in[10] * in[13] + in[8] * in[5] * in[14]
+		- in[8] * in[6] * in[13] - in[12] * in[5] * in[10] + in[12] * in[6] * in[9];
+
+	inv[1] = -in[1] * in[10] * in[15] + in[1] * in[11] * in[14] + in[9] * in[2] * in[15]
+		- in[9] * in[3] * in[14] - in[13] * in[2] * in[11] + in[13] * in[3] * in[10];
+	inv[5] = in[0] * in[10] * in[15] - in[0] * in[11] * in[14] - in[8] * in[2] * in[15]
+		+ in[8] * in[3] * in[14] + in[12] * in[2] * in[11] - in[12] * in[3] * in[10];
+	inv[9] = -in[0] * in[9] * in[15] + in[0] * in[11] * in[13] + in[8] * in[1] * in[15]
+		- in[8] * in[3] * in[13] - in[12] * in[1] * in[11] + in[12] * in[3] * in[9];
+	inv[13] = in[0] * in[9] * in[14] - in[0] * in[10] * in[13] - in[8] * in[1] * in[14]
+		+ in[8] * in[2] * in[13] + in[12] * in[1] * in[10] - in[12] * in[2] * in[9];
+
+	inv[2] = in[1] * in[6] * in[15] - in[1] * in[7] * in[14] - in[5] * in[2] * in[15]
+		+ in[5] * in[3] * in[14] + in[13] * in[2] * in[7] - in[13] * in[3] * in[6];
+	inv[6] = -in[0] * in[6] * in[15] + in[0] * in[7] * in[14] + in[4] * in[2] * in[15]
+		- in[4] * in[3] * in[14] - in[12] * in[2] * in[7] + in[12] * in[3] * in[6];
+	inv[10] = in[0] * in[5] * in[15] - in[0] * in[7] * in[13] - in[4] * in[1] * in[15]
+		+ in[4] * in[3] * in[13] + in[12] * in[1] * in[7] - in[12] * in[3] * in[5];
+	inv[14] = -in[0] * in[5] * in[14] + in[0] * in[6] * in[13] + in[4] * in[1] * in[14]
+		- in[4] * in[2] * in[13] - in[12] * in[1] * in[6] + in[12] * in[2] * in[5];
+
+	inv[3] = -in[1] * in[6] * in[11] + in[1] * in[7] * in[10] + in[5] * in[2] * in[11]
+		- in[5] * in[3] * in[10] - in[9] * in[2] * in[7] + in[9] * in[3] * in[6];
+	inv[7] = in[0] * in[6] * in[11] - in[0] * in[7] * in[10] - in[4] * in[2] * in[11]
+		+ in[4] * in[3] * in[10] + in[8] * in[2] * in[7] - in[8] * in[3] * in[6];
+	inv[11] = -in[0] * in[5] * in[11] + in[0] * in[7] * in[9] + in[4] * in[1] * in[11]
+		- in[4] * in[3] * in[9] - in[8] * in[1] * in[7] + in[8] * in[3] * in[5];
+	inv[15] = in[0] * in[5] * in[10] - in[0] * in[6] * in[9] - in[4] * in[1] * in[10]
+		+ in[4] * in[2] * in[9] + in[8] * in[1] * in[6] - in[8] * in[2] * in[5];
+
+	det = in[0] * inv[0] + in[1] * inv[4] + in[2] * inv[8] + in[3] * inv[12];
+	if (fabsf (det) < 1e-8f)
+		return false;
+
+	det = 1.f / det;
+	for (int i = 0; i < 16; ++i)
+		out[i] = inv[i] * det;
+	return true;
+}
+
+#if !defined(NDEBUG)
+static void Mat4_InverseSelfCheck (void)
+{
+	float out[16];
+	const float singular[16] = {
+		1.f, 0.f, 0.f, 0.f,
+		1.f, 0.f, 0.f, 0.f,
+		0.f, 0.f, 1.f, 0.f,
+		0.f, 0.f, 0.f, 1.f
+	};
+
+	assert (!Mat4_InverseImpl (singular, out));
+}
+#endif
+
+qboolean Mat4_Inverse (const float in[16], float out[16])
+{
+#if !defined(NDEBUG)
+	static qboolean selfcheck_ran;
+	if (!selfcheck_ran)
+	{
+		Mat4_InverseSelfCheck ();
+		selfcheck_ran = true;
+	}
+#endif
+
+	return Mat4_InverseImpl (in, out);
 }
 
 /*
