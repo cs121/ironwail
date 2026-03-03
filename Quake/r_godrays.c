@@ -1,3 +1,5 @@
+#include "quakedef.h"
+
 #include "r_godrays.h"
 
 #include <float.h>
