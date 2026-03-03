@@ -701,6 +701,8 @@ static qboolean Q1BSPX_IsProcessed(const char *lumpname)
 
 static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int samples)
 {
+        /* E5BGR9 bit layout: [31:27]=exp [26:18]=R [17:9]=G [8:0]=B.
+         * Decode into dst as RGB to match the engine lightdata convention. */
         for (int i = 0; i < samples; i++)
         {
                 uint32_t packed = LittleLong(src[i]);
@@ -725,6 +727,7 @@ static void Q1BSPX_DecodeE5BGR9Lighting(byte *dst, const unsigned int *src, int 
 
 static void Mod_DecodeRgbeLighting(byte *dst, const byte *src, int samples)
 {
+        /* Radiance RGBE stores channels as R, G, B, exponent. */
         for (int i = 0; i < samples; i++, dst += 3, src += 4)
         {
                 int e = src[3];
@@ -757,6 +760,10 @@ static qboolean Mod_ShouldAutoSwapBspLighting(const qmodel_t *mod)
 
 	/* Fallback for custom installs that mount rerelease content directly. */
 	if (strstr(com_gamedir, "rerelease") || strstr(com_gamedir, "RERELEASE"))
+		return true;
+
+	/* Heuristic: 4-byte LIGHTING data without BSPX RGBLIGHTING likely uses BGRA/BGRX bytes. */
+	if (mod->lightdatasize > 0 && (mod->lightdatasize % 4) == 0 && !Q1BSPX_FindLump("RGBLIGHTING", NULL))
 		return true;
 
 	return false;
@@ -1815,6 +1822,8 @@ static void Mod_LoadLighting (lump_t *l)
 					loadmodel->lightdatasamples = l->filelen;
 					loadmodel->litfile = true;
 					lightmap_source_name = "LIT_V1";
+					Con_Printf("LIT: loaded %s (%u texels) from %s\n",
+						lightmap_source_name, loadmodel->lightdatasamples, lighting_source);
 					goto loadlightdir;
                                 }
 				Hunk_FreeToLowMark(mark);
@@ -1983,13 +1992,14 @@ static void Mod_LoadLighting (lump_t *l)
 
                         for (int sample = 0; sample < samples; sample++)
                         {
-                                *out++ = *in++;
-                                *out++ = *in++;
-                                *out++ = *in++;
+						*out++ = *in++;
+						*out++ = *in++;
+						*out++ = *in++;
+						/* DLIT color bytes are RGB, followed by LIGHTINGDIR XYZ bytes. */
 
-                                *luxout++ = *in++;
-                                *luxout++ = *in++;
-                                *luxout++ = *in++;
+						*luxout++ = *in++;
+						*luxout++ = *in++;
+						*luxout++ = *in++;
                         }
 
                         Q1BSPX_MarkUsed("DLIT");
@@ -2063,7 +2073,7 @@ static void Mod_LoadLighting (lump_t *l)
 
 
 loadlightdir:
-	if (bspx_rgblighting && loadmodel->lightdatasamples)
+	if (bspx_rgblighting && loadmodel->lightdatasamples && !loadmodel->litfile)
 		Mod_LoadRGBLightingBSPX(loadmodel, bspx_rgblighting, bspx_rgb_size);
 
 	if (!loadmodel->lightdirdata)
