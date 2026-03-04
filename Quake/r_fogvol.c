@@ -293,10 +293,11 @@ enum
 	FOGVOL_U_LIGHT_SUBSAMPLE = 29,
 	FOGVOL_U_SUN_SCATTER = 30,
 	FOGVOL_U_SUN_COLOR = 31,
-	FOGVOL_U_COUNT = 32
+	FOGVOL_U_SUN_ANISOTROPY = 32,
+	FOGVOL_U_COUNT = 33
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_SUN_COLOR == 31);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_SUN_ANISOTROPY == 32);
 
 extern float skyflatcolor[3];
 
@@ -1954,10 +1955,11 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	vec3_t sun_color;
 	float sun_intensity;
 	float sun_scatter;
+	const sun_t *sun = R_GetSun ();
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 32);
+	assert (FOGVOL_U_COUNT == 33);
 #endif
 	GL_Uniform1iFunc (FOGVOL_U_STEPS, steps);
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
@@ -1986,11 +1988,12 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1iFunc (FOGVOL_U_BLEND_MODE_DEFAULT, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
 	GL_Uniform1iFunc (FOGVOL_U_LIGHT_ENABLED, fog_light_enabled ? 1 : 0);
 	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
-	if (r_fogvol_sun_dir.value > 0.f && R_GetSun (shadow_dir, NULL, NULL, NULL))
+	if (r_fogvol_sun_dir.value > 0.f && R_WorldHasSun ())
 	{
-		/* Convention: r_sun.dir points from scene toward the sun (light source).
+		/* Convention: sun->dir points from scene toward the sun (light source).
 		 * Fog shadow marching moves from sample point toward the blocker, so use
 		 * the same direction without flipping to keep shader/CPU conventions aligned. */
+		VectorCopy (sun->dir, shadow_dir);
 	}
 	else
 	{
@@ -2002,12 +2005,17 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		VectorNormalize (shadow_dir);
 	GL_Uniform1iFunc (FOGVOL_U_SHADOW_ENABLED, r_fogvol_shadow.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_SHADOW_SAMPLES, shadow_samples);
-	GL_Uniform1fFunc (FOGVOL_U_SHADOW_STRENGTH, CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f));
+	GL_Uniform1fFunc (FOGVOL_U_SHADOW_STRENGTH, sun->shadow_strength);
 	GL_Uniform1fFunc (FOGVOL_U_SHADOW_JITTER, r_fogvol_shadow_jitter.value > 0.f ? 1.f : 0.f);
 	GL_Uniform3fFunc (FOGVOL_U_SHADOW_DIR, shadow_dir[0], shadow_dir[1], shadow_dir[2]);
 	GL_Uniform1iFunc (FOGVOL_U_LIGHTGRID_ENABLED, fog_lightgrid_enabled ? 1 : 0);
-	sun_scatter = q_max (0.f, r_fogvol_sun_scatter.value);
-	if (!R_GetSun (NULL, NULL, sun_color, &sun_intensity))
+	sun_scatter = sun->volumetric_intensity;
+	if (R_WorldHasSun ())
+	{
+		VectorCopy (sun->color, sun_color);
+		sun_intensity = sun->intensity;
+	}
+	else
 	{
 		VectorSet (sun_color, skyflatcolor[0], skyflatcolor[1], skyflatcolor[2]);
 		sun_intensity = 1.f;
@@ -2023,6 +2031,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	}
 	GL_Uniform1fFunc (FOGVOL_U_SUN_SCATTER, sun_scatter * q_max (0.f, sun_intensity));
 	GL_Uniform3fFunc (FOGVOL_U_SUN_COLOR, q_max (0.f, sun_color[0]), q_max (0.f, sun_color[1]), q_max (0.f, sun_color[2]));
+	GL_Uniform1fFunc (FOGVOL_U_SUN_ANISOTROPY, sun->anisotropy);
 }
 
 void R_FogVol_Render (void)

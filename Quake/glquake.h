@@ -472,13 +472,24 @@ typedef struct gpuframedata_s {
         unsigned int    _padding2;
 } gpuframedata_t;
 
-typedef struct r_sun_s {
-	qboolean enabled;
-	vec3_t origin;
+typedef struct {
 	vec3_t dir;
 	vec3_t color;
 	float intensity;
-} r_sun_t;
+
+	// volumetrics
+	float volumetric_intensity;
+	float anisotropy;
+
+	// shadows
+	float shadow_bias;
+	float shadow_strength;
+	float shadow_distance;
+
+	// godrays
+	float ray_decay;
+	float ray_density;
+} sun_t;
 
 COMPILE_TIME_ASSERT (gpuframedata_std140_size, sizeof (gpuframedata_t) == 432);
 
@@ -493,10 +504,15 @@ extern gpulightbuffer_t r_lightbuffer;
 extern gpuframedata_t r_framedata;
 extern float r_lightstyle_framefrac;
 extern dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
-extern r_sun_t r_sun;
+extern sun_t r_sun_state;
 
 qboolean R_WorldHasSun (void);
-qboolean R_GetSun (vec3_t dir, vec3_t origin, vec3_t color, float *intensity);
+const sun_t* R_GetSun (void);
+void R_SetSun (const sun_t *src);
+void R_Sun_ResetToDefaults (sun_t *s);
+void R_Sun_ApplyMapOverrides (sun_t *s, const char *worldspawn_entity_string);
+void R_Sun_Finalize (sun_t *s);
+void R_Sun_UpdateFromWorld (void);
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);
