@@ -128,9 +128,6 @@ const float ANISO_G_LOCAL    = 0.5;
 
 //  helpers 
 
-// PERF FIX (G-02): NOISE_PERIOD = 64 is a power-of-two, so wrapping can be
-// done with a bitwise AND instead of integer modulo  avoids expensive div
-// instructions on older GPU architectures.
 int WrapIndex(int v, int period)
 {
 	// Generic path (kept for non-power-of-two periods if ever changed).
@@ -141,15 +138,6 @@ int WrapIndex(int v, int period)
 ivec3 WrapIndex(ivec3 v, int period)
 {
 	return ivec3(WrapIndex(v.x, period), WrapIndex(v.y, period), WrapIndex(v.z, period));
-}
-
-// Fast wrap for NOISE_PERIOD (must be a power of two).
-ivec3 WrapNoise(ivec3 v)
-{
-	const int mask = NOISE_PERIOD - 1; // 63
-	// Correct for negative values: ((v % P) + P) % P == v & mask for P = 2^n
-	// because two's-complement negative & mask gives the correct positive remainder.
-	return ivec3(v.x & mask, v.y & mask, v.z & mask);
 }
 
 uint HashU32(ivec3 p)
@@ -170,9 +158,8 @@ float ValueNoise(vec3 p)
 	vec3 f = fract(p);
 	vec3 w = f * f * (3.0 - 2.0 * f);
 
-	// PERF: Use fast bitwise-AND wrap (WrapNoise) instead of modulo WrapIndex.
-	ivec3 i0 = WrapNoise(ivec3(i));
-	ivec3 i1 = WrapNoise(i0 + ivec3(1));
+	ivec3 i0 = WrapIndex(ivec3(i), NOISE_PERIOD);
+	ivec3 i1 = WrapIndex(i0 + ivec3(1), NOISE_PERIOD);
 
 	float n000 = Hash31(i0);
 	float n100 = Hash31(ivec3(i1.x, i0.y, i0.z));
