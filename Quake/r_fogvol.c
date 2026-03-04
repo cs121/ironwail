@@ -1241,6 +1241,13 @@ static int R_FogVol_BuildFrameLightBroadphase (const fogvol_visible_volume_t *vi
 	return candidate_count;
 }
 
+static float R_FogVol_SRGBToLinear (float c)
+{
+	if (c <= 0.04045f)
+		return c / 12.92f;
+	return powf ((c + 0.055f) / 1.055f, 2.4f);
+}
+
 static qboolean R_FogVol_TryGetSurfaceLightSample (const qmodel_t *model, const msurface_t *surf, vec3_t out_rgb)
 {
 	const byte *samples;
@@ -1299,9 +1306,9 @@ static qboolean R_FogVol_TryGetSurfaceLightSample (const qmodel_t *model, const 
 	out_rgb[2] = q_max (0.f, accum[2] * (1.f / 255.f));
 	if (!q_strcasecmp (r_lightmap_colorspace.string, "srgb"))
 	{
-		out_rgb[0] = powf (q_max (out_rgb[0], 0.f), 2.2f);
-		out_rgb[1] = powf (q_max (out_rgb[1], 0.f), 2.2f);
-		out_rgb[2] = powf (q_max (out_rgb[2], 0.f), 2.2f);
+		out_rgb[0] = R_FogVol_SRGBToLinear (out_rgb[0]);
+		out_rgb[1] = R_FogVol_SRGBToLinear (out_rgb[1]);
+		out_rgb[2] = R_FogVol_SRGBToLinear (out_rgb[2]);
 	}
 	return (out_rgb[0] > 0.f || out_rgb[1] > 0.f || out_rgb[2] > 0.f);
 }
