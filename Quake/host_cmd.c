@@ -2310,11 +2310,17 @@ void Host_ShutdownSave (void)
 	SDL_DestroyCond (save_pending_condition);
 	save_pending_condition = NULL;
 
+	SDL_DestroyMutex (save_mutex);
+	save_mutex = NULL;
+
 	SaveData_Clear (&save_data);
 }
 
 void Host_WaitForSaveThread (void)
 {
+	if (!save_mutex || !save_finished_condition)
+		return;
+
 	SDL_LockMutex (save_mutex);
 	while (save_pending)
 		SDL_CondWait (save_finished_condition, save_mutex);
@@ -2324,6 +2330,10 @@ void Host_WaitForSaveThread (void)
 qboolean Host_IsSaving (void)
 {
 	qboolean saving;
+
+	if (!save_mutex || !save_finished_condition)
+		return false;
+
 	SDL_LockMutex (save_mutex);
 	saving = save_pending;
 	SDL_UnlockMutex (save_mutex);
@@ -2392,9 +2402,39 @@ static int Host_BackgroundSave (void *param)
 static void Host_InitSaveThread (void)
 {
 	save_mutex = SDL_CreateMutex ();
+	if (!save_mutex)
+		Sys_Error ("Host_InitSaveThread: couldn't create save mutex: %s", SDL_GetError ());
+
 	save_finished_condition = SDL_CreateCond ();
+	if (!save_finished_condition)
+	{
+		SDL_DestroyMutex (save_mutex);
+		save_mutex = NULL;
+		Sys_Error ("Host_InitSaveThread: couldn't create save finished condition: %s", SDL_GetError ());
+	}
+
 	save_pending_condition = SDL_CreateCond ();
+	if (!save_pending_condition)
+	{
+		SDL_DestroyCond (save_finished_condition);
+		save_finished_condition = NULL;
+		SDL_DestroyMutex (save_mutex);
+		save_mutex = NULL;
+		Sys_Error ("Host_InitSaveThread: couldn't create save pending condition: %s", SDL_GetError ());
+	}
+
 	save_thread = SDL_CreateThread (Host_BackgroundSave, "SaveThread", &save_data);
+	if (!save_thread)
+	{
+		SDL_DestroyCond (save_pending_condition);
+		save_pending_condition = NULL;
+		SDL_DestroyCond (save_finished_condition);
+		save_finished_condition = NULL;
+		SDL_DestroyMutex (save_mutex);
+		save_mutex = NULL;
+		Sys_Error ("Host_InitSaveThread: couldn't create save thread: %s", SDL_GetError ());
+	}
+
 	SaveData_Init (&save_data);
 }
 
