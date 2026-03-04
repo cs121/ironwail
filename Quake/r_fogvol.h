@@ -126,6 +126,7 @@ void R_FogVol_LogEndFrameState (void);
 void R_Froxel_BeginFrame (float near_clip, float far_clip);
 void R_Froxel_InjectDlights (void);
 void R_Froxel_EndFrame (void);
+void R_Froxel_ResetResources (void);
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num);
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres);
 /* FogVol rendering-availability gate: volumetric resources/programs + r_fogvol are ready this frame. */
