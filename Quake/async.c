@@ -22,8 +22,21 @@ static unsigned int jobs_dropped;
 static unsigned int jobs_sync_fallbacks;
 static unsigned int jobs_wake_signals;
 static unsigned int jobs_wake_broadcasts;
+static unsigned int jobs_overflow_sync;
+static unsigned int jobs_overflow_drop;
+static unsigned int jobs_overflow_fail;
+static unsigned int jobs_overflow_block_waits;
+static unsigned int jobs_overflow_block_timeouts;
+
+typedef enum jobs_overflow_policy_e {
+	JOBS_OVERFLOW_SYNC,
+	JOBS_OVERFLOW_DROP,
+	JOBS_OVERFLOW_BLOCK,
+	JOBS_OVERFLOW_FAIL
+} jobs_overflow_policy_t;
 
 static qboolean Jobs_SubmitNode (jobnode_t *node);
+static jobs_overflow_policy_t Jobs_GetOverflowPolicy (void);
 static void Jobs_LogQueueStats (const char *reason);
 
 static cvar_t host_async = {"host_async", "0", CVAR_ARCHIVE};
@@ -31,6 +44,8 @@ static cvar_t host_async_fs = {"host_async_fs", "0", CVAR_ARCHIVE};
 static cvar_t host_async_assets = {"host_async_assets", "0", CVAR_ARCHIVE};
 static cvar_t host_async_workers = {"host_async_workers", "1", CVAR_ARCHIVE};
 static cvar_t host_async_max_pending = {"host_async_max_pending", "128", CVAR_ARCHIVE};
+static cvar_t host_async_overflow_policy = {"host_async_overflow_policy", "sync", CVAR_ARCHIVE};
+static cvar_t host_async_overflow_block_ms = {"host_async_overflow_block_ms", "2", CVAR_ARCHIVE};
 
 qboolean Host_AsyncEnabled (void)
 {
@@ -67,6 +82,8 @@ static int Jobs_Worker (void *unused)
 			jobs_tail = NULL;
 		if (jobs_pending > 0)
 			jobs_pending--;
+		SDL_CondSignal (jobs_cond);
+		jobs_wake_signals++;
 		SDL_UnlockMutex (jobs_mutex);
 
 		node->func (node->userdata);
@@ -82,6 +99,19 @@ static int Jobs_Worker (void *unused)
 		free (node);
 	}
 	return 0;
+}
+
+static jobs_overflow_policy_t Jobs_GetOverflowPolicy (void)
+{
+	const char *policy = host_async_overflow_policy.string;
+
+	if (!q_strcasecmp (policy, "drop"))
+		return JOBS_OVERFLOW_DROP;
+	if (!q_strcasecmp (policy, "block"))
+		return JOBS_OVERFLOW_BLOCK;
+	if (!q_strcasecmp (policy, "fail"))
+		return JOBS_OVERFLOW_FAIL;
+	return JOBS_OVERFLOW_SYNC;
 }
 
 JobHandle *Jobs_Submit (jobs_func_t func, void *userdata)
@@ -136,15 +166,47 @@ JobHandle *Jobs_Submit (jobs_func_t func, void *userdata)
 static qboolean Jobs_SubmitNode (jobnode_t *node)
 {
 	int max_pending;
+	jobs_overflow_policy_t policy;
 
+	policy = Jobs_GetOverflowPolicy ();
 	SDL_LockMutex (jobs_mutex);
 	max_pending = (int) host_async_max_pending.value;
-	if (max_pending > 0 && jobs_pending >= (unsigned int) max_pending)
+	while (max_pending > 0 && jobs_pending >= (unsigned int) max_pending)
 	{
+		int wait_ms;
+
 		jobs_dropped++;
-		SDL_UnlockMutex (jobs_mutex);
-		Jobs_LogQueueStats ("queue full");
-		return false;
+		switch (policy)
+		{
+		case JOBS_OVERFLOW_DROP:
+			jobs_overflow_drop++;
+			SDL_UnlockMutex (jobs_mutex);
+			Jobs_LogQueueStats ("overflow-drop");
+			return false;
+		case JOBS_OVERFLOW_FAIL:
+			jobs_overflow_fail++;
+			SDL_UnlockMutex (jobs_mutex);
+			Jobs_LogQueueStats ("overflow-fail");
+			return false;
+		case JOBS_OVERFLOW_BLOCK:
+			wait_ms = q_max (0, (int) host_async_overflow_block_ms.value);
+			if (wait_ms <= 0 || SDL_CondWaitTimeout (jobs_cond, jobs_mutex, wait_ms) == SDL_MUTEX_TIMEDOUT)
+			{
+				jobs_overflow_block_timeouts++;
+				SDL_UnlockMutex (jobs_mutex);
+				Jobs_LogQueueStats ("overflow-block-timeout");
+				return false;
+			}
+			jobs_overflow_block_waits++;
+			max_pending = (int) host_async_max_pending.value;
+			continue;
+		case JOBS_OVERFLOW_SYNC:
+		default:
+			jobs_overflow_sync++;
+			SDL_UnlockMutex (jobs_mutex);
+			Jobs_LogQueueStats ("overflow-sync");
+			return false;
+		}
 	}
 
 	if (jobs_tail)
@@ -170,6 +232,11 @@ static void Jobs_LogQueueStats (const char *reason)
 	unsigned int sync_fallbacks;
 	unsigned int wake_signals;
 	unsigned int wake_broadcasts;
+	unsigned int overflow_sync;
+	unsigned int overflow_drop;
+	unsigned int overflow_fail;
+	unsigned int overflow_block_waits;
+	unsigned int overflow_block_timeouts;
 
 	if (!developer.value)
 		return;
@@ -181,9 +248,14 @@ static void Jobs_LogQueueStats (const char *reason)
 	sync_fallbacks = jobs_sync_fallbacks;
 	wake_signals = jobs_wake_signals;
 	wake_broadcasts = jobs_wake_broadcasts;
+	overflow_sync = jobs_overflow_sync;
+	overflow_drop = jobs_overflow_drop;
+	overflow_fail = jobs_overflow_fail;
+	overflow_block_waits = jobs_overflow_block_waits;
+	overflow_block_timeouts = jobs_overflow_block_timeouts;
 	SDL_UnlockMutex (jobs_mutex);
 
-	Con_DPrintf ("Async jobs %s: pending=%u peak=%u dropped=%u sync_fallbacks=%u wake_signals=%u wake_broadcasts=%u max_pending=%d\n",
+	Con_DPrintf ("Async jobs %s: pending=%u peak=%u dropped=%u sync_fallbacks=%u wake_signals=%u wake_broadcasts=%u ovf_sync=%u ovf_drop=%u ovf_fail=%u ovf_block_waits=%u ovf_block_timeouts=%u max_pending=%d policy=%s block_ms=%d\n",
 		reason,
 		pending,
 		peak_pending,
@@ -191,10 +263,17 @@ static void Jobs_LogQueueStats (const char *reason)
 		sync_fallbacks,
 		wake_signals,
 		wake_broadcasts,
-		(int) host_async_max_pending.value);
+		overflow_sync,
+		overflow_drop,
+		overflow_fail,
+		overflow_block_waits,
+		overflow_block_timeouts,
+		(int) host_async_max_pending.value,
+		host_async_overflow_policy.string,
+		(int) host_async_overflow_block_ms.value);
 }
 
-void Jobs_SubmitDetached (jobs_func_t func, void *userdata)
+qboolean Jobs_TrySubmitDetached (jobs_func_t func, void *userdata)
 {
 	jobnode_t *node;
 
@@ -204,23 +283,33 @@ void Jobs_SubmitDetached (jobs_func_t func, void *userdata)
 	if (!Host_AsyncEnabled () || jobs_num_threads <= 0)
 	{
 		func (userdata);
-		return;
+		return true;
 	}
 
 	node = (jobnode_t *) calloc (1, sizeof (*node));
 	if (!node)
-		Sys_Error ("Jobs_SubmitDetached: out of memory");
+		Sys_Error ("Jobs_TrySubmitDetached: out of memory");
 	node->func = func;
 	node->userdata = userdata;
 	node->detached = true;
 
 	if (!Jobs_SubmitNode (node))
 	{
+		free (node);
+		return false;
+	}
+
+	return true;
+}
+
+void Jobs_SubmitDetached (jobs_func_t func, void *userdata)
+{
+	if (!Jobs_TrySubmitDetached (func, userdata))
+	{
 		SDL_LockMutex (jobs_mutex);
 		jobs_sync_fallbacks++;
 		SDL_UnlockMutex (jobs_mutex);
 		func (userdata);
-		free (node);
 	}
 }
 
@@ -533,7 +622,12 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 	SDL_UnlockMutex (fs_mutex);
 
 	handle.id = job->id;
-	Jobs_SubmitDetached (FS_AsyncReadJob, job);
+	if (!Jobs_TrySubmitDetached (FS_AsyncReadJob, job))
+	{
+		handle.id = 0;
+		cb (user, NULL, 0, -1);
+		free (job);
+	}
 	return handle;
 }
 
@@ -723,6 +817,8 @@ void Jobs_Init (void)
 	Cvar_RegisterVariable (&host_async_assets);
 	Cvar_RegisterVariable (&host_async_workers);
 	Cvar_RegisterVariable (&host_async_max_pending);
+	Cvar_RegisterVariable (&host_async_overflow_policy);
+	Cvar_RegisterVariable (&host_async_overflow_block_ms);
 
 	jobs_mutex = SDL_CreateMutex ();
 	jobs_cond = SDL_CreateCond ();
