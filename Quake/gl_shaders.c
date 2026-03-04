@@ -592,13 +592,16 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
                                         included = GL_LoadShaderFile_Internal (full_path, depth + 1, include_stack, include_stack_size);
                                         if (included)
                                         {
-                                                q_snprintf (linebuf, sizeof (linebuf), "#line 1 \"%s\"\n", full_path);
-                                                APPEND_STR (linebuf, strlen (linebuf));
-                                                APPEND_STR (included, strlen (included));
-                                                if (line_end && (result_len == 0 || result[result_len - 1] != '\n'))
-                                                        APPEND_STR ("\n", 1);
-                                                q_snprintf (linebuf, sizeof (linebuf), "#line %d \"%s\"\n", parent_line + 1, path);
-                                                APPEND_STR (linebuf, strlen (linebuf));
+							/* GLSL #line accepts only numeric source IDs (not quoted paths).
+							 * Use the single-argument form for broad driver compatibility.
+							 */
+							q_snprintf (linebuf, sizeof (linebuf), "#line 1\n");
+							APPEND_STR (linebuf, strlen (linebuf));
+							APPEND_STR (included, strlen (included));
+							if (line_end && (result_len == 0 || result[result_len - 1] != '\n'))
+								APPEND_STR ("\n", 1);
+							q_snprintf (linebuf, sizeof (linebuf), "#line %d\n", parent_line + 1);
+							APPEND_STR (linebuf, strlen (linebuf));
                                         }
 
                                         cursor = line_end ? line_end + 1 : cursor + line_len;
