@@ -71,17 +71,6 @@ float fbm(vec3 x)
     return t;
 }
 
-float sRGBencode(float c)
-{
-    return c > 0.0031308 ? (1.055 * pow(c, 1.0 / 2.4) - 0.055) : (12.92 * c);
-}
-
-vec3 sRGBencode(vec3 c)
-{
-    c = clamp(c, 0.0, 1.0);
-    return vec3(sRGBencode(c.x), sRGBencode(c.y), sRGBencode(c.z));
-}
-
 // --- Main --------------------------------------------------------------------
 
 void main()
@@ -136,8 +125,6 @@ void main()
 
     color = 1.0 - exp(-1.2 * sqrt(color * color * color));
     color *= 1.0 - dot(uv, uv) * 0.2;
-    color = sRGBencode(color);
-
     float alpha = clamp(max(max(color.r, color.g), color.b), 0.0, 1.0);
     fragColor = vec4(color, alpha);
 }
