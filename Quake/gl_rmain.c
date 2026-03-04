@@ -4694,7 +4694,7 @@ void R_WarpScaleView (void)
 	needwarpscale = r_refdef.scale != 1 || water_warp;
 	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
 	need_depth_resolve = (fbodest == framebufs.composite.fbo)
-		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || r_fogvol.value > 0.f
+		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || R_FogVol_ShouldAffectPostFX ()
 			|| (R_Godrays_IsReady (cl.worldmodel, r_framecount) && (r_godrays.value > 0.f || r_godrays_debug.value > 0.f || r_godrays_debug_source.value > 0.f)));
 
 	if (msaa)

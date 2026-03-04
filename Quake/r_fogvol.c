@@ -1724,8 +1724,6 @@ qboolean R_FogVol_IsEnabledForFrame (void)
 {
 	if (r_fogvol.value <= 0.f)
 		return false;
-	if (Fog_GetDensity () <= 0.f)
-		return false;
 	if (!glprogs.fogvol)
 		return false;
 	if (framebufs.composite.color_tex == 0 || framebufs.fogvol.color_tex[0] == 0)
@@ -1748,12 +1746,22 @@ qboolean R_FogVol_HasValidComposite (void)
 
 qboolean R_FogVol_ShouldAffectPostFX (void)
 {
+	/* PostFX should reserve volumetric integration/composite paths whenever
+	 * fogvol rendering is available this frame, even if classic global fog
+	 * density is currently zero. */
 	return R_FogVol_IsEnabledForFrame ();
 }
 
 qboolean R_FogVol_CanRenderGlobal (void)
 {
-	return R_FogVol_IsEnabledForFrame ();
+	if (!R_FogVol_IsEnabledForFrame ())
+		return false;
+	if (r_fogvol_globalfog.value <= 0.f)
+		return false;
+	if (Fog_GetDensity () <= 0.f)
+		return false;
+
+	return true;
 }
 
 /* Returns the fogvol composite texture that was rendered this frame.
