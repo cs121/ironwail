@@ -863,7 +863,9 @@ static void TexMgr_LinearizeWadPixels (gltexture_t *glt, unsigned *data)
 	{
 		for (int c = 0; c < 3; ++c)
 		{
-			float linear = powf (bytes[c] * (1.0f / 255.0f), 2.2f) * 255.0f + 0.5f;
+			/* WAD pixels are decoded with the sRGB EOTF on purpose, not a gamma 2.2 approximation. */
+			float s = bytes[c] * (1.0f / 255.0f);
+			float linear = TexMgr_SRGBToLinear (s) * 255.0f + 0.5f;
 			if (linear < 0.0f)
 				linear = 0.0f;
 			else if (linear > 255.0f)
