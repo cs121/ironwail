@@ -110,6 +110,8 @@ extern cvar_t r_fogvol_shadow_samples;
 extern cvar_t r_fogvol_shadow_strength;
 extern cvar_t r_fogvol_shadow_jitter;
 extern cvar_t r_fogvol_sun_scatter;
+extern cvar_t r_fogvol_froxel;
+extern cvar_t r_froxel_debug;
 
 void R_FogVol_RegisterCvars (void);
 void R_FogVol_Init (void);
@@ -121,6 +123,9 @@ void R_FogVol_Render (void);
 void R_FogVol_DrawDebug2D (void);
 void R_FogVol_ClearHistory (void);
 void R_FogVol_LogEndFrameState (void);
+void R_Froxel_BeginFrame (float near_clip, float far_clip);
+void R_Froxel_InjectDlights (void);
+void R_Froxel_EndFrame (void);
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num);
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres);
 /* FogVol rendering-availability gate: volumetric resources/programs + r_fogvol are ready this frame. */
