@@ -311,10 +311,11 @@ void Fog_SetupFrame (void)
 	const float SphericalCorrection = 0.85f; // compensate higher perceived density with spherical fog
 	const float DensityScale = ExpAdjustment * SphericalCorrection / 96.0f;
 	float density = Fog_GetDensity() * DensityScale;
-	qboolean fogvol_global = R_FogVol_CanRenderGlobal ();
+	qboolean fogvol_global_active = R_FogVol_CanRenderGlobal ();
 	memcpy(r_framedata.fogdata, Fog_GetColor(), 3 * sizeof(float));
 	memcpy(r_framedata.skyfogdata, r_framedata.fogdata, 3 * sizeof(float));
-	r_framedata.fogdata[3] = fogvol_global ? 0.f : density * density;
+	/* Keep analytic global fog only when volumetric global replacement is not active. */
+	r_framedata.fogdata[3] = fogvol_global_active ? 0.f : density * density;
 	r_framedata.skyfogdata[3] = density > 0.f ? CLAMP (0.f, skyfog, 1.f) : 0.f;
 }
 

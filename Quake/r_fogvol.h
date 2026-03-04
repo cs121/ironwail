@@ -113,12 +113,13 @@ void R_FogVol_ClearHistory (void);
 void R_FogVol_LogEndFrameState (void);
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num);
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres);
-/* Feature-level gate: fogvol is enabled by cvar and all global render resources/programs are ready this frame. */
+/* FogVol rendering-availability gate: volumetric resources/programs + r_fogvol are ready this frame. */
 qboolean R_FogVol_IsEnabledForFrame (void);
 /* Output-level gate: fogvol produced a valid composite texture this frame (safe to sample now). */
 qboolean R_FogVol_HasValidComposite (void);
-/* PostFX gate: fogvol should contribute to postprocess passes this frame. */
+/* PostFX gate: volumetric output may be produced this frame (not tied to global fog density). */
 qboolean R_FogVol_ShouldAffectPostFX (void);
+/* Global-replacement gate: volumetric global fog is eligible this frame (includes classic fog density + r_fogvol_globalfog). */
 qboolean R_FogVol_CanRenderGlobal (void);
 /*
  * FogVol Composite Contract (for CPU + shader users):
