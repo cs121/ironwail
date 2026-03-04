@@ -89,6 +89,9 @@ JobHandle *Jobs_Submit (jobs_func_t func, void *userdata)
 	JobHandle *handle;
 	jobnode_t *node;
 
+	if (!func)
+		Sys_Error ("Jobs_Submit: NULL function");
+
 	handle = (JobHandle *) calloc (1, sizeof (*handle));
 	if (!handle)
 		Sys_Error ("Jobs_Submit: out of memory");
@@ -194,6 +197,9 @@ static void Jobs_LogQueueStats (const char *reason)
 void Jobs_SubmitDetached (jobs_func_t func, void *userdata)
 {
 	jobnode_t *node;
+
+	if (!func)
+		Sys_Error ("Jobs_SubmitDetached: NULL function");
 
 	if (!Host_AsyncEnabled () || jobs_num_threads <= 0)
 	{
@@ -447,6 +453,13 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 	fs_asyncread_handle_t handle;
 	fs_job_t *job;
 	handle.id = 0;
+
+	if (!path || !path[0] || !cb)
+	{
+		if (cb)
+			cb (user, NULL, 0, -1);
+		return handle;
+	}
 
 	if (!Host_AsyncFSEnabled ())
 	{
