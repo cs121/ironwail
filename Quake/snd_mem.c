@@ -99,7 +99,12 @@ typedef struct pending_snd_job_s
 	byte *decoded;
 	int decoded_bytes;
 	int status;
-	volatile int done;
+	/*
+	 * Producer/consumer handoff between async file/decode worker threads and
+	 * the main thread: workers publish status/data, then set done atomically;
+	 * main thread must only consume shared fields after observing done.
+	 */
+	SDL_atomic_t done;
 	struct pending_snd_job_s *next;
 } pending_snd_job_t;
 
@@ -156,7 +161,7 @@ static void S_LoadSoundDecodeJob (void *userdata)
 	if (job->info.channels != 1 || (job->info.width != 1 && job->info.width != 2))
 	{
 		job->status = -1;
-		job->done = 1;
+		SDL_AtomicSet (&job->done, 1);
 		return;
 	}
 
@@ -165,7 +170,7 @@ static void S_LoadSoundDecodeJob (void *userdata)
 	if (outcount <= 0)
 	{
 		job->status = -1;
-		job->done = 1;
+		SDL_AtomicSet (&job->done, 1);
 		return;
 	}
 
@@ -196,7 +201,7 @@ static void S_LoadSoundDecodeJob (void *userdata)
 	}
 
 	job->status = 0;
-	job->done = 1;
+	SDL_AtomicSet (&job->done, 1);
 }
 
 static void S_AsyncReadComplete (void *user, uint8_t *data, size_t len, int status)
@@ -207,7 +212,7 @@ static void S_AsyncReadComplete (void *user, uint8_t *data, size_t len, int stat
 	if (status != 0 || !data)
 	{
 		job->status = -1;
-		job->done = 1;
+		SDL_AtomicSet (&job->done, 1);
 		return;
 	}
 	Jobs_SubmitDetached (S_LoadSoundDecodeJob, job);
@@ -218,7 +223,7 @@ static sfxcache_t *S_CommitPendingSound (pending_snd_job_t *job)
 	sfxcache_t *sc;
 	pending_snd_job_t **pp;
 
-	if (!job->done)
+	if (!SDL_AtomicGet (&job->done))
 		return NULL;
 
 	pp = &pending_snd_jobs;
@@ -283,7 +288,7 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	job = S_FindPendingSoundJob (s);
 	if (job)
 	{
-		if (!job->done)
+		if (!SDL_AtomicGet (&job->done))
 			return NULL;
 		sc = S_CommitPendingSound (job);
 		if (sc)
