@@ -268,7 +268,13 @@ typedef struct fs_canceled_id_s {
 	struct fs_canceled_id_s *next;
 } fs_canceled_id_t;
 
+typedef struct fs_outstanding_id_s {
+	unsigned int id;
+	struct fs_outstanding_id_s *next;
+} fs_outstanding_id_t;
+
 static fs_canceled_id_t *fs_canceled_ids;
+static fs_outstanding_id_t *fs_outstanding_ids;
 
 #define FS_RECENT_COMPLETED_CAPACITY 64
 #define FS_CANCELED_PRUNE_GENERATIONS 4
@@ -303,6 +309,48 @@ static qboolean FS_HasCompletionIdLocked (unsigned int id)
 	return false;
 }
 
+static qboolean FS_HasOutstandingIdLocked (unsigned int id)
+{
+	fs_outstanding_id_t *entry = fs_outstanding_ids;
+	while (entry)
+	{
+		if (entry->id == id)
+			return true;
+		entry = entry->next;
+	}
+
+	return false;
+}
+
+static void FS_AddOutstandingIdLocked (unsigned int id)
+{
+	fs_outstanding_id_t *entry = (fs_outstanding_id_t *) calloc (1, sizeof (*entry));
+	if (!entry)
+		Sys_Error ("FS_AddOutstandingIdLocked: out of memory");
+
+	entry->id = id;
+	entry->next = fs_outstanding_ids;
+	fs_outstanding_ids = entry;
+}
+
+static qboolean FS_RemoveOutstandingIdLocked (unsigned int id)
+{
+	fs_outstanding_id_t **cursor = &fs_outstanding_ids;
+	while (*cursor)
+	{
+		fs_outstanding_id_t *entry = *cursor;
+		if (entry->id == id)
+		{
+			*cursor = entry->next;
+			free (entry);
+			return true;
+		}
+		cursor = &entry->next;
+	}
+
+	return false;
+}
+
 static unsigned int FS_AllocAsyncReadIdLocked (void)
 {
 	unsigned int candidate = fs_next_id;
@@ -313,7 +361,9 @@ static unsigned int FS_AllocAsyncReadIdLocked (void)
 		if (candidate == 0)
 			candidate = 1;
 
-		if (!FS_HasCompletionIdLocked (candidate) && !FS_HasCanceledIdLocked (candidate))
+		if (!FS_HasOutstandingIdLocked (candidate)
+			&& !FS_HasCanceledIdLocked (candidate)
+			&& !FS_HasCompletionIdLocked (candidate))
 			break;
 
 		candidate++;
@@ -478,6 +528,7 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 
 	SDL_LockMutex (fs_mutex);
 	job->id = FS_AllocAsyncReadIdLocked ();
+	FS_AddOutstandingIdLocked (job->id);
 	job->generation = fs_generation;
 	SDL_UnlockMutex (fs_mutex);
 
@@ -556,6 +607,7 @@ void FS_PumpAsyncCompletions (void)
 		FS_RecordCompletionIdLocked (list->id);
 		canceled = FS_TakeCanceledIdLocked (list->id);
 		stale = list->generation != fs_generation;
+		FS_RemoveOutstandingIdLocked (list->id);
 		SDL_UnlockMutex (fs_mutex);
 
 		if (!canceled && !stale)
@@ -577,6 +629,7 @@ void Jobs_Shutdown (void)
 	jobnode_t *node;
 	fs_completion_t *comp;
 	fs_canceled_id_t *canceled;
+	fs_outstanding_id_t *outstanding;
 
 	if (!jobs_mutex)
 		return;
@@ -626,6 +679,18 @@ void Jobs_Shutdown (void)
 		fs_canceled_id_t *next = canceled->next;
 		free (canceled);
 		canceled = next;
+	}
+
+	SDL_LockMutex (fs_mutex);
+	outstanding = fs_outstanding_ids;
+	fs_outstanding_ids = NULL;
+	SDL_UnlockMutex (fs_mutex);
+
+	while (outstanding)
+	{
+		fs_outstanding_id_t *next = outstanding->next;
+		free (outstanding);
+		outstanding = next;
 	}
 
 	while ((node = jobs_head) != NULL)
