@@ -1303,7 +1303,9 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
                 {
                         float L = out_color255[i] * (1.0f / 256.0f);
                         L = fminf (L, 1.0f);
-                        info->static_color[i] = powf (L, 1.0f / 2.2f);
+                        // Keep entity static_color in linear space. Alias/world
+                        // paths are display-encoded once in postprocess.frag.
+                        info->static_color[i] = L;
                 }
                 info->intensity = intensity;
                 info->used_lightgrid = used_lightgrid;
