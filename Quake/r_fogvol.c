@@ -329,6 +329,8 @@ typedef struct froxel_state_s
 } froxel_state_t;
 
 static froxel_state_t r_froxel;
+static uint64_t r_froxel_tested_froxels_before = 0;
+static uint64_t r_froxel_tested_froxels_after = 0;
 
 extern float skyflatcolor[3];
 
@@ -1520,18 +1522,74 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 static void R_Froxel_InjectOneLight (const vec3_t origin, float radius, const vec3_t color, float intensity)
 {
 	int nx = r_froxel.dims[0], ny = r_froxel.dims[1], nz = r_froxel.dims[2];
+	vec3_t rel;
+	const float radius2 = radius * radius;
+	const float near_clip = r_froxel.near_clip;
+	const float far_clip = r_froxel.far_clip;
+	const float inv_log_far_near = 1.f / q_max (r_froxel.log_far_near, 1e-6f);
+	const qboolean inject_debug = (r_fogvol_inject_debug.value > 0.f) || (r_fogvol_debug.value >= 7.f);
+	float cx, cy, cz;
+	float zmin_depth, zmax_depth;
+	float zf_min, zf_max;
+	int z0, z1;
 
 	if (!r_froxel.valid || radius <= 0.f)
 		return;
 
-	for (int z = 0; z < nz; ++z)
+	if (inject_debug)
+		r_froxel_tested_froxels_before += (uint64_t)nx * (uint64_t)ny * (uint64_t)nz;
+
+	VectorSubtract (origin, r_refdef.vieworg, rel);
+	cx = DotProduct (rel, vright);
+	cy = DotProduct (rel, vup);
+	cz = DotProduct (rel, vpn);
+
+	zmin_depth = q_max (near_clip, cz - radius);
+	zmax_depth = q_min (far_clip, cz + radius);
+	if (zmax_depth < zmin_depth)
+		return;
+
+	zf_min = logf (q_max (zmin_depth, near_clip) / near_clip) * inv_log_far_near;
+	zf_max = logf (q_max (zmax_depth, near_clip) / near_clip) * inv_log_far_near;
+	z0 = CLAMP (0, (int)floorf (zf_min * (float)nz - 0.5f), nz - 1);
+	z1 = CLAMP (0, (int)ceilf (zf_max * (float)nz - 0.5f), nz - 1);
+	if (z1 < z0)
+		return;
+
+	for (int z = z0; z <= z1; ++z)
 	{
 		float zf = ((float)z + 0.5f) / (float)nz;
 		float zv = r_froxel.near_clip * expf (r_froxel.log_far_near * zf);
 		float half_w = q_max (1e-3f, zv * r_froxel.tan_half_fov_x);
 		float half_h = q_max (1e-3f, zv * r_froxel.tan_half_fov_y);
-		for (int y = 0; y < ny; ++y)
-		for (int x = 0; x < nx; ++x)
+		float dz = zv - cz;
+		float cross2 = radius2 - dz * dz;
+		float cross;
+		float min_xf, max_xf, min_yf, max_yf;
+		int x0, x1, y0, y1;
+
+		if (cross2 <= 0.f)
+			continue;
+
+		cross = sqrtf (cross2);
+		min_xf = (cx - cross) / half_w;
+		max_xf = (cx + cross) / half_w;
+		min_yf = (cy - cross) / half_h;
+		max_yf = (cy + cross) / half_h;
+
+		x0 = CLAMP (0, (int)ceilf (((min_xf + 1.f) * 0.5f) * (float)nx - 0.5f), nx - 1);
+		x1 = CLAMP (0, (int)floorf (((max_xf + 1.f) * 0.5f) * (float)nx - 0.5f), nx - 1);
+		y0 = CLAMP (0, (int)ceilf (((min_yf + 1.f) * 0.5f) * (float)ny - 0.5f), ny - 1);
+		y1 = CLAMP (0, (int)floorf (((max_yf + 1.f) * 0.5f) * (float)ny - 0.5f), ny - 1);
+
+		if (x1 < x0 || y1 < y0)
+			continue;
+
+		if (inject_debug)
+			r_froxel_tested_froxels_after += (uint64_t)(x1 - x0 + 1) * (uint64_t)(y1 - y0 + 1);
+
+		for (int y = y0; y <= y1; ++y)
+		for (int x = x0; x <= x1; ++x)
 		{
 			float xf = (((float)x + 0.5f) / (float)nx) * 2.f - 1.f;
 			float yf = (((float)y + 0.5f) / (float)ny) * 2.f - 1.f;
@@ -1570,6 +1628,12 @@ void R_Froxel_InjectDlights (void)
 	if (!r_froxel.valid)
 		return;
 
+	if ((r_fogvol_inject_debug.value > 0.f) || (r_fogvol_debug.value >= 7.f))
+	{
+		r_froxel_tested_froxels_before = 0;
+		r_froxel_tested_froxels_after = 0;
+	}
+
 	active = DLightPool_GetActiveList (&active_count);
 	if (active)
 	{
@@ -1588,6 +1652,16 @@ void R_Froxel_InjectDlights (void)
 		if (!CL_DlightIsActive (dl) || dl->radius <= 0.f)
 			continue;
 		R_Froxel_InjectOneLight (dl->origin, dl->radius, dl->color, 1.f);
+	}
+
+	if (((r_fogvol_inject_debug.value > 0.f) || (r_fogvol_debug.value >= 7.f))
+		&& r_froxel_tested_froxels_before > 0)
+	{
+		double ratio = (double)r_froxel_tested_froxels_after / (double)r_froxel_tested_froxels_before;
+		Con_DPrintf ("FROXEL inject tested_froxels before=%llu after=%llu ratio=%.3f\n",
+			(unsigned long long)r_froxel_tested_froxels_before,
+			(unsigned long long)r_froxel_tested_froxels_after,
+			ratio);
 	}
 }
 
