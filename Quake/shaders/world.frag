@@ -172,6 +172,16 @@ float whitenoise(vec2 p)
 	return whitenoise01(p) - 0.5;
 }
 
+// Forward+ prep: shared tile coordinate helper for upcoming clustered light lists.
+uvec3 ComputeLightTileCoord(vec2 tile_coord, float view_depth)
+{
+	uint tx = uint(clamp(floor(tile_coord.x), 0.0, float(LIGHT_TILES_X - 1)));
+	uint ty = uint(clamp(floor(tile_coord.y), 0.0, float(LIGHT_TILES_Y - 1)));
+	float z = max(view_depth, 1e-6);
+	float tzf = clamp(log2(z) * ZLogScale + ZLogBias, 0.0, float(LIGHT_TILES_Z - 1));
+	return uvec3(tx, ty, uint(tzf));
+}
+
 // Convert uniform to triangle distribution
 float tri(float x)
 {
@@ -450,7 +460,9 @@ void main()
 		if (!additive_dlights && NumLights > 0u)
 		{
 			vec3  dynamic_light      = vec3(0.0);
+			uvec3 tile_coord = ComputeLightTileCoord(in_coord, max(in_depth, 1e-6));
 			float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
+			dynamic_light_noise *= 1.0 + float(tile_coord.z) * 0.0;
 			// OPT: precompute plane dot-product once outside loop
 			vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
 
@@ -466,14 +478,16 @@ void main()
 				if (rad <= 0.0 || rad < minlight)
 					continue;
 
-				vec3  local_pos    = l.origin - plane.xyz * dist;
-				minlight           = rad - minlight;
-				vec3  light_vec    = local_pos - in_pos;
-				float surface_dist = length(light_vec);
+				vec3  local_pos = l.origin - plane.xyz * dist;
+				minlight = rad - minlight;
+				vec3  light_vec = local_pos - in_pos;
+				float dist_sq = dot(light_vec, light_vec);
 
-				// OPT: guard division; skip degenerate point-on-surface
-				if (surface_dist < 1e-6)
+				// OPT: keep rsqrt path ready for clustered lists where this loop gets shorter.
+				if (dist_sq < 1e-12)
 					continue;
+				float inv_surface_dist = inversesqrt(dist_sq);
+				float surface_dist = dist_sq * inv_surface_dist;
 
 				float attenuation   = clamp((minlight - surface_dist) * (1.0/16.0), 0.0, 1.0);
 				float normalized_d  = surface_dist / rad;
@@ -490,7 +504,7 @@ void main()
 				// Specular
 				if (attenuation > 0.0 && falloff > 0.0)
 				{
-					vec3  light_dir = light_vec / surface_dist;           // already normalised
+					vec3  light_dir = light_vec * inv_surface_dist;      // already normalised
 					float ndotl     = max(dot(surface_normal, light_dir), 0.0);
 
 					if (ndotl > 0.0)
