@@ -198,6 +198,9 @@ cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_dir = { "r_fogvol_sun_dir", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_color = { "r_fogvol_sun_color", "0 0 0", CVAR_ARCHIVE };
+cvar_t r_fogvol_froxel = { "r_fogvol_froxel", "0", CVAR_ARCHIVE };
+/* r_froxel_debug: 0=off, 1=froxel rgb at first hit, 2=max-energy heat */
+cvar_t r_froxel_debug = { "r_froxel_debug", "0", CVAR_ARCHIVE };
 
 typedef struct fogvol_cvar_reg_s
 {
@@ -262,6 +265,8 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_sun_dir, "lighting", "1"},
 	{&r_fogvol_sun_scatter, "lighting", "0"},
 	{&r_fogvol_sun_color, "lighting", "0 0 0"},
+	{&r_fogvol_froxel, "lighting", "0"},
+	{&r_froxel_debug, "debug", "0"},
 };
 
 /* NOTE: Keep this mapping synchronized with shaders/fogvol.frag layout(location=...). */
@@ -301,10 +306,29 @@ enum
 	FOGVOL_U_SUN_COLOR = 31,
 	FOGVOL_U_SUN_ANISOTROPY = 32,
 	FOGVOL_U_DLIGHT_SCALE = 33,
-	FOGVOL_U_COUNT = 34
+	FOGVOL_U_FROXEL_ENABLED = 34,
+	FOGVOL_U_FROXEL_PARAMS0 = 35,
+	FOGVOL_U_FROXEL_PARAMS1 = 36,
+	FOGVOL_U_FROXEL_DEBUG = 37,
+	FOGVOL_U_COUNT = 38
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_DLIGHT_SCALE == 33);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_FROXEL_DEBUG == 37);
+
+typedef struct froxel_state_s
+{
+	GLuint light_tex;
+	int dims[3];
+	float near_clip;
+	float far_clip;
+	float tan_half_fov_x;
+	float tan_half_fov_y;
+	float log_far_near;
+	float *light_rgb;
+	qboolean valid;
+} froxel_state_t;
+
+static froxel_state_t r_froxel;
 
 extern float skyflatcolor[3];
 
@@ -1412,8 +1436,162 @@ void R_FogVol_RegisterCvars (void)
 	}
 }
 
+static void R_Froxel_FreeCPUBuffer (void)
+{
+	if (r_froxel.light_rgb)
+	{
+		free (r_froxel.light_rgb);
+		r_froxel.light_rgb = NULL;
+	}
+}
+
+static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)
+{
+	size_t count;
+
+	if (nx <= 0 || ny <= 0 || nz <= 0)
+		return false;
+
+	count = (size_t)nx * (size_t)ny * (size_t)nz * 3u;
+	if (!r_froxel.light_rgb || r_froxel.dims[0] != nx || r_froxel.dims[1] != ny || r_froxel.dims[2] != nz)
+	{
+		float *newbuf = (float *)calloc (count, sizeof (float));
+		if (!newbuf)
+			return false;
+		R_Froxel_FreeCPUBuffer ();
+		r_froxel.light_rgb = newbuf;
+		r_froxel.dims[0] = nx;
+		r_froxel.dims[1] = ny;
+		r_froxel.dims[2] = nz;
+	}
+
+	if (!r_froxel.light_tex)
+		glGenTextures (1, &r_froxel.light_tex);
+
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.light_tex);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_RGB16F, nx, ny, nz, 0, GL_RGB, GL_FLOAT, r_froxel.light_rgb);
+
+	return true;
+}
+
+void R_Froxel_BeginFrame (float near_clip, float far_clip)
+{
+	int nx, ny, nz;
+
+	r_froxel.valid = false;
+	if (r_fogvol_froxel.value <= 0.f)
+		return;
+
+	nx = CLAMP (16, (r_refdef.vrect.width + 15) / 16, 192);
+	ny = CLAMP (12, (r_refdef.vrect.height + 15) / 16, 128);
+	nz = 32;
+
+	r_froxel.near_clip = q_max (near_clip, 1.f);
+	r_froxel.far_clip = q_max (far_clip, r_froxel.near_clip + 1.f);
+	r_froxel.tan_half_fov_x = tanf (DEG2RAD (r_refdef.fov_x) * 0.5f);
+	r_froxel.tan_half_fov_y = tanf (DEG2RAD (r_refdef.fov_y) * 0.5f);
+	r_froxel.log_far_near = logf (r_froxel.far_clip / r_froxel.near_clip);
+
+	if (!R_Froxel_EnsureResources (nx, ny, nz))
+		return;
+
+	memset (r_froxel.light_rgb, 0, sizeof (float) * (size_t)nx * (size_t)ny * (size_t)nz * 3u);
+	r_froxel.valid = true;
+}
+
+static void R_Froxel_InjectOneLight (const vec3_t origin, float radius, const vec3_t color, float intensity)
+{
+	int nx = r_froxel.dims[0], ny = r_froxel.dims[1], nz = r_froxel.dims[2];
+
+	if (!r_froxel.valid || radius <= 0.f)
+		return;
+
+	for (int z = 0; z < nz; ++z)
+	{
+		float zf = ((float)z + 0.5f) / (float)nz;
+		float zv = r_froxel.near_clip * expf (r_froxel.log_far_near * zf);
+		float half_w = q_max (1e-3f, zv * r_froxel.tan_half_fov_x);
+		float half_h = q_max (1e-3f, zv * r_froxel.tan_half_fov_y);
+		for (int y = 0; y < ny; ++y)
+		for (int x = 0; x < nx; ++x)
+		{
+			float xf = (((float)x + 0.5f) / (float)nx) * 2.f - 1.f;
+			float yf = (((float)y + 0.5f) / (float)ny) * 2.f - 1.f;
+			vec3_t p;
+			float dist2;
+			float dist;
+			float att;
+			int idx = (x + nx * (y + ny * z)) * 3;
+
+			VectorCopy (r_refdef.vieworg, p);
+			VectorMA (p, zv, vpn, p);
+			VectorMA (p, xf * half_w, vright, p);
+			VectorMA (p, yf * half_h, vup, p);
+
+			dist2 = (origin[0] - p[0]) * (origin[0] - p[0])
+				+ (origin[1] - p[1]) * (origin[1] - p[1])
+				+ (origin[2] - p[2]) * (origin[2] - p[2]);
+			dist = sqrtf (dist2);
+			att = CLAMP (0.f, 1.f - dist / radius, 1.f);
+			att *= att * intensity;
+			if (att <= 0.f)
+				continue;
+
+			r_froxel.light_rgb[idx + 0] += color[0] * att;
+			r_froxel.light_rgb[idx + 1] += color[1] * att;
+			r_froxel.light_rgb[idx + 2] += color[2] * att;
+		}
+	}
+}
+
+void R_Froxel_InjectDlights (void)
+{
+	const dlight_t *const *active;
+	int active_count = 0;
+
+	if (!r_froxel.valid)
+		return;
+
+	active = DLightPool_GetActiveList (&active_count);
+	if (active)
+	{
+		for (int i = 0; i < active_count; ++i)
+		{
+			const dlight_t *dl = active[i];
+			if (!dl || !CL_DlightIsActive (dl) || dl->radius <= 0.f)
+				continue;
+			R_Froxel_InjectOneLight (dl->origin, dl->radius, dl->color, 1.f);
+		}
+	}
+
+	for (int i = 0; i < r_num_fog_dlights; ++i)
+	{
+		const dlight_t *dl = &r_fog_dlights[i];
+		if (!CL_DlightIsActive (dl) || dl->radius <= 0.f)
+			continue;
+		R_Froxel_InjectOneLight (dl->origin, dl->radius, dl->color, 1.f);
+	}
+}
+
+void R_Froxel_EndFrame (void)
+{
+	if (!r_froxel.valid || !r_froxel.light_tex)
+		return;
+
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.light_tex);
+	GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, 0,
+		r_froxel.dims[0], r_froxel.dims[1], r_froxel.dims[2], GL_RGB, GL_FLOAT, r_froxel.light_rgb);
+	GL_MemoryBarrierFunc (GL_TEXTURE_FETCH_BARRIER_BIT);
+}
+
 void R_FogVol_Init (void)
 {
+	memset (&r_froxel, 0, sizeof (r_froxel));
 }
 
 void R_FogVol_Clear (void)
@@ -2165,7 +2343,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 34);
+	assert (FOGVOL_U_COUNT == 38);
 #endif
 	GL_Uniform1iFunc (FOGVOL_U_STEPS, steps);
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
@@ -2239,6 +2417,11 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform3fFunc (FOGVOL_U_SUN_COLOR, q_max (0.f, sun_color[0]), q_max (0.f, sun_color[1]), q_max (0.f, sun_color[2]));
 	GL_Uniform1fFunc (FOGVOL_U_SUN_ANISOTROPY, sun->anisotropy);
 	GL_Uniform1fFunc (FOGVOL_U_DLIGHT_SCALE, q_max (0.f, r_fogvol_dlightscale.value));
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (r_froxel.valid && r_froxel.light_tex) ? 1 : 0);
+	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, r_froxel.near_clip, r_froxel.far_clip, r_froxel.tan_half_fov_x, r_froxel.tan_half_fov_y);
+	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, r_froxel.log_far_near,
+		(float)q_max (1, r_froxel.dims[0]), (float)q_max (1, r_froxel.dims[1]), (float)q_max (1, r_froxel.dims[2]));
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, CLAMP (0, (int)Q_rint (r_froxel_debug.value), 2));
 }
 
 void R_FogVol_Render (void)
@@ -2353,6 +2536,10 @@ void R_FogVol_Render (void)
 		steps = (int)Q_rint (depth_far / step_size);
 	}
 	steps = CLAMP (8, steps, q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
+
+	R_Froxel_BeginFrame (depth_near, depth_far);
+	R_Froxel_InjectDlights ();
+	R_Froxel_EndFrame ();
 
 	memset (&fog_lights, 0, sizeof (fog_lights));
 	memset (&light_stats, 0, sizeof (light_stats));
@@ -2490,6 +2677,7 @@ void R_FogVol_Render (void)
 	GL_BeginGroup ("Fog volumes");
 	R_FogVol_UseProgram (glprogs.fogvol);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, (r_froxel.valid ? r_froxel.light_tex : 0));
 	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_FogVol_SetShaderUniforms (steps, mode, use_halfres,

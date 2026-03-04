@@ -41,6 +41,7 @@
 layout(binding=0) uniform sampler2D SceneColor;
 layout(binding=1) uniform sampler2D SceneDepth;
 layout(binding=3) uniform sampler3D FogNoiseTex;
+layout(binding=6) uniform sampler3D FogFroxelLightTex;
 
 struct FogVolume
 {
@@ -117,6 +118,10 @@ layout(location=30) uniform float FogSunScatter;
 layout(location=31) uniform vec3  FogSunColor;
 layout(location=32) uniform float FogSunAnisotropy;
 layout(location=33) uniform float FogDLightScale;
+layout(location=34) uniform int   FogFroxelEnabled;
+layout(location=35) uniform vec4  FogFroxelParams0; // x near, y far, z tanHalfFovX, w tanHalfFovY
+layout(location=36) uniform vec4  FogFroxelParams1; // x log(far/near), yzw dims
+layout(location=37) uniform int   FogFroxelDebug;
 
 layout(location=0) out vec4 FragColor;
 
@@ -378,6 +383,24 @@ vec3 SampleFogLightgrid(vec3 p, FogVolume volume)
 	return mix(c0, c1, local.z);
 }
 
+vec3 SampleFroxelLight(vec3 p)
+{
+	if (FogFroxelEnabled == 0)
+		return vec3(0.0);
+
+	vec3 viewPos = (View * vec4(p, 1.0)).xyz;
+	float z = max(-viewPos.z, FogFroxelParams0.x);
+	float halfW = max(1e-4, z * FogFroxelParams0.z);
+	float halfH = max(1e-4, z * FogFroxelParams0.w);
+	float u = viewPos.x / (2.0 * halfW) + 0.5;
+	float v = viewPos.y / (2.0 * halfH) + 0.5;
+	float w = log(max(z, FogFroxelParams0.x) / max(FogFroxelParams0.x, 1e-4)) / max(FogFroxelParams1.x, 1e-4);
+	vec3 uvw = vec3(u, v, w);
+	if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0))))
+		return vec3(0.0);
+	return texture(FogFroxelLightTex, clamp(uvw, 0.0, 1.0)).rgb;
+}
+
 // PERF: lod=0 full quality (near), lod=1 coarse (far). Caller passes based on distance.
 float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, float noiseScalePre, vec3 flowPre, int lod, float marchDist)
 {
@@ -621,7 +644,7 @@ void main()
 	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
 	int lightOffset     = max(lightList.offset_count.x, 0);
 	int lightCount      = clamp(lightList.offset_count.y, 0, MAX_FOGLIGHTS);
-	bool  doLights      = (FogLightEnabled != 0 && lightCount > 0);
+	bool  doLights      = (FogLightEnabled != 0 && lightCount > 0 && FogFroxelEnabled == 0);
 	bool  doLightgrid   = (FogLightgridEnabled != 0);
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated  they were
@@ -685,6 +708,12 @@ void main()
 			// by FogEmissiveEnabled/volume.extra.z below.
 			vec3 staticScatter = SampleFogLightgrid(p, volume);
 			stepScatter += staticScatter * (FogDLightScale * (1.0 - att));
+		}
+
+		if (FogFroxelEnabled != 0)
+		{
+			vec3 froxelScatter = clamp(SampleFroxelLight(p), 0.0, 32.0);
+			stepScatter += froxelScatter * (FogDLightScale * (1.0 - att));
 		}
 
 		if (doLights)
@@ -759,6 +788,20 @@ void main()
 		FragColor = vec4(vec3(clamp(transmittance, 0.0, 1.0)), 1.0);
 		return;
 	}
+	if (FogFroxelDebug == 1)
+	{
+		vec3 froxelViz = clamp(SampleFroxelLight(ro + rd * max(tEnter, 0.0)) * 0.5, 0.0, 1.0);
+		FragColor = vec4(froxelViz, 1.0);
+		return;
+	}
+	if (FogFroxelDebug == 2)
+	{
+		vec3 froxelViz = SampleFroxelLight(ro + rd * max(tEnter, 0.0));
+		float energy = clamp(max(froxelViz.r, max(froxelViz.g, froxelViz.b)) * 0.25, 0.0, 1.0);
+		FragColor = vec4(energy, energy * energy, 0.0, 1.0);
+		return;
+	}
+
 	if (FogDebugMode == 8)
 	{
 		float avgShadow = (shadowWeightAccum > 1e-6) ? (shadowVisAccum / shadowWeightAccum) : 1.0;
