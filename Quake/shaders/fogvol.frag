@@ -130,6 +130,10 @@ const float NOISE_SCALE_MIN  = 0.005;
 const float NOISE_SCALE_MAX  = 0.5;
 const float LUT_PERIOD       = 64.0;
 const float ANISO_G_LOCAL    = 0.5;
+// Subtle cloud shaping constants (kept local: no new CVars / uniforms).
+const float FOG_RIDGED_STRENGTH = 0.22;
+const float FOG_MACRO_SCALE_MUL = 0.22;
+const float FOG_MACRO_STRENGTH  = 0.20;
 
 const int FOGVOL_SHAPE_BOX = 0;
 const int FOGVOL_SHAPE_SPHERE = 1;
@@ -402,7 +406,8 @@ vec3 SampleFroxelLight(vec3 p)
 }
 
 // PERF: lod=0 full quality (near), lod=1 coarse (far). Caller passes based on distance.
-float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, float noiseScalePre, vec3 flowPre, int lod, float marchDist)
+float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, float noiseScalePre, vec3 flowPre,
+	float macroDensityMul, int lod, float marchDist)
 {
 	float edgeDist;
 	float edgeFade;
@@ -432,7 +437,11 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, f
 		// (near samples). Far samples (lod=1) skip warp  imperceptible at distance.
 		if (volume.wind_turbulence.w > 1e-4 && lod == 0 && marchDist < FogDomainWarpMaxDist)
 			noisePos += vec3(FBM(p * noiseScalePre * 2.03), FBM(p.yzx * noiseScalePre * 2.71), FBM(p.zxy * noiseScalePre * 1.91)) * volume.wind_turbulence.w * 0.35;
-		float n = FogNoise(noisePos, lod);
+		float baseN = FogNoise(noisePos, lod);
+		// ALU-only ridge shaping from the already fetched base noise (no extra texture/noise fetch).
+		float ridged = 1.0 - abs(2.0 * baseN - 1.0);
+		ridged *= ridged;
+		float n = mix(baseN, ridged, FOG_RIDGED_STRENGTH);
 		float noiseBias = clamp(volume.noise_params.z, 0.0, 1.0);
 		if (noiseBias > 0.0)
 			n = smoothstep(noiseBias, 1.0, n);
@@ -440,7 +449,8 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, f
 		noiseFactor = mix(1.0, clamp(2.0 * n, 0.0, 2.0), amt);
 	}
 
-	float sigma = density * noiseFactor * edgeFade * HeightFactor(p, volume);
+	// Macro billow density modulation is reused per-ray (computed once in main), so no per-step macro fetch.
+	float sigma = (density * macroDensityMul) * noiseFactor * edgeFade * HeightFactor(p, volume);
 	return IsFiniteFloat(sigma) ? max(sigma, 0.0) : 0.0;
 }
 
@@ -448,7 +458,7 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, f
 // work per call. Shadow is now called with the sigma already known for the
 // current sample point (passed as firstSigma), so we skip one EvaluateFogSigma.
 float EstimateShadowVisibility(vec3 p, FogVolume volume, float density, float falloff,
-	float noiseScalePre, vec3 flowPre, float stepLen,
+	float noiseScalePre, vec3 flowPre, float macroDensityMul, float stepLen,
 	vec3 sunDirNorm, float shadowJitterVal, float firstSigma)
 {
 	// sunDirNorm is pre-validated (zero-length guard done by caller)
@@ -465,7 +475,7 @@ float EstimateShadowVisibility(vec3 p, FogVolume volume, float density, float fa
 		if (!PointInsideVolume(sp, volume))
 			break;
 		// PERF: Shadow samples always use lod=1 (1 octave)  shadows don't need full detail.
-		float sigma = EvaluateFogSigma(sp, volume, density, falloff, noiseScalePre, flowPre, 1, sampleDist);
+		float sigma = EvaluateFogSigma(sp, volume, density, falloff, noiseScalePre, flowPre, macroDensityMul, 1, sampleDist);
 		tauLight += sigma * shadowStep;
 	}
 
@@ -661,6 +671,21 @@ void main()
 		flowPre = volume.velocity_windspeed.xyz + flowDir * volume.velocity_windspeed.w;
 	}
 
+	float macroDensityMul = 1.0;
+	if (FogNoiseEnabled != 0)
+	{
+		// PERF: Evaluate macro billow once per ray and reuse for all march/shadow samples.
+		float macroScale = clamp(noiseScalePre * FOG_MACRO_SCALE_MUL, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
+		vec3 macroPos = (ro + rd * tEnter) * macroScale + flowPre * Time * macroScale;
+		float macroRaw = FogNoise(macroPos, 1);
+		float billow = abs(2.0 * macroRaw - 1.0);
+		billow *= billow;
+		float macroStrength = FOG_MACRO_STRENGTH;
+		if (FogHalfRes != 0)
+			macroStrength *= 0.85;
+		macroDensityMul = mix(1.0, billow, macroStrength);
+	}
+
 	int adaptiveSteps = int(stepCount); // adaptive, already capped at FogSteps
 	float sigmaEvenPrev = 0.0;
 	vec3 lightScatterPrev = vec3(0.0);
@@ -683,7 +708,7 @@ void main()
 		}
 		else
 		{
-			rawSigma = EvaluateFogSigma(p, volume, density, falloff, noiseScalePre, flowPre, noiseLod, t);
+			rawSigma = EvaluateFogSigma(p, volume, density, falloff, noiseScalePre, flowPre, macroDensityMul, noiseLod, t);
 			if ((i & 1) == 0)
 				sigmaEvenPrev = rawSigma;
 		}
@@ -695,7 +720,7 @@ void main()
 		// Shadow internally uses lod=1 for all its samples anyway, so this approximation is fine.
 		// sunDir is pre-normalized; shadowJitter is pre-computed; phaseSun is pre-computed.
 		float shadowVisibility = doShadow
-			? EstimateShadowVisibility(p, volume, density, falloff, noiseScalePre, flowPre,
+			? EstimateShadowVisibility(p, volume, density, falloff, noiseScalePre, flowPre, macroDensityMul,
 				stepLen, sunDir, shadowJitter, rawSigma)
 			: 1.0;
 
