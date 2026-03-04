@@ -13,14 +13,31 @@ float BrightPartMask(vec3 color, float threshold, float knee)
 	return mask;
 }
 
+float SkyDepthMask(float depth)
+{
+	/*
+	 * Be tolerant about depth convention: some pipelines can expose regular or
+	 * reversed depth depending on runtime capabilities/state.  Accept either
+	 * sky extreme near the far plane so source debug remains
+	 * visible instead of going fully black on convention mismatches.
+	 */
+	const float edgeEpsilon = 0.003;
+	float cpuCutoff = clamp(SkyParams.x, 0.0, 1.0);
+	float reversedLike = step(depth, min(cpuCutoff + edgeEpsilon, 1.0));
+	float regularLike = step(max(cpuCutoff - edgeEpsilon, 0.0), depth);
+	float nearZero = step(depth, edgeEpsilon);
+	float nearOne = step(1.0 - edgeEpsilon, depth);
+
+	if (SkyParams.z > 0.5)
+		return clamp(max(reversedLike, nearOne), 0.0, 1.0);
+	return clamp(max(regularLike, nearZero), 0.0, 1.0);
+}
+
 void main()
 {
 	ivec2 coord = ivec2(gl_FragCoord.xy);
 	float depth = texelFetch(DepthTexture, coord, 0).r;
-	bool isSky = (SkyParams.z > 0.5) ? (depth <= SkyParams.x) : (depth >= SkyParams.x);
-	float mask = 0.0;
-	if (isSky)
-		mask = BrightPartMask(SkyTint.rgb, SkyParams.w, SkyMaskParams.x);
+	float mask = SkyDepthMask(depth) * BrightPartMask(SkyTint.rgb, SkyParams.w, SkyMaskParams.x);
 	vec3 color = SkyTint.rgb * SkyParams.y * mask;
 	outColor = vec4(color, mask);
 }
