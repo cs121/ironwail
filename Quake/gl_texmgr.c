@@ -777,7 +777,8 @@ static qboolean TexMgr_IsLinearDataTextureName (const char *name)
 		return true;
 	if (strstr (lower, "depth") || strstr (lower, "velocity"))
 		return true;
-	if (strstr (lower, "ssao") || strstr (lower, "noise") || strstr (lower, "blue"))
+	/* Avoid broad color words (e.g. "blue"): albedo textures often include them but should remain sRGB. */
+	if (strstr (lower, "ssao") || strstr (lower, "noise") || strstr (lower, "blue_noise") || strstr (lower, "bluenoise") || strstr (lower, "_bn"))
 		return true;
 	if (strstr (lower, "lut"))
 		return true;
