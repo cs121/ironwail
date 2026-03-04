@@ -885,14 +885,11 @@ static void R_ParseWorldspawn (void)
 		if (!strcmp("wateralpha", key))
 			map_wateralpha = atof(value);
 
-		}
-
 		if (!strcmp("telealpha", key))
 			map_telealpha = atof(value);
 
 		if (!strcmp("slimealpha", key))
 			map_slimealpha = atof(value);
-
 	}
 
 
