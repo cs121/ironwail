@@ -258,10 +258,18 @@ static unsigned int fs_generation;
 
 typedef struct fs_canceled_id_s {
 	unsigned int id;
+	unsigned int added_generation;
 	struct fs_canceled_id_s *next;
 } fs_canceled_id_t;
 
 static fs_canceled_id_t *fs_canceled_ids;
+
+#define FS_RECENT_COMPLETED_CAPACITY 64
+#define FS_CANCELED_PRUNE_GENERATIONS 4
+
+static unsigned int fs_recent_completed_ids[FS_RECENT_COMPLETED_CAPACITY];
+static unsigned int fs_recent_completed_count;
+static unsigned int fs_recent_completed_write;
 
 static qboolean FS_HasCanceledIdLocked (unsigned int id)
 {
@@ -292,6 +300,50 @@ static qboolean FS_TakeCanceledIdLocked (unsigned int id)
 	}
 
 	return false;
+}
+
+static qboolean FS_IsRecentCompletionLocked (unsigned int id)
+{
+	unsigned int i;
+
+	for (i = 0; i < fs_recent_completed_count; ++i)
+	{
+		if (fs_recent_completed_ids[i] == id)
+			return true;
+	}
+
+	return false;
+}
+
+static void FS_RecordCompletionIdLocked (unsigned int id)
+{
+	fs_recent_completed_ids[fs_recent_completed_write] = id;
+	fs_recent_completed_write = (fs_recent_completed_write + 1) % FS_RECENT_COMPLETED_CAPACITY;
+	if (fs_recent_completed_count < FS_RECENT_COMPLETED_CAPACITY)
+		fs_recent_completed_count++;
+}
+
+static qboolean FS_IsCancelTooOldLocked (const fs_canceled_id_t *entry)
+{
+	unsigned int age = fs_generation - entry->added_generation;
+	return age > FS_CANCELED_PRUNE_GENERATIONS;
+}
+
+static void FS_PruneCanceledIdsLocked (void)
+{
+	fs_canceled_id_t **cursor = &fs_canceled_ids;
+	while (*cursor)
+	{
+		fs_canceled_id_t *entry = *cursor;
+		if (FS_IsCancelTooOldLocked (entry))
+		{
+			*cursor = entry->next;
+			free (entry);
+			continue;
+		}
+
+		cursor = &entry->next;
+	}
 }
 
 static uint8_t *FS_LoadMallocThread (const char *path, size_t *len_out)
@@ -404,12 +456,25 @@ void FS_AsyncReadCancel (fs_asyncread_handle_t handle)
 		free (entry);
 		return;
 	}
+	if (FS_IsRecentCompletionLocked (handle.id))
+	{
+		SDL_UnlockMutex (fs_mutex);
+		free (entry);
+		return;
+	}
 
 	/*
 	 * Track cancellations by exact async handle id. This avoids the old
 	 * "cancel-before" behavior where canceling one request could
 	 * unintentionally suppress unrelated lower-id completions.
+	 *
+	 * Late cancels are best-effort: if the completion was already consumed,
+	 * the id may still be in a small recent-completion cache and can be
+	 * ignored immediately. Otherwise we enqueue the cancel id for matching in
+	 * a later completion pump, and unmatched ids are pruned after a safe
+	 * generation horizon.
 	 */
+	entry->added_generation = fs_generation;
 	entry->next = fs_canceled_ids;
 	fs_canceled_ids = entry;
 	SDL_UnlockMutex (fs_mutex);
@@ -427,6 +492,7 @@ void FS_PumpAsyncCompletions (void)
 	fs_completion_t *list;
 
 	SDL_LockMutex (fs_mutex);
+	FS_PruneCanceledIdsLocked ();
 	list = fs_comp_head;
 	fs_comp_head = fs_comp_tail = NULL;
 	SDL_UnlockMutex (fs_mutex);
@@ -438,6 +504,7 @@ void FS_PumpAsyncCompletions (void)
 		qboolean stale;
 
 		SDL_LockMutex (fs_mutex);
+		FS_RecordCompletionIdLocked (list->id);
 		canceled = FS_TakeCanceledIdLocked (list->id);
 		stale = list->generation != fs_generation;
 		SDL_UnlockMutex (fs_mutex);
