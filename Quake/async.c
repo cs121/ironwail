@@ -284,6 +284,42 @@ static qboolean FS_HasCanceledIdLocked (unsigned int id)
 	return false;
 }
 
+static qboolean FS_HasCompletionIdLocked (unsigned int id)
+{
+	fs_completion_t *comp = fs_comp_head;
+	while (comp)
+	{
+		if (comp->id == id)
+			return true;
+		comp = comp->next;
+	}
+
+	return false;
+}
+
+static unsigned int FS_AllocAsyncReadIdLocked (void)
+{
+	unsigned int candidate = fs_next_id;
+
+	for (;;)
+	{
+		/* id 0 is reserved and never issued as a valid async handle. */
+		if (candidate == 0)
+			candidate = 1;
+
+		if (!FS_HasCompletionIdLocked (candidate) && !FS_HasCanceledIdLocked (candidate))
+			break;
+
+		candidate++;
+	}
+
+	fs_next_id = candidate + 1;
+	if (fs_next_id == 0)
+		fs_next_id = 1;
+
+	return candidate;
+}
+
 static qboolean FS_TakeCanceledIdLocked (unsigned int id)
 {
 	fs_canceled_id_t **cursor = &fs_canceled_ids;
@@ -428,7 +464,7 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 	job->user = user;
 
 	SDL_LockMutex (fs_mutex);
-	job->id = fs_next_id++;
+	job->id = FS_AllocAsyncReadIdLocked ();
 	job->generation = fs_generation;
 	SDL_UnlockMutex (fs_mutex);
 
