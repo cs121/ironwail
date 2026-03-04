@@ -349,6 +349,7 @@ void R_FogVol_ClearHistory (void)
 	r_fogvol_history_width = 0;
 	r_fogvol_history_height = 0;
 	r_fogvol_composite_valid = false;
+	R_Froxel_ResetResources ();
 
 	if (!framebufs.fogvol.history_fbo[0] || !framebufs.fogvol.history_fbo[1])
 		return;
@@ -1443,6 +1444,18 @@ static void R_Froxel_FreeCPUBuffer (void)
 		free (r_froxel.light_rgb);
 		r_froxel.light_rgb = NULL;
 	}
+}
+
+void R_Froxel_ResetResources (void)
+{
+	if (r_froxel.light_tex)
+		glDeleteTextures (1, &r_froxel.light_tex);
+	r_froxel.light_tex = 0;
+	R_Froxel_FreeCPUBuffer ();
+	r_froxel.dims[0] = 0;
+	r_froxel.dims[1] = 0;
+	r_froxel.dims[2] = 0;
+	r_froxel.valid = false;
 }
 
 static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)

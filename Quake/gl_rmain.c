@@ -912,6 +912,7 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.history_fbo);
 	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.composite_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.fogvol.finalcopy_fbo);
+	R_Froxel_ResetResources ();
 	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
 	GL_AutoExposureDeletePBOs ();
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
