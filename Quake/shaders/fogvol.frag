@@ -116,6 +116,7 @@ layout(location=29) uniform int   FogLightSubsample;
 layout(location=30) uniform float FogSunScatter;
 layout(location=31) uniform vec3  FogSunColor;
 layout(location=32) uniform float FogSunAnisotropy;
+layout(location=33) uniform float FogDLightScale;
 
 layout(location=0) out vec4 FragColor;
 
@@ -693,7 +694,7 @@ void main()
 			// probe data; explicit fog volume emissive remains handled separately
 			// by FogEmissiveEnabled/volume.extra.z below.
 			vec3 staticScatter = SampleFogLightgrid(p, volume);
-			stepScatter += staticScatter * (1.0 - att);
+			stepScatter += staticScatter * (FogDLightScale * (1.0 - att));
 		}
 
 		if (doLights)
@@ -715,7 +716,7 @@ void main()
 					if (atten < 1e-5) continue;
 					vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
 					float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
-					lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * phaseLocal);
+					lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal);
 				}
 				lightScatterPrev = lightScatter;
 			}

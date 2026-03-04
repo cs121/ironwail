@@ -117,6 +117,10 @@ static int r_num_fog_dlights = 0;
 static dlight_t r_fog_dlights[MAX_FOG_DLIGHTS];
 static fog_torch_cache_entry_t r_fog_torch_cache[FOG_TORCH_CACHE_SIZE];
 
+#define MAX_FOG_STATIC_LIGHTS 192
+static int r_num_fog_static_lights = 0;
+static fog_light_gpu_t r_fog_static_lights[MAX_FOG_STATIC_LIGHTS];
+
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
 cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
@@ -185,6 +189,7 @@ cvar_t r_fogvol_globalfog_priority = { "r_fogvol_globalfog_priority", "-1", CVAR
 cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_lightgrid = { "r_fogvol_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
+cvar_t r_fogvol_dlightscale = { "r_fogvol_dlightscale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_stats = { "r_fogvol_light_stats", "0", CVAR_NONE };
 cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE };
@@ -248,6 +253,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_light, "lighting", "0"},
 	{&r_fogvol_lightgrid, "lighting", "1"},
 	{&r_fogvol_light_max, "lighting", "16"},
+	{&r_fogvol_dlightscale, "lighting", "1"},
 	{&r_fogvol_light_stats, "debug", "0"},
 	{&r_fogvol_shadow, "lighting", "1"},
 	{&r_fogvol_shadow_samples, "lighting", "2"},
@@ -294,14 +300,16 @@ enum
 	FOGVOL_U_SUN_SCATTER = 30,
 	FOGVOL_U_SUN_COLOR = 31,
 	FOGVOL_U_SUN_ANISOTROPY = 32,
-	FOGVOL_U_COUNT = 33
+	FOGVOL_U_DLIGHT_SCALE = 33,
+	FOGVOL_U_COUNT = 34
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_SUN_ANISOTROPY == 32);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_DLIGHT_SCALE == 33);
 
 extern float skyflatcolor[3];
 
 extern cvar_t gl_farclip;
+extern cvar_t r_lightmap_colorspace;
 
 static int r_fogvol_history_index = 0;
 static int r_fogvol_history_width = 0;
@@ -1195,10 +1203,160 @@ static int R_FogVol_BuildFrameLightBroadphase (const fogvol_visible_volume_t *vi
 		candidate_count++;
 	}
 
+
+	for (int i = 0; i < r_num_fog_static_lights && candidate_count < max_out; ++i)
+	{
+		const fog_light_gpu_t *sl = &r_fog_static_lights[i];
+		float overlap_score = 0.f;
+		float radius = sl->pos_rad[3];
+
+		if (radius <= 0.f)
+			continue;
+
+		for (int v = 0; v < visible_count; ++v)
+		{
+			if (!R_FogVol_LightOverlapsVolume (visible_volumes[v].volume, sl->pos_rad, radius))
+				continue;
+			overlap_score += visible_volumes[v].screen_weight;
+		}
+
+		if (overlap_score <= 0.f)
+			continue;
+
+		out[candidate_count].index = 200000 + i;
+		out[candidate_count].score = overlap_score * radius;
+		out[candidate_count].light = *sl;
+		out[candidate_count].bounds_mins[0] = sl->pos_rad[0] - radius;
+		out[candidate_count].bounds_mins[1] = sl->pos_rad[1] - radius;
+		out[candidate_count].bounds_mins[2] = sl->pos_rad[2] - radius;
+		out[candidate_count].bounds_maxs[0] = sl->pos_rad[0] + radius;
+		out[candidate_count].bounds_maxs[1] = sl->pos_rad[1] + radius;
+		out[candidate_count].bounds_maxs[2] = sl->pos_rad[2] + radius;
+		candidate_count++;
+	}
+
 	if (candidate_count > 1)
 		qsort (out, candidate_count, sizeof (out[0]), R_FogVol_CompareLightCandidate);
 
 	return candidate_count;
+}
+
+static qboolean R_FogVol_TryGetSurfaceLightSample (const qmodel_t *model, const msurface_t *surf, vec3_t out_rgb)
+{
+	const byte *samples;
+	int bytes_per_pixel;
+	int smax;
+	int tmax;
+	int facesize;
+	float accum[3] = {0.f, 0.f, 0.f};
+	float accum_weight = 0.f;
+	const qboolean use_rgb = (model && model->has_lightdata_rgb && model->lightdata && model->lightdata_rgb);
+
+	if (!model || !surf || !surf->samples)
+		return false;
+
+	samples = surf->samples;
+	bytes_per_pixel = (model->flags & MOD_HDRLIGHTING) ? 4 : 3;
+	if (use_rgb)
+	{
+		const ptrdiff_t offset = samples - model->lightdata;
+		if (offset >= 0 && bytes_per_pixel > 0 && (offset % bytes_per_pixel) == 0)
+		{
+			const size_t sample_offset = (size_t)offset / (size_t)bytes_per_pixel;
+			const size_t rgb_offset = sample_offset * 3;
+			if (rgb_offset + 3 <= (size_t)model->lightdata_rgb_size)
+			{
+				samples = model->lightdata_rgb + rgb_offset;
+				bytes_per_pixel = 3;
+			}
+		}
+	}
+
+	smax = (surf->extents[0] >> 4) + 1;
+	tmax = (surf->extents[1] >> 4) + 1;
+	if (smax <= 0 || tmax <= 0)
+		return false;
+	facesize = smax * tmax * bytes_per_pixel;
+
+	for (int map = 0; map < MAXLIGHTMAPS && surf->styles[map] != INVALID_LIGHTSTYLE; ++map)
+	{
+		const float style_scale = ((surf->styles[map] < 256) ? d_lightstylevalue[surf->styles[map]] : d_lightstylevalue[0]) * (1.f / 256.f);
+		int center_s = smax / 2;
+		int center_t = tmax / 2;
+		const byte *lightmap = samples + facesize * map;
+		const byte *texel = lightmap + (center_t * smax + center_s) * bytes_per_pixel;
+		accum[0] += style_scale * texel[0];
+		accum[1] += style_scale * texel[1];
+		accum[2] += style_scale * texel[2];
+		accum_weight += style_scale;
+	}
+
+	if (accum_weight <= 0.f)
+		return false;
+
+	out_rgb[0] = q_max (0.f, accum[0] * (1.f / 255.f));
+	out_rgb[1] = q_max (0.f, accum[1] * (1.f / 255.f));
+	out_rgb[2] = q_max (0.f, accum[2] * (1.f / 255.f));
+	if (!q_strcasecmp (r_lightmap_colorspace.string, "srgb"))
+	{
+		out_rgb[0] = powf (q_max (out_rgb[0], 0.f), 2.2f);
+		out_rgb[1] = powf (q_max (out_rgb[1], 0.f), 2.2f);
+		out_rgb[2] = powf (q_max (out_rgb[2], 0.f), 2.2f);
+	}
+	return (out_rgb[0] > 0.f || out_rgb[1] > 0.f || out_rgb[2] > 0.f);
+}
+
+static void R_FogVol_BuildStaticLightInjection (void)
+{
+	qmodel_t *model = cl.worldmodel;
+	int stride;
+
+	r_num_fog_static_lights = 0;
+	if (!model || model->type != mod_brush || model->numsurfaces <= 0)
+		return;
+	if (!model->lightdata)
+		return;
+
+	stride = q_max (1, model->numsurfaces / MAX_FOG_STATIC_LIGHTS);
+	for (int i = 0; i < model->numsurfaces && r_num_fog_static_lights < MAX_FOG_STATIC_LIGHTS; i += stride)
+	{
+		msurface_t *surf = &model->surfaces[i];
+		fog_light_gpu_t *dst;
+		vec3_t center;
+		vec3_t color;
+		float radius;
+
+		if (!surf->samples)
+			continue;
+		if (!surf->texinfo || surf->texinfo->texnum < 0 || surf->texinfo->texnum >= model->numtextures)
+			continue;
+		if (!model->textures[surf->texinfo->texnum] || (model->textures[surf->texinfo->texnum]->flags & TEX_SPECIAL))
+			continue;
+		if (!R_FogVol_TryGetSurfaceLightSample (model, surf, color))
+			continue;
+
+		center[0] = 0.5f * (surf->mins[0] + surf->maxs[0]);
+		center[1] = 0.5f * (surf->mins[1] + surf->maxs[1]);
+		center[2] = 0.5f * (surf->mins[2] + surf->maxs[2]);
+		radius = 0.5f * sqrtf (
+			(surf->maxs[0] - surf->mins[0]) * (surf->maxs[0] - surf->mins[0]) +
+			(surf->maxs[1] - surf->mins[1]) * (surf->maxs[1] - surf->mins[1]) +
+			(surf->maxs[2] - surf->mins[2]) * (surf->maxs[2] - surf->mins[2]));
+		radius = CLAMP (64.f, radius * 1.5f, 384.f);
+
+		dst = &r_fog_static_lights[r_num_fog_static_lights++];
+		dst->pos_rad[0] = center[0];
+		dst->pos_rad[1] = center[1];
+		dst->pos_rad[2] = center[2];
+		dst->pos_rad[3] = radius;
+		dst->col_int[0] = color[0] * 0.65f;
+		dst->col_int[1] = color[1] * 0.65f;
+		dst->col_int[2] = color[2] * 0.65f;
+		dst->col_int[3] = 1.f;
+	}
+
+	if (developer.value > 0.f)
+		Con_DPrintf ("FogVol: injected %d static lights from lightmaps\n", r_num_fog_static_lights);
 }
 
 static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, const fogvol_light_candidate_t *prefiltered, int prefiltered_count, fog_light_gpu_t *out, int max_count, fogvol_light_stats_t *stats)
@@ -1254,6 +1412,7 @@ void R_FogVol_Init (void)
 void R_FogVol_Clear (void)
 {
 	r_fogvolume_count = 0;
+	r_num_fog_static_lights = 0;
 }
 
 static void R_FogVol_ClearEntities (void)
@@ -1608,6 +1767,7 @@ void R_FogVol_ParseEntities (void)
 	const char *data;
 
 	R_FogVol_ClearEntities ();
+	r_num_fog_static_lights = 0;
 
 	if (!cl.worldmodel || !cl.worldmodel->entities)
 		return;
@@ -1703,6 +1863,8 @@ void R_FogVol_ParseEntities (void)
 
 		data = COM_Parse (data);
 	}
+
+	R_FogVol_BuildStaticLightInjection ();
 }
 
 void R_FogVol_AddTestVolumes (void)
@@ -1959,7 +2121,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 33);
+	assert (FOGVOL_U_COUNT == 34);
 #endif
 	GL_Uniform1iFunc (FOGVOL_U_STEPS, steps);
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
@@ -2032,6 +2194,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1fFunc (FOGVOL_U_SUN_SCATTER, sun_scatter * q_max (0.f, sun_intensity));
 	GL_Uniform3fFunc (FOGVOL_U_SUN_COLOR, q_max (0.f, sun_color[0]), q_max (0.f, sun_color[1]), q_max (0.f, sun_color[2]));
 	GL_Uniform1fFunc (FOGVOL_U_SUN_ANISOTROPY, sun->anisotropy);
+	GL_Uniform1fFunc (FOGVOL_U_DLIGHT_SCALE, q_max (0.f, r_fogvol_dlightscale.value));
 }
 
 void R_FogVol_Render (void)
