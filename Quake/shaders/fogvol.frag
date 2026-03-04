@@ -126,6 +126,9 @@ const float NOISE_SCALE_MAX  = 0.5;
 const float LUT_PERIOD       = 64.0;
 const float ANISO_G_LOCAL    = 0.5;
 
+const int FOGVOL_SHAPE_BOX = 0;
+const int FOGVOL_SHAPE_SPHERE = 1;
+
 //  helpers 
 
 int WrapIndex(int v, int period)
@@ -356,7 +359,7 @@ float FogEdgeSoftnessMask(float edgeDist, float falloff, float edgeSoftness)
 
 bool PointInsideVolume(vec3 p, FogVolume volume)
 {
-	if (volume.extra.x > 0.5)
+	if (int (volume.extra.x + 0.5) == FOGVOL_SHAPE_SPHERE)
 		return length(p - volume.sphere.xyz) <= volume.sphere.w;
 	return all(greaterThanEqual(p, volume.mins.xyz)) && all(lessThanEqual(p, volume.maxs.xyz));
 }
@@ -381,7 +384,7 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, f
 	float edgeDist;
 	float edgeFade;
 	float edgeSoftness = clamp(volume.params2.x, 0.0, 1.0);
-	if (volume.extra.x > 0.5)
+	if (int (volume.extra.x + 0.5) == FOGVOL_SHAPE_SPHERE)
 	{
 		edgeDist = volume.sphere.w - length(p - volume.sphere.xyz);
 		edgeFade = (falloff <= 0.0) ? 1.0 : smoothstep(0.0, falloff, edgeDist);
@@ -503,7 +506,7 @@ void main()
 		tScene = FogDepthParams.y;
 
 	float tEnter, tExit;
-	if (volume.extra.x > 0.5)
+	if (int (volume.extra.x + 0.5) == FOGVOL_SHAPE_SPHERE)
 	{
 		if (!RaySphere(ro, rd, volume.sphere.xyz, volume.sphere.w, tEnter, tExit))
 		{

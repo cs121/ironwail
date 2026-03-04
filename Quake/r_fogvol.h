@@ -4,6 +4,16 @@
 #define MAX_FOGVOLUMES 64
 #define MAX_FOGLIGHTS 31 /* keep FogLightsUBO under 64KB std140 limit on NVIDIA */
 
+/* Fog volume shape encoding used by CPU logic, entity parsing, and GPU UBOs.
+ * 0 = axis-aligned box (mins/maxs)
+ * 1 = sphere (sphereCenter/sphereRadius)
+ * Values outside this set are unsupported and must be normalized before use. */
+typedef enum fog_volume_shape_e
+{
+	FOGVOL_SHAPE_BOX = 0,
+	FOGVOL_SHAPE_SPHERE = 1
+} fog_volume_shape_t;
+
 typedef struct fog_volume_s
 {
 	vec3_t mins;
@@ -14,7 +24,7 @@ typedef struct fog_volume_s
 	float density;
 	float falloff;
 	int mode;
-	int shape;
+	int shape; /* fog_volume_shape_t */
 	int blendMode;
 	float emissiveStrength;
 	float noiseScale;

@@ -971,7 +971,7 @@ static float R_FogVol_DistanceToVolume (const fog_volume_t *volume, const vec3_t
 	if (!volume)
 		return 999999.f;
 
-	if (volume->shape > 0)
+	if (volume->shape == FOGVOL_SHAPE_SPHERE)
 	{
 		vec3_t d;
 		VectorSubtract (p, volume->sphereCenter, d);
@@ -999,7 +999,7 @@ static qboolean R_FogVol_LightOverlapsVolume (const fog_volume_t *volume, const 
 
 static void R_FogVol_GetVolumeBounds (const fog_volume_t *vol, vec3_t bmins, vec3_t bmaxs)
 {
-	if (vol->shape == 1)
+	if (vol->shape == FOGVOL_SHAPE_SPHERE)
 	{
 		for (int a = 0; a < 3; ++a)
 		{
@@ -1427,6 +1427,18 @@ static void R_FogVol_ClearEntities (void)
 	r_fogvolume_entity_count = 0;
 }
 
+static qboolean R_FogVol_IsSupportedShape (int shape)
+{
+	return shape == FOGVOL_SHAPE_BOX || shape == FOGVOL_SHAPE_SPHERE;
+}
+
+static int R_FogVol_NormalizeShape (int shape)
+{
+	if (shape == FOGVOL_SHAPE_SPHERE)
+		return FOGVOL_SHAPE_SPHERE;
+	return FOGVOL_SHAPE_BOX;
+}
+
 static void R_FogVol_ClampVolume (fog_volume_t *volume)
 {
 	volume->density = CLAMP (0.f, volume->density, 10.f);
@@ -1435,7 +1447,7 @@ static void R_FogVol_ClampVolume (fog_volume_t *volume)
 	volume->noiseScale = CLAMP (0.001f, volume->noiseScale, 0.5f);
 	volume->turbulence = CLAMP (0.f, volume->turbulence, 2.f);
 	volume->emissiveStrength = CLAMP (0.f, volume->emissiveStrength, 16.f);
-	volume->shape = CLAMP (0, volume->shape, 2);
+	volume->shape = R_FogVol_NormalizeShape (volume->shape);
 	volume->blendMode = CLAMP (-1, volume->blendMode, 1);
 	volume->edgeSoftness = CLAMP (0.f, volume->edgeSoftness, 1.f);
 }
@@ -1564,11 +1576,28 @@ static void R_FogVol_EntitySetOrigin (fog_volume_t *volume, fogvol_entity_parse_
 
 static void R_FogVol_EntitySetShape (fog_volume_t *volume, fogvol_entity_parse_state_t *state, const char *value)
 {
+	int parsed_shape;
+	char *endptr = NULL;
 	(void)state;
-	if (!q_strcasecmp (value, "sphere") || atoi (value) == 1)
-		volume->shape = 1;
+
+	if (!q_strcasecmp (value, "sphere"))
+		parsed_shape = FOGVOL_SHAPE_SPHERE;
+	else if (!q_strcasecmp (value, "box"))
+		parsed_shape = FOGVOL_SHAPE_BOX;
 	else
-		volume->shape = 0;
+		parsed_shape = (int)strtol (value, &endptr, 10);
+
+	if ((endptr && *endptr != '\0') || !R_FogVol_IsSupportedShape (parsed_shape))
+	{
+		if (developer.value > 0.f)
+			Con_DPrintf ("FogVol: unsupported shape '%s' (expected %d=box or %d=sphere), defaulting to box\n",
+				value,
+				FOGVOL_SHAPE_BOX,
+				FOGVOL_SHAPE_SPHERE);
+		parsed_shape = FOGVOL_SHAPE_BOX;
+	}
+
+	volume->shape = parsed_shape;
 }
 
 /* Supported fog volume entity keys:
@@ -1657,7 +1686,7 @@ static float R_FogVol_PointDistance (const vec3_t point, const fog_volume_t *vol
 	float dist2 = 0.f;
 	int i;
 
-	if (volume->shape == 1)
+	if (R_FogVol_NormalizeShape (volume->shape) == FOGVOL_SHAPE_SPHERE)
 	{
 		vec3_t delta;
 		float dist;
@@ -1794,7 +1823,7 @@ void R_FogVol_ParseEntities (void)
 		volume.density = 0.1f;
 		volume.falloff = 16.f;
 		volume.mode = 0;
-		volume.shape = 0;
+		volume.shape = FOGVOL_SHAPE_BOX;
 		volume.blendMode = -1;
 		volume.emissiveStrength = 0.f;
 		volume.noiseScale = 0.05f;
@@ -1852,7 +1881,7 @@ void R_FogVol_ParseEntities (void)
 				}
 				VectorCopy (mins, volume.mins);
 				VectorCopy (maxs, volume.maxs);
-				if (volume.shape == 1)
+				if (R_FogVol_NormalizeShape (volume.shape) == FOGVOL_SHAPE_SPHERE)
 				{
 					for (int a = 0; a < 3; ++a)
 						volume.sphereCenter[a] = 0.5f * (volume.mins[a] + volume.maxs[a]);
@@ -1896,7 +1925,7 @@ void R_FogVol_AddTestVolumes (void)
 	volume.density    = 0.02f;
 	volume.falloff    = 16.f;
 	volume.mode       = 0;
-	volume.shape      = 0;
+	volume.shape      = FOGVOL_SHAPE_BOX;
 	volume.blendMode  = -1;
 	volume.noiseScale = 0.05f;
 	volume.noiseAmount = 0.6f;
@@ -1987,7 +2016,7 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 
 	{
 		vec3_t bmins, bmaxs;
-		if (v->shape == 1)
+		if (v->shape == FOGVOL_SHAPE_SPHERE)
 		{
 			for (int a = 0; a < 3; ++a)
 			{
@@ -2013,7 +2042,7 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 		 * comparison against bmins/bmaxs (already computed above). */
 		{
 			qboolean cam_inside;
-			if (v->shape == 1)
+			if (v->shape == FOGVOL_SHAPE_SPHERE)
 			{
 				vec3_t d;
 				VectorSubtract (r_refdef.vieworg, v->sphereCenter, d);
@@ -2413,7 +2442,7 @@ void R_FogVol_Render (void)
 		gpu->misc[2] = v->falloff;
 		gpu->misc[3] = v->height;
 
-		gpu->extra[0] = (float)v->shape;
+		gpu->extra[0] = (float)R_FogVol_NormalizeShape (v->shape);
 		gpu->extra[1] = (float)((v->blendMode >= 0) ? v->blendMode : (int)Q_rint (r_fogvol_blendmode.value));
 		gpu->extra[2] = v->emissiveStrength;
 		gpu->extra[3] = v->heightScale;
@@ -2876,7 +2905,7 @@ static qboolean R_FogVol_GridSphereOverlap (const vec3_t cell_mins, const vec3_t
 
 static qboolean R_FogVol_GridVolumeOverlapsCell (const fog_volume_t *vol, const vec3_t cell_mins, const vec3_t cell_maxs)
 {
-	if (vol->shape == 1)
+	if (R_FogVol_NormalizeShape (vol->shape) == FOGVOL_SHAPE_SPHERE)
 		return R_FogVol_GridSphereOverlap (cell_mins, cell_maxs, vol);
 	return R_FogVol_GridBoxOverlap (cell_mins, cell_maxs, vol);
 }
