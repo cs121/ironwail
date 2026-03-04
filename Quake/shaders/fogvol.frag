@@ -761,11 +761,7 @@ void main()
 					if (atten < 1e-5) continue;
 					vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
 					float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
-<<<<<<< HEAD
 					lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal);
-=======
-					lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 1.0 * phaseLocal);
->>>>>>> d32d9906 (fogvol fixed)
 				}
 				lightScatterPrev = lightScatter;
 			}
