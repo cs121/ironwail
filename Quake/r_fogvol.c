@@ -2357,6 +2357,10 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 
 #if !defined(NDEBUG)
 	assert (FOGVOL_U_COUNT == 38);
+	assert (glwidth > 0);
+	assert (glheight > 0);
+	assert (view_w > 0.f);
+	assert (view_h > 0.f);
 #endif
 	GL_Uniform1iFunc (FOGVOL_U_STEPS, steps);
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
@@ -2529,12 +2533,18 @@ void R_FogVol_Render (void)
 	use_halfres = (r_fogvol_halfres.value > 0.f);
 	fog_width = use_halfres ? framebufs.fogvol.width : glwidth;
 	fog_height = use_halfres ? framebufs.fogvol.height : glheight;
-	depth_scale_x = (float)glwidth / (float)fog_width;
-	depth_scale_y = (float)glheight / (float)fog_height;
 	view_x = (float)(glx + r_refdef.vrect.x);
 	view_y = (float)(gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height);
 	view_w = (float)r_refdef.vrect.width;
 	view_h = (float)r_refdef.vrect.height;
+	if (glwidth <= 0 || glheight <= 0 || fog_width <= 0 || fog_height <= 0 || view_w <= 0.f || view_h <= 0.f)
+	{
+		Con_DPrintf ("R_FogVol_Render: rejected dimensions gl=%dx%d fog=%dx%d view=%.1fx%.1f\n",
+			glwidth, glheight, fog_width, fog_height, view_w, view_h);
+		return;
+	}
+	depth_scale_x = (float)glwidth / (float)fog_width;
+	depth_scale_y = (float)glheight / (float)fog_height;
 	depth_near = 0.5f;
 	depth_far = gl_farclip.value > depth_near ? gl_farclip.value : depth_near + 1.f;
 	depth_sky_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
