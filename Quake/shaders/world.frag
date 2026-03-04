@@ -18,6 +18,9 @@ vec3 ApplyFog(vec3 clr, vec3 p)
 }
 
 #define MAX_LIGHTS    64
+#define LIGHT_TILES_X 32
+#define LIGHT_TILES_Y 16
+#define LIGHT_TILES_Z 32
 
 struct Light
 {
