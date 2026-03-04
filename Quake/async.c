@@ -15,6 +15,7 @@ static SDL_cond *jobs_cond;
 static jobnode_t *jobs_head;
 static jobnode_t *jobs_tail;
 static qboolean jobs_shutdown;
+/* Queue stats are protected by jobs_mutex. Read/write them only while holding that lock. */
 static unsigned int jobs_pending;
 static unsigned int jobs_peak_pending;
 static unsigned int jobs_dropped;
@@ -115,7 +116,9 @@ JobHandle *Jobs_Submit (jobs_func_t func, void *userdata)
 
 	if (!Jobs_SubmitNode (node))
 	{
+		SDL_LockMutex (jobs_mutex);
 		jobs_sync_fallbacks++;
+		SDL_UnlockMutex (jobs_mutex);
 		func (userdata);
 		SDL_LockMutex (handle->mutex);
 		handle->done = true;
@@ -158,16 +161,33 @@ static qboolean Jobs_SubmitNode (jobnode_t *node)
 
 static void Jobs_LogQueueStats (const char *reason)
 {
+	unsigned int pending;
+	unsigned int peak_pending;
+	unsigned int dropped;
+	unsigned int sync_fallbacks;
+	unsigned int wake_signals;
+	unsigned int wake_broadcasts;
+
 	if (!developer.value)
 		return;
+
+	SDL_LockMutex (jobs_mutex);
+	pending = jobs_pending;
+	peak_pending = jobs_peak_pending;
+	dropped = jobs_dropped;
+	sync_fallbacks = jobs_sync_fallbacks;
+	wake_signals = jobs_wake_signals;
+	wake_broadcasts = jobs_wake_broadcasts;
+	SDL_UnlockMutex (jobs_mutex);
+
 	Con_DPrintf ("Async jobs %s: pending=%u peak=%u dropped=%u sync_fallbacks=%u wake_signals=%u wake_broadcasts=%u max_pending=%d\n",
 		reason,
-		jobs_pending,
-		jobs_peak_pending,
-		jobs_dropped,
-		jobs_sync_fallbacks,
-		jobs_wake_signals,
-		jobs_wake_broadcasts,
+		pending,
+		peak_pending,
+		dropped,
+		sync_fallbacks,
+		wake_signals,
+		wake_broadcasts,
 		(int) host_async_max_pending.value);
 }
 
@@ -190,7 +210,9 @@ void Jobs_SubmitDetached (jobs_func_t func, void *userdata)
 
 	if (!Jobs_SubmitNode (node))
 	{
+		SDL_LockMutex (jobs_mutex);
 		jobs_sync_fallbacks++;
+		SDL_UnlockMutex (jobs_mutex);
 		func (userdata);
 		free (node);
 	}
