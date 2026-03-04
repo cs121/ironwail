@@ -1,11 +1,11 @@
-// fogvol.frag  —  volumetric fog raymarcher
-// ── CHANGES FROM ORIGINAL ──────────────────────────────────────────────────
-//  1. [BUG] Dither() used sin(dot(…)+Time) → adds Time *inside* sin, not as
+// fogvol.frag    volumetric fog raymarcher
+//  CHANGES FROM ORIGINAL 
+//  1. [BUG] Dither() used sin(dot(...)+Time)  adds Time *inside* sin, not as
 //     an extra phase.  A tiny Time value barely shifts the phase; a large one
 //     causes banding.  Fix: add Time *outside* sin as an additive phase shift.
 //  2. [BUG] FogNoiseEnabled jitter block: when FogJitterEnabled!=0 the IGN
 //     path ignores FogJitterEnabled but the plain Dither path still runs for
-//     the NoiseEnabled=1 / JitterEnabled=0 combination – correct, but the
+//     the NoiseEnabled=1 / JitterEnabled=0 combination  correct, but the
 //     variable shadowing made it easy to mis-read.  Restructured for clarity.
 //  3. [BEST PRACTICE] DepthToNdcZ: use an explicit compile-time #define
 //     variant (REVERSED_Z) consistent with fogvol_temporal.frag instead of a
@@ -26,7 +26,7 @@
 //  8. [BEST PRACTICE] stepsTaken / edgeFadeSum / earlyTerminated are
 //     computed but never read in any non-debug path.  Removed to avoid
 //     misleading future readers; keep only tau / transmittance / accum.
-// ───────────────────────────────────────────────────────────────────────────
+// 
 
 // FogVol Composite Contract:
 //   RGB = fog radiance composited over scene color (display-space contribution).
@@ -126,10 +126,10 @@ const float NOISE_SCALE_MAX  = 0.5;
 const float LUT_PERIOD       = 64.0;
 const float ANISO_G_LOCAL    = 0.5;
 
-// ── helpers ────────────────────────────────────────────────────────────────
+//  helpers 
 
 // PERF FIX (G-02): NOISE_PERIOD = 64 is a power-of-two, so wrapping can be
-// done with a bitwise AND instead of integer modulo — avoids expensive div
+// done with a bitwise AND instead of integer modulo  avoids expensive div
 // instructions on older GPU architectures.
 int WrapIndex(int v, int period)
 {
@@ -192,9 +192,9 @@ float ValueNoise(vec3 p)
 	return mix(nxy0, nxy1, w.z);
 }
 
-// PERF: FBM with LOD selection — distant fragments use 1 octave instead of 2.
+// PERF: FBM with LOD selection  distant fragments use 1 octave instead of 2.
 // Controlled by distance passed from the march loop.
-// lod=0 → 2 octaves (near, full quality), lod=1 → 1 octave (far, half cost).
+// lod=0  2 octaves (near, full quality), lod=1  1 octave (far, half cost).
 float FBM_LOD(vec3 p, int lod)
 {
 	float v0 = ValueNoise(p);
@@ -228,7 +228,7 @@ float FogNoise(vec3 p)
 
 float DepthToNdcZ(float depth)
 {
-	// FogDepthParams.z > 0.5  →  reverse-Z  (depth already in [0,1] NDC).
+	// FogDepthParams.z > 0.5    reverse-Z  (depth already in [0,1] NDC).
 	// NOTE: fogvol_temporal.frag uses a compile-time #define REVERSED_Z for
 	// the same test.  Ideally unify both shaders to use the same mechanism.
 	if (FogDepthParams.z > 0.5)
@@ -289,7 +289,7 @@ bool RayAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tEnter, out float
 
 // FIX #1: Time is added *outside* sin() as a pure phase offset so that it
 // shifts the dither pattern frame-to-frame without distorting the frequency.
-// Original: sin(dot(pixel, k) + Time)  ← Time inside sin is fine for small
+// Original: sin(dot(pixel, k) + Time)   Time inside sin is fine for small
 // values but causes the *frequency* to appear modulated once Time grows large.
 float Dither(vec2 pixel)
 {
@@ -322,7 +322,7 @@ vec3 DebugVolumeColor(float id, float priority)
 	return mix(base, vec3(1.0, 1.0 - tint, tint), 0.35);
 }
 
-// FIX #6: Simplified – max(falloff,0) already ensures edgeThickness >= 0,
+// FIX #6: Simplified  max(falloff,0) already ensures edgeThickness >= 0,
 // so the second <= 0 guard collapsed into a single early-out.
 
 bool RaySphere(vec3 ro, vec3 rd, vec3 center, float radius, out float tEnter, out float tExit)
@@ -407,7 +407,7 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, f
 	}
 	edgeFade *= FogEdgeSoftnessMask(edgeDist, falloff, edgeSoftness);
 
-	// PERF: If edgeFade is zero, density is zero regardless of noise — skip noise entirely.
+	// PERF: If edgeFade is zero, density is zero regardless of noise  skip noise entirely.
 	if (edgeFade < 1e-5)
 		return 0.0;
 
@@ -416,7 +416,7 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, f
 	{
 		vec3 noisePos = p * noiseScalePre + flowPre * Time * noiseScalePre;
 		// PERF: Turbulence domain warp costs 3 extra FBM calls. Apply only at lod=0
-		// (near samples). Far samples (lod=1) skip warp — imperceptible at distance.
+		// (near samples). Far samples (lod=1) skip warp  imperceptible at distance.
 		if (volume.wind_turbulence.w > 1e-4 && lod == 0 && marchDist < FogDomainWarpMaxDist)
 			noisePos += vec3(FBM(p * noiseScalePre * 2.03), FBM(p.yzx * noiseScalePre * 2.71), FBM(p.zxy * noiseScalePre * 1.91)) * volume.wind_turbulence.w * 0.35;
 		float n = FogNoise(noisePos, lod);
@@ -441,7 +441,7 @@ float EstimateShadowVisibility(vec3 p, FogVolume volume, float density, float fa
 	// sunDirNorm is pre-validated (zero-length guard done by caller)
 	int sampleCount = min(FogShadowSamples, 8);
 	float shadowStep = max(stepLen * 2.0, 8.0);
-	// PERF: First sample reuses the sigma already computed for the main step —
+	// PERF: First sample reuses the sigma already computed for the main step 
 	// no extra EvaluateFogSigma call needed for s==0.
 	float tauLight = firstSigma * shadowStep;
 
@@ -451,7 +451,7 @@ float EstimateShadowVisibility(vec3 p, FogVolume volume, float density, float fa
 		vec3 sp = p + sunDirNorm * sampleDist;
 		if (!PointInsideVolume(sp, volume))
 			break;
-		// PERF: Shadow samples always use lod=1 (1 octave) — shadows don't need full detail.
+		// PERF: Shadow samples always use lod=1 (1 octave)  shadows don't need full detail.
 		float sigma = EvaluateFogSigma(sp, volume, density, falloff, noiseScalePre, flowPre, 1, sampleDist);
 		tauLight += sigma * shadowStep;
 	}
@@ -459,7 +459,7 @@ float EstimateShadowVisibility(vec3 p, FogVolume volume, float density, float fa
 	return exp(-max(FogShadowStrength, 0.0) * tauLight);
 }
 
-// ── main ───────────────────────────────────────────────────────────────────
+//  main 
 
 void main()
 {
@@ -543,10 +543,10 @@ void main()
 
 	float len       = tExit - tEnter;
 
-	// PERF: Adaptive step count — clamp stepLen to a maximum world-space size.
+	// PERF: Adaptive step count  clamp stepLen to a maximum world-space size.
 	// Without this, a global fog volume (16384^3) with farclip=4096 gives
 	// stepLen = 4096/16 = 256 units, which is very coarse and wastes steps on
-	// short rays (near wall = len of 32 units → stepLen 256 → only 1 effective step).
+	// short rays (near wall = len of 32 units  stepLen 256  only 1 effective step).
 	//
 	// Strategy: use a target stepLen based on a fraction of the fog near-distance,
 	// but never more than len/4 (always at least 4 samples per ray) and never
@@ -555,7 +555,7 @@ void main()
 	// FogDepthParams.x = near plane (~0.5 units), not useful here.
 	// Use a fixed world-space target: 32 units (tunable via density).
 	// For global fog, density is very low so large steps are fine visually.
-	const float MAX_STEP_LEN = 64.0; // world units — coarser = faster, less detail
+	const float MAX_STEP_LEN = 64.0; // world units  coarser = faster, less detail
 	float stepCount = max(float(FogSteps), 1.0);
 	float idealStepLen = len / stepCount;
 	// If stepLen would exceed MAX_STEP_LEN, reduce step count proportionally.
@@ -608,12 +608,12 @@ void main()
 	vec3  viewDir       = -rd;
 
 	// PERF: Precompute per-ray constants outside the march loop.
-	// Normalize sunDir once here — CPU already normalizes it, but guard against fp drift.
+	// Normalize sunDir once here  CPU already normalizes it, but guard against fp drift.
 	float sunDirLenSq   = dot(FogShadowDir, FogShadowDir);
 	vec3  sunDir        = (sunDirLenSq > 1e-6) ? (FogShadowDir * inversesqrt(sunDirLenSq)) : vec3(0.0);
 	sunDirLenSq         = dot(sunDir, sunDir); // recompute on normalized vector for guard checks
 
-	// Shadow jitter: compute once per ray (same screen pixel → same jitter value).
+	// Shadow jitter: compute once per ray (same screen pixel  same jitter value).
 	bool  doShadow      = (FogShadowEnabled != 0 && FogShadowSamples > 0 && sunDirLenSq > 1e-6);
 	float shadowJitter  = doShadow && (FogShadowJitter > 0.0)
 		? (InterleavedGradientNoise(gl_FragCoord.xy + Time * 13.37) - 0.5)
@@ -634,7 +634,7 @@ void main()
 	bool  doLights      = (FogLightEnabled != 0 && lightCount > 0);
 	bool  doLightgrid   = (FogLightgridEnabled != 0);
 
-	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated — they were
+	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated  they were
 	// accumulated but never consumed, silently wasting ALU every iteration.
 
 	// Precompute noise flow parameters once (used per step inside loop).
@@ -677,7 +677,7 @@ void main()
 		float opticalDepth = min(rawSigma * stepLen, FogDensityParams.y);
 		float att        = exp(-opticalDepth);
 
-		// PERF: Pass rawSigma as firstSigma → shadow reuses it, saves 1 EvaluateFogSigma.
+		// PERF: Pass rawSigma as firstSigma  shadow reuses it, saves 1 EvaluateFogSigma.
 		// Note: rawSigma was computed at noiseLod which may be 0 (full quality near) or 1 (coarse far).
 		// Shadow internally uses lod=1 for all its samples anyway, so this approximation is fine.
 		// sunDir is pre-normalized; shadowJitter is pre-computed; phaseSun is pre-computed.
@@ -729,12 +729,12 @@ void main()
 		shadowVisAccum   += shadowVisibility * (1.0 - att);
 		shadowWeightAccum += (1.0 - att);
 
-		// BUG FIX 3: Threshold 0.005 — enough to abort when truly opaque.
+		// BUG FIX 3: Threshold 0.005  enough to abort when truly opaque.
 		if (transmittance < 0.01)
 			break;
 	}
 
-	// ── debug outputs ─────────────────────────────────────────────────────
+	//  debug outputs 
 	if (FogDebugMode == 1)
 	{
 		vec3 debugColor = DebugVolumeColor(float(FogVolumeIndex), volume.misc.x);
@@ -779,8 +779,8 @@ void main()
 		return;
 	}
 
-	// ── composite ─────────────────────────────────────────────────────────
-	// BUG FIX (G-04): Use the 'scene' value cached at the top of main() —
+	//  composite 
+	// BUG FIX (G-04): Use the 'scene' value cached at the top of main() 
 	// no need to sample SceneColor a second time here.
 	vec3 outColor;
 	int blendMode = int(volume.extra.y + 0.5);
@@ -798,8 +798,8 @@ void main()
 	if (FogEmissiveEnabled != 0 && volume.extra.z > 0.0)
 		outColor += scatterColor * volume.extra.z * (1.0 - transmittance);
 	// Alpha = fog density (1.0 - transmittance) for SSAO suppression:
-	//   alpha=0.0 → transparent/no fog → SSAO unchanged
-	//   alpha=1.0 → fully opaque fog → SSAO suppressed
+	//   alpha=0.0  transparent/no fog  SSAO unchanged
+	//   alpha=1.0  fully opaque fog  SSAO suppressed
 	// This is SAFE: the final blit into composite.fbo uses
 	// glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE) so this alpha never
 	// reaches composite.fbo, the display compositor, or any blending path
@@ -807,6 +807,6 @@ void main()
 	// in the internal fogvol ping-pong composite_tex buffers where postprocess
 	// reads it. The temporal pass blends alpha like RGB (see fogvol_temporal.frag).
 	// Using alpha instead of RGB luminance correctly detects dark-colored fog
-	// (purple, red, brown) where lum≈0 even at full density.
+	// (purple, red, brown) where lum0 even at full density.
 	FragColor = vec4(outColor, 1.0 - transmittance);
 }
