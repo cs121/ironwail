@@ -1330,7 +1330,7 @@ static void R_FogVol_BuildStaticLightInjection (void)
 			continue;
 		if (!surf->texinfo || surf->texinfo->texnum < 0 || surf->texinfo->texnum >= model->numtextures)
 			continue;
-		if (!model->textures[surf->texinfo->texnum] || (model->textures[surf->texinfo->texnum]->flags & TEX_SPECIAL))
+		if (!model->textures[surf->texinfo->texnum] || (surf->texinfo->flags & TEX_SPECIAL))
 			continue;
 		if (!R_FogVol_TryGetSurfaceLightSample (model, surf, color))
 			continue;
