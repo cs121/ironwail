@@ -25,6 +25,9 @@ vec3 ApplyFog(vec3 clr, vec3 p)
 }
 
 #define MAX_LIGHTS    64
+#define LIGHT_TILES_X 32
+#define LIGHT_TILES_Y 16
+#define LIGHT_TILES_Z 32
 
 struct Light
 {
@@ -73,6 +76,17 @@ float ComputeFalloff(float x, float mode, float expval)
         return pow(max(x, 0.0), expval);
 }
 
+// Forward+ prep: keep cluster math local/cheap so later light-list integration
+// can reuse this path without reworking the fragment shader structure.
+uvec3 ComputeLightTileCoord(vec2 tile_coord, float view_depth)
+{
+        uint tx = uint(clamp(floor(tile_coord.x), 0.0, float(LIGHT_TILES_X - 1)));
+        uint ty = uint(clamp(floor(tile_coord.y), 0.0, float(LIGHT_TILES_Y - 1)));
+        float z = max(view_depth, 1e-6);
+        float tzf = clamp(log2(z) * ZLogScale + ZLogBias, 0.0, float(LIGHT_TILES_Z - 1));
+        return uvec3(tx, ty, uint(tzf));
+}
+
 void main()
 {
         vec2 uv = in_uv;
@@ -100,6 +114,9 @@ void main()
         vec3 surface_normal = normalize(in_normal);
         if (!gl_FrontFacing)
                 surface_normal = -surface_normal;
+        // Forward+ prep warm-up: compute tile id once to keep interpolation/live range
+        // behavior stable before cluster-list plumbing lands.
+        uvec3 _tile_coord = ComputeLightTileCoord(in_coord, max(in_depth, 1e-6));
 
         vec3 dynamic_light = vec3(0.0);
         if (NumLights > 0u)
@@ -125,9 +142,11 @@ void main()
                                         // auch für World ungenau bei großen Polygonen. Direkte 3D-
                                         // Distanzberechnung ist universell korrekt.
                                         vec3 to_light = l.origin - in_pos;
-                                        float surface_dist = length(to_light);
-                                        if (surface_dist >= rad)
+                                        float rad_sq = rad * rad;
+                                        float dist_sq = dot(to_light, to_light);
+                                        if (dist_sq >= rad_sq)
                                                 continue;
+                                        float surface_dist = sqrt(max(dist_sq, 1e-12));
                                         float minlight = l.minlight;
                                         if (rad - surface_dist < minlight)
                                                 continue;
