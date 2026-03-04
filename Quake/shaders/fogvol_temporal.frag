@@ -224,7 +224,12 @@ void main()
 		varianceConfidence = 1.0 / (1.0 + lumaVar * 8.0);
 
 		confidence = clamp(depthAgreement * motionConfidence * varianceConfidence, 0.0, 1.0);
-		alpha = clamp(FogTemporalAlpha * confidence, FogTemporalConfidenceParams.x, 1.0);
+		// BUG-F-03 FIX: min_alpha must not be applied unconditionally — at low confidence
+		// (fast rotation, disocclusion) the floor forces stale history in every frame,
+		// causing persistent fog density asymmetry between opposite view directions.
+		// Scale min_alpha by confidence so it only acts as a floor for stable pixels.
+		float minAlpha = FogTemporalConfidenceParams.x * smoothstep(0.0, 0.5, confidence);
+		alpha = clamp(FogTemporalAlpha * confidence, minAlpha, 1.0);
 	}
 
 	if (FogDebugMode == 7)

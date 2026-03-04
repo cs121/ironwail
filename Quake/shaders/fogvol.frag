@@ -536,7 +536,8 @@ void main()
 	vec3  rd     = normalize(worldPos - ro);
 	float tScene = length(worldPos - ro);
 	if (IsSkyDepth(depth))
-		tScene = FogDepthParams.y;
+		tScene = 2048.0; // BUG-F-02 FIX: cap sky path length — far_clip causes open areas to look/
+		                 // disproportionately foggier than enclosed rooms when sky is visible
 
 	float tEnter, tExit;
 	if (int (volume.extra.x + 0.5) == FOGVOL_SHAPE_SPHERE)
@@ -725,7 +726,7 @@ void main()
 			: 1.0;
 
 		// phaseSun is already precomputed per-ray (constant for all steps on same ray).
-		vec3  stepScatter = (1.0 - att) * (scatterColor * phaseSun + sunRadiance * transmittance);
+		vec3  stepScatter = (1.0 - att) * (scatterColor * phaseSun + sunRadiance); // BUG-F-01 FIX: removed inner *transmittance (caused transmittance^2 weighting for sun term)
 		if (doLightgrid)
 		{
 			// Static/emissive world contribution comes from the baked lightgrid
@@ -760,7 +761,11 @@ void main()
 					if (atten < 1e-5) continue;
 					vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
 					float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
+<<<<<<< HEAD
 					lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal);
+=======
+					lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 1.0 * phaseLocal);
+>>>>>>> d32d9906 (fogvol fixed)
 				}
 				lightScatterPrev = lightScatter;
 			}

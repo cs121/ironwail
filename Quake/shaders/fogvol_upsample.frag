@@ -102,18 +102,23 @@ void main()
 	}
 	else
 	{
-		/* BUG FIX (G-08): The previous 4-tap loop iterated halfCoord + (0,0..1,1).
-		 * For a full-res pixel at (fx, fy), halfCoord = (fx/2, fy/2).
-		 * halfCoord + (1,1) = (fx/2+1, fy/2+1) — two half-res texels away in
-		 * both axes, not adjacent.  The correct 4-tap set is the 2×2 block of
-		 * half-res texels that STRADDLE the current full-res pixel, i.e. the
-		 * texel at halfCoord and its three neighbours at (-1,0), (0,-1), (-1,-1).
-		 * These are the four half-res texels that overlap the full-res pixel
-		 * when the half-res grid has 2× larger texels. */
-		AccumTap(halfCoord,                    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
-		AccumTap(halfCoord + ivec2(-1,  0),    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
-		AccumTap(halfCoord + ivec2( 0, -1),    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
-		AccumTap(halfCoord + ivec2(-1, -1),    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
+		/* BUG-U-01 FIX: The 4 straddling half-res texels depend on which quadrant
+		 * of the 2×2 block the full-res pixel falls in (its parity).
+		 * For pixel (fx,fy): halfCoord = (fx/2, fy/2).
+		 * The four half-res texels whose 2×2 footprints cover (fx,fy) are:
+		 *   halfCoord + (0,0), (-1,0), (0,-1), (-1,-1)  when fx,fy are ODD
+		 *   halfCoord + (0,0), (+1,0), (0,+1), (+1,+1)  when fx,fy are EVEN
+		 * Unified via parity offset: base = halfCoord, delta = parity - 1
+		 *   parity = (fx&1, fy&1) → delta = (0,-1) or (-1,0) etc.
+		 * Using (parity - 1) maps: odd→(0,-1) stays in block, even→(-1,-1) wrong.
+		 * Correct: offset the BASE by parity so the 4 taps are always the 2×2
+		 * block that contains the full-res pixel. */
+		ivec2 parity  = ivec2(fullCoord.x & 1, fullCoord.y & 1); // 0 or 1
+		ivec2 base    = halfCoord - (ivec2(1) - parity); // shift base to block origin
+		AccumTap(base,                    halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
+		AccumTap(base + ivec2(1, 0),      halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
+		AccumTap(base + ivec2(0, 1),      halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
+		AccumTap(base + ivec2(1, 1),      halfSizeSafe, fullSizeSafe, depthCenter, accum, weightSum);
 	}
 
 	vec4 result;
