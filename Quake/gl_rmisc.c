@@ -135,6 +135,8 @@ extern cvar_t r_vignette_noise;
 extern cvar_t r_teleportfx;
 extern cvar_t r_teleportfx_time;
 extern cvar_t r_sun_light;
+extern cvar_t r_godrays_decay;
+extern cvar_t r_godrays_density;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -663,75 +665,171 @@ R_NewGame -- johnfitz -- handle a game switch
 ===============
 */
 
+typedef struct
+{
+	qboolean dir_defined;
+	qboolean color_defined;
+	qboolean intensity_defined;
+} sun_presence_t;
+
 static qboolean r_worldspawn_has_sun = false;
-r_sun_t r_sun;
+static sun_presence_t r_worldspawn_sun_presence;
+sun_t r_sun_state;
 cvar_t r_sun_light = { "r_sun_light", "0", CVAR_ARCHIVE };
 // Enables dynamic directional sunlight from parsed worldspawn sun keys (not baked lightmaps).
 
-static void R_ResetSunState (void)
+static void R_SetDefaultSunDirection (vec3_t dir)
 {
-	r_worldspawn_has_sun = false;
-	r_sun.enabled = false;
-	VectorClear (r_sun.origin);
-	VectorClear (r_sun.dir);
-	VectorSet (r_sun.color, 1.f, 1.f, 1.f);
-	r_sun.intensity = 1.f;
+	vec3_t ang;
+	ang[PITCH] = 45.0f;
+	ang[YAW] = 225.0f;
+	ang[ROLL] = 0.0f;
+	AngleVectors (ang, dir, NULL, NULL);
+}
+
+void R_Sun_ResetToDefaults (sun_t *s)
+{
+	if (!s)
+		return;
+	R_SetDefaultSunDirection (s->dir);
+	VectorSet (s->color, 1.f, 1.f, 1.f);
+	s->intensity = 1.f;
+	s->volumetric_intensity = q_max (0.f, r_fogvol_sun_scatter.value);
+	s->anisotropy = 0.f;
+	s->shadow_bias = 0.001f;
+	s->shadow_strength = CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f);
+	s->shadow_distance = 0.f;
+	s->ray_decay = CLAMP (0.f, r_godrays_decay.value, 1.f);
+	s->ray_density = q_max (0.f, r_godrays_density.value);
+}
+
+void R_Sun_ApplyMapOverrides (sun_t *s, const char *worldspawn_entity_string)
+{
+	char key[128], value[4096];
+	const char *data;
+
+	if (!s || !worldspawn_entity_string)
+		return;
+
+	r_worldspawn_sun_presence.dir_defined = false;
+	r_worldspawn_sun_presence.color_defined = false;
+	r_worldspawn_sun_presence.intensity_defined = false;
+
+	data = COM_Parse (worldspawn_entity_string);
+	if (!data || com_token[0] != '{')
+		return;
+
+	while (1)
+	{
+		data = COM_Parse (data);
+		if (!data)
+			return;
+		if (com_token[0] == '}')
+			break;
+		if (com_token[0] == '_')
+			q_strlcpy (key, com_token + 1, sizeof (key));
+		else
+			q_strlcpy (key, com_token, sizeof (key));
+		while (key[0] && key[strlen (key) - 1] == ' ')
+			key[strlen (key) - 1] = 0;
+
+		data = COM_ParseEx (data, CPE_ALLOWTRUNC);
+		if (!data)
+			return;
+		q_strlcpy (value, com_token, sizeof (value));
+
+		if (!strcmp ("sun_mangle", key))
+		{
+			vec3_t ang;
+			if (sscanf (value, "%f %f %f", &ang[0], &ang[1], &ang[2]) == 3)
+			{
+				AngleVectors (ang, s->dir, NULL, NULL);
+				r_worldspawn_sun_presence.dir_defined = true;
+			}
+			continue;
+		}
+
+		if (!strcmp ("sunlight", key) || !strcmp ("sunlight2", key))
+		{
+			char *endptr;
+			float intensity = strtof (value, &endptr);
+			while (endptr && *endptr == ' ')
+				endptr++;
+			if (endptr && endptr != value && *endptr == '\0')
+			{
+				s->intensity = intensity;
+				r_worldspawn_sun_presence.intensity_defined = true;
+			}
+			continue;
+		}
+
+		if (!strcmp ("sunlight_color", key) || !strcmp ("sun_color", key) || !strcmp ("suncolour", key))
+		{
+			if (sscanf (value, "%f %f %f", &s->color[0], &s->color[1], &s->color[2]) == 3)
+				r_worldspawn_sun_presence.color_defined = true;
+			continue;
+		}
+	}
+}
+
+void R_Sun_Finalize (sun_t *s)
+{
+	if (!s)
+		return;
+	if (DotProduct (s->dir, s->dir) <= 1e-6f)
+		R_SetDefaultSunDirection (s->dir);
+	if (DotProduct (s->dir, s->dir) <= 1e-6f)
+		VectorSet (s->dir, 0.f, 0.f, -1.f);
+	else
+		VectorNormalize (s->dir);
+
+	s->color[0] = q_max (0.f, s->color[0]);
+	s->color[1] = q_max (0.f, s->color[1]);
+	s->color[2] = q_max (0.f, s->color[2]);
+	s->intensity = q_max (0.f, s->intensity);
+	s->volumetric_intensity = q_max (0.f, s->volumetric_intensity);
+	s->anisotropy = CLAMP (-0.99f, s->anisotropy, 0.99f);
+	s->shadow_bias = q_max (0.f, s->shadow_bias);
+	s->shadow_strength = CLAMP (0.f, s->shadow_strength, 4.f);
+	s->shadow_distance = q_max (0.f, s->shadow_distance);
+	s->ray_decay = CLAMP (0.f, s->ray_decay, 1.f);
+	s->ray_density = q_max (0.f, s->ray_density);
+}
+
+const sun_t* R_GetSun (void)
+{
+	return &r_sun_state;
+}
+
+void R_SetSun (const sun_t *src)
+{
+	if (!src)
+		return;
+	r_sun_state = *src;
+	R_Sun_Finalize (&r_sun_state);
 }
 
 qboolean R_WorldHasSun (void)
 {
-	return r_sun.enabled;
+	return r_worldspawn_has_sun;
 }
 
-qboolean R_GetSun (vec3_t dir, vec3_t origin, vec3_t color, float *intensity)
+void R_Sun_UpdateFromWorld (void)
 {
-	if (!r_sun.enabled)
-		return false;
+	sun_t sun;
 
-	if (dir)
-	{
-		if (DotProduct (r_sun.dir, r_sun.dir) > 1e-6f)
-			VectorCopy (r_sun.dir, dir);
-		else
-			VectorSet (dir, 0.f, 0.f, -1.f);
-	}
-	if (origin)
-		VectorCopy (r_sun.origin, origin);
-	if (color)
-		VectorCopy (r_sun.color, color);
-	if (intensity)
-		*intensity = r_sun.intensity;
-	return true;
-}
+	r_worldspawn_sun_presence.dir_defined = false;
+	r_worldspawn_sun_presence.color_defined = false;
+	r_worldspawn_sun_presence.intensity_defined = false;
+	R_Sun_ResetToDefaults (&sun);
+	if (cl.worldmodel)
+		R_Sun_ApplyMapOverrides (&sun, cl.worldmodel->entities);
+	R_Sun_Finalize (&sun);
+	R_SetSun (&sun);
 
-static void R_ApplyDefaultSunIfMissing (qmodel_t *world)
-{
-	vec3_t center;
-	vec3_t ang;
-
-	if (!world || r_sun.enabled || r_worldspawn_has_sun)
-		return;
-
-	center[0] = 0.5f * (world->mins[0] + world->maxs[0]);
-	center[1] = 0.5f * (world->mins[1] + world->maxs[1]);
-	center[2] = 0.5f * (world->mins[2] + world->maxs[2]);
-
-	VectorCopy (center, r_sun.origin);
-	r_sun.origin[2] += 128.0f;
-
-	ang[PITCH] = 45.0f;
-	ang[YAW] = 225.0f;
-	ang[ROLL] = 0.0f;
-
-	AngleVectors (ang, r_sun.dir, NULL, NULL);
-	if (VectorLength (r_sun.dir) < 0.001f)
-		VectorSet (r_sun.dir, 0.f, 0.f, -1.f);
-	else
-		VectorNormalize (r_sun.dir);
-
-	VectorSet (r_sun.color, 1.f, 1.f, 1.f);
-	r_sun.intensity = 1.f;
-	r_sun.enabled = true;
+	r_worldspawn_has_sun = r_worldspawn_sun_presence.dir_defined
+		|| r_worldspawn_sun_presence.color_defined
+		|| r_worldspawn_sun_presence.intensity_defined;
 }
 
 void R_NewGame (void)
@@ -754,12 +852,7 @@ static void R_ParseWorldspawn (void)
 {
 	char key[128], value[4096];
 	const char *data;
-	qboolean sun_dir_parsed = false;
-	qboolean sun_intensity_parsed = false;
-	qboolean sun_color_parsed = false;
-
 	map_fallbackalpha = r_wateralpha.value;
-	R_ResetSunState ();
 	map_wateralpha = (cl.worldmodel->contentstransparent&SURF_DRAWWATER)?r_wateralpha.value:1;
 	map_lavaalpha = 1.0f;
 	map_telealpha = (cl.worldmodel->contentstransparent&SURF_DRAWTELE)?r_telealpha.value:1;
@@ -792,44 +885,6 @@ static void R_ParseWorldspawn (void)
 		if (!strcmp("wateralpha", key))
 			map_wateralpha = atof(value);
 
-		if (!strcmp("sun_mangle", key))
-		{
-			vec3_t ang;
-			if (sscanf(value, "%f %f %f", &ang[0], &ang[1], &ang[2]) == 3)
-			{
-				AngleVectors (ang, r_sun.dir, NULL, NULL);
-				if (DotProduct (r_sun.dir, r_sun.dir) > 1e-6f)
-				{
-					VectorNormalize (r_sun.dir);
-					sun_dir_parsed = true;
-				}
-			}
-		}
-
-		if (!strcmp("sunlight", key))
-		{
-			char *endptr;
-			float intensity = strtof (value, &endptr);
-
-			while (endptr && *endptr == ' ')
-				endptr++;
-			if (endptr && endptr != value && *endptr == '\0')
-			{
-				r_sun.intensity = q_max (0.f, intensity);
-				sun_intensity_parsed = true;
-			}
-		}
-
-		if (!strcmp("sunlight_color", key) || !strcmp("sun_color", key) || !strcmp("suncolour", key))
-		{
-			vec3_t color;
-			if (sscanf(value, "%f %f %f", &color[0], &color[1], &color[2]) == 3)
-			{
-				r_sun.color[0] = q_max (0.f, color[0]);
-				r_sun.color[1] = q_max (0.f, color[1]);
-				r_sun.color[2] = q_max (0.f, color[2]);
-				sun_color_parsed = true;
-			}
 		}
 
 		if (!strcmp("telealpha", key))
@@ -840,11 +895,6 @@ static void R_ParseWorldspawn (void)
 
 	}
 
-	if (sun_dir_parsed || sun_intensity_parsed || sun_color_parsed)
-	{
-		r_worldspawn_has_sun = true;
-		r_sun.enabled = true;
-	}
 
 	map_fallbackalpha = CLAMP(0.f, map_fallbackalpha, 1.f);
 	map_wateralpha = CLAMP(0.f, map_wateralpha, 1.f);
@@ -877,8 +927,6 @@ void R_NewMap (void)
 	R_ReloadDecals ();
 	R_ClearDecals ();
 
-	R_ResetSunState ();
-
 	GL_BuildLightmaps ();
         GL_BuildBModelVertexBuffer ();
         GL_BuildBModelMarkBuffers ();
@@ -891,7 +939,7 @@ void R_NewMap (void)
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
         R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
-        R_ApplyDefaultSunIfMissing (cl.worldmodel);
+        R_Sun_UpdateFromWorld ();
         R_ParseDlightEntities (); // persistent dlights from BSP entities
         R_FogVol_ParseEntities (); // fog volume entities from BSP
 

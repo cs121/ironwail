@@ -115,6 +115,7 @@ layout(location=28) uniform int   FogHalfRes;
 layout(location=29) uniform int   FogLightSubsample;
 layout(location=30) uniform float FogSunScatter;
 layout(location=31) uniform vec3  FogSunColor;
+layout(location=32) uniform float FogSunAnisotropy;
 
 layout(location=0) out vec4 FragColor;
 
@@ -123,7 +124,6 @@ const float NOISE_SCALE_MIN  = 0.005;
 const float NOISE_SCALE_MAX  = 0.5;
 const float LUT_PERIOD       = 64.0;
 const float ANISO_G_LOCAL    = 0.5;
-const float ANISO_G_SUN      = 0.35;
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
@@ -619,7 +619,7 @@ void main()
 		: 0.0;
 	// PERF: Precompute sun phase once per ray (viewDir and sunDir are constant).
 	float phaseSun      = (sunDirLenSq > 1e-6)
-		? AnisotropicPhase(clamp(dot(viewDir, sunDir), -1.0, 1.0), ANISO_G_SUN)
+		? AnisotropicPhase(clamp(dot(viewDir, sunDir), -1.0, 1.0), clamp(FogSunAnisotropy, -0.99, 0.99))
 		: 1.0;
 	float sunScatterStrength = max(FogSunScatter, 0.0);
 	vec3 sunScatterColor = max(FogSunColor, vec3(0.0));
