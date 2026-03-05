@@ -298,7 +298,9 @@ static int GL_NumLightmapTaps (const msurface_t *surf)
 		return 1;
 	if (surf->styles[2] == INVALID_LIGHTSTYLE)
 		return 2;
-	return 3;
+	if (surf->styles[3] == INVALID_LIGHTSTYLE)
+		return 3;
+	return 4;
 }
 
 /*
@@ -407,18 +409,16 @@ static void GL_FillSurfaceLightmap (msurface_t *surf)
 
 			default:
 			{
-				unsigned r = 0, g = 0, b = 0;
-				int map;
-				for (map = 0; map < style_count; map++)
+				const byte *pix1 = samples + facesize + idx;
+				const byte *pix2 = samples + facesize * 2 + idx;
+				row[s] = GL_PackLightmapColor (pix[0], pix[1], pix[2], 0xff);
+				row[s + smax] = GL_PackLightmapColor (pix1[0], pix1[1], pix1[2], 0xff);
+				row[s + smax * 2] = GL_PackLightmapColor (pix2[0], pix2[1], pix2[2], 0xff);
+				if (taps >= 4 && style_count >= 4)
 				{
-					const byte *mapsrc = samples + map * facesize + idx;
-					r |= mapsrc[0] << (map << 3);
-					g |= mapsrc[1] << (map << 3);
-					b |= mapsrc[2] << (map << 3);
+					const byte *pix3 = samples + facesize * 3 + idx;
+					row[s + smax * 3] = GL_PackLightmapColor (pix3[0], pix3[1], pix3[2], 0xff);
 				}
-				row[s] = r;
-				row[s + smax] = g;
-				row[s + smax * 2] = b;
 				break;
 			}
 			}
