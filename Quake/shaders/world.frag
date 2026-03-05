@@ -7,6 +7,14 @@
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
+layout(binding=7) uniform sampler2D SunShadowTex;
+layout(binding=8) uniform samplerCubeArray DLightShadowTex;
+
+layout(location=30) uniform mat4 ShadowSunViewProj;
+layout(location=34) uniform vec4 ShadowEnableDebug;   // x=enabled, y=sun, z=dlight, w=debug mode
+layout(location=35) uniform vec4 ShadowDLightIndices; // selected light indices (float encoded ints)
+layout(location=36) uniform vec4 ShadowBiasCounts;    // x=num dlight slots, y=sun bias, z=dlight bias
+layout(location=37) uniform vec4 ShadowPCFTexel;      // x=sun pcf radius, y=dlight pcf radius, z=1/sun size, w=1/dlight size
 #include "frame_uniforms.glsl"
 
 // Fog.w is treated as a signed-friendly density; use abs(Fog.w) so negative CPU values do not invert attenuation.
@@ -230,6 +238,147 @@ float DepthToCanonical(float depth)
 #endif
 }
 
+int ShadowSlotForLight(int lightIndex)
+{
+	if (abs(ShadowDLightIndices.x - float(lightIndex)) < 0.5) return 0;
+	if (abs(ShadowDLightIndices.y - float(lightIndex)) < 0.5) return 1;
+	if (abs(ShadowDLightIndices.z - float(lightIndex)) < 0.5) return 2;
+	if (abs(ShadowDLightIndices.w - float(lightIndex)) < 0.5) return 3;
+	return -1;
+}
+
+float SampleSunShadow(vec3 worldPos)
+{
+	if (ShadowEnableDebug.x < 0.5 || ShadowEnableDebug.y < 0.5)
+		return 1.0;
+
+	vec4 clip = ShadowSunViewProj * vec4(worldPos, 1.0);
+	if (abs(clip.w) <= 1e-6)
+		return 1.0;
+
+	vec3 ndc = clip.xyz / clip.w;
+	vec2 uv = ndc.xy * 0.5 + 0.5;
+	float depth = ndc.z * 0.5 + 0.5;
+	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || depth < 0.0 || depth > 1.0)
+		return 1.0;
+
+	float bias = max(ShadowBiasCounts.y, 0.0);
+	float pcf = max(ShadowPCFTexel.x, 0.0) * max(ShadowPCFTexel.z, 0.0);
+	float sum = 0.0;
+	float taps = 0.0;
+	for (int y = -1; y <= 1; ++y)
+	{
+		for (int x = -1; x <= 1; ++x)
+		{
+			float closest = texture(SunShadowTex, uv + vec2(float(x), float(y)) * pcf).r;
+			sum += (depth - bias <= closest) ? 1.0 : 0.0;
+			taps += 1.0;
+		}
+	}
+	return (taps > 0.0) ? (sum / taps) : 1.0;
+}
+
+float SampleSunShadowDepth(vec3 worldPos)
+{
+	if (ShadowEnableDebug.x < 0.5 || ShadowEnableDebug.y < 0.5)
+		return 1.0;
+
+	vec4 clip = ShadowSunViewProj * vec4(worldPos, 1.0);
+	if (abs(clip.w) <= 1e-6)
+		return 1.0;
+
+	vec3 ndc = clip.xyz / clip.w;
+	vec2 uv = ndc.xy * 0.5 + 0.5;
+	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+		return 1.0;
+
+	return texture(SunShadowTex, uv).r;
+}
+
+float SampleDLightShadow(int lightIndex, vec3 worldPos, vec3 lightPos, float radius)
+{
+	if (ShadowEnableDebug.x < 0.5 || ShadowEnableDebug.z < 0.5)
+		return 1.0;
+
+	int slot = ShadowSlotForLight(lightIndex);
+	if (slot < 0)
+		return 1.0;
+
+	vec3 dir = worldPos - lightPos;
+	float dist = length(dir);
+	if (dist <= 1e-5 || radius <= 1e-5)
+		return 1.0;
+
+	vec3 dirN = dir / dist;
+	float ref = dist / radius;
+	float bias = max(ShadowBiasCounts.z, 0.0);
+	float pcf = max(ShadowPCFTexel.y, 0.0) * max(ShadowPCFTexel.w, 0.0) * 2.0;
+
+	vec3 axis = (abs(dirN.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+	vec3 tangent = normalize(cross(axis, dirN));
+	vec3 bitangent = normalize(cross(dirN, tangent));
+	float vis = 0.0;
+	float taps = 0.0;
+	for (int i = 0; i < 4; ++i)
+	{
+		vec2 o = vec2((i & 1) == 0 ? -1.0 : 1.0, (i < 2) ? -1.0 : 1.0) * pcf;
+		vec3 sampleDir = normalize(dirN + tangent * o.x + bitangent * o.y);
+		float closest = texture(DLightShadowTex, vec4(sampleDir, float(slot))).r;
+		vis += (ref - bias <= closest) ? 1.0 : 0.0;
+		taps += 1.0;
+	}
+	return vis / max(taps, 1.0);
+}
+
+float ComputeCombinedDLightShadow(vec3 worldPos)
+{
+	if (ShadowEnableDebug.x < 0.5 || ShadowEnableDebug.z < 0.5)
+		return 1.0;
+
+	float accum = 0.0;
+	float wsum = 0.0;
+	int slots = int(clamp(ShadowBiasCounts.x, 0.0, 4.0));
+	for (int slot = 0; slot < slots; ++slot)
+	{
+		int idx = int(round((slot == 0) ? ShadowDLightIndices.x :
+				    (slot == 1) ? ShadowDLightIndices.y :
+				    (slot == 2) ? ShadowDLightIndices.z : ShadowDLightIndices.w));
+		if (idx < 0)
+			continue;
+		Light l = Lights[idx];
+		vec3 d = worldPos - l.origin;
+		float dist = length(d);
+		if (dist >= l.radius || l.radius <= 1e-5)
+			continue;
+		float w = 1.0 - dist / l.radius;
+		float vis = SampleDLightShadow(idx, worldPos, l.origin, l.radius);
+		accum += vis * w;
+		wsum += w;
+	}
+
+	return (wsum > 1e-6) ? (accum / wsum) : 1.0;
+}
+
+float SampleFirstDLightDepth(vec3 worldPos)
+{
+	if (ShadowEnableDebug.x < 0.5 || ShadowEnableDebug.z < 0.5)
+		return 1.0;
+	if (ShadowBiasCounts.x < 0.5)
+		return 1.0;
+
+	int idx = int(round(ShadowDLightIndices.x));
+	if (idx < 0)
+		return 1.0;
+
+	Light l = Lights[idx];
+	vec3 dir = worldPos - l.origin;
+	float len = length(dir);
+	if (len <= 1e-5)
+		return 1.0;
+
+	return texture(DLightShadowTex, vec4(dir / len, 0.0)).r;
+}
+
 #define OUT_COLOR out_fragcolor
 
 #if OIT
@@ -406,13 +555,22 @@ void main()
 			else // 3 or 4 lightstyles
 			{
 				vec4 lm2 = SampleLightmap(vec2(lmuv.x + in_lmofs * 2.0, lmuv.y));
-				// OPT: three dot-products replaced by direct style-weighted sum avoids
-				// redundant lm-alpha channels; kept original semantics for compatibility
-				static_light = vec3(
-					dot(in_styles, lm0),
-					dot(in_styles, lm1),
-					dot(in_styles, lm2)
-				);
+				// FIX: dot(in_styles, lmN) war falsch - lmN.w ist Lightmap-Alpha,
+				// kein Lightstyle-Gewicht. Korrekter style-gewichteter Sum. lm3 fuer 4 Styles.
+				if (in_styles.w < 0.0) // 3 styles
+				{
+					static_light = in_styles.x * lm0.xyz
+					             + in_styles.y * lm1.xyz
+					             + in_styles.z * lm2.xyz;
+				}
+				else // 4 styles
+				{
+					vec4 lm3 = SampleLightmap(vec2(lmuv.x + in_lmofs * 3.0, lmuv.y));
+					static_light = in_styles.x * lm0.xyz
+					             + in_styles.y * lm1.xyz
+					             + in_styles.z * lm2.xyz
+					             + in_styles.w * lm3.xyz;
+				}
 			}
 		}
 
@@ -497,7 +655,8 @@ void main()
 				// OPT: pow(x,1.5) = x*sqrt(x), avoids generic pow()
 				float nc            = clamp(1.0 - normalized_d, 0.0, 1.0);
 				float falloff       = nc * sqrt(nc);
-				vec3  light_contrib = attenuation * falloff * l.color * dynamic_light_noise;
+				float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, rad);
+				vec3  light_contrib = attenuation * falloff * shadow * l.color * dynamic_light_noise;
 
 				// FIX: Shadow-Term fuer dieses DLight berechnen.
 				// War faelschlicherweise entfernt - keine DLight-Schatten in world.frag.
@@ -542,7 +701,8 @@ void main()
 				 * non-sky surfaces get a conservative attenuation from ShaderParams.z
 				 * (driven by cvar r_sun_visibility, clamped to [0,1] on CPU). */
 				float sun_visibility = ((in_flags & CF_MAT_SKY) != 0u) ? 1.0 : ShaderParams.z;
-				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl * sun_visibility;
+				float sun_shadow = SampleSunShadow(in_pos);
+				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl * sun_visibility * sun_shadow;
 				total_light += max(min(sun_contrib, 1.0 - total_light), 0.0);
 			}
 		}
@@ -575,6 +735,20 @@ void main()
 	result.rgb  *= in_stage_color.rgb;
 	result.a     = in_alpha * in_stage_color.a;
 	result       = clamp(result, 0.0, 1.0);
+
+	if (ShadowEnableDebug.w > 0.5)
+	{
+		int smode = int(ShadowEnableDebug.w + 0.5);
+		if (smode == 1)
+			result.rgb = vec3(SampleSunShadow(in_pos));
+		else if (smode == 2)
+			result.rgb = vec3(ComputeCombinedDLightShadow(in_pos));
+		else if (smode == 3)
+			result.rgb = vec3(SampleSunShadowDepth(in_pos));
+		else if (smode == 4)
+			result.rgb = vec3(SampleFirstDLightDepth(in_pos));
+	}
+
 	result.rgb   = ApplyFog(result.rgb, in_pos - EyePos);
 
 	// BUG FIX: original wrote "out_fragcolor" directly but OUT_COLOR must be used
@@ -613,3 +787,4 @@ void main()
 	OUT_COLOR.rgb += SUPPRESS_BANDING() * ScreenDither;
 #endif
 }
+

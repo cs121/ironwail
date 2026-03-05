@@ -93,6 +93,7 @@ layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
 layout(location=7) out float out_dlight_vis;
+layout(location=8) out vec3 out_dlight_color;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 
@@ -157,14 +158,16 @@ void main()
         // anderen Kanäle bleiben unverändert, was Farbverschiebungen erzeugt.
         // Besser: den vollen LightColor-Wert als Ambient-Basis verwenden und
         // DLight additiv dazurechnen statt subtraktiv zu trennen.
-        vec3 litAmbient = inst.LightColor.rgb * (mix(0.35, 1.0, lighting) * AliasFrameBuffer.Overbright);
+        vec3 ambient_src = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
+        vec3 litAmbient = ambient_src * (mix(0.35, 1.0, lighting) * AliasFrameBuffer.Overbright);
         // DLightColor direkt (kein weiteres lighting-Weighting) – CPU hat bereits
         // Distanz/Radius berücksichtigt. NdotL-Faktor hier wäre Doppelmodulation.
         vec3 litDlight = inst.DLightColor.rgb;
-        vec3 base_color = litAmbient + litDlight;
+        vec3 base_color = litAmbient;
         bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
         vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
         out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, AliasFrameBuffer.Overbright);
 	out_dlight_vis = clamp(dot(litDlight, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
+	out_dlight_color = litDlight;
 	out_normal = world_normal;
 }

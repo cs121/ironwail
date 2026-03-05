@@ -411,6 +411,28 @@ static void R_ResetBModelCalls (GLuint program)
 	num_bmodel_calls = 0;
 }
 
+static qboolean R_IsWorldLightingProgram (GLuint program)
+{
+	int oit, dither, mode, alphatest;
+
+	for (oit = 0; oit < 2; ++oit)
+		for (dither = 0; dither < 3; ++dither)
+			for (mode = 0; mode < 3; ++mode)
+				if (glprogs.world[oit][dither][mode] == program)
+					return true;
+
+	for (alphatest = 0; alphatest < 2; ++alphatest)
+		if (glprogs.world_dlight[alphatest] == program)
+			return true;
+
+	return false;
+}
+
+static qboolean R_IsWorldShadowCasterProgram (GLuint program)
+{
+	return program == glprogs.world_shadow[0] || program == glprogs.world_shadow[1];
+}
+
 /*
 =============
 R_FlushBModelCalls
@@ -436,6 +458,10 @@ static void R_FlushBModelCalls (void)
 	GL_MemoryBarrierFunc (GL_COMMAND_BARRIER_BIT);
 
 	GL_UseProgram (bmodel_batch_program);
+	if (R_IsWorldLightingProgram (bmodel_batch_program))
+		R_Shadow_ApplyWorldReceiverUniforms (bmodel_batch_program);
+	else if (R_IsWorldShadowCasterProgram (bmodel_batch_program))
+		R_Shadow_ApplyWorldCasterUniforms (bmodel_batch_program);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, gl_bmodel_ibo);
 	GL_BindBuffer (GL_ARRAY_BUFFER, gl_bmodel_vbo);
 	GL_BindBuffer (GL_DRAW_INDIRECT_BUFFER, cmdbuf);
@@ -1017,6 +1043,8 @@ static GLuint R_ChooseBModelProgram (qboolean oit, qboolean alphatest)
 typedef enum {
         BP_SOLID,
         BP_ALPHATEST,
+        BP_SHADOW_SUN,
+        BP_SHADOW_DLIGHT,
         BP_GODRAYS,
         BP_SKYLAYERS,
         BP_SKYCUBEMAP,
@@ -1455,6 +1483,16 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 texend = TEXTYPE_CUTOUT + 1;
                 program = R_ChooseBModelProgram (oit, true);
                 break;
+        case BP_SHADOW_SUN:
+                texbegin = 0;
+                texend = TEXTYPE_CUTOUT;
+                program = glprogs.world_shadow[0];
+                break;
+        case BP_SHADOW_DLIGHT:
+                texbegin = 0;
+                texend = TEXTYPE_CUTOUT;
+                program = glprogs.world_shadow[1];
+                break;
         case BP_GODRAYS:
                 texbegin = 0;
                 texend = TEXTYPE_COUNT;
@@ -1509,6 +1547,8 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         state = GLS_CULL_BACK | GLS_ATTRIBS(6);
         if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
                 state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
+        else if (pass == BP_SHADOW_SUN || pass == BP_SHADOW_DLIGHT)
+                state |= GLS_BLEND_OPAQUE;
         else if (pass == BP_GODRAYS)
                 state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
         else if (!translucent)
@@ -1524,6 +1564,10 @@ if (pass <= BP_ALPHATEST)
 GL_UseProgram (program);
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+}
+else if (pass == BP_SHADOW_SUN || pass == BP_SHADOW_DLIGHT)
+{
+	R_Shadow_ApplyWorldCasterUniforms (program);
 }
 else if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
 {
@@ -1912,6 +1956,14 @@ void R_DrawBrushModels_DLights (entity_t **ents, int count)
 
         R_DrawBrushModels_Real (ents, count, BP_DLIGHT_SOLID, false);
         R_DrawBrushModels_Real (ents, count, BP_DLIGHT_ALPHA, false);
+}
+
+void R_DrawBrushModels_Shadow (entity_t **ents, int count, qboolean dlight)
+{
+	if (!count)
+		return;
+
+	R_DrawBrushModels_Real (ents, count, dlight ? BP_SHADOW_DLIGHT : BP_SHADOW_SUN, false);
 }
 
 /*

@@ -5,6 +5,7 @@
 #include "r_fogvol.h"
 
 void R_SetupView (void);
+void R_RenderShadowMaps (void);
 void R_RenderScene (void);
 void R_WarpScaleView (void);
 
@@ -29,6 +30,7 @@ void R_WarpScaleView (void);
 void R_FrameGraph_RenderView (const r_framegraph_state_t *state)
 {
 	R_SetupView ();
+	R_RenderShadowMaps ();
 	R_UpdateDecals ();
 	Fog_EnableGFog ();
 	R_RenderScene ();

@@ -123,6 +123,18 @@ extern	cvar_t	r_litwater;
 extern	cvar_t	r_dynamic;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_scale;
+extern	cvar_t	r_shadow;
+extern	cvar_t	r_shadow_sun;
+extern	cvar_t	r_shadow_dlight;
+extern	cvar_t	r_shadow_dlight_max;
+extern	cvar_t	r_shadow_sun_size;
+extern	cvar_t	r_shadow_dlight_size;
+extern	cvar_t	r_shadow_sun_distance;
+extern	cvar_t	r_shadow_sun_bias;
+extern	cvar_t	r_shadow_dlight_bias;
+extern	cvar_t	r_shadow_sun_pcf;
+extern	cvar_t	r_shadow_dlight_pcf;
+extern	cvar_t	r_shadow_debug;
 
 extern	cvar_t	r_oit;
 extern	cvar_t	r_alphasort;
@@ -542,12 +554,21 @@ void R_DrawBrushModels_Godrays (entity_t **ents, int count);
 void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
+void R_DrawBrushModels_Shadow (entity_t **ents, int count, qboolean dlight);
 void R_DrawAliasModels (entity_t **ents, int count);
+void R_DrawAliasModels_Shadow (entity_t **ents, int count, qboolean dlight);
 void R_DrawSpriteModels (entity_t **ents, int count);
 void R_DrawBrushModels_ShowTris (entity_t **ents, int count);
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count);
 void R_DrawSpriteModels_ShowTris (entity_t **ents, int count);
 void R_GLStateDump (const char *tag);
+void R_RenderShadowMaps (void);
+void R_RenderSunShadowMap (void);
+void R_RenderDLightShadowMaps (void);
+void R_Shadow_ApplyWorldReceiverUniforms (GLuint program);
+void R_Shadow_ApplyAliasReceiverUniforms (GLuint program);
+void R_Shadow_ApplyWorldCasterUniforms (GLuint program);
+void R_Shadow_ApplyAliasCasterUniforms (GLuint program);
 
 entity_t **R_GetVisEntities (modtype_t type, qboolean translucent, int *outcount);
 
@@ -633,6 +654,7 @@ typedef struct glprogs_s {
 	/* 3d */
 	GLuint		world[2][3][3];		// [OIT][standard/dithered/banded][solid/alpha test/water]
 	GLuint		world_dlight[2];		// [alpha test]
+	GLuint		world_shadow[2];		// [dlight:0=sun,1=point]
 	GLuint		water[2][2];		// [OIT][dither]
 	GLuint		teleport[2][2];		// [OIT][dither]
 	GLuint		skystencil;
@@ -640,6 +662,7 @@ typedef struct glprogs_s {
 	GLuint		skycubemap[2][2];	// [anim][dither]
 	GLuint		skyboxside[2];		// [dither]
 	GLuint		alias[2][3][2][2];	// [OIT][mode:standard/dithered/noperspective][alpha test][md5]
+	GLuint		alias_shadow[2];		// [md5]
 	GLuint		sprites[2];			// [dither]
 	GLuint		decal;
 	GLuint		particles[2][2];	// [OIT][dither]
@@ -759,6 +782,16 @@ typedef struct glframebufs_s {
 		GLuint		fbo_scene;
 		GLuint		fbo_composite;
 	}				oit;
+
+	struct {
+		GLuint		sun_depth_tex;
+		GLuint		sun_fbo;
+		GLuint		dlight_depth_tex;
+		GLuint		dlight_fbo;
+		int			sun_size;
+		int			dlight_size;
+		qboolean	available;
+	}				shadow;
 } glframebufs_t;
 
 extern glframebufs_t framebufs;

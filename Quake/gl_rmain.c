@@ -106,6 +106,285 @@ static const float r_identity_mat4[16] = {
 		0.f, 0.f, 0.f, 1.f
 };
 
+#define SHADOW_DLIGHT_FACES 6
+
+#define SHADOW_CASTER_U_VIEWPROJ        0
+#define SHADOW_CASTER_U_LIGHTPOS_FAR    4
+#define SHADOW_CASTER_U_MODE            8
+
+#define SHADOW_RECV_U_SUN_VIEWPROJ      30
+#define SHADOW_RECV_U_ENABLES_DEBUG     34
+#define SHADOW_RECV_U_DLIGHT_INDICES    35
+#define SHADOW_RECV_U_BIAS_COUNTS       36
+#define SHADOW_RECV_U_PCF_TEXEL         37
+
+typedef struct shadow_runtime_s
+{
+	qboolean	valid;
+	float		sun_viewproj[16];
+	int			num_dlights;
+	int			dlight_indices[SHADOW_DLIGHT_MAX];
+	vec4_t		dlight_pos_radius[SHADOW_DLIGHT_MAX];
+	float		dlight_viewproj[SHADOW_DLIGHT_MAX][SHADOW_DLIGHT_FACES][16];
+	float		caster_viewproj[16];
+	vec4_t		caster_lightpos_far_mode; // xyz: light pos, w: far plane
+	int			caster_mode; // 0=sun, 1=dlight
+} shadow_runtime_t;
+
+static shadow_runtime_t r_shadow_state;
+
+typedef struct shadow_draw_context_s
+{
+	entity_t	**brush_ents;
+	int		brush_count;
+	entity_t	**alias_ents;
+	int		alias_count;
+} shadow_draw_context_t;
+
+static shadow_draw_context_t r_shadow_draw_ctx;
+
+static void R_Shadow_MatrixIdentity (float m[16])
+{
+	memset (m, 0, sizeof (float) * 16);
+	m[0] = m[5] = m[10] = m[15] = 1.f;
+}
+
+static void R_Shadow_MatrixMultiply (float out[16], const float a[16], const float b[16])
+{
+	float m[16];
+	int c, r;
+
+	for (c = 0; c < 4; ++c)
+	{
+		for (r = 0; r < 4; ++r)
+		{
+			m[c * 4 + r] =
+				a[0 * 4 + r] * b[c * 4 + 0] +
+				a[1 * 4 + r] * b[c * 4 + 1] +
+				a[2 * 4 + r] * b[c * 4 + 2] +
+				a[3 * 4 + r] * b[c * 4 + 3];
+		}
+	}
+
+	memcpy (out, m, sizeof (m));
+}
+
+static void R_Shadow_MatrixPerspective (float m[16], float fovy_deg, float aspect, float znear, float zfar)
+{
+	const float f = 1.f / tanf (fovy_deg * (float)M_PI / 360.f);
+
+	R_Shadow_MatrixIdentity (m);
+	m[0] = f / q_max (aspect, 1e-6f);
+	m[5] = f;
+	m[10] = (zfar + znear) / (znear - zfar);
+	m[11] = -1.f;
+	m[14] = (2.f * zfar * znear) / (znear - zfar);
+	m[15] = 0.f;
+}
+
+static void R_Shadow_MatrixOrtho (float m[16], float left, float right, float bottom, float top, float znear, float zfar)
+{
+	R_Shadow_MatrixIdentity (m);
+	m[0] = 2.f / q_max (right - left, 1e-6f);
+	m[5] = 2.f / q_max (top - bottom, 1e-6f);
+	m[10] = -2.f / q_max (zfar - znear, 1e-6f);
+	m[12] = -(right + left) / q_max (right - left, 1e-6f);
+	m[13] = -(top + bottom) / q_max (top - bottom, 1e-6f);
+	m[14] = -(zfar + znear) / q_max (zfar - znear, 1e-6f);
+}
+
+static void R_Shadow_MatrixLook (float m[16], const vec3_t eye, const vec3_t dir, const vec3_t up_hint)
+{
+	vec3_t f, s, u, up;
+
+	VectorCopy (dir, f);
+	if (VectorLength (f) < 1e-6f)
+		VectorSet (f, 0.f, 0.f, -1.f);
+	VectorNormalize (f);
+
+	VectorCopy (up_hint, up);
+	if (VectorLength (up) < 1e-6f)
+		VectorSet (up, 0.f, 0.f, 1.f);
+	VectorNormalize (up);
+
+	CrossProduct (f, up, s);
+	if (VectorLength (s) < 1e-6f)
+	{
+		VectorSet (up, 0.f, 1.f, 0.f);
+		CrossProduct (f, up, s);
+	}
+	VectorNormalize (s);
+	CrossProduct (s, f, u);
+
+	R_Shadow_MatrixIdentity (m);
+	m[0] = s[0]; m[4] = s[1]; m[8]  = s[2];
+	m[1] = u[0]; m[5] = u[1]; m[9]  = u[2];
+	m[2] = -f[0]; m[6] = -f[1]; m[10] = -f[2];
+	m[12] = -DotProduct (s, eye);
+	m[13] = -DotProduct (u, eye);
+	m[14] = DotProduct (f, eye);
+}
+
+static int R_Shadow_ClampMapSize (float value)
+{
+	int s = (int)Q_rint (value);
+	s = CLAMP (128, s, 8192);
+	return Q_nextPow2 (s);
+}
+
+static qboolean R_Shadow_Enabled (void)
+{
+	return r_shadow.value > 0.f;
+}
+
+static qboolean R_Shadow_SunEnabled (void)
+{
+	return R_Shadow_Enabled () && r_shadow_sun.value > 0.f && R_WorldHasSun () && r_sun_light.value > 0.f;
+}
+
+static qboolean R_Shadow_DlightEnabled (void)
+{
+	return R_Shadow_Enabled () && r_shadow_dlight.value > 0.f && r_framedata.numlights > 0;
+}
+
+static void R_Shadow_ResetRuntime (void)
+{
+	int i;
+
+	r_shadow_state.valid = false;
+	r_shadow_state.num_dlights = 0;
+	R_Shadow_MatrixIdentity (r_shadow_state.sun_viewproj);
+	for (i = 0; i < SHADOW_DLIGHT_MAX; ++i)
+		r_shadow_state.dlight_indices[i] = -1;
+}
+
+static void R_Shadow_SelectDlights (void)
+{
+	int i, slot;
+	int limit = CLAMP (0, (int)Q_rint (r_shadow_dlight_max.value), SHADOW_DLIGHT_MAX);
+	float best_score[SHADOW_DLIGHT_MAX];
+
+	r_shadow_state.num_dlights = 0;
+	for (slot = 0; slot < SHADOW_DLIGHT_MAX; ++slot)
+	{
+		r_shadow_state.dlight_indices[slot] = -1;
+		VectorSet (r_shadow_state.dlight_pos_radius[slot], 0.f, 0.f, 0.f);
+		r_shadow_state.dlight_pos_radius[slot][3] = 1.f;
+		best_score[slot] = -FLT_MAX;
+	}
+
+	if (!R_Shadow_DlightEnabled () || limit <= 0)
+		return;
+
+	for (i = 0; i < (int)r_framedata.numlights; ++i)
+	{
+		const gpulight_t *l = &r_lightbuffer.lights[i];
+		vec3_t to_light;
+		float dist, luminance, score;
+
+		VectorSubtract (l->pos, r_refdef.vieworg, to_light);
+		dist = VectorLength (to_light);
+		luminance = l->color[0] * 0.299f + l->color[1] * 0.587f + l->color[2] * 0.114f;
+		score = l->radius * (0.35f + luminance) / (1.f + dist * 0.0025f);
+
+		for (slot = 0; slot < limit; ++slot)
+		{
+			if (score > best_score[slot] || (score == best_score[slot] && i < r_shadow_state.dlight_indices[slot]))
+			{
+				int k;
+				for (k = limit - 1; k > slot; --k)
+				{
+					best_score[k] = best_score[k - 1];
+					r_shadow_state.dlight_indices[k] = r_shadow_state.dlight_indices[k - 1];
+				}
+				best_score[slot] = score;
+				r_shadow_state.dlight_indices[slot] = i;
+				break;
+			}
+		}
+	}
+
+	for (slot = 0; slot < limit; ++slot)
+	{
+		int idx = r_shadow_state.dlight_indices[slot];
+		if (idx < 0 || idx >= (int)r_framedata.numlights)
+			continue;
+		VectorCopy (r_lightbuffer.lights[idx].pos, r_shadow_state.dlight_pos_radius[slot]);
+		r_shadow_state.dlight_pos_radius[slot][3] = q_max (r_lightbuffer.lights[idx].radius, 16.f);
+		r_shadow_state.num_dlights++;
+	}
+}
+
+static void R_Shadow_UpdateSunMatrix (void)
+{
+	const sun_t *sun = R_GetSun ();
+	float sun_dist = q_max (128.f, r_shadow_sun_distance.value);
+	float radius = sun_dist * 0.75f;
+	float znear = 1.f;
+	float zfar = sun_dist * 2.5f;
+	vec3_t center, forward, eye, up;
+	float view[16], proj[16], viewproj[16];
+	float center_ls[4];
+	float texel;
+
+	VectorMA (r_refdef.vieworg, sun_dist * 0.5f, vpn, center);
+	VectorScale (sun->dir, -1.f, forward);
+	VectorMA (center, -sun_dist, forward, eye);
+	VectorSet (up, 0.f, 0.f, 1.f);
+
+	R_Shadow_MatrixLook (view, eye, forward, up);
+	R_Shadow_MatrixOrtho (proj, -radius, radius, -radius, radius, znear, zfar);
+	R_Shadow_MatrixMultiply (viewproj, proj, view);
+
+	/* Shadow stabilization via texel snapping in light space. */
+	center_ls[0] = view[0] * center[0] + view[4] * center[1] + view[8] * center[2] + view[12];
+	center_ls[1] = view[1] * center[0] + view[5] * center[1] + view[9] * center[2] + view[13];
+	center_ls[2] = view[2] * center[0] + view[6] * center[1] + view[10] * center[2] + view[14];
+	center_ls[3] = 1.f;
+	texel = (radius * 2.f) / q_max (1.f, (float)framebufs.shadow.sun_size);
+	center_ls[0] = floorf (center_ls[0] / texel) * texel;
+	center_ls[1] = floorf (center_ls[1] / texel) * texel;
+	view[12] -= center_ls[0] - (view[0] * center[0] + view[4] * center[1] + view[8] * center[2] + view[12]);
+	view[13] -= center_ls[1] - (view[1] * center[0] + view[5] * center[1] + view[9] * center[2] + view[13]);
+	R_Shadow_MatrixMultiply (r_shadow_state.sun_viewproj, proj, view);
+}
+
+static void R_Shadow_UpdateDlightMatrices (void)
+{
+	static const vec3_t face_dirs[SHADOW_DLIGHT_FACES] = {
+		{ 1.f, 0.f, 0.f }, { -1.f, 0.f, 0.f }, { 0.f, 1.f, 0.f },
+		{ 0.f, -1.f, 0.f }, { 0.f, 0.f, 1.f }, { 0.f, 0.f, -1.f }
+	};
+	static const vec3_t face_ups[SHADOW_DLIGHT_FACES] = {
+		{ 0.f, -1.f, 0.f }, { 0.f, -1.f, 0.f }, { 0.f, 0.f, 1.f },
+		{ 0.f, 0.f, -1.f }, { 0.f, -1.f, 0.f }, { 0.f, -1.f, 0.f }
+	};
+	int slot, face;
+
+	for (slot = 0; slot < r_shadow_state.num_dlights; ++slot)
+	{
+		const vec4_t *light = &r_shadow_state.dlight_pos_radius[slot];
+		float zfar = q_max ((*light)[3], 16.f);
+		float znear = q_max (1.f, zfar * 0.02f);
+		float proj[16], view[16];
+
+		R_Shadow_MatrixPerspective (proj, 90.f, 1.f, znear, zfar);
+		for (face = 0; face < SHADOW_DLIGHT_FACES; ++face)
+		{
+			R_Shadow_MatrixLook (view, *light, face_dirs[face], face_ups[face]);
+			R_Shadow_MatrixMultiply (r_shadow_state.dlight_viewproj[slot][face], proj, view);
+		}
+	}
+}
+
+static void R_Shadow_SetCasterState (const float viewproj[16], qboolean dlight, const vec3_t lightpos, float far_plane)
+{
+	memcpy (r_shadow_state.caster_viewproj, viewproj, sizeof (r_shadow_state.caster_viewproj));
+	VectorCopy (lightpos, r_shadow_state.caster_lightpos_far_mode);
+	r_shadow_state.caster_lightpos_far_mode[3] = q_max (far_plane, 1.f);
+	r_shadow_state.caster_mode = dlight ? 1 : 0;
+}
+
 static void GL_LogErrorIfDeveloper (const char *label)
 {
 	GLenum err = glGetError ();
@@ -235,6 +514,18 @@ cvar_t  r_dlight_bloom_radius = { "r_dlight_bloom_radius", "1.0", CVAR_ARCHIVE }
 cvar_t  r_dlight_bloom_threshold = { "r_dlight_bloom_threshold", "0.1", CVAR_ARCHIVE };
 cvar_t  r_dlight_ndotl = { "r_dlight_ndotl", "0.2", CVAR_ARCHIVE };
 cvar_t  r_dlight_satchop = { "r_dlight_satchop", "0.1", CVAR_ARCHIVE };
+cvar_t  r_shadow = { "r_shadow", "1", CVAR_ARCHIVE };
+cvar_t  r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
+cvar_t  r_shadow_dlight = { "r_shadow_dlight", "1", CVAR_ARCHIVE };
+cvar_t  r_shadow_dlight_max = { "r_shadow_dlight_max", "4", CVAR_ARCHIVE };
+cvar_t  r_shadow_sun_size = { "r_shadow_sun_size", "2048", CVAR_ARCHIVE };
+cvar_t  r_shadow_dlight_size = { "r_shadow_dlight_size", "512", CVAR_ARCHIVE };
+cvar_t  r_shadow_sun_distance = { "r_shadow_sun_distance", "1200", CVAR_ARCHIVE };
+cvar_t  r_shadow_sun_bias = { "r_shadow_sun_bias", "0.0015", CVAR_ARCHIVE };
+cvar_t  r_shadow_dlight_bias = { "r_shadow_dlight_bias", "0.02", CVAR_ARCHIVE };
+cvar_t  r_shadow_sun_pcf = { "r_shadow_sun_pcf", "1.5", CVAR_ARCHIVE };
+cvar_t  r_shadow_dlight_pcf = { "r_shadow_dlight_pcf", "0.75", CVAR_ARCHIVE };
+cvar_t  r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
 cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
@@ -708,6 +999,150 @@ static qboolean GL_AutoExposurePBOAvailable (void);
 static void GL_AutoExposureDeletePBOs (void);
 static void GL_AutoExposureInitPBOs (void);
 
+static void GL_CreateShadowFrameBuffers (void)
+{
+	GLenum status;
+	GLfloat border[] = { 1.f, 1.f, 1.f, 1.f };
+	int sun_size = R_Shadow_ClampMapSize (r_shadow_sun_size.value);
+	int dlight_size = R_Shadow_ClampMapSize (r_shadow_dlight_size.value);
+
+	framebufs.shadow.sun_depth_tex = 0;
+	framebufs.shadow.sun_fbo = 0;
+	framebufs.shadow.dlight_depth_tex = 0;
+	framebufs.shadow.dlight_fbo = 0;
+	framebufs.shadow.available = false;
+	framebufs.shadow.sun_size = sun_size;
+	framebufs.shadow.dlight_size = dlight_size;
+
+	if (!R_Shadow_Enabled ())
+		return;
+
+	/* Sun shadow map (2D depth). */
+	glGenTextures (1, &framebufs.shadow.sun_depth_tex);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.shadow.sun_depth_tex);
+	GL_ObjectLabelFunc (GL_TEXTURE, framebufs.shadow.sun_depth_tex, -1, "shadow sun depth");
+	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, sun_size, sun_size);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	glTexParameterfv (GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, border);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
+
+	GL_GenFramebuffersFunc (1, &framebufs.shadow.sun_fbo);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.shadow.sun_fbo);
+	GL_ObjectLabelFunc (GL_FRAMEBUFFER, framebufs.shadow.sun_fbo, -1, "shadow sun fbo");
+	GL_FramebufferTexture2DFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, framebufs.shadow.sun_depth_tex, 0);
+	glDrawBuffer (GL_NONE);
+	glReadBuffer (GL_NONE);
+	status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		Con_Warning ("Shadow sun framebuffer incomplete (0x%X), disabling sun+dlight shadows.\n", status);
+		GL_DeleteFramebuffersFunc (1, &framebufs.shadow.sun_fbo);
+		GL_DeleteNativeTexture (framebufs.shadow.sun_depth_tex);
+		framebufs.shadow.sun_fbo = 0;
+		framebufs.shadow.sun_depth_tex = 0;
+		return;
+	}
+
+	/* DLight shadow atlas (cube map array depth). */
+	if (!GL_TexStorage3DFunc || !GL_FramebufferTextureLayerFunc)
+	{
+		Con_Warning ("GL cube-array shadow APIs unavailable, disabling dlight shadow maps (sun shadows stay enabled).\n");
+		framebufs.shadow.available = true;
+		return;
+	}
+
+	glGenTextures (1, &framebufs.shadow.dlight_depth_tex);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_CUBE_MAP_ARRAY, framebufs.shadow.dlight_depth_tex);
+	GL_ObjectLabelFunc (GL_TEXTURE, framebufs.shadow.dlight_depth_tex, -1, "shadow dlight depth cubearray");
+	GL_TexStorage3DFunc (GL_TEXTURE_CUBE_MAP_ARRAY, 1, GL_DEPTH_COMPONENT24, dlight_size, dlight_size, SHADOW_DLIGHT_MAX * SHADOW_DLIGHT_FACES);
+	glTexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+	glTexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAX_LEVEL, 0);
+
+	GL_GenFramebuffersFunc (1, &framebufs.shadow.dlight_fbo);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.shadow.dlight_fbo);
+	GL_ObjectLabelFunc (GL_FRAMEBUFFER, framebufs.shadow.dlight_fbo, -1, "shadow dlight fbo");
+	GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.dlight_depth_tex, 0, 0);
+	glDrawBuffer (GL_NONE);
+	glReadBuffer (GL_NONE);
+	status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+	if (status != GL_FRAMEBUFFER_COMPLETE)
+	{
+		Con_Warning ("Shadow dlight framebuffer incomplete (0x%X), disabling dlight shadows (sun shadows stay enabled).\n", status);
+		framebufs.shadow.dlight_fbo = 0;
+		GL_DeleteNativeTexture (framebufs.shadow.dlight_depth_tex);
+		framebufs.shadow.dlight_depth_tex = 0;
+		framebufs.shadow.available = true;
+		return;
+	}
+
+	framebufs.shadow.available = true;
+}
+
+static void GL_DeleteShadowFrameBuffers (void)
+{
+	GL_DeleteFramebuffersFunc (1, &framebufs.shadow.sun_fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.shadow.dlight_fbo);
+	GL_DeleteNativeTexture (framebufs.shadow.sun_depth_tex);
+	GL_DeleteNativeTexture (framebufs.shadow.dlight_depth_tex);
+	framebufs.shadow.sun_depth_tex = 0;
+	framebufs.shadow.sun_fbo = 0;
+	framebufs.shadow.dlight_depth_tex = 0;
+	framebufs.shadow.dlight_fbo = 0;
+	framebufs.shadow.available = false;
+}
+
+static void R_Shadow_ReconcileResources (void)
+{
+	static int retry_after_frame = 0;
+	const int sun_size = R_Shadow_ClampMapSize (r_shadow_sun_size.value);
+	const int dlight_size = R_Shadow_ClampMapSize (r_shadow_dlight_size.value);
+	const qboolean want_shadows = R_Shadow_Enabled ();
+	const qboolean have_any_resources =
+		framebufs.shadow.available
+		|| framebufs.shadow.sun_depth_tex != 0
+		|| framebufs.shadow.sun_fbo != 0
+		|| framebufs.shadow.dlight_depth_tex != 0
+		|| framebufs.shadow.dlight_fbo != 0;
+
+	if (!want_shadows)
+	{
+		if (have_any_resources)
+			GL_DeleteShadowFrameBuffers ();
+		framebufs.shadow.sun_size = sun_size;
+		framebufs.shadow.dlight_size = dlight_size;
+		retry_after_frame = 0;
+		return;
+	}
+
+	if (framebufs.shadow.available
+		&& framebufs.shadow.sun_size == sun_size
+		&& framebufs.shadow.dlight_size == dlight_size)
+	{
+		return;
+	}
+
+	if (have_any_resources)
+		GL_DeleteShadowFrameBuffers ();
+
+	if (r_framecount < retry_after_frame)
+		return;
+
+	GL_CreateShadowFrameBuffers ();
+	if (!framebufs.shadow.available)
+		retry_after_frame = r_framecount + 300;
+	else
+		retry_after_frame = 0;
+}
+
 /*
 =============
 GL_CreateFrameBuffers
@@ -735,6 +1170,7 @@ void GL_CreateFrameBuffers (void)
 		framebufs.composite.depth_stencil_tex,
 		"composite fbo"
 	);
+	GL_CreateShadowFrameBuffers ();
 	framebufs.fogvol.width = vid.width;
 	framebufs.fogvol.height = vid.height;
 	if (r_fogvol_halfres.value > 0.f)
@@ -902,6 +1338,7 @@ GL_DeleteFrameBuffers
 */
 void GL_DeleteFrameBuffers (void)
 {
+	GL_DeleteShadowFrameBuffers ();
 	GL_DeleteFramebuffersFunc (1, &framebufs.resolved_scene.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_composite);
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
@@ -4527,6 +4964,192 @@ static void R_EndTranslucency (void)
 	}
 
         GL_EndGroup (); // translucent objects
+}
+
+static void R_Shadow_GetSelectedIndices (int outidx[SHADOW_DLIGHT_MAX])
+{
+	int i;
+	for (i = 0; i < SHADOW_DLIGHT_MAX; ++i)
+		outidx[i] = (i < r_shadow_state.num_dlights) ? r_shadow_state.dlight_indices[i] : -1;
+}
+
+void R_Shadow_ApplyWorldReceiverUniforms (GLuint program)
+{
+	int idx[SHADOW_DLIGHT_MAX];
+	float enabled, sun_enabled, dlight_enabled;
+	GLuint suntex = 0;
+	GLuint dlighttex = 0;
+
+	(void)program;
+
+	enabled = (framebufs.shadow.available && R_Shadow_Enabled () && r_shadow_state.valid) ? 1.f : 0.f;
+	sun_enabled = (enabled > 0.f && R_Shadow_SunEnabled () && framebufs.shadow.sun_depth_tex) ? 1.f : 0.f;
+	dlight_enabled = (enabled > 0.f && r_shadow_state.num_dlights > 0 && framebufs.shadow.dlight_depth_tex) ? 1.f : 0.f;
+	R_Shadow_GetSelectedIndices (idx);
+
+	if (sun_enabled > 0.f)
+		suntex = framebufs.shadow.sun_depth_tex;
+	if (dlight_enabled > 0.f)
+		dlighttex = framebufs.shadow.dlight_depth_tex;
+
+	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, suntex);
+	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_CUBE_MAP_ARRAY, dlighttex);
+
+	GL_UniformMatrix4fvFunc (SHADOW_RECV_U_SUN_VIEWPROJ, 1, GL_FALSE, r_shadow_state.sun_viewproj);
+	GL_Uniform4fFunc (SHADOW_RECV_U_ENABLES_DEBUG, enabled, sun_enabled, dlight_enabled, CLAMP (0.f, r_shadow_debug.value, 4.f));
+	GL_Uniform4fFunc (SHADOW_RECV_U_DLIGHT_INDICES, (float)idx[0], (float)idx[1], (float)idx[2], (float)idx[3]);
+	GL_Uniform4fFunc (SHADOW_RECV_U_BIAS_COUNTS, (float)r_shadow_state.num_dlights,
+		q_max (0.f, r_shadow_sun_bias.value),
+		q_max (0.f, r_shadow_dlight_bias.value),
+		0.f);
+	GL_Uniform4fFunc (SHADOW_RECV_U_PCF_TEXEL,
+		q_max (0.f, r_shadow_sun_pcf.value),
+		q_max (0.f, r_shadow_dlight_pcf.value),
+		framebufs.shadow.sun_size > 0 ? 1.f / (float)framebufs.shadow.sun_size : 0.f,
+		framebufs.shadow.dlight_size > 0 ? 1.f / (float)framebufs.shadow.dlight_size : 0.f);
+}
+
+void R_Shadow_ApplyAliasReceiverUniforms (GLuint program)
+{
+	(void)program;
+	R_Shadow_ApplyWorldReceiverUniforms (program);
+	GL_Uniform4fFunc (38,
+		r_framedata.sun_dir_enabled[0],
+		r_framedata.sun_dir_enabled[1],
+		r_framedata.sun_dir_enabled[2],
+		r_framedata.sun_dir_enabled[3]);
+	GL_Uniform4fFunc (39,
+		r_framedata.sun_color_intensity[0],
+		r_framedata.sun_color_intensity[1],
+		r_framedata.sun_color_intensity[2],
+		r_framedata.sun_color_intensity[3]);
+	GL_Uniform1fFunc (40, r_framedata.shader_params[2]);
+	GL_Uniform1fFunc (41, (float)r_framedata.numlights);
+	GL_Uniform4fFunc (42,
+		q_max (0.f, r_dlight_scale.value),
+		r_dlight_radius_scale.value,
+		(float)CLAMP (0, (int)Q_rint (r_dlight_falloff.value), 3),
+		q_max (0.01f, r_dlight_exp.value));
+	GL_Uniform4fFunc (43,
+		q_max (0.f, r_dlight_core_boost.value),
+		q_max (0.01f, r_dlight_core_exp.value),
+		q_max (0.f, r_dlight_softknee.value),
+		CLAMP (0.f, r_dlight_ndotl.value, 1.f));
+	GL_Uniform4fFunc (44, CLAMP (0.f, r_dlight_satchop.value, 1.f), 0.f, 0.f, 0.f);
+}
+
+void R_Shadow_ApplyWorldCasterUniforms (GLuint program)
+{
+	(void)program;
+	GL_UniformMatrix4fvFunc (SHADOW_CASTER_U_VIEWPROJ, 1, GL_FALSE, r_shadow_state.caster_viewproj);
+	GL_Uniform4fFunc (SHADOW_CASTER_U_LIGHTPOS_FAR,
+		r_shadow_state.caster_lightpos_far_mode[0],
+		r_shadow_state.caster_lightpos_far_mode[1],
+		r_shadow_state.caster_lightpos_far_mode[2],
+		r_shadow_state.caster_lightpos_far_mode[3]);
+	GL_Uniform1iFunc (SHADOW_CASTER_U_MODE, r_shadow_state.caster_mode);
+}
+
+void R_Shadow_ApplyAliasCasterUniforms (GLuint program)
+{
+	R_Shadow_ApplyWorldCasterUniforms (program);
+}
+
+static void R_Shadow_ClearDrawContext (void)
+{
+	memset (&r_shadow_draw_ctx, 0, sizeof (r_shadow_draw_ctx));
+}
+
+void R_RenderSunShadowMap (void)
+{
+	vec3_t dummy = {0.f, 0.f, 0.f};
+
+	if (!R_Shadow_SunEnabled () || !framebufs.shadow.sun_fbo || !framebufs.shadow.sun_depth_tex)
+		return;
+	if (r_shadow_draw_ctx.brush_count <= 0 && r_shadow_draw_ctx.alias_count <= 0)
+		return;
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.shadow.sun_fbo);
+	glViewport (0, 0, framebufs.shadow.sun_size, framebufs.shadow.sun_size);
+	glClear (GL_DEPTH_BUFFER_BIT);
+
+	R_Shadow_SetCasterState (r_shadow_state.sun_viewproj, false, dummy, 1.f);
+	if (r_shadow_draw_ctx.brush_count > 0)
+		R_DrawBrushModels_Shadow (r_shadow_draw_ctx.brush_ents, r_shadow_draw_ctx.brush_count, false);
+	if (r_shadow_draw_ctx.alias_count > 0)
+		R_DrawAliasModels_Shadow (r_shadow_draw_ctx.alias_ents, r_shadow_draw_ctx.alias_count, false);
+}
+
+void R_RenderDLightShadowMaps (void)
+{
+	int slot, face;
+
+	if (!R_Shadow_DlightEnabled () || !framebufs.shadow.dlight_fbo || !framebufs.shadow.dlight_depth_tex)
+		return;
+	if (r_shadow_state.num_dlights <= 0)
+		return;
+	if (r_shadow_draw_ctx.brush_count <= 0 && r_shadow_draw_ctx.alias_count <= 0)
+		return;
+
+	for (slot = 0; slot < r_shadow_state.num_dlights; ++slot)
+	{
+		const vec4_t *light = &r_shadow_state.dlight_pos_radius[slot];
+		for (face = 0; face < SHADOW_DLIGHT_FACES; ++face)
+		{
+			int layer = slot * SHADOW_DLIGHT_FACES + face;
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.shadow.dlight_fbo);
+			GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.dlight_depth_tex, 0, layer);
+			glViewport (0, 0, framebufs.shadow.dlight_size, framebufs.shadow.dlight_size);
+			glClear (GL_DEPTH_BUFFER_BIT);
+
+			R_Shadow_SetCasterState (r_shadow_state.dlight_viewproj[slot][face], true, *light, (*light)[3]);
+			if (r_shadow_draw_ctx.brush_count > 0)
+				R_DrawBrushModels_Shadow (r_shadow_draw_ctx.brush_ents, r_shadow_draw_ctx.brush_count, true);
+			if (r_shadow_draw_ctx.alias_count > 0)
+				R_DrawAliasModels_Shadow (r_shadow_draw_ctx.alias_ents, r_shadow_draw_ctx.alias_count, true);
+		}
+	}
+}
+
+void R_RenderShadowMaps (void)
+{
+	int old_viewport[4];
+
+	R_Shadow_ResetRuntime ();
+	R_Shadow_ClearDrawContext ();
+	R_Shadow_ReconcileResources ();
+
+	if (!framebufs.shadow.available || !R_Shadow_Enabled ())
+		return;
+	if (!cl.worldmodel || !r_drawworld_cheatsafe)
+		return;
+
+	r_shadow_draw_ctx.brush_ents = R_GetVisEntities (mod_brush, false, &r_shadow_draw_ctx.brush_count);
+	r_shadow_draw_ctx.alias_ents = R_GetVisEntities (mod_alias, false, &r_shadow_draw_ctx.alias_count);
+	if (r_shadow_draw_ctx.brush_count <= 0 && r_shadow_draw_ctx.alias_count <= 0)
+		return;
+
+	R_Shadow_SelectDlights ();
+	if (R_Shadow_SunEnabled ())
+		R_Shadow_UpdateSunMatrix ();
+	if (r_shadow_state.num_dlights > 0)
+		R_Shadow_UpdateDlightMatrices ();
+
+	glGetIntegerv (GL_VIEWPORT, old_viewport);
+	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+
+	GL_BeginGroup ("Shadow maps");
+	R_RenderSunShadowMap ();
+	R_RenderDLightShadowMaps ();
+	GL_EndGroup ();
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	glViewport (old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+	r_shadow_state.valid =
+		((R_Shadow_SunEnabled () && framebufs.shadow.sun_depth_tex != 0)
+		 || (r_shadow_state.num_dlights > 0 && R_Shadow_DlightEnabled () && framebufs.shadow.dlight_depth_tex != 0));
 }
 
 // Quake3-style dynamic light pass rationale: render only additive dlight
