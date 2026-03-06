@@ -82,7 +82,7 @@ layout(std140, binding=4) uniform FogLightsUBO
 
 layout(std140, binding=5) uniform FogLightgridUBO
 {
-	vec4 FogLightgridProbeRGB[8];
+	vec4 FogLightgridProbeRGB[MAX_FOGVOLUMES * 8];
 };
 
 layout(location=0)  uniform int   FogSteps;
@@ -385,10 +385,11 @@ vec3 SampleFogLightgrid(vec3 p, FogVolume volume)
 	vec3 size = max(volume.maxs.xyz - volume.mins.xyz, vec3(1e-3));
 	vec3 local = clamp((p - volume.mins.xyz) / size, 0.0, 1.0);
 
-	vec3 c00 = mix(FogLightgridProbeRGB[0].rgb, FogLightgridProbeRGB[1].rgb, local.x);
-	vec3 c10 = mix(FogLightgridProbeRGB[2].rgb, FogLightgridProbeRGB[3].rgb, local.x);
-	vec3 c01 = mix(FogLightgridProbeRGB[4].rgb, FogLightgridProbeRGB[5].rgb, local.x);
-	vec3 c11 = mix(FogLightgridProbeRGB[6].rgb, FogLightgridProbeRGB[7].rgb, local.x);
+	int base = FogVolumeIndex * 8;
+	vec3 c00 = mix(FogLightgridProbeRGB[base + 0].rgb, FogLightgridProbeRGB[base + 1].rgb, local.x);
+	vec3 c10 = mix(FogLightgridProbeRGB[base + 2].rgb, FogLightgridProbeRGB[base + 3].rgb, local.x);
+	vec3 c01 = mix(FogLightgridProbeRGB[base + 4].rgb, FogLightgridProbeRGB[base + 5].rgb, local.x);
+	vec3 c11 = mix(FogLightgridProbeRGB[base + 6].rgb, FogLightgridProbeRGB[base + 7].rgb, local.x);
 	vec3 c0 = mix(c00, c10, local.y);
 	vec3 c1 = mix(c01, c11, local.y);
 	return mix(c0, c1, local.z);
