@@ -212,6 +212,11 @@ cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
+/* Per-local-light occlusion term in fogvol.frag:
+ * 0=off, 1=cheap signed depth test along light ray, 2=multi-tap depth cone trace.
+ * Mode 2 is automatically downgraded to mode 1 when shadow marching is disabled
+ * because there is no additional shadow context to justify the extra taps. */
+cvar_t r_fogvol_local_occlusion = { "r_fogvol_local_occlusion", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_dir = { "r_fogvol_sun_dir", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_color = { "r_fogvol_sun_color", "0 0 0", CVAR_ARCHIVE };
@@ -304,6 +309,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_shadow_samples, "lighting", "2"},
 	{&r_fogvol_shadow_strength, "lighting", "0.8"},
 	{&r_fogvol_shadow_jitter, "lighting", "1"},
+	{&r_fogvol_local_occlusion, "lighting", "0"},
 	{&r_fogvol_sun_dir, "lighting", "1"},
 	{&r_fogvol_sun_scatter, "lighting", "0"},
 	{&r_fogvol_sun_color, "lighting", "0 0 0"},
@@ -374,10 +380,12 @@ enum
 	FOGVOL_U_GODRAY_COUPLING = 41,
 	FOGVOL_U_GODRAY_SHAFTS_PARAMS = 42,
 	FOGVOL_U_FROXEL_TEMPORAL_PARAMS = 43,
-	FOGVOL_U_COUNT = 44
+	FOGVOL_U_LOCAL_OCCLUSION_MODE = 44,
+	FOGVOL_U_LOCAL_OCCLUSION_PARAMS = 45,
+	FOGVOL_U_COUNT = 46
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_FROXEL_TEMPORAL_PARAMS == 43);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_LOCAL_OCCLUSION_PARAMS == 45);
 
 typedef struct froxel_state_s
 {
@@ -3082,7 +3090,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 44);
+	assert (FOGVOL_U_COUNT == 46);
 	assert (glwidth > 0);
 	assert (glheight > 0);
 	assert (view_w > 0.f);
@@ -3188,7 +3196,24 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		q_max (0.f, r_fogvol_froxel_scale.value),
 		q_max (0.f, r_fogvol_lightlist_scale.value),
 		q_max (0.f, r_fogvol_lightgrid_scale.value));
-	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, (int)R_FogVol_LightingMode ());
+	{
+		const fogvol_lighting_mode_t lighting_mode = R_FogVol_LightingMode ();
+		int local_occlusion_mode = CLAMP (0, (int)Q_rint (r_fogvol_local_occlusion.value), 2);
+
+		/* Local-light occlusion only applies when the shader evaluates explicit
+		 * FogLights list contribution (lighting_mode 1 or 3). Make this explicit
+		 * in CPU-side uniform plumbing so mode interactions are deterministic. */
+		if (!(lighting_mode == FOGVOL_LIGHTING_RAYMARCH || lighting_mode == FOGVOL_LIGHTING_FROXEL_PLUS_DETAIL))
+			local_occlusion_mode = 0;
+		if (local_occlusion_mode >= 2 && r_fogvol_shadow.value <= 0.f)
+			local_occlusion_mode = 1;
+
+		GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, (int)lighting_mode);
+		GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, local_occlusion_mode);
+		/* x: depth-thickness tolerance in world units, y: cone radius scale,
+		 * z: max trace distance scale (relative to light distance), w: reserved. */
+		GL_Uniform4fFunc (FOGVOL_U_LOCAL_OCCLUSION_PARAMS, 8.f, 0.035f, 1.f, 0.f);
+	}
 
 	{
 		GLuint shafts_tex = 0;
