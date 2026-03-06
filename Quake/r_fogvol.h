@@ -117,6 +117,7 @@ extern cvar_t r_fogvol_froxel_static;
 extern cvar_t r_fogvol_froxel_godrays;
 extern cvar_t r_fogvol_froxel_temporal_alpha;
 extern cvar_t r_fogvol_froxel_temporal_reject_threshold;
+extern cvar_t r_fogvol_froxel_temporal_rotation_reject_scale;
 extern cvar_t r_fogvol_godray_coupling;
 extern cvar_t r_froxel_debug;
 

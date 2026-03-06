@@ -203,6 +203,7 @@ cvar_t r_fogvol_froxel_static = { "r_fogvol_froxel_static", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_godrays = { "r_fogvol_froxel_godrays", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_temporal_alpha = { "r_fogvol_froxel_temporal_alpha", "0.85", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_temporal_reject_threshold = { "r_fogvol_froxel_temporal_reject_threshold", "24", CVAR_ARCHIVE };
+cvar_t r_fogvol_froxel_temporal_rotation_reject_scale = { "r_fogvol_froxel_temporal_rotation_reject_scale", "20", CVAR_ARCHIVE };
 cvar_t r_fogvol_godray_coupling = { "r_fogvol_godray_coupling", "1", CVAR_ARCHIVE };
 /* Source weighting policy for local fog lighting contributions.
  * - r_fogvol_froxel_scale controls FogFroxelLightTex contribution when enabled.
@@ -289,6 +290,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_froxel_godrays, "lighting", "0"},
 	{&r_fogvol_froxel_temporal_alpha, "temporal", "0.85"},
 	{&r_fogvol_froxel_temporal_reject_threshold, "temporal", "24"},
+	{&r_fogvol_froxel_temporal_rotation_reject_scale, "temporal", "20"},
 	{&r_fogvol_godray_coupling, "lighting", "1"},
 	{&r_fogvol_froxel_scale, "lighting", "1"},
 	{&r_fogvol_lightlist_scale, "lighting", "1"},
@@ -361,6 +363,9 @@ typedef struct froxel_state_s
 	float *light_rgb;
 	float *prev_light_rgb;
 	vec3_t prev_vieworg;
+	vec3_t prev_vpn;
+	vec3_t prev_vright;
+	vec3_t prev_vup;
 	qboolean prev_valid;
 	qboolean valid;
 } froxel_state_t;
@@ -1539,11 +1544,17 @@ static void R_Froxel_BlendWithHistory (void)
 {
 	const float alpha = CLAMP (0.f, r_fogvol_froxel_temporal_alpha.value, 1.f);
 	const float reject_threshold = q_max (0.f, r_fogvol_froxel_temporal_reject_threshold.value);
+	const float rotation_scale_deg = q_max (1e-3f, r_fogvol_froxel_temporal_rotation_reject_scale.value);
 	const int nx = r_froxel.dims[0], ny = r_froxel.dims[1], nz = r_froxel.dims[2];
 	const float delta_x = r_refdef.vieworg[0] - r_froxel.prev_vieworg[0];
 	const float delta_y = r_refdef.vieworg[1] - r_froxel.prev_vieworg[1];
 	const float delta_z = r_refdef.vieworg[2] - r_froxel.prev_vieworg[2];
 	const float camera_delta = sqrtf (delta_x * delta_x + delta_y * delta_y + delta_z * delta_z);
+	const float dot_vpn = CLAMP (-1.f, DotProduct (vpn, r_froxel.prev_vpn), 1.f);
+	const float dot_vright = CLAMP (-1.f, DotProduct (vright, r_froxel.prev_vright), 1.f);
+	const float dot_vup = CLAMP (-1.f, DotProduct (vup, r_froxel.prev_vup), 1.f);
+	const float rot_delta_deg = q_max ((float)RAD2DEG (acosf (dot_vpn)),
+		q_max ((float)RAD2DEG (acosf (dot_vright)), (float)RAD2DEG (acosf (dot_vup))));
 
 	if (!r_froxel.valid || !r_froxel.prev_valid || !r_froxel.prev_light_rgb || alpha <= 0.f)
 		return;
@@ -1554,7 +1565,9 @@ static void R_Froxel_BlendWithHistory (void)
 		const float zv = r_froxel.near_clip * expf (r_froxel.log_far_near * zf);
 		const float depth_gate = CLAMP (0.f, 1.f, zv / q_max (reject_threshold, 1.f));
 		const float camera_reject = CLAMP (0.f, 1.f, camera_delta / q_max (reject_threshold, 1.f));
-		const float history_weight = alpha * (1.f - camera_reject) * depth_gate;
+		const float rotation_reject = CLAMP (0.f, 1.f, rot_delta_deg / rotation_scale_deg);
+		const float combined_reject = q_max (camera_reject, rotation_reject);
+		const float history_weight = alpha * (1.f - combined_reject) * depth_gate;
 		const float current_weight = 1.f - history_weight;
 		for (int y = 0; y < ny; ++y)
 		{
@@ -1971,6 +1984,9 @@ void R_Froxel_EndFrame (void)
 	GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, 0,
 		r_froxel.dims[0], r_froxel.dims[1], r_froxel.dims[2], GL_RGB, GL_FLOAT, r_froxel.prev_light_rgb);
 	VectorCopy (r_refdef.vieworg, r_froxel.prev_vieworg);
+	VectorCopy (vpn, r_froxel.prev_vpn);
+	VectorCopy (vright, r_froxel.prev_vright);
+	VectorCopy (vup, r_froxel.prev_vup);
 	r_froxel.prev_valid = true;
 	GL_MemoryBarrierFunc (GL_TEXTURE_FETCH_BARRIER_BIT);
 }
