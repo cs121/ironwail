@@ -794,6 +794,8 @@ cvar_t	r_lerplightstyles = { "r_lerplightstyles", "1", CVAR_ARCHIVE }; // 0=off;
 cvar_t	gl_fullbrights = { "gl_fullbrights", "1", CVAR_ARCHIVE };
 cvar_t	gl_farclip = { "gl_farclip", "65536", CVAR_ARCHIVE };
 cvar_t	gl_overbright_models = { "gl_overbright_models", "0", CVAR_ARCHIVE };
+cvar_t	r_viewmodel_light_boost = { "r_viewmodel_light_boost", "1.5", CVAR_ARCHIVE };
+cvar_t	r_viewmodel_minlight = { "r_viewmodel_minlight", "72", CVAR_ARCHIVE };
 cvar_t	r_model_halflambert = { "r_model_halflambert", "0", CVAR_ARCHIVE };
 cvar_t	r_facenormals_enable = { "r_facenormals_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_oldskyleaf = { "r_oldskyleaf", "0", CVAR_NONE };

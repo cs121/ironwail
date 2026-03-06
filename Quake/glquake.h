@@ -622,6 +622,8 @@ void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
 
 extern cvar_t r_debug_itemlight;
 extern cvar_t r_minlight_models;
+extern cvar_t r_viewmodel_light_boost;
+extern cvar_t r_viewmodel_minlight;
 extern cvar_t r_model_lightgrid;
 
 #define WORLDSHADER_SOLID		0
