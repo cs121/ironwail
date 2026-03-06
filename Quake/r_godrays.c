@@ -16,7 +16,6 @@ extern cvar_t r_godrays_emissive_threshold;
 extern cvar_t r_godrays_light_threshold;
 extern cvar_t r_godrays_mask_knee;
 extern cvar_t r_godrays_blur;
-extern cvar_t r_godrays_lighttex_name_match;
 extern cvar_t r_godrays_samples;
 extern cvar_t r_godrays_density;
 extern cvar_t r_godrays_weight;
@@ -39,7 +38,6 @@ void R_Godrays_RegisterCvars (void)
 	Cvar_RegisterVariable (&r_godrays_light_threshold);
 	Cvar_RegisterVariable (&r_godrays_mask_knee);
 	Cvar_RegisterVariable (&r_godrays_blur);
-	Cvar_RegisterVariable (&r_godrays_lighttex_name_match);
 	Cvar_RegisterVariable (&r_godrays_samples);
 	Cvar_RegisterVariable (&r_godrays_density);
 	Cvar_RegisterVariable (&r_godrays_weight);

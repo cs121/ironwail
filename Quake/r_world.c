@@ -27,7 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t r_godrays;
-extern cvar_t r_godrays_lighttex_name_match;
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_oit;
 
@@ -525,47 +524,6 @@ static unsigned R_StageOutputCallFlags (const mat_shader_stage_t *stage)
 	return flags;
 }
 
-static qboolean R_GodraysNameContainsLightToken (const char *name)
-{
-	static const char *const tokens[] = {
-		"light",
-		"lamp",
-		"glow",
-		"flare",
-		"neon",
-		"torch",
-		"lantern"
-	};
-
-	if (!name || !name[0])
-		return false;
-
-	for (size_t i = 0; i < countof (tokens); ++i)
-	{
-		if (q_strcasestr (name, tokens[i]))
-			return true;
-	}
-
-	return false;
-}
-
-static qboolean R_GodraysLighttexNameMatches (const texture_t *t, const mat_shader_stage_t *stage)
-{
-	if (r_godrays_lighttex_name_match.value <= 0.f)
-		return true;
-
-	if (R_GodraysNameContainsLightToken (t ? t->name : NULL))
-		return true;
-	if (R_GodraysNameContainsLightToken (t ? t->shader_map : NULL))
-		return true;
-	if (R_GodraysNameContainsLightToken (stage ? stage->map_path : NULL))
-		return true;
-	if (R_GodraysNameContainsLightToken (t && t->shader ? t->shader->name : NULL))
-		return true;
-
-	return false;
-}
-
 qboolean R_TextureEmitsGodrays (texture_t *t)
 {
 	if (!t)
@@ -580,25 +538,13 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 	if (t->shader->stages)
 	{
 		size_t stage_count = VEC_SIZE (t->shader->stages);
-		qboolean has_godray = false;
-		qboolean has_light_match = false;
-		qboolean has_emissive = false;
 
 		for (size_t i = 0; i < stage_count; ++i)
 		{
 			const mat_shader_stage_t *stage = &t->shader->stages[i];
 			if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
-			{
-				has_godray = true;
-				if (R_GodraysLighttexNameMatches (t, stage))
-					has_light_match = true;
-			}
-			if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
-				has_emissive = true;
+				return true;
 		}
-
-		if (has_godray && (has_light_match || has_emissive))
-			return true;
 	}
 
 	return false;
@@ -1407,17 +1353,13 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 						fb = NULL;
 				}
 
-				if (R_GodraysLighttexNameMatches (t, stage))
-					extra_flags |= CALLFLAG_GODRAYS_LIGHT;
+				extra_flags |= CALLFLAG_GODRAYS_LIGHT;
 
 				if (wants_emissive)
 				{
 					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
 					extra_flags |= CALLFLAG_MAT_EMISSIVE;
 				}
-
-				if ((extra_flags & (CALLFLAG_GODRAYS_LIGHT | CALLFLAG_GODRAYS_EMISSIVE)) == 0u)
-					continue;
 
 				if (t->type == TEXTYPE_CUTOUT)
 					extra_flags |= CALLFLAG_ALPHA_TEST;
@@ -1548,7 +1490,12 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
                 state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
         else if (pass == BP_SHADOW_SUN || pass == BP_SHADOW_DLIGHT)
-                state |= GLS_BLEND_OPAQUE;
+        {
+                /* Shadow caster pass: disable face culling so one-sided BSP
+                 * geometry still occludes lights from both sides. */
+                state &= ~GLS_MASK_CULL;
+                state |= GLS_CULL_NONE | GLS_BLEND_OPAQUE;
+        }
         else if (pass == BP_GODRAYS)
                 state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
         else if (!translucent)

@@ -68,6 +68,13 @@ static qboolean CL_BeamCanUseQ3P (void)
 
 static qboolean CL_BeamResolveAttachment (int entnum, qboolean local_space, const vec3_t fallback, vec3_t out)
 {
+	/* World-space beams already carry absolute coordinates in fallback. */
+	if (!local_space)
+	{
+		VectorCopy (fallback, out);
+		return false;
+	}
+
 	if (entnum <= 0 || entnum >= cl.num_entities)
 	{
 		VectorCopy (fallback, out);
@@ -80,10 +87,7 @@ static qboolean CL_BeamResolveAttachment (int entnum, qboolean local_space, cons
 		return false;
 	}
 
-	if (local_space)
-		VectorAdd (cl_entities[entnum].origin, fallback, out);
-	else
-		VectorCopy (cl_entities[entnum].origin, out);
+	VectorAdd (cl_entities[entnum].origin, fallback, out);
 	return true;
 }
 

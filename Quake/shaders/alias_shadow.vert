@@ -15,7 +15,10 @@ layout(std430, binding=1) restrict readonly buffer AliasShadowInstanceBlock
 	InstanceData instances[];
 } AliasShadowBuffer;
 
-layout(location=0) uniform mat4 ShadowViewProj;
+// BUG FIX: location=0 fuer mat4 belegte Slots 0-3, was mit den vertex attribs
+// in_pos(0), in_nor(1), in_uv(2), in_weights(3) im MD5-Pfad kollidierte.
+// Verschoben auf location=8 (nach den 5 MD5-Attribs und sicher frei).
+layout(location=8) uniform mat4 ShadowViewProj;
 
 struct PoseVertex
 {

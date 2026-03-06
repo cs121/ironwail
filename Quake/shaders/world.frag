@@ -258,6 +258,8 @@ float SampleSunShadow(vec3 worldPos)
 
 	vec3 ndc = clip.xyz / clip.w;
 	vec2 uv = ndc.xy * 0.5 + 0.5;
+	// Sun shadow map is always rendered with a standard (non-reversed) ortho
+	// projection on the CPU side, so depth lives in [0,1] with 0=near, 1=far.
 	float depth = ndc.z * 0.5 + 0.5;
 	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || depth < 0.0 || depth > 1.0)
 		return 1.0;
@@ -271,6 +273,7 @@ float SampleSunShadow(vec3 worldPos)
 		for (int x = -1; x <= 1; ++x)
 		{
 			float closest = texture(SunShadowTex, uv + vec2(float(x), float(y)) * pcf).r;
+			// Standard map: receiver is lit when its depth (minus bias) is <= stored depth.
 			sum += (depth - bias <= closest) ? 1.0 : 0.0;
 			taps += 1.0;
 		}
@@ -310,6 +313,9 @@ float SampleDLightShadow(int lightIndex, vec3 worldPos, vec3 lightPos, float rad
 		return 1.0;
 
 	vec3 dirN = dir / dist;
+	// INVARIANTE: ref = dist/radius wird mit stored = dist_occluder/farPlane verglichen.
+	// Korrekt NUR wenn farPlane (ShadowLightPosFar.w) == radius beim Shadow-Pass.
+	// CPU muss ShadowLightPosFar.w = l.radius setzen — sonst falsche Tiefenvergleiche.
 	float ref = dist / radius;
 	float bias = max(ShadowBiasCounts.z, 0.0);
 	float pcf = max(ShadowPCFTexel.y, 0.0) * max(ShadowPCFTexel.w, 0.0) * 2.0;
@@ -400,6 +406,10 @@ float SampleFirstDLightDepth(vec3 worldPos)
 		vec4 color = vec4(GammaToLinear(OUT_COLOR.rgb), OUT_COLOR.a);
 		float z = 1.0 / gl_FragCoord.w;
 		float weight = clamp(color.a * color.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);
+		// WBOIT: weighted-blended OIT (McGuire & Bavoil 2013).
+		// accum.rgb = pre-multiplied color * weight
+		// accum.a   = alpha * weight  (used for normalization in composite pass)
+		// reveal    = alpha            (product across layers, written additively)
 		out_accum  = vec4(color.rgb * color.a * weight, color.a * weight);
 		out_reveal = color.a;
 	}
@@ -600,7 +610,9 @@ void main()
 		if (LightmapParams.z > 0.5)
 		{
 			vec3 dir = SampleLightmapDir(lmuv);
-			float ndl = max(dot(dir, vec3(0.0, 0.0, 1.0)), 0.0);
+			// BUG FIX: was dot(dir, vec3(0,0,1)) — must use the actual surface
+			// normal so slanted geometry is shaded correctly.
+			float ndl = max(dot(dir, surface_normal), 0.0);
 			static_light *= ndl;
 		}
 

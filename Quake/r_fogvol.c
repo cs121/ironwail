@@ -103,19 +103,11 @@ static fog_volume_t r_fogvolume_entities[MAX_FOGVOLUMES];
 static int r_fogvolume_entity_count = 0;
 
 #define MAX_FOG_DLIGHTS 64
-#define FOG_TORCH_CACHE_SIZE 128
-
-typedef struct fog_torch_cache_entry_s
-{
-	const qmodel_t *model;
-	qboolean is_torch;
-} fog_torch_cache_entry_t;
 
 /* Variant C split: these lights are fog-only and must never enter the normal
  * geometry/cluster/shadow dlight pipelines. */
 static int r_num_fog_dlights = 0;
 static dlight_t r_fog_dlights[MAX_FOG_DLIGHTS];
-static fog_torch_cache_entry_t r_fog_torch_cache[FOG_TORCH_CACHE_SIZE];
 
 #define MAX_FOG_STATIC_LIGHTS 192
 static int r_num_fog_static_lights = 0;
@@ -655,56 +647,6 @@ static void R_FogDlights_Add (const vec3_t origin, float radius, const vec3_t co
 	dl->color[1] = CLAMP (0.f, color[1], 1.f);
 	dl->color[2] = CLAMP (0.f, color[2], 1.f);
 	dl->active = true;
-}
-
-static qboolean R_IsTorchName (const char *name)
-{
-	return name
-		&& (q_strcasestr (name, "torch")
-			|| q_strcasestr (name, "flame")
-			|| q_strcasestr (name, "fire")
-			|| q_strcasestr (name, "burn")
-			|| q_strcasestr (name, "lantern"));
-}
-
-static qboolean R_IsTorchModel (const qmodel_t *model)
-{
-	const uintptr_t key = (uintptr_t)model;
-	int slot;
-
-	if (!model)
-		return false;
-
-	slot = (int)(key % FOG_TORCH_CACHE_SIZE);
-	if (r_fog_torch_cache[slot].model != model)
-	{
-		r_fog_torch_cache[slot].model = model;
-		r_fog_torch_cache[slot].is_torch = R_IsTorchName (model->name);
-	}
-	return r_fog_torch_cache[slot].is_torch;
-}
-
-static void R_FogDlights_AddTorchEntities (void)
-{
-	const vec3_t torch_color = {1.f, 0.55f, 0.2f};
-
-	for (int i = 0; i < cl_numvisedicts; ++i)
-	{
-		const entity_t *ent = cl_visedicts[i];
-		float flicker_a;
-		float flicker_b;
-		float flicker;
-		float radius;
-
-		if (!ent || !ent->model || !R_IsTorchModel (ent->model))
-			continue;
-
-		flicker_a = 0.5f + 0.5f * sinf ((float)cl.time * 7.0f + (float)i * 12.9898f);
-		flicker_b = 0.5f + 0.5f * sinf ((float)cl.time * 13.0f + (float)i * 3.1f + 1.7f);
-		flicker = CLAMP (0.f, 0.7f * flicker_a + 0.3f * flicker_b, 1.f);
-		radius = 96.f * (0.85f + 0.15f * flicker);
-		R_FogDlights_Add (ent->origin, radius, torch_color);
-	}
 }
 
 static GLuint R_FogVol_GetFramebufferColorAttachmentTexture (GLenum target)
@@ -2231,7 +2173,6 @@ void R_FogVol_BuildList (void)
 {
 	R_FogVol_Clear ();
 	R_FogDlights_Clear ();
-	R_FogDlights_AddTorchEntities ();
 
 	/* BUG FIX (testvolumes): r_fogvol_testvolumes must work independently of
 	 * r_fogvol so developers can test the pipeline without setting up entity

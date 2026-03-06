@@ -245,9 +245,11 @@ void main()
 	}
 	else
 	{
-		out_styles.y = GetLightStyle(in_styles.y);
-		out_styles.z = GetLightStyle(in_styles.z);
-		out_styles.w = (in_styles.w == 255) ? -1.0 : GetLightStyle(in_styles.w);
+		out_styles.yzw = vec3(
+			GetLightStyle(in_styles.y),
+			GetLightStyle(in_styles.z),
+			GetLightStyle(in_styles.w)
+		);
 	}
 
 	// BUG FIX: CF_NOLIGHTMAP override must come AFTER style computation;

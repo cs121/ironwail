@@ -2,11 +2,14 @@
 #extension GL_ARB_shader_draw_parameters : require
 #define DRAW_ID gl_DrawIDARB
 #else
-layout(location=1) uniform int DrawID;  // FIX: war location=0, Konflikt mit ShadowViewProj
+layout(location=0) uniform int DrawID;
 #define DRAW_ID DrawID
 #endif
 
-layout(location=0) uniform mat4 ShadowViewProj;
+// BUG FIX: location=0 kollidierte mit dem vertex attrib in_pos (location=0).
+// ShadowViewProj belegt locations 0-3 (mat4 = 4 konsekutive slots) — in_pos war
+// dadurch undefiniert. Verschoben auf location=4 (erste freie Slot nach mat4).
+layout(location=4) uniform mat4 ShadowViewProj;
 
 struct Call
 {
@@ -55,7 +58,7 @@ layout(std430, binding=2) restrict readonly buffer InstanceBuffer
 };
 
 layout(location=0) in vec3 in_pos;
-layout(location=0) out vec3 out_world_pos;
+layout(location=0) out vec3 out_world_pos;  // location=0 als Output ist korrekt (anderes Interface)
 
 void main()
 {

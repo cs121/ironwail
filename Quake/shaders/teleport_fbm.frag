@@ -76,6 +76,7 @@ float fbm(vec3 x)
 void main()
 {
     vec2 uv = v_texcoord * 2.0 - 1.0;
+    float r2 = dot(uv, uv);
 
     float T = u_time;
     float a = sin(T * 0.10) + cos(T * 0.0331) * 3.14;
@@ -83,8 +84,17 @@ void main()
     float s = sin(a);
     mat2 R = mat2(c, s, -s, c);
 
+    // Extra UV warping to push the teleporter look closer to the original.
+    vec2 warpUv = uv;
+    float swirl = 0.12 * sin(10.0 * length(uv) - T * 2.2);
+    warpUv += vec2(-uv.y, uv.x) * swirl;
+    warpUv += 0.055 * vec2(
+        sin(uv.y * 12.0 + T * 1.8),
+        cos(uv.x * 11.0 - T * 1.6)
+    );
+
     vec3 ro = vec3(0.0, 0.0, 3.0 + 2.0 * sin(T * 0.5));
-    vec3 rd = normalize(vec3(uv, -2.0));
+    vec3 rd = normalize(vec3(warpUv, -2.0));
 
     ro.xy *= R;
     rd.xy *= R;
@@ -92,7 +102,7 @@ void main()
     rd.zx *= R;
 
     vec3 color = vec3(0.0);
-    float t = 0.15 * fract(T * 61.123 + dot(uv, uv));
+    float t = 0.15 * fract(T * 61.123 + r2);
 
     for (int i = 0; i < 20; ++i)
     {
@@ -123,8 +133,36 @@ void main()
         color += vec3(1.0, 3.0, 2.0) * (0.0012 / dot(q, q));
     }
 
-    color = 1.0 - exp(-1.2 * sqrt(color * color * color));
-    color *= 1.0 - dot(uv, uv) * 0.2;
-    float alpha = clamp(max(max(color.r, color.g), color.b), 0.0, 1.0);
-    fragColor = vec4(color, alpha);
+    // Dark base + clustered bright points for a classic Quake-ish teleporter.
+    vec3 dots = vec3(0.0);
+    const int DOT_COUNT = 10;
+    for (int i = 0; i < DOT_COUNT; ++i)
+    {
+        float fi = float(i);
+        float ang = fi * 1.723 + sin(T * 0.32 + fi * 0.71) * 0.55;
+        float rad = 0.12 + 0.34 * fract(sin(fi * 19.37) * 43758.5453);
+        vec2 center = vec2(cos(ang), sin(ang)) * rad;
+        center += 0.075 * vec2(
+            sin(T * (1.2 + 0.07 * fi) + fi * 2.1),
+            cos(T * (1.5 + 0.05 * fi) + fi * 1.3)
+        );
+
+        float d = length(warpUv - center);
+        float blob = exp(-28.0 * d * d);
+        float flicker = 0.65 + 0.35 * sin(T * (3.0 + fi * 0.35) + fi * 4.13);
+        vec3 tint = mix(vec3(0.85, 0.9, 1.0), vec3(1.0, 1.0, 1.0), fract(fi * 0.37));
+        dots += tint * blob * flicker;
+    }
+
+    vec3 core = 1.0 - exp(-1.15 * sqrt(max(color, 0.0)));
+    core = mix(vec3(dot(core, vec3(0.333))), core, 0.25);
+    core *= vec3(0.45, 0.48, 0.5);
+
+    vec3 finalColor = core + dots * 0.9;
+    finalColor *= 1.0 - r2 * 0.23;
+    finalColor *= 0.58;
+    finalColor += vec3(0.01, 0.012, 0.015) * (1.0 - smoothstep(0.0, 1.0, r2));
+
+    float alpha = clamp(max(max(finalColor.r, finalColor.g), finalColor.b) * 1.15, 0.0, 1.0);
+    fragColor = vec4(finalColor, alpha);
 }

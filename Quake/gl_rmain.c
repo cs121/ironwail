@@ -108,16 +108,6 @@ static const float r_identity_mat4[16] = {
 
 #define SHADOW_DLIGHT_FACES 6
 
-#define SHADOW_CASTER_U_VIEWPROJ        0
-#define SHADOW_CASTER_U_LIGHTPOS_FAR    4
-#define SHADOW_CASTER_U_MODE            8
-
-#define SHADOW_RECV_U_SUN_VIEWPROJ      30
-#define SHADOW_RECV_U_ENABLES_DEBUG     34
-#define SHADOW_RECV_U_DLIGHT_INDICES    35
-#define SHADOW_RECV_U_BIAS_COUNTS       36
-#define SHADOW_RECV_U_PCF_TEXEL         37
-
 typedef struct shadow_runtime_s
 {
 	qboolean	valid;
@@ -142,6 +132,85 @@ typedef struct shadow_draw_context_s
 } shadow_draw_context_t;
 
 static shadow_draw_context_t r_shadow_draw_ctx;
+
+typedef struct shadow_receiver_uniforms_s
+{
+	GLuint	program;
+	GLint	sun_viewproj;
+	GLint	enables_debug;
+	GLint	dlight_indices;
+	GLint	bias_counts;
+	GLint	pcf_texel;
+} shadow_receiver_uniforms_t;
+
+typedef struct shadow_caster_uniforms_s
+{
+	GLuint	program;
+	GLint	viewproj;
+	GLint	lightpos_far;
+	GLint	mode;
+} shadow_caster_uniforms_t;
+
+static shadow_receiver_uniforms_t r_shadow_receiver_uniforms[16];
+static int r_shadow_receiver_uniforms_count = 0;
+static shadow_caster_uniforms_t r_shadow_caster_uniforms[8];
+static int r_shadow_caster_uniforms_count = 0;
+
+static shadow_receiver_uniforms_t *R_Shadow_GetReceiverUniforms (GLuint program)
+{
+	int i;
+
+	for (i = 0; i < r_shadow_receiver_uniforms_count; ++i)
+	{
+		if (r_shadow_receiver_uniforms[i].program == program)
+			return &r_shadow_receiver_uniforms[i];
+	}
+
+	/* Shader programs can be recreated on reload/restart.
+	 * If the fixed cache fills with stale IDs, reset it and repopulate. */
+	if (r_shadow_receiver_uniforms_count >= (int)countof (r_shadow_receiver_uniforms))
+	{
+		r_shadow_receiver_uniforms_count = 0;
+		memset (r_shadow_receiver_uniforms, 0, sizeof (r_shadow_receiver_uniforms));
+	}
+
+	{
+		shadow_receiver_uniforms_t *u = &r_shadow_receiver_uniforms[r_shadow_receiver_uniforms_count++];
+		u->program = program;
+		u->sun_viewproj = GL_GetUniformLocationFunc (program, "ShadowSunViewProj");
+		u->enables_debug = GL_GetUniformLocationFunc (program, "ShadowEnableDebug");
+		u->dlight_indices = GL_GetUniformLocationFunc (program, "ShadowDLightIndices");
+		u->bias_counts = GL_GetUniformLocationFunc (program, "ShadowBiasCounts");
+		u->pcf_texel = GL_GetUniformLocationFunc (program, "ShadowPCFTexel");
+		return u;
+	}
+}
+
+static shadow_caster_uniforms_t *R_Shadow_GetCasterUniforms (GLuint program)
+{
+	int i;
+
+	for (i = 0; i < r_shadow_caster_uniforms_count; ++i)
+	{
+		if (r_shadow_caster_uniforms[i].program == program)
+			return &r_shadow_caster_uniforms[i];
+	}
+
+	if (r_shadow_caster_uniforms_count >= (int)countof (r_shadow_caster_uniforms))
+	{
+		r_shadow_caster_uniforms_count = 0;
+		memset (r_shadow_caster_uniforms, 0, sizeof (r_shadow_caster_uniforms));
+	}
+
+	{
+		shadow_caster_uniforms_t *u = &r_shadow_caster_uniforms[r_shadow_caster_uniforms_count++];
+		u->program = program;
+		u->viewproj = GL_GetUniformLocationFunc (program, "ShadowViewProj");
+		u->lightpos_far = GL_GetUniformLocationFunc (program, "ShadowLightPosFar");
+		u->mode = GL_GetUniformLocationFunc (program, "ShadowMode");
+		return u;
+	}
+}
 
 static void R_Shadow_MatrixIdentity (float m[16])
 {
@@ -1446,15 +1515,6 @@ static GLuint GL_GenerateBloomTexture (void)
 		return fallback;
 
 	float threshold = q_max (0.f, r_bloom_threshold.value);
-	qboolean msaa = framebufs.scene.samples > 1;
-	GLuint velocity_texture = 0;
-	if (framebufs.scene.velocity_tex)
-	{
-		velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
-		if (framesetup.scene_fbo != framebufs.scene.fbo)
-			velocity_texture = 0;
-	}
-	float mask_enabled = velocity_texture ? 1.f : 0.f;
 
 	GL_BeginGroup ("Bloom extract");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
@@ -1462,8 +1522,8 @@ static GLuint GL_GenerateBloomTexture (void)
 	GL_UseProgram (glprogs.bloom_extract);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
-	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, velocity_texture);
-	GL_Uniform4fFunc (0, threshold, mask_enabled, 0.f, 0.f);
+	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, 0);
+	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
 	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
 		(float)vid.width / (float)width,
 		(float)vid.height / (float)height);
@@ -1878,6 +1938,51 @@ static void R_GetGodraysSkyParams_Current (godrays_sky_params_t *params)
 		params);
 }
 
+static qboolean R_GodraysMediumEnabled (void)
+{
+	/* Godrays are a volumetric effect and should only run when a volumetric
+	 * fog medium path is active (fog volumes and/or froxel fog). */
+	if (R_FogVol_ShouldAffectPostFX ())
+		return true;
+	if (r_fogvol.value > 0.f && r_fogvol_froxel.value > 0.f)
+		return true;
+	return false;
+}
+
+static void R_GetGodraysLightPos_Current (float *out_x, float *out_y)
+{
+	const sun_t *sun;
+	float dist;
+	vec3_t sun_world;
+	vec3_t proj;
+	float x = 0.5f;
+	float y = 0.5f;
+
+	if (!out_x || !out_y)
+		return;
+
+	if (!R_WorldHasSun ())
+	{
+		*out_x = x;
+		*out_y = y;
+		return;
+	}
+
+	sun = R_GetSun ();
+	dist = q_max (256.f, q_max (gl_farclip.value * 0.5f, 1024.f));
+	VectorMA (r_refdef.vieworg, dist, sun->dir, sun_world);
+	ProjectVector (sun_world, r_matviewproj, proj);
+
+	if (proj[2] > 0.f)
+	{
+		x = CLAMP (0.f, proj[0] * 0.5f + 0.5f, 1.f);
+		y = CLAMP (0.f, proj[1] * 0.5f + 0.5f, 1.f);
+	}
+
+	*out_x = x;
+	*out_y = y;
+}
+
 static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 {
 	int width = vid.width;
@@ -2018,6 +2123,8 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	medium_scatter_source_t medium = { 0, 0.f };
 	GLuint volumetric_tex = 0;
 	float volumetric_enabled = 0.f;
+
+	R_GetGodraysLightPos_Current (&light_x, &light_y);
 
 	if (r_godrays.value > 0.f)
 	{
@@ -2669,7 +2776,9 @@ void GL_PostProcess (void)
 		postfx_lut_strength = 0.f;
 	}
 
-	godrays_enabled = (r_godrays.value > 0.f && R_Godrays_IsReady (cl.worldmodel, r_framecount));
+	godrays_enabled = (r_godrays.value > 0.f
+		&& R_GodraysMediumEnabled ()
+		&& R_Godrays_IsReady (cl.worldmodel, r_framecount));
 	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
 	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
 	godrays_debug_enabled = (godrays_debug > 0.f || godrays_debug_source > 0.f);
@@ -3505,8 +3614,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
 		return true;
 
-	/* Bloom extraction relies on material masks in scene velocity alpha.
-	 * Route bloom frames through the scene FBO so particles (mask=2) stay excluded. */
+	/* Bloom enabled: keep scene-effects path active for a full-frame bloom extract/composite pass. */
 	if (r_bloom.value > 0.f)
 		return true;
 
@@ -3533,6 +3641,7 @@ GL_NeedsPostprocess
 qboolean GL_NeedsPostprocess (void)
 {
 	float saturation;
+	qboolean godrays_medium;
 
 	if (r_postfx.value <= 0.f)
 		return false;
@@ -3548,7 +3657,8 @@ qboolean GL_NeedsPostprocess (void)
 		return true;
 	if (r_ssao.value > 0.f)
 		return true;
-	if (r_godrays.value > 0.f)
+	godrays_medium = R_GodraysMediumEnabled ();
+	if (r_godrays.value > 0.f && godrays_medium)
 		return true;
 	if (R_FogVol_ShouldAffectPostFX ())
 		return true;
@@ -4979,8 +5089,9 @@ void R_Shadow_ApplyWorldReceiverUniforms (GLuint program)
 	float enabled, sun_enabled, dlight_enabled;
 	GLuint suntex = 0;
 	GLuint dlighttex = 0;
-
-	(void)program;
+	shadow_receiver_uniforms_t *u = R_Shadow_GetReceiverUniforms (program);
+	if (!u)
+		return;
 
 	enabled = (framebufs.shadow.available && R_Shadow_Enabled () && r_shadow_state.valid) ? 1.f : 0.f;
 	sun_enabled = (enabled > 0.f && R_Shadow_SunEnabled () && framebufs.shadow.sun_depth_tex) ? 1.f : 0.f;
@@ -4995,18 +5106,23 @@ void R_Shadow_ApplyWorldReceiverUniforms (GLuint program)
 	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, suntex);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_CUBE_MAP_ARRAY, dlighttex);
 
-	GL_UniformMatrix4fvFunc (SHADOW_RECV_U_SUN_VIEWPROJ, 1, GL_FALSE, r_shadow_state.sun_viewproj);
-	GL_Uniform4fFunc (SHADOW_RECV_U_ENABLES_DEBUG, enabled, sun_enabled, dlight_enabled, CLAMP (0.f, r_shadow_debug.value, 4.f));
-	GL_Uniform4fFunc (SHADOW_RECV_U_DLIGHT_INDICES, (float)idx[0], (float)idx[1], (float)idx[2], (float)idx[3]);
-	GL_Uniform4fFunc (SHADOW_RECV_U_BIAS_COUNTS, (float)r_shadow_state.num_dlights,
-		q_max (0.f, r_shadow_sun_bias.value),
-		q_max (0.f, r_shadow_dlight_bias.value),
-		0.f);
-	GL_Uniform4fFunc (SHADOW_RECV_U_PCF_TEXEL,
-		q_max (0.f, r_shadow_sun_pcf.value),
-		q_max (0.f, r_shadow_dlight_pcf.value),
-		framebufs.shadow.sun_size > 0 ? 1.f / (float)framebufs.shadow.sun_size : 0.f,
-		framebufs.shadow.dlight_size > 0 ? 1.f / (float)framebufs.shadow.dlight_size : 0.f);
+	if (u->sun_viewproj >= 0)
+		GL_UniformMatrix4fvFunc (u->sun_viewproj, 1, GL_FALSE, r_shadow_state.sun_viewproj);
+	if (u->enables_debug >= 0)
+		GL_Uniform4fFunc (u->enables_debug, enabled, sun_enabled, dlight_enabled, CLAMP (0.f, r_shadow_debug.value, 4.f));
+	if (u->dlight_indices >= 0)
+		GL_Uniform4fFunc (u->dlight_indices, (float)idx[0], (float)idx[1], (float)idx[2], (float)idx[3]);
+	if (u->bias_counts >= 0)
+		GL_Uniform4fFunc (u->bias_counts, (float)r_shadow_state.num_dlights,
+			q_max (0.f, r_shadow_sun_bias.value),
+			q_max (0.f, r_shadow_dlight_bias.value),
+			0.f);
+	if (u->pcf_texel >= 0)
+		GL_Uniform4fFunc (u->pcf_texel,
+			q_max (0.f, r_shadow_sun_pcf.value),
+			q_max (0.f, r_shadow_dlight_pcf.value),
+			framebufs.shadow.sun_size > 0 ? 1.f / (float)framebufs.shadow.sun_size : 0.f,
+			framebufs.shadow.dlight_size > 0 ? 1.f / (float)framebufs.shadow.dlight_size : 0.f);
 }
 
 void R_Shadow_ApplyAliasReceiverUniforms (GLuint program)
@@ -5040,14 +5156,20 @@ void R_Shadow_ApplyAliasReceiverUniforms (GLuint program)
 
 void R_Shadow_ApplyWorldCasterUniforms (GLuint program)
 {
-	(void)program;
-	GL_UniformMatrix4fvFunc (SHADOW_CASTER_U_VIEWPROJ, 1, GL_FALSE, r_shadow_state.caster_viewproj);
-	GL_Uniform4fFunc (SHADOW_CASTER_U_LIGHTPOS_FAR,
-		r_shadow_state.caster_lightpos_far_mode[0],
-		r_shadow_state.caster_lightpos_far_mode[1],
-		r_shadow_state.caster_lightpos_far_mode[2],
-		r_shadow_state.caster_lightpos_far_mode[3]);
-	GL_Uniform1iFunc (SHADOW_CASTER_U_MODE, r_shadow_state.caster_mode);
+	shadow_caster_uniforms_t *u = R_Shadow_GetCasterUniforms (program);
+	if (!u)
+		return;
+
+	if (u->viewproj >= 0)
+		GL_UniformMatrix4fvFunc (u->viewproj, 1, GL_FALSE, r_shadow_state.caster_viewproj);
+	if (u->lightpos_far >= 0)
+		GL_Uniform4fFunc (u->lightpos_far,
+			r_shadow_state.caster_lightpos_far_mode[0],
+			r_shadow_state.caster_lightpos_far_mode[1],
+			r_shadow_state.caster_lightpos_far_mode[2],
+			r_shadow_state.caster_lightpos_far_mode[3]);
+	if (u->mode >= 0)
+		GL_Uniform1iFunc (u->mode, r_shadow_state.caster_mode);
 }
 
 void R_Shadow_ApplyAliasCasterUniforms (GLuint program)
@@ -5091,13 +5213,13 @@ void R_RenderDLightShadowMaps (void)
 	if (r_shadow_draw_ctx.brush_count <= 0 && r_shadow_draw_ctx.alias_count <= 0)
 		return;
 
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.shadow.dlight_fbo);
 	for (slot = 0; slot < r_shadow_state.num_dlights; ++slot)
 	{
 		const vec4_t *light = &r_shadow_state.dlight_pos_radius[slot];
 		for (face = 0; face < SHADOW_DLIGHT_FACES; ++face)
 		{
 			int layer = slot * SHADOW_DLIGHT_FACES + face;
-			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.shadow.dlight_fbo);
 			GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.dlight_depth_tex, 0, layer);
 			glViewport (0, 0, framebufs.shadow.dlight_size, framebufs.shadow.dlight_size);
 			glClear (GL_DEPTH_BUFFER_BIT);
@@ -5114,6 +5236,10 @@ void R_RenderDLightShadowMaps (void)
 void R_RenderShadowMaps (void)
 {
 	int old_viewport[4];
+	GLint old_draw_fbo = 0;
+	GLint old_read_fbo = 0;
+	GLint old_depth_func = GL_LEQUAL;
+	GLdouble old_clear_depth = 1.0;
 
 	R_Shadow_ResetRuntime ();
 	R_Shadow_ClearDrawContext ();
@@ -5136,6 +5262,15 @@ void R_RenderShadowMaps (void)
 		R_Shadow_UpdateDlightMatrices ();
 
 	glGetIntegerv (GL_VIEWPORT, old_viewport);
+	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &old_draw_fbo);
+	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &old_read_fbo);
+	glGetIntegerv (GL_DEPTH_FUNC, &old_depth_func);
+	glGetDoublev (GL_DEPTH_CLEAR_VALUE, &old_clear_depth);
+	/* Shadow maps store standard (non-reversed) depth.
+	 * Force LEQUAL + clear=1 so nearer occluders win deterministically,
+	 * even when the main scene uses clip-control reversed Z. */
+	glDepthFunc (GL_LEQUAL);
+	glClearDepth (1.0);
 	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
 	GL_BeginGroup ("Shadow maps");
@@ -5143,8 +5278,11 @@ void R_RenderShadowMaps (void)
 	R_RenderDLightShadowMaps ();
 	GL_EndGroup ();
 
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, old_draw_fbo);
+	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, old_read_fbo);
 	glViewport (old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
+	glDepthFunc (old_depth_func);
+	glClearDepth (old_clear_depth);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 	r_shadow_state.valid =

@@ -52,15 +52,14 @@ layout(location=0) out vec4 outColor;
 
 // ── shared bilateral tap accumulator ──────────────────────────────────────
 // FIX #3: Single implementation used by both tap-count paths.
-// FIX #2: fullTap uses tapCoord * 2 (top-left of the 2×2 block) so the depth
-//         sample always corresponds to the correct representative pixel.
+// FIX #2: fullTap uses tapCoord * 2 + 1 to match the halfres fog pass depth lattice.
 // FIX #6: halfSizeSafe ensures clamp bounds are never negative.
 void AccumTap(ivec2 tapCoord, ivec2 halfSizeSafe, ivec2 fullSizeSafe,
               float depthCenter, inout vec4 accum, inout float weightSum)
 {
 	ivec2 clampedTap = clamp(tapCoord, ivec2(0), halfSizeSafe);
-	// FIX #2: representative full-res texel = top-left of the 2×2 block.
-	ivec2 fullTap    = clamp(clampedTap * 2, ivec2(0), fullSizeSafe);
+	// Match the representative depth texel used by the halfres fog pass.
+	ivec2 fullTap    = clamp(clampedTap * 2 + ivec2(1), ivec2(0), fullSizeSafe);
 	float depthTap   = texelFetch(SceneDepth, fullTap, 0).r;
 	float weight     = exp(-abs(depthTap - depthCenter) * FogUpsampleK);
 	// Accumulate RGBA: RGB=fog color, A=fog density (1-transmittance).

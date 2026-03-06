@@ -151,8 +151,10 @@ layout(location=8) in vec3 in_dlight_color;
 		vec4 color = vec4(GammaToLinear(OUT_COLOR.rgb), OUT_COLOR.a);
 		float z = 1.0 / gl_FragCoord.w;
 		float weight = clamp(color.a * color.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);
-		out_accum = vec4(color.rgb, color.a * weight);
-		out_accum.rgb *= out_accum.a;
+		// WBOIT: single atomic write — matches world.frag convention exactly.
+		// BUG FIX: two-step write (assign then *= out_accum.a) is undefined on
+		// some drivers; collapsed into one expression.
+		out_accum  = vec4(color.rgb * color.a * weight, color.a * weight);
 		out_reveal = color.a;
 	}
 
@@ -238,6 +240,8 @@ float SampleDLightShadowSlot(vec3 worldPos, vec3 lightPos, float radius, int slo
 		return 1.0;
 
 	vec3 dirN = dir / dist;
+	// INVARIANTE: ref = dist/radius korrekt NUR wenn farPlane == radius beim Shadow-Render-Pass.
+	// CPU: ShadowLightPosFar.w = l.radius setzen.
 	float ref = dist / radius;
 	float bias = max(ShadowBiasCounts.z, 0.0);
 	float pcf = max(ShadowPCFTexel.y, 0.0) * max(ShadowPCFTexel.w, 0.0) * 2.0;
@@ -401,13 +405,26 @@ void main()
 	vec3 albedo = result.rgb;
 	dlight_contrib = ComputeAliasDLightContribution(world_pos, world_nor);
 	if (ShadowNumLights < 0.5)
-		dlight_contrib = in_dlight_color;
-	dlight_shadow = ComputeAliasDLightShadow(world_pos);
+	{
+		// Legacy path: per-light shadow already absent from in_dlight_color;
+		// apply the aggregated shadow term here.
+		// BUG FIX: was missing dlight_shadow multiplication entirely.
+		dlight_shadow = ComputeAliasDLightShadow(world_pos);
+		dlight_contrib = in_dlight_color * dlight_shadow;
+	}
+	else
+	{
+		// Per-light shadow already integrated inside ComputeAliasDLightContribution().
+		// Still compute aggregate for debug visualiser.
+		dlight_shadow = ComputeAliasDLightShadow(world_pos);
+	}
 	result.rgb += albedo * dlight_contrib;
 
 	if (ShadowEnableDebug.x > 0.5 && ShadowSunDirEnabled.w > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
 	{
-		vec3 sun_to_surface = -normalize(ShadowSunDirEnabled.xyz);
+		// ShadowSunDirEnabled.xyz is scene->sun; negate for incoming light direction.
+		// The vector is pre-normalized on the CPU — no normalize() needed here.
+		vec3 sun_to_surface = -ShadowSunDirEnabled.xyz;
 		float ndotl = max(dot(world_nor, sun_to_surface), 0.0);
 		if (ndotl > 0.0)
 		{
@@ -490,8 +507,10 @@ void main()
 	vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
 	float viewModelMask = ((in_flags & ALIAS_FLAG_NO_MOTION_BLUR) != 0) ? 1.0 : 0.0;
 	vec2 velocityOut = vec2(0.0);
+	// BUG FIX: was writing velocity * result.a — multiply is wrong, alpha ~=1 anyway
+	// for the opaque gate; write raw velocity to avoid sub-pixel ghosting.
 	if (viewModelMask < 0.5 && result.a >= 0.999)
-		velocityOut = velocity * result.a;
+		velocityOut = velocity;
 	out_velocity = vec4(velocityOut, viewModelMask, 1.0);
 #endif
 
