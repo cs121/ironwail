@@ -715,6 +715,15 @@ void main()
 	}
 
 	int adaptiveSteps = int(stepCount); // adaptive, already capped at FogSteps
+	bool doGodrayCoupling = (FogGodrayCoupling != 0);
+	float shaftEnergyPre = 0.0;
+	if (doGodrayCoupling)
+	{
+		// Safe to precompute once: shaftUv depends only on screenUv, which is constant per pixel.
+		vec2 shaftUv = clamp(screenUv, vec2(0.0), vec2(1.0));
+		vec3 shafts = texture(FogGodrayShaftsTex, shaftUv).rgb;
+		shaftEnergyPre = max(shafts.r, max(shafts.g, shafts.b)) * max(FogGodrayShaftsParams.w, 0.0);
+	}
 	float sigmaEvenPrev = 0.0;
 	vec3 lightScatterPrev = vec3(0.0);
 	for (int i = 0; i < FogSteps; ++i)
@@ -755,13 +764,10 @@ void main()
 		// phaseSun is already precomputed per-ray (constant for all steps on same ray).
 		vec3  stepScatter = (1.0 - att) * (scatterColor * phaseSun + sunRadiance); // BUG-F-01 FIX: removed inner *transmittance (caused transmittance^2 weighting for sun term)
 		float godrayInject = 0.0;
-		if (FogGodrayCoupling != 0)
+		if (doGodrayCoupling)
 		{
-			vec2 shaftUv = clamp(screenUv, vec2(0.0), vec2(1.0));
-			vec3 shafts = texture(FogGodrayShaftsTex, shaftUv).rgb;
-			float shaftEnergy = max(shafts.r, max(shafts.g, shafts.b)) * max(FogGodrayShaftsParams.w, 0.0);
 			float depthGate = clamp(1.0 - (t / max(FogDepthParams.y, 1e-3)), 0.0, 1.0);
-			godrayInject = shaftEnergy * depthGate * max(FogGodrayShaftsParams.z, 0.0);
+			godrayInject = shaftEnergyPre * depthGate * max(FogGodrayShaftsParams.z, 0.0);
 			stepScatter += FogSunColor * FogSunScatter * (1.0 - att) * godrayInject;
 		}
 		if (doLightgrid)
