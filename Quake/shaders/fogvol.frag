@@ -127,7 +127,7 @@ layout(location=38) uniform int   FogFroxelParityMode; // 0: froxel perf fast pa
 layout(location=39) uniform vec3  FogLightSourceScales; // x: froxel, y: local light list, z: lightgrid/static
 layout(location=40) uniform int   FogLightingMode; // 0=off, 1=raymarch, 2=froxel, 3=froxel+raymarch detail
 layout(location=41) uniform int   FogGodrayCoupling;
-layout(location=42) uniform vec4  FogGodrayShaftsParams; // xy: shafts texture size, z: coupling strength
+layout(location=42) uniform vec4  FogGodrayShaftsParams; // xy: shafts texture size, z: coupling strength, w: froxel godray scale
 layout(location=43) uniform vec4  FogFroxelTemporalParams; // x: alpha, y: reject threshold, z: camera delta, w: prev valid
 
 layout(location=0) out vec4 FragColor;
@@ -758,7 +758,7 @@ void main()
 		{
 			vec2 shaftUv = clamp(screenUv, vec2(0.0), vec2(1.0));
 			vec3 shafts = texture(FogGodrayShaftsTex, shaftUv).rgb;
-			float shaftEnergy = max(shafts.r, max(shafts.g, shafts.b));
+			float shaftEnergy = max(shafts.r, max(shafts.g, shafts.b)) * max(FogGodrayShaftsParams.w, 0.0);
 			float depthGate = clamp(1.0 - (t / max(FogDepthParams.y, 1e-3)), 0.0, 1.0);
 			godrayInject = shaftEnergy * depthGate * max(FogGodrayShaftsParams.z, 0.0);
 			stepScatter += FogSunColor * FogSunScatter * (1.0 - att) * godrayInject;
