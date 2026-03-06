@@ -94,8 +94,11 @@ typedef struct fogvol_light_stats_s
 	int broadphase_candidates;
 	int narrowphase_candidates;
 	int narrowphase_accepted;
+	int lightgrid_probes;
 	double broadphase_seconds;
 	double narrowphase_seconds;
+	double lightgrid_seconds;
+	double lightgrid_upload_seconds;
 } fogvol_light_stats_t;
 
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
@@ -3084,13 +3087,17 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 
 void R_FogVol_Render (void)
 {
+	static const vec3_t fog_lightgrid_corner_lut[8] = {
+		{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f, 0.f},
+		{0.f, 0.f, 1.f}, {1.f, 0.f, 1.f}, {0.f, 1.f, 1.f}, {1.f, 1.f, 1.f}
+	};
 	static int last_dumpstate = -1;
 	int steps;
 	GLuint buf;
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
 	fog_light_lists_gpu_t fog_lights;
-	fog_lightgrid_gpu_t fog_lightgrid;
+	fog_lightgrid_gpu_t fog_lightgrid[MAX_FOGVOLUMES];
 	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 9);
 	float inv_viewproj[16];
 	GLuint src_tex;
@@ -3270,15 +3277,39 @@ void R_FogVol_Render (void)
 			fog_light_enabled = fog_light_enabled || (count > 0);
 		}
 
-		if (light_stats_enabled)
+	}
+
+	memset (&fog_lightgrid, 0, sizeof (fog_lightgrid));
+	if (fog_lightgrid_enabled)
+	{
+		const double lightgrid_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
+
+		for (int i = 0; i < r_fogvolume_count; ++i)
 		{
-			Con_DPrintf ("fogvol_light_stats: broadphase_candidates=%d narrowphase_candidates=%d accepted=%d broadphase_ms=%.3f narrowphase_ms=%.3f\n",
-				light_stats.broadphase_candidates,
-				light_stats.narrowphase_candidates,
-				light_stats.narrowphase_accepted,
-				light_stats.broadphase_seconds * 1000.0,
-				light_stats.narrowphase_seconds * 1000.0);
+			const fog_volume_t *v = &r_fogvolumes[i];
+
+			for (int c = 0; c < 8; ++c)
+			{
+				vec3_t probe_pos;
+				const lightgrid_probe_t *probe;
+
+				probe_pos[0] = v->mins[0] + (v->maxs[0] - v->mins[0]) * fog_lightgrid_corner_lut[c][0];
+				probe_pos[1] = v->mins[1] + (v->maxs[1] - v->mins[1]) * fog_lightgrid_corner_lut[c][1];
+				probe_pos[2] = v->mins[2] + (v->maxs[2] - v->mins[2]) * fog_lightgrid_corner_lut[c][2];
+				probe = R_GetLightgridSample (probe_pos);
+				if (probe)
+				{
+					fog_lightgrid[i].probe_rgb[c][0] = probe->rgb[0] * probe->ao;
+					fog_lightgrid[i].probe_rgb[c][1] = probe->rgb[1] * probe->ao;
+					fog_lightgrid[i].probe_rgb[c][2] = probe->rgb[2] * probe->ao;
+				}
+				if (light_stats_enabled)
+					light_stats.lightgrid_probes++;
+			}
 		}
+
+		if (light_stats_enabled)
+			light_stats.lightgrid_seconds = Sys_DoubleTime () - lightgrid_start;
 	}
 
 	for (int i = 0; i < r_fogvolume_count; ++i)
@@ -3362,6 +3393,28 @@ void R_FogVol_Render (void)
 		GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
 	}
 #endif
+	{
+		const double lightgrid_upload_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
+
+		/* Upload all per-volume 8-corner probes once per frame; shader indexes by FogVolumeIndex. */
+		GL_Upload (GL_UNIFORM_BUFFER, fog_lightgrid, sizeof (fog_lightgrid_gpu_t) * r_fogvolume_count, &buf, &ofs);
+		GL_BindBufferRange (GL_UNIFORM_BUFFER, 5, buf, (GLintptr)ofs, sizeof (fog_lightgrid_gpu_t) * r_fogvolume_count);
+
+		if (light_stats_enabled)
+			light_stats.lightgrid_upload_seconds = Sys_DoubleTime () - lightgrid_upload_start;
+	}
+	if (light_stats_enabled)
+	{
+		Con_DPrintf ("fogvol_light_stats: broadphase_candidates=%d narrowphase_candidates=%d accepted=%d broadphase_ms=%.3f narrowphase_ms=%.3f lightgrid_probe_ms=%.3f lightgrid_upload_ms=%.3f probes=%d\n",
+			light_stats.broadphase_candidates,
+			light_stats.narrowphase_candidates,
+			light_stats.narrowphase_accepted,
+			light_stats.broadphase_seconds * 1000.0,
+			light_stats.narrowphase_seconds * 1000.0,
+			light_stats.lightgrid_seconds * 1000.0,
+			light_stats.lightgrid_upload_seconds * 1000.0,
+			light_stats.lightgrid_probes);
+	}
 
 	GL_BeginGroup ("Fog volumes");
 	R_FogVol_UseProgram (glprogs.fogvol);
@@ -3414,10 +3467,6 @@ void R_FogVol_Render (void)
 		fog_volume_t *v = &r_fogvolumes[i];
 		int x0, y0, x1, y1;
 		GLuint src_fbo;
-		static const vec3_t corner_lut[8] = {
-			{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f, 0.f},
-			{0.f, 0.f, 1.f}, {1.f, 0.f, 1.f}, {0.f, 1.f, 1.f}, {1.f, 1.f, 1.f}
-		};
 
 		if (!v->enabled)
 			continue;
@@ -3496,27 +3545,6 @@ void R_FogVol_Render (void)
 				i, src_tex, depth_tex, dst_tex, src_fbo, dst_fbo, x0, y0, x1 - x0, y1 - y0);
 		R_FogVol_AssertNoFeedbackHazard ("ITER", dst_tex, src_tex);
 		R_FogVol_AssertNoBoundFeedbackHazard ("ITER");
-		memset (&fog_lightgrid, 0, sizeof (fog_lightgrid));
-		if (fog_lightgrid_enabled)
-		{
-			for (int c = 0; c < 8; ++c)
-			{
-				vec3_t probe_pos;
-				const lightgrid_probe_t *probe;
-				probe_pos[0] = v->mins[0] + (v->maxs[0] - v->mins[0]) * corner_lut[c][0];
-				probe_pos[1] = v->mins[1] + (v->maxs[1] - v->mins[1]) * corner_lut[c][1];
-				probe_pos[2] = v->mins[2] + (v->maxs[2] - v->mins[2]) * corner_lut[c][2];
-				probe = R_GetLightgridSample (probe_pos);
-				if (probe)
-				{
-					fog_lightgrid.probe_rgb[c][0] = probe->rgb[0] * probe->ao;
-					fog_lightgrid.probe_rgb[c][1] = probe->rgb[1] * probe->ao;
-					fog_lightgrid.probe_rgb[c][2] = probe->rgb[2] * probe->ao;
-				}
-			}
-		}
-		GL_Upload (GL_UNIFORM_BUFFER, &fog_lightgrid, sizeof (fog_lightgrid), &buf, &ofs);
-		GL_BindBufferRange (GL_UNIFORM_BUFFER, 5, buf, (GLintptr)ofs, sizeof (fog_lightgrid));
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
 		GL_SetScissorEnabled (true);
