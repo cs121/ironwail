@@ -180,6 +180,8 @@ cvar_t r_fogvol_globalfog_height = { "r_fogvol_globalfog_height", "0", CVAR_ARCH
 cvar_t r_fogvol_globalfog_height_scale = { "r_fogvol_globalfog_height_scale", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_priority = { "r_fogvol_globalfog_priority", "-1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
+/* 0=off, 1=raymarch local lights, 2=froxel local lights (default), 3=froxel base + conservative raymarch detail */
+cvar_t r_fogvol_lighting_mode = { "r_fogvol_lighting_mode", "2", CVAR_ARCHIVE };
 cvar_t r_fogvol_lightgrid = { "r_fogvol_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
 cvar_t r_fogvol_dlightscale = { "r_fogvol_dlightscale", "1", CVAR_ARCHIVE };
@@ -263,6 +265,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_globalfog_height_scale, "global", "0"},
 	{&r_fogvol_globalfog_priority, "global", "-1"},
 	{&r_fogvol_light, "lighting", "0"},
+	{&r_fogvol_lighting_mode, "lighting", "2"},
 	{&r_fogvol_lightgrid, "lighting", "1"},
 	{&r_fogvol_light_max, "lighting", "16"},
 	{&r_fogvol_dlightscale, "lighting", "1"},
@@ -328,13 +331,36 @@ enum
 	FOGVOL_U_FROXEL_PARAMS1 = 36,
 	FOGVOL_U_FROXEL_DEBUG = 37,
 	FOGVOL_U_FROXEL_PARITY_MODE = 38,
-	FOGVOL_U_LIGHT_SOURCE_SCALES = 39,
-	FOGVOL_U_GODRAY_COUPLING = 40,
-	FOGVOL_U_GODRAY_SHAFTS_PARAMS = 41,
-	FOGVOL_U_COUNT = 42
+	FOGVOL_U_LIGHTING_MODE = 39,
+	FOGVOL_U_LIGHT_SOURCE_SCALES = 40,
+	FOGVOL_U_GODRAY_COUPLING = 41,
+	FOGVOL_U_GODRAY_SHAFTS_PARAMS = 42,
+	FOGVOL_U_COUNT = 43
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_GODRAY_SHAFTS_PARAMS == 41);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_GODRAY_SHAFTS_PARAMS == 42);
+
+#define FOGVOL_LIGHTING_MODE_OFF 0
+#define FOGVOL_LIGHTING_MODE_RAYMARCH_ONLY 1
+#define FOGVOL_LIGHTING_MODE_FROXEL_ONLY 2
+#define FOGVOL_LIGHTING_MODE_FROXEL_BASE_RAYMARCH_DETAIL 3
+
+static int R_FogVol_LightingMode (void)
+{
+	return CLAMP (FOGVOL_LIGHTING_MODE_OFF, (int)Q_rint (r_fogvol_lighting_mode.value), FOGVOL_LIGHTING_MODE_FROXEL_BASE_RAYMARCH_DETAIL);
+}
+
+static qboolean R_FogVol_UseFroxelLights (void)
+{
+	const int mode = R_FogVol_LightingMode ();
+	return mode == FOGVOL_LIGHTING_MODE_FROXEL_ONLY || mode == FOGVOL_LIGHTING_MODE_FROXEL_BASE_RAYMARCH_DETAIL;
+}
+
+static qboolean R_FogVol_UseRaymarchLocalLights (void)
+{
+	const int mode = R_FogVol_LightingMode ();
+	return mode == FOGVOL_LIGHTING_MODE_RAYMARCH_ONLY || mode == FOGVOL_LIGHTING_MODE_FROXEL_BASE_RAYMARCH_DETAIL;
+}
 
 typedef struct froxel_state_s
 {
@@ -1839,7 +1865,7 @@ static void R_FogVol_WarnFroxelLightingConfig (void)
 
 	if (warned)
 		return;
-	if (r_fogvol_froxel.value > 0.f && r_fogvol_light.value <= 0.f)
+	if (R_FogVol_UseFroxelLights () && r_fogvol_froxel.value > 0.f && r_fogvol_light.value <= 0.f)
 	{
 		Con_Printf ("Warning: r_fogvol_froxel>0 requires r_fogvol_light>0 for froxel dlight injection; with r_fogvol_light<=0, froxel lighting is skipped.\n");
 		warned = true;
@@ -2611,7 +2637,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 42);
+	assert (FOGVOL_U_COUNT == 43);
 	assert (glwidth > 0);
 	assert (glheight > 0);
 	assert (view_w > 0.f);
@@ -2695,6 +2721,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		(float)q_max (1, r_froxel.dims[0]), (float)q_max (1, r_froxel.dims[1]), (float)q_max (1, r_froxel.dims[2]));
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, CLAMP (0, (int)Q_rint (r_froxel_debug.value), 2));
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, r_fogvol_froxel_parity.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, R_FogVol_LightingMode ());
 	/* Lighting-source policy for fog shading in shaders/fogvol.frag:
 	 *   X (froxel): sampled from FogFroxelLightTex.
 	 *   Y (local list): per-volume FogLights UBO iteration.
@@ -2781,7 +2808,9 @@ void R_FogVol_Render (void)
 	int frame_candidate_count = 0;
 	qboolean has_fog_bounds = false;
 	const qboolean light_stats_enabled = r_fogvol_light_stats.value > 0.f;
-	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f);
+	const qboolean use_froxel_lighting = R_FogVol_UseFroxelLights ();
+	const qboolean use_raymarch_local_lighting = R_FogVol_UseRaymarchLocalLights ();
+	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f) && use_froxel_lighting;
 	const qboolean want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
 	const qboolean want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
 	const qboolean want_froxel_godrays = froxel_injection_enabled && (r_fogvol_froxel_godrays.value > 0.f);
@@ -2876,7 +2905,7 @@ void R_FogVol_Render (void)
 	fog_lightgrid_has_data = (lightgrid && lightgrid->octree && r_lightgrid.value > 0.f);
 	fog_lightgrid_enabled = fog_lightgrid_has_data && (r_fogvol_lightgrid.value > 0.f);
 
-	if (r_fogvol_light.value > 0.f)
+	if (r_fogvol_light.value > 0.f && use_raymarch_local_lighting)
 	{
 		const double broadphase_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
 		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), MAX_FOGLIGHTS);

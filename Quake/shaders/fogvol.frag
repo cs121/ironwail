@@ -124,9 +124,10 @@ layout(location=35) uniform vec4  FogFroxelParams0; // x near, y far, z tanHalfF
 layout(location=36) uniform vec4  FogFroxelParams1; // x log(far/near), yzw dims
 layout(location=37) uniform int   FogFroxelDebug;
 layout(location=38) uniform int   FogFroxelParityMode; // 0: froxel perf fast path, 1: legacy per-light parity path
-layout(location=39) uniform vec3  FogLightSourceScales; // x: froxel, y: local light list, z: lightgrid/static
-layout(location=40) uniform int   FogGodrayCoupling;
-layout(location=41) uniform vec4  FogGodrayShaftsParams; // xy: shafts texture size, z: coupling strength
+layout(location=39) uniform int   FogLightingMode;
+layout(location=40) uniform vec3  FogLightSourceScales; // x: froxel, y: local light list, z: lightgrid/static
+layout(location=41) uniform int   FogGodrayCoupling;
+layout(location=42) uniform vec4  FogGodrayShaftsParams; // xy: shafts texture size, z: coupling strength
 
 layout(location=0) out vec4 FragColor;
 
@@ -660,10 +661,13 @@ void main()
 	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
 	int lightOffset     = max(lightList.offset_count.x, 0);
 	int lightCount      = clamp(lightList.offset_count.y, 0, MAX_FOGLIGHTS);
-	bool  doFroxelLights = (FogLightEnabled != 0) && (FogFroxelEnabled != 0) && (FogFroxelParityMode == 0) && (FogLightSourceScales.x > 0.0);
-	bool  doListLights   = (FogLightEnabled != 0) && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
-	bool  doLights       = doFroxelLights || doListLights;
-	bool  doLightgrid    = (FogLightgridEnabled != 0) && (FogLightSourceScales.z > 0.0);
+	int lightingMode    = clamp(FogLightingMode, 0, 3);
+	bool  useFroxelLighting = (lightingMode == 2 || lightingMode == 3) && (FogLightEnabled != 0) && (FogFroxelEnabled != 0) && (FogFroxelParityMode == 0) && (FogLightSourceScales.x > 0.0);
+	bool  doRaymarchLighting = (lightingMode == 1) && (FogLightEnabled != 0) && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
+	/* Mode 3 keeps froxel as base and adds only conservative local-list detail (subsampled + scaled) to avoid double-lighting. */
+	bool  doRaymarchDetail = (lightingMode == 3) && (FogLightEnabled != 0) && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
+	bool  doAnyRaymarchLocal = doRaymarchLighting || doRaymarchDetail;
+	bool  doLightgrid    = (lightingMode != 0) && (FogLightgridEnabled != 0) && (FogLightSourceScales.z > 0.0);
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated  they were
 	// accumulated but never consumed, silently wasting ALU every iteration.
@@ -756,21 +760,16 @@ void main()
 		// Froxel local-light contribution can run as a fast path; debug outputs remain
 		// independent below via FogFroxelDebug visualization modes.
 
-		if (doLights)
+		if (useFroxelLighting || doAnyRaymarchLocal)
 		{
 			vec3 lightScatter = lightScatterPrev;
 			if (FogLightSubsample == 0 || (i & 1) == 0)
 			{
-				vec3 froxelScatter = vec3(0.0);
+				vec3 froxelScatter = useFroxelLighting
+					? (SampleFroxelLight(p) * (FogDLightScale * FogLightSourceScales.x))
+					: vec3(0.0);
 				vec3 localScatter = vec3(0.0);
-				if (doFroxelLights)
-				{
-					// Froxel lighting is blended with the per-volume light list.
-					// We normalize by active source weight sum to avoid double-counting
-					// when both represent the same local lights.
-					froxelScatter = SampleFroxelLight(p) * (FogDLightScale * FogLightSourceScales.x);
-				}
-				if (doListLights)
+				if (doAnyRaymarchLocal)
 				{
 					for (int l = 0; l < MAX_FOGLIGHTS; ++l)
 					{
@@ -789,13 +788,12 @@ void main()
 					}
 					localScatter *= FogLightSourceScales.y;
 				}
-				if (doFroxelLights && doListLights)
-				{
-					float denom = max(FogLightSourceScales.x + FogLightSourceScales.y, 1e-4);
-					lightScatter = (froxelScatter + localScatter) / denom;
-				}
-				else if (doFroxelLights)
-					lightScatter = froxelScatter;
+
+				if (doRaymarchDetail)
+					localScatter *= 0.25;
+
+				if (useFroxelLighting)
+					lightScatter = froxelScatter + localScatter;
 				else
 					lightScatter = localScatter;
 				lightScatterPrev = lightScatter;
