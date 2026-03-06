@@ -122,6 +122,7 @@ layout(location=34) uniform int   FogFroxelEnabled;
 layout(location=35) uniform vec4  FogFroxelParams0; // x near, y far, z tanHalfFovX, w tanHalfFovY
 layout(location=36) uniform vec4  FogFroxelParams1; // x log(far/near), yzw dims
 layout(location=37) uniform int   FogFroxelDebug;
+layout(location=38) uniform int   FogFroxelParityMode; // 0: froxel perf fast path, 1: legacy per-light parity path
 
 layout(location=0) out vec4 FragColor;
 
@@ -655,9 +656,7 @@ void main()
 	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
 	int lightOffset     = max(lightList.offset_count.x, 0);
 	int lightCount      = clamp(lightList.offset_count.y, 0, MAX_FOGLIGHTS);
-	// Parity mode: froxel fog must receive the same lighting terms as standard fogvol.
-	// Therefore local fog lights remain enabled regardless of FogFroxelEnabled.
-	bool  doLights      = (FogLightEnabled != 0 && lightCount > 0);
+	bool  doLights      = (FogLightEnabled != 0) && ((FogFroxelEnabled != 0) || (lightCount > 0));
 	bool  doLightgrid   = (FogLightgridEnabled != 0);
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated  they were
@@ -738,19 +737,19 @@ void main()
 			stepScatter += staticScatter * (FogDLightScale * (1.0 - att));
 		}
 
-		// Keep froxel volume available for debug views, but do not add it to the
-		// regular lighting path so froxel and standard fogvol stay energy-parity.
+		// Froxel local-light contribution can run as a fast path; debug outputs remain
+		// independent below via FogFroxelDebug visualization modes.
 
 		if (doLights)
 		{
 			vec3 lightScatter = lightScatterPrev;
 			if (FogLightSubsample == 0 || (i & 1) == 0)
 			{
-				vec3 froxelLight = SampleFroxelLight(p);
-				float froxelEnergy = max(froxelLight.r, max(froxelLight.g, froxelLight.b));
-				if (FogFroxelEnabled != 0 && froxelEnergy <= 1e-4)
+				if (FogFroxelEnabled != 0 && FogFroxelParityMode == 0)
 				{
-					lightScatter = vec3(0.0);
+					// Fast path: froxel lighting is mutually exclusive with per-light UBO iteration.
+					// Froxel stores local light energy in world space; no extra local phase term needed here.
+					lightScatter = SampleFroxelLight(p) * FogDLightScale;
 				}
 				else
 				{
