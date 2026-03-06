@@ -655,7 +655,9 @@ void main()
 	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
 	int lightOffset     = max(lightList.offset_count.x, 0);
 	int lightCount      = clamp(lightList.offset_count.y, 0, MAX_FOGLIGHTS);
-	bool  doLights      = (FogLightEnabled != 0 && lightCount > 0 && FogFroxelEnabled == 0);
+	// Parity mode: froxel fog must receive the same lighting terms as standard fogvol.
+	// Therefore local fog lights remain enabled regardless of FogFroxelEnabled.
+	bool  doLights      = (FogLightEnabled != 0 && lightCount > 0);
 	bool  doLightgrid   = (FogLightgridEnabled != 0);
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated  they were
@@ -736,11 +738,8 @@ void main()
 			stepScatter += staticScatter * (FogDLightScale * (1.0 - att));
 		}
 
-		if (FogFroxelEnabled != 0)
-		{
-			vec3 froxelScatter = clamp(SampleFroxelLight(p), 0.0, 32.0);
-			stepScatter += froxelScatter * (FogDLightScale * (1.0 - att));
-		}
+		// Keep froxel volume available for debug views, but do not add it to the
+		// regular lighting path so froxel and standard fogvol stay energy-parity.
 
 		if (doLights)
 		{
