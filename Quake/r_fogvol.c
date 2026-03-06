@@ -192,6 +192,17 @@ cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_color = { "r_fogvol_sun_color", "0 0 0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel = { "r_fogvol_froxel", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_parity = { "r_fogvol_froxel_parity", "0", CVAR_ARCHIVE };
+/* Source weighting policy for local fog lighting contributions.
+ * - r_fogvol_froxel_scale controls FogFroxelLightTex contribution when enabled.
+ * - r_fogvol_lightlist_scale controls per-volume FogLights list contribution.
+ * - r_fogvol_lightgrid_scale controls baked/static FogLightgrid contribution.
+ *
+ * Default policy keeps baked/static lighting fully visible even with froxel enabled,
+ * while splitting local-light energy evenly between froxel and explicit local lists
+ * to avoid double-counting when both carry overlapping lights. */
+cvar_t r_fogvol_froxel_scale = { "r_fogvol_froxel_scale", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_lightlist_scale = { "r_fogvol_lightlist_scale", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_lightgrid_scale = { "r_fogvol_lightgrid_scale", "1", CVAR_ARCHIVE };
 /* r_froxel_debug: 0=off, 1=froxel rgb at first hit, 2=max-energy heat */
 cvar_t r_froxel_debug = { "r_froxel_debug", "0", CVAR_ARCHIVE };
 
@@ -260,6 +271,9 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_sun_color, "lighting", "0 0 0"},
 	{&r_fogvol_froxel, "lighting", "0"},
 	{&r_fogvol_froxel_parity, "lighting", "0"},
+	{&r_fogvol_froxel_scale, "lighting", "1"},
+	{&r_fogvol_lightlist_scale, "lighting", "1"},
+	{&r_fogvol_lightgrid_scale, "lighting", "1"},
 	{&r_froxel_debug, "debug", "0"},
 };
 
@@ -305,10 +319,11 @@ enum
 	FOGVOL_U_FROXEL_PARAMS1 = 36,
 	FOGVOL_U_FROXEL_DEBUG = 37,
 	FOGVOL_U_FROXEL_PARITY_MODE = 38,
-	FOGVOL_U_COUNT = 39
+	FOGVOL_U_LIGHT_SOURCE_SCALES = 39,
+	FOGVOL_U_COUNT = 40
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_FROXEL_PARITY_MODE == 38);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_LIGHT_SOURCE_SCALES == 39);
 
 typedef struct froxel_state_s
 {
@@ -2442,7 +2457,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 39);
+	assert (FOGVOL_U_COUNT == 40);
 	assert (glwidth > 0);
 	assert (glheight > 0);
 	assert (view_w > 0.f);
@@ -2526,6 +2541,19 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		(float)q_max (1, r_froxel.dims[0]), (float)q_max (1, r_froxel.dims[1]), (float)q_max (1, r_froxel.dims[2]));
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, CLAMP (0, (int)Q_rint (r_froxel_debug.value), 2));
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, r_fogvol_froxel_parity.value > 0.f ? 1 : 0);
+	/* Lighting-source policy for fog shading in shaders/fogvol.frag:
+	 *   X (froxel): sampled from FogFroxelLightTex.
+	 *   Y (local list): per-volume FogLights UBO iteration.
+	 *   Z (lightgrid): baked/static contribution from FogLightgrid probes.
+	 *
+	 * Shader normalizes X+Y only when both local-light sources are active to
+	 * avoid double-counting overlapping local lights; Z is additive by design so
+	 * static light injection remains visible with r_fogvol_froxel 1 and
+	 * r_fogvol_light 1 unless explicitly scaled down by policy cvars. */
+	GL_Uniform3fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES,
+		q_max (0.f, r_fogvol_froxel_scale.value),
+		q_max (0.f, r_fogvol_lightlist_scale.value),
+		q_max (0.f, r_fogvol_lightgrid_scale.value));
 }
 
 void R_FogVol_Render (void)
