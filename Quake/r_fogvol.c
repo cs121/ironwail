@@ -191,6 +191,7 @@ cvar_t r_fogvol_sun_dir = { "r_fogvol_sun_dir", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_color = { "r_fogvol_sun_color", "0 0 0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel = { "r_fogvol_froxel", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_froxel_parity = { "r_fogvol_froxel_parity", "0", CVAR_ARCHIVE };
 /* r_froxel_debug: 0=off, 1=froxel rgb at first hit, 2=max-energy heat */
 cvar_t r_froxel_debug = { "r_froxel_debug", "0", CVAR_ARCHIVE };
 
@@ -258,6 +259,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_sun_scatter, "lighting", "0"},
 	{&r_fogvol_sun_color, "lighting", "0 0 0"},
 	{&r_fogvol_froxel, "lighting", "0"},
+	{&r_fogvol_froxel_parity, "lighting", "0"},
 	{&r_froxel_debug, "debug", "0"},
 };
 
@@ -302,10 +304,11 @@ enum
 	FOGVOL_U_FROXEL_PARAMS0 = 35,
 	FOGVOL_U_FROXEL_PARAMS1 = 36,
 	FOGVOL_U_FROXEL_DEBUG = 37,
-	FOGVOL_U_COUNT = 38
+	FOGVOL_U_FROXEL_PARITY_MODE = 38,
+	FOGVOL_U_COUNT = 39
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_FROXEL_DEBUG == 37);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_FROXEL_PARITY_MODE == 38);
 
 typedef struct froxel_state_s
 {
@@ -2439,7 +2442,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 38);
+	assert (FOGVOL_U_COUNT == 39);
 	assert (glwidth > 0);
 	assert (glheight > 0);
 	assert (view_w > 0.f);
@@ -2522,6 +2525,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, r_froxel.log_far_near,
 		(float)q_max (1, r_froxel.dims[0]), (float)q_max (1, r_froxel.dims[1]), (float)q_max (1, r_froxel.dims[2]));
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, CLAMP (0, (int)Q_rint (r_froxel_debug.value), 2));
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, r_fogvol_froxel_parity.value > 0.f ? 1 : 0);
 }
 
 void R_FogVol_Render (void)
