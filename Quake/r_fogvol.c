@@ -361,6 +361,11 @@ typedef struct froxel_state_s
 	float *light_rgb;
 	float *prev_light_rgb;
 	vec3_t prev_vieworg;
+	int prev_frame;
+	int prev_lighting_mode;
+	int prev_parity_mode;
+	qboolean prev_froxel_enabled;
+	qboolean prev_mode_valid;
 	qboolean prev_valid;
 	qboolean valid;
 } froxel_state_t;
@@ -1452,6 +1457,8 @@ void R_Froxel_ResetResources (void)
 	r_froxel.dims[0] = 0;
 	r_froxel.dims[1] = 0;
 	r_froxel.dims[2] = 0;
+	r_froxel.prev_frame = 0;
+	r_froxel.prev_mode_valid = false;
 	r_froxel.prev_valid = false;
 	r_froxel.valid = false;
 }
@@ -1513,9 +1520,12 @@ static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)
 void R_Froxel_BeginFrame (float near_clip, float far_clip)
 {
 	int nx, ny, nz;
+	const int lighting_mode = CLAMP (0, (int)Q_rint (r_fogvol_lighting_mode.value), 3);
+	const int parity_mode = CLAMP (0, (int)Q_rint (r_fogvol_froxel_parity.value), 1);
+	const qboolean froxel_enabled = (r_fogvol_froxel.value > 0.f);
 
 	r_froxel.valid = false;
-	if (r_fogvol_froxel.value <= 0.f)
+	if (!froxel_enabled)
 		return;
 
 	nx = CLAMP (16, (r_refdef.vrect.width + 15) / 16, 192);
@@ -1530,6 +1540,17 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 
 	if (!R_Froxel_EnsureResources (nx, ny, nz))
 		return;
+
+	if (r_froxel.prev_mode_valid
+		&& (r_froxel.prev_froxel_enabled != froxel_enabled
+			|| r_froxel.prev_lighting_mode != lighting_mode
+			|| r_froxel.prev_parity_mode != parity_mode))
+		r_froxel.prev_valid = false;
+
+	r_froxel.prev_froxel_enabled = froxel_enabled;
+	r_froxel.prev_lighting_mode = lighting_mode;
+	r_froxel.prev_parity_mode = parity_mode;
+	r_froxel.prev_mode_valid = true;
 
 	memset (r_froxel.light_rgb, 0, sizeof (float) * (size_t)nx * (size_t)ny * (size_t)nz * 3u);
 	r_froxel.valid = true;
@@ -1546,6 +1567,9 @@ static void R_Froxel_BlendWithHistory (void)
 	const float camera_delta = sqrtf (delta_x * delta_x + delta_y * delta_y + delta_z * delta_z);
 
 	if (!r_froxel.valid || !r_froxel.prev_valid || !r_froxel.prev_light_rgb || alpha <= 0.f)
+		return;
+
+	if (r_froxel.prev_frame != (r_framecount - 1))
 		return;
 
 	for (int z = 0; z < nz; ++z)
@@ -1971,6 +1995,7 @@ void R_Froxel_EndFrame (void)
 	GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, 0,
 		r_froxel.dims[0], r_froxel.dims[1], r_froxel.dims[2], GL_RGB, GL_FLOAT, r_froxel.prev_light_rgb);
 	VectorCopy (r_refdef.vieworg, r_froxel.prev_vieworg);
+	r_froxel.prev_frame = r_framecount;
 	r_froxel.prev_valid = true;
 	GL_MemoryBarrierFunc (GL_TEXTURE_FETCH_BARRIER_BIT);
 }
@@ -2997,7 +3022,10 @@ void R_FogVol_Render (void)
 	}
 	else
 	{
+		/* If froxel injection is skipped this frame, drop temporal history so
+		 * the next injected frame cannot blend against stale, non-consecutive data. */
 		r_froxel.valid = false;
+		r_froxel.prev_valid = false;
 	}
 
 	memset (&fog_lights, 0, sizeof (fog_lights));
