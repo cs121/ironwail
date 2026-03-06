@@ -34,6 +34,14 @@ The dominant issue was **A + C combined**:
 - `r_fogvol_shadow_jitter` (default `1`): stochastic offset for shadow taps to reduce banding; may introduce light temporal noise.
 - `r_fogvol_sun_scatter` (default `0`): adds directional sun radiance to volumetric scattering using the existing anisotropic phase; independent from `r_fogvol_shadow` visibility so it can be tuned separately.
 - `r_fogvol_sun_color` (default `0 0 0`): optional override for directional fog light color. When left at `0 0 0`, fog sun color defaults to `R_GetSun` worldspawn color/intensity, and falls back to sky average tint when no sun is defined.
+- `r_fogvol_local_occlusion` (default `0`): optional per-local-light fog occlusion term for light-list shading (`FogLights` loop in `fogvol.frag`).
+  - `0`: disabled (legacy behavior, fastest).
+  - `1`: cheap signed depth test (single projected depth probe along sample→light ray).
+  - `2`: multi-tap depth cone trace (higher quality, higher cost).
+  - Interaction with `r_fogvol_lighting_mode` is explicit in CPU uniform setup:
+    - Active only when local light-list shading runs (`mode 1` raymarch or `mode 3` froxel+detail).
+    - Forced to `0` in pure froxel mode (`mode 2`) and lighting off (`mode 0`).
+    - Mode `2` is downgraded to mode `1` when `r_fogvol_shadow 0`.
 - `r_fogvol_godray_coupling` (default `1`): enables fogvol/godray coupling path.
   - Preferred path: inject previous-frame godray shafts into froxel lighting when `r_fogvol_froxel 1` and `r_fogvol_froxel_godrays > 0`.
   - Alternate path: sample godray shafts directly in `fogvol.frag` during march (depth-gated) when froxel path is unavailable.
@@ -58,3 +66,9 @@ The dominant issue was **A + C combined**:
    - If mode 1/2 shows little-to-no signal and counters stay near zero, froxel acceleration will not help in that scene.
 5. Verify configuration sanity:
    - If `r_fogvol_froxel=1` while `r_fogvol_light=0`, froxel injection is intentionally skipped and cannot provide performance wins.
+
+## Local-light occlusion quality/performance trade-offs
+- `r_fogvol_local_occlusion 0`: no added depth work in local-light path; use as baseline for perf captures.
+- `r_fogvol_local_occlusion 1`: adds one depth sample + one depth reconstruction per contributing light at each marched fog step. This is the recommended low-cost default when you need basic blocker awareness near geometry edges.
+- `r_fogvol_local_occlusion 2`: adds multiple projected depth taps per contributing light for a cone-like blocker test. This reduces false positives/negatives from a single depth sample, but cost scales with both light count and fog step count; reserve for capture-quality settings or scenes with few active local lights.
+- Since cost multiplies with local light-list evaluation, prefer `r_fogvol_lighting_mode 2` (pure froxel) for performance-sensitive gameplay and use modes `1`/`3` when local occlusion detail is important.

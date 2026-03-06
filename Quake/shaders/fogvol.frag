@@ -129,6 +129,8 @@ layout(location=40) uniform int   FogLightingMode; // 0=off, 1=raymarch, 2=froxe
 layout(location=41) uniform int   FogGodrayCoupling;
 layout(location=42) uniform vec4  FogGodrayShaftsParams; // xy: shafts texture size, z: coupling strength, w: froxel godray scale
 layout(location=43) uniform vec4  FogFroxelTemporalParams; // x: alpha, y: reject threshold, z: camera delta, w: prev valid
+layout(location=44) uniform int   FogLocalOcclusionMode; // 0=off, 1=cheap signed depth test, 2=multi-tap depth cone trace
+layout(location=45) uniform vec4  FogLocalOcclusionParams; // x depth thickness, y cone scale, z max dist scale, w reserved
 
 layout(location=0) out vec4 FragColor;
 
@@ -256,6 +258,64 @@ bool IsSkyDepth(float depth)
 
 // FIX #4: Accept viewUv so the NDC x/y is correct for every pixel, not just
 // the screen centre.  Original had clip.xy hardcoded to (0,0).
+float LinearEyeDepth(float depth, vec2 viewUv);
+
+vec2 ScreenUvToViewUv(vec2 screenUv)
+{
+	vec2 screenPos = screenUv * FogViewportParams.xy;
+	return (screenPos - FogViewParams.xy) * FogViewParams.zw;
+}
+
+vec2 ProjectWorldToScreenUv(vec3 worldPos)
+{
+	vec4 clip = ViewProj * vec4(worldPos, 1.0);
+	if (abs(clip.w) < 1e-6)
+		return vec2(-1.0);
+	vec2 ndc = clip.xy / clip.w;
+	return ndc * 0.5 + 0.5;
+}
+
+float LocalLightOcclusionTap(vec3 probePos, float probeViewDist, float thickness)
+{
+	vec2 uv = ProjectWorldToScreenUv(probePos);
+	if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0)
+		return 1.0;
+	float depth = texture(SceneDepth, uv).r;
+	if (IsSkyDepth(depth))
+		return 1.0;
+	float sceneViewDist = LinearEyeDepth(depth, ScreenUvToViewUv(uv));
+	return (sceneViewDist + thickness >= probeViewDist) ? 1.0 : 0.0;
+}
+
+float EstimateLocalLightOcclusion(vec3 samplePos, vec3 lightPos, float lightDist)
+{
+	if (FogLocalOcclusionMode <= 0 || lightDist <= 1e-3)
+		return 1.0;
+
+	vec3 dir = (lightPos - samplePos) / lightDist;
+	float maxDist = lightDist * max(FogLocalOcclusionParams.z, 0.0);
+	if (FogLocalOcclusionMode == 1)
+	{
+		float t = min(maxDist, lightDist * 0.6);
+		vec3 probePos = samplePos + dir * t;
+		float probeViewDist = length(probePos - FogCameraPosWS);
+		return LocalLightOcclusionTap(probePos, probeViewDist, max(FogLocalOcclusionParams.x, 0.0));
+	}
+
+	float vis = 1.0;
+	const int kTapCount = 4;
+	for (int s = 0; s < kTapCount; ++s)
+	{
+		float t = min(maxDist, lightDist * (float(s + 1) / float(kTapCount + 1)));
+		vec3 probePos = samplePos + dir * t;
+		float probeViewDist = length(probePos - FogCameraPosWS);
+		float cone = max(FogLocalOcclusionParams.y, 0.0) * t;
+		float thickness = max(FogLocalOcclusionParams.x, 0.0) + cone;
+		vis *= LocalLightOcclusionTap(probePos, probeViewDist, thickness);
+	}
+	return vis;
+}
+
 float LinearEyeDepth(float depth, vec2 viewUv)
 {
 	float ndcDepth = DepthToNdcZ(depth);
@@ -811,7 +871,8 @@ void main()
 						if (atten < 1e-5) continue;
 						vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
 						float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
-						localScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal);
+						float localOcclusion = EstimateLocalLightOcclusion(p, FogLights[lightIndex].pos_rad.xyz, lightDist);
+						localScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal * localOcclusion);
 					}
 					localScatter *= FogLightSourceScales.y;
 					if (doListLightsDetail)
