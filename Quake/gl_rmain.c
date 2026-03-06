@@ -90,6 +90,24 @@ static qboolean r_dlight_buffered_frame = false;
 
 static godrays_stabilization_t r_godrays_stabilization;
 
+
+static GLuint r_godrays_coupling_shafts_tex = 0;
+static int r_godrays_coupling_shafts_w = 0;
+static int r_godrays_coupling_shafts_h = 0;
+
+qboolean R_Godrays_GetFogCouplingSource (GLuint *out_shafts_tex, int *out_width, int *out_height)
+{
+	if (out_shafts_tex)
+		*out_shafts_tex = r_godrays_coupling_shafts_tex;
+	if (out_width)
+		*out_width = r_godrays_coupling_shafts_w;
+	if (out_height)
+		*out_height = r_godrays_coupling_shafts_h;
+
+	return r_godrays_coupling_shafts_tex != 0;
+}
+
+
 typedef struct framesetup_s
 {
         GLuint          scene_fbo;
@@ -2699,6 +2717,10 @@ void GL_PostProcess (void)
 
 	GL_BeginGroup ("Postprocess");
 
+	r_godrays_coupling_shafts_tex = 0;
+	r_godrays_coupling_shafts_w = 0;
+	r_godrays_coupling_shafts_h = 0;
+
 	R_PostFX_GetState (&postfx_state);
 
 	palidx = GLPalette_Postprocess ();
@@ -2802,6 +2824,12 @@ void GL_PostProcess (void)
 		if (godrays_enabled || godrays_debug > 0.f)
 			godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);
 		godrays_source = framebufs.godrays.source_tex;
+		if (godrays_texture)
+		{
+			r_godrays_coupling_shafts_tex = godrays_texture;
+			r_godrays_coupling_shafts_w = framebufs.godrays.width;
+			r_godrays_coupling_shafts_h = framebufs.godrays.height;
+		}
 	}
 
 	view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;

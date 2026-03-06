@@ -42,6 +42,7 @@ layout(binding=0) uniform sampler2D SceneColor;
 layout(binding=1) uniform sampler2D SceneDepth;
 layout(binding=3) uniform sampler3D FogNoiseTex;
 layout(binding=6) uniform sampler3D FogFroxelLightTex;
+layout(binding=7) uniform sampler2D FogGodrayShaftsTex;
 
 struct FogVolume
 {
@@ -124,6 +125,8 @@ layout(location=36) uniform vec4  FogFroxelParams1; // x log(far/near), yzw dims
 layout(location=37) uniform int   FogFroxelDebug;
 layout(location=38) uniform int   FogFroxelParityMode; // 0: froxel perf fast path, 1: legacy per-light parity path
 layout(location=39) uniform vec3  FogLightSourceScales; // x: froxel, y: local light list, z: lightgrid/static
+layout(location=40) uniform int   FogGodrayCoupling;
+layout(location=41) uniform vec4  FogGodrayShaftsParams; // xy: shafts texture size, z: coupling strength
 
 layout(location=0) out vec4 FragColor;
 
@@ -731,6 +734,16 @@ void main()
 
 		// phaseSun is already precomputed per-ray (constant for all steps on same ray).
 		vec3  stepScatter = (1.0 - att) * (scatterColor * phaseSun + sunRadiance); // BUG-F-01 FIX: removed inner *transmittance (caused transmittance^2 weighting for sun term)
+		float godrayInject = 0.0;
+		if (FogGodrayCoupling != 0)
+		{
+			vec2 shaftUv = clamp(screenUv, vec2(0.0), vec2(1.0));
+			vec3 shafts = texture(FogGodrayShaftsTex, shaftUv).rgb;
+			float shaftEnergy = max(shafts.r, max(shafts.g, shafts.b));
+			float depthGate = clamp(1.0 - (t / max(FogDepthParams.y, 1e-3)), 0.0, 1.0);
+			godrayInject = shaftEnergy * depthGate * max(FogGodrayShaftsParams.z, 0.0);
+			stepScatter += FogSunColor * FogSunScatter * (1.0 - att) * godrayInject;
+		}
 		if (doLightgrid)
 		{
 			// Static/emissive world contribution comes from the baked lightgrid
@@ -857,6 +870,14 @@ void main()
 		float unshadowedLum = shadowedLum / max(avgShadow, 1e-3);
 		float ratio = clamp(shadowedLum / max(unshadowedLum, 1e-3), 0.0, 1.0);
 		FragColor = vec4(clamp(shadowedLum * 2.0, 0.0, 1.0), clamp(unshadowedLum * 2.0, 0.0, 1.0), ratio, 1.0);
+		return;
+	}
+
+	if (FogDebugMode == 9)
+	{
+		vec3 shafts = (FogGodrayCoupling != 0) ? texture(FogGodrayShaftsTex, clamp(screenUv, vec2(0.0), vec2(1.0))).rgb : vec3(0.0);
+		float shaftEnergy = max(shafts.r, max(shafts.g, shafts.b));
+		FragColor = vec4(shaftEnergy, shaftEnergy * 0.5, 0.0, 1.0);
 		return;
 	}
 

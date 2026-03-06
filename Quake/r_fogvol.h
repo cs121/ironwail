@@ -114,6 +114,7 @@ extern cvar_t r_fogvol_froxel;
 extern cvar_t r_fogvol_froxel_sun;
 extern cvar_t r_fogvol_froxel_static;
 extern cvar_t r_fogvol_froxel_godrays;
+extern cvar_t r_fogvol_godray_coupling;
 extern cvar_t r_froxel_debug;
 
 void R_FogVol_RegisterCvars (void);
