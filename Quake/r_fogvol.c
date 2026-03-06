@@ -1669,7 +1669,7 @@ static void R_FogVol_WarnFroxelLightingConfig (void)
 		return;
 	if (r_fogvol_froxel.value > 0.f && r_fogvol_light.value <= 0.f)
 	{
-		Con_Printf ("Warning: r_fogvol_froxel=1 while r_fogvol_light=0. Froxel injection is disabled in this mode and cannot provide performance wins.\n");
+		Con_Printf ("Warning: r_fogvol_froxel>0 requires r_fogvol_light>0 for froxel dlight injection; with r_fogvol_light<=0, froxel lighting is skipped.\n");
 		warned = true;
 	}
 }
@@ -2578,9 +2578,9 @@ void R_FogVol_Render (void)
 	int frame_candidate_count = 0;
 	qboolean has_fog_bounds = false;
 	const qboolean light_stats_enabled = r_fogvol_light_stats.value > 0.f;
-	const qboolean froxel_light_enabled = r_fogvol_light.value > 0.f;
-	const int froxel_dlight_count = froxel_light_enabled ? R_Froxel_CountInjectableDlights () : 0;
-	const qboolean run_froxel_injection = froxel_light_enabled && froxel_dlight_count > 0;
+	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f) && (r_fogvol_light.value > 0.f);
+	const int froxel_dlight_count = froxel_injection_enabled ? R_Froxel_CountInjectableDlights () : 0;
+	const qboolean run_froxel_injection = froxel_injection_enabled && froxel_dlight_count > 0;
 
 	R_FogVol_WarnFroxelLightingConfig ();
 
