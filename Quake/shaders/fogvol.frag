@@ -900,6 +900,14 @@ void main()
 		return;
 	}
 
+	if (FogFroxelDebug == 4)
+	{
+		vec3 froxelViz = SampleFroxelLight(ro + rd * max(tEnter, 0.0));
+		float energy = clamp(dot(froxelViz, vec3(0.2126, 0.7152, 0.0722)) * 0.3, 0.0, 1.0);
+		FragColor = vec4(energy, energy * 0.5, 0.0, 1.0);
+		return;
+	}
+
 	if (FogDebugMode == 8)
 	{
 		float avgShadow = (shadowWeightAccum > 1e-6) ? (shadowVisAccum / shadowWeightAccum) : 1.0;
