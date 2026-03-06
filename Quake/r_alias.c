@@ -100,6 +100,26 @@ static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
 static qboolean r_alias_shadow_batch_dlight = false;
 
+static float R_LightgridLuminance (const vec3_t color)
+{
+	return color[0] * 0.2126f + color[1] * 0.7152f + color[2] * 0.0722f;
+}
+
+static void R_LightgridChroma (const vec3_t color, vec3_t chroma)
+{
+	const float sum = color[0] + color[1] + color[2];
+
+	if (sum <= 0.f)
+	{
+		VectorClear (chroma);
+		return;
+	}
+
+	chroma[0] = color[0] / sum;
+	chroma[1] = color[1] / sum;
+	chroma[2] = color[2] / sum;
+}
+
 static void R_ScaleAliasLighting (vec3_t light, vec3_t ambient, vec3_t dlight, float scale)
 {
 	if (scale <= 0.f || scale == 1.f)
@@ -113,7 +133,7 @@ static void R_ScaleAliasLighting (vec3_t light, vec3_t ambient, vec3_t dlight, f
 	}
 }
 
-static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_delta)
+static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_before, const vec3_t ambient_after, const vec3_t ambient_delta)
 {
         if (!r_lightgrid_debug.value)
         {
@@ -132,11 +152,26 @@ static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_delt
 
         r_lightgrid_debug_sample_reported = true;
 
-        Con_Printf ("r_lightgrid_debug: %s probe rgb=(%.2f %.2f %.2f) ao=%.2f ambient_delta=(%.1f %.1f %.1f)\n",
-                e->model ? e->model->name : "<no model>",
-                e->lightcache.lightgrid_color[0], e->lightcache.lightgrid_color[1], e->lightcache.lightgrid_color[2],
-                e->lightcache.lightgrid_ao,
-                ambient_delta[0], ambient_delta[1], ambient_delta[2]);
+        {
+                vec3_t before_chroma;
+                vec3_t after_chroma;
+                const float before_luminance = R_LightgridLuminance (ambient_before);
+                const float after_luminance = R_LightgridLuminance (ambient_after);
+
+                R_LightgridChroma (ambient_before, before_chroma);
+                R_LightgridChroma (ambient_after, after_chroma);
+
+                Con_Printf ("r_lightgrid_debug: %s probe rgb=(%.2f %.2f %.2f) ao=%.2f "
+                        "ambient_delta=(%.1f %.1f %.1f) lum=%.1f->%.1f "
+                        "chroma=(%.3f %.3f %.3f)->(%.3f %.3f %.3f)\n",
+                        e->model ? e->model->name : "<no model>",
+                        e->lightcache.lightgrid_color[0], e->lightcache.lightgrid_color[1], e->lightcache.lightgrid_color[2],
+                        e->lightcache.lightgrid_ao,
+                        ambient_delta[0], ambient_delta[1], ambient_delta[2],
+                        before_luminance, after_luminance,
+                        before_chroma[0], before_chroma[1], before_chroma[2],
+                        after_chroma[0], after_chroma[1], after_chroma[2]);
+        }
 }
 
 static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor)
@@ -151,16 +186,32 @@ static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor)
                 return;
 
         {
+                vec3_t ambient_before;
                 vec3_t ambient_delta;
+                float grid_scale = 1.f;
+
+                VectorCopy (ambientcolor, ambient_before);
+
                 for (int i = 0; i < 3; i++)
                 {
                         const float before = fmaxf (ambientcolor[i], 0.f);
-                        const float after = fmaxf (before, gridcolor[i]);
+                        const float headroom = 255.f - before;
+
+                        if (gridcolor[i] > 0.f)
+                                grid_scale = fminf (grid_scale, headroom / gridcolor[i]);
+                }
+
+                grid_scale = CLAMP (0.f, grid_scale, 1.f);
+
+                for (int i = 0; i < 3; i++)
+                {
+                        const float before = fmaxf (ambientcolor[i], 0.f);
+                        const float after = CLAMP (0.f, before + gridcolor[i] * grid_scale, 255.f);
                         ambientcolor[i] = after;
                         ambient_delta[i] = after - before;
                 }
 
-                R_DebugLightgridSample (e, ambient_delta);
+                R_DebugLightgridSample (e, ambient_before, ambientcolor, ambient_delta);
         }
 }
 
