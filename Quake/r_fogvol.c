@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_lightgrid.h"
 #include "r_fogvol.h"
 #include "r_dlight_pool.h"
+#include "r_godrays.h"
 #include <assert.h>
 #include <math.h>
 #include <stddef.h>
@@ -195,6 +196,7 @@ cvar_t r_fogvol_froxel_parity = { "r_fogvol_froxel_parity", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_sun = { "r_fogvol_froxel_sun", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_static = { "r_fogvol_froxel_static", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_godrays = { "r_fogvol_froxel_godrays", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_godray_coupling = { "r_fogvol_godray_coupling", "1", CVAR_ARCHIVE };
 /* Source weighting policy for local fog lighting contributions.
  * - r_fogvol_froxel_scale controls FogFroxelLightTex contribution when enabled.
  * - r_fogvol_lightlist_scale controls per-volume FogLights list contribution.
@@ -277,6 +279,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_froxel_sun, "lighting", "1"},
 	{&r_fogvol_froxel_static, "lighting", "1"},
 	{&r_fogvol_froxel_godrays, "lighting", "0"},
+	{&r_fogvol_godray_coupling, "lighting", "1"},
 	{&r_fogvol_froxel_scale, "lighting", "1"},
 	{&r_fogvol_lightlist_scale, "lighting", "1"},
 	{&r_fogvol_lightgrid_scale, "lighting", "1"},
@@ -326,10 +329,12 @@ enum
 	FOGVOL_U_FROXEL_DEBUG = 37,
 	FOGVOL_U_FROXEL_PARITY_MODE = 38,
 	FOGVOL_U_LIGHT_SOURCE_SCALES = 39,
-	FOGVOL_U_COUNT = 40
+	FOGVOL_U_GODRAY_COUPLING = 40,
+	FOGVOL_U_GODRAY_SHAFTS_PARAMS = 41,
+	FOGVOL_U_COUNT = 42
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_LIGHT_SOURCE_SCALES == 39);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_GODRAY_SHAFTS_PARAMS == 41);
 
 typedef struct froxel_state_s
 {
@@ -1659,11 +1664,74 @@ static void R_Froxel_InjectStaticLights (void)
 
 static void R_Froxel_InjectGodraysSource (void)
 {
+	GLuint shafts_tex = 0;
+	int shafts_w = 0;
+	int shafts_h = 0;
+	const int nx = q_max (1, r_froxel.dims[0]);
+	const int ny = q_max (1, r_froxel.dims[1]);
+	const int nz = q_max (1, r_froxel.dims[2]);
+	float coupling_scale;
+	byte *pixels = NULL;
+	const float phase_weight = 0.35f;
+	vec3_t sun_color;
+	float sun_intensity;
+
 	if (!r_froxel.valid || r_fogvol_froxel_godrays.value <= 0.f)
 		return;
+	if (r_fogvol_godray_coupling.value <= 0.f)
+		return;
+	if (!R_Godrays_GetFogCouplingSource (&shafts_tex, &shafts_w, &shafts_h))
+		return;
+	if (shafts_tex == 0 || shafts_w <= 0 || shafts_h <= 0)
+		return;
+	if (!R_WorldHasSun ())
+		return;
 
-	/* Optional path: keep disabled by default until a dedicated reduction
-	 * from godray source/mask buffers is wired for stable 3D injection. */
+	coupling_scale = q_max (0.f, r_fogvol_froxel_godrays.value) * q_max (0.f, r_fogvol_godray_coupling.value);
+	if (coupling_scale <= 0.f)
+		return;
+
+	pixels = (byte *)malloc ((size_t)shafts_w * (size_t)shafts_h * 4u);
+	if (!pixels)
+		return;
+
+	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, shafts_tex);
+	glGetTexImage (GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, 0);
+
+	VectorCopy (R_GetSun ()->color, sun_color);
+	if (sun_color[0] <= 0.f && sun_color[1] <= 0.f && sun_color[2] <= 0.f)
+		VectorSet (sun_color, 1.f, 1.f, 1.f);
+	sun_intensity = q_max (0.f, R_GetSun ()->intensity);
+
+	for (int z = 0; z < nz; ++z)
+	{
+		float zf = (float)z / (float)q_max (1, nz - 1);
+		for (int y = 0; y < ny; ++y)
+		{
+			int py = (int)((float)y * (float)(shafts_h - 1) / (float)q_max (1, ny - 1));
+			for (int x = 0; x < nx; ++x)
+			{
+				int px = (int)((float)x * (float)(shafts_w - 1) / (float)q_max (1, nx - 1));
+				const int pidx = (py * shafts_w + px) * 4;
+				const float shafts_r = pixels[pidx + 0] * (1.f / 255.f);
+				const float shafts_g = pixels[pidx + 1] * (1.f / 255.f);
+				const float shafts_b = pixels[pidx + 2] * (1.f / 255.f);
+				const float shaft_energy = q_max (shafts_r, q_max (shafts_g, shafts_b));
+				if (shaft_energy <= 1e-4f)
+					continue;
+
+				const float depth_falloff = 1.f - zf;
+				const float inject = shaft_energy * coupling_scale * depth_falloff;
+				const int idx = ((z * ny + y) * nx + x) * 3;
+				r_froxel.light_rgb[idx + 0] += sun_color[0] * sun_intensity * inject * phase_weight;
+				r_froxel.light_rgb[idx + 1] += sun_color[1] * sun_intensity * inject * phase_weight;
+				r_froxel.light_rgb[idx + 2] += sun_color[2] * sun_intensity * inject * phase_weight;
+			}
+		}
+	}
+
+	free (pixels);
 }
 
 void R_Froxel_InjectDlights (void)
@@ -2543,7 +2611,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 40);
+	assert (FOGVOL_U_COUNT == 42);
 	assert (glwidth > 0);
 	assert (glheight > 0);
 	assert (view_w > 0.f);
@@ -2640,6 +2708,23 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		q_max (0.f, r_fogvol_froxel_scale.value),
 		q_max (0.f, r_fogvol_lightlist_scale.value),
 		q_max (0.f, r_fogvol_lightgrid_scale.value));
+
+	{
+		GLuint shafts_tex = 0;
+		int shafts_w = 0;
+		int shafts_h = 0;
+		const qboolean allow_coupling = (r_fogvol_godray_coupling.value > 0.f);
+		const qboolean shafts_ready = allow_coupling && R_Godrays_GetFogCouplingSource (&shafts_tex, &shafts_w, &shafts_h);
+		const qboolean enable_in_shader = shafts_ready && !r_froxel.valid;
+
+		GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, enable_in_shader ? shafts_tex : 0);
+		GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, enable_in_shader ? 1 : 0);
+		GL_Uniform4fFunc (FOGVOL_U_GODRAY_SHAFTS_PARAMS,
+			enable_in_shader ? (float)q_max (1, shafts_w) : 1.f,
+			enable_in_shader ? (float)q_max (1, shafts_h) : 1.f,
+			q_max (0.f, r_fogvol_godray_coupling.value),
+			0.f);
+	}
 }
 
 void R_FogVol_Render (void)
@@ -2651,7 +2736,7 @@ void R_FogVol_Render (void)
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
 	fog_light_lists_gpu_t fog_lights;
 	fog_lightgrid_gpu_t fog_lightgrid;
-	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 8);
+	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 9);
 	float inv_viewproj[16];
 	GLuint src_tex;
 	GLuint dst_tex;
@@ -2922,6 +3007,7 @@ void R_FogVol_Render (void)
 	R_FogVol_UseProgram (glprogs.fogvol);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, (r_froxel.valid ? r_froxel.light_tex : 0));
+	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, 0);
 	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_FogVol_SetShaderUniforms (steps, mode, use_halfres,

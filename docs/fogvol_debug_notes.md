@@ -16,6 +16,7 @@ The dominant issue was **A + C combined**:
 - `6`: transmittance visualization
 - `7`: temporal history contribution (`R=alpha, G=history valid, B=motion factor`)
 - `8`: fog shadow debug (`R=shadowed scattering, G=unshadowed estimate, B=visibility ratio`)
+- `9`: godray shaft coupling contribution (`R=shaft energy, G=half-energy`, requires `r_fogvol_godray_coupling > 0`)
 
 ## Added guardrails
 - Runtime depth conventions are now passed explicitly (`near/far/reverseZ/skyCutoff`) to fog shader.
@@ -33,6 +34,9 @@ The dominant issue was **A + C combined**:
 - `r_fogvol_shadow_jitter` (default `1`): stochastic offset for shadow taps to reduce banding; may introduce light temporal noise.
 - `r_fogvol_sun_scatter` (default `0`): adds directional sun radiance to volumetric scattering using the existing anisotropic phase; independent from `r_fogvol_shadow` visibility so it can be tuned separately.
 - `r_fogvol_sun_color` (default `0 0 0`): optional override for directional fog light color. When left at `0 0 0`, fog sun color defaults to `R_GetSun` worldspawn color/intensity, and falls back to sky average tint when no sun is defined.
+- `r_fogvol_godray_coupling` (default `1`): enables fogvol/godray coupling path.
+  - Preferred path: inject previous-frame godray shafts into froxel lighting when `r_fogvol_froxel 1` and `r_fogvol_froxel_godrays > 0`.
+  - Alternate path: sample godray shafts directly in `fogvol.frag` during march (depth-gated) when froxel path is unavailable.
 - Existing diagnostics retained: `r_fogvol_testvolumes`, `r_fogvol_testvolumes_dumpstate`
 
 ## Performance implications of fog shadows
