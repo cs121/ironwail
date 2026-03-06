@@ -89,15 +89,6 @@ typedef struct fogvol_visible_volume_s
 	float screen_weight;
 } fogvol_visible_volume_t;
 
-typedef struct fogvol_light_stats_s
-{
-	int broadphase_candidates;
-	int narrowphase_candidates;
-	int narrowphase_accepted;
-	double broadphase_seconds;
-	double narrowphase_seconds;
-} fogvol_light_stats_t;
-
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
 static int r_fogvolume_count = 0;
 static fog_volume_t r_fogvolume_entities[MAX_FOGVOLUMES];
@@ -116,8 +107,6 @@ static fog_light_gpu_t r_fog_static_lights[MAX_FOG_STATIC_LIGHTS];
 
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
-cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
-cvar_t r_fogvol_stepsize = { "r_fogvol_stepsize", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_upsample = { "r_fogvol_upsample", "1", CVAR_ARCHIVE };
 /* r_fogvol_upsample_k: bilateral weight scale for depth difference in the
@@ -136,8 +125,6 @@ cvar_t r_fogvol_domainwarp_dist = { "r_fogvol_domainwarp_dist", "128", CVAR_ARCH
 cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes_dumpstate = { "r_fogvol_testvolumes_dumpstate", "0", CVAR_NONE };
-cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_blendmode = { "r_fogvol_blendmode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_emissive = { "r_fogvol_emissive", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
 cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.01", CVAR_ARCHIVE };
@@ -188,7 +175,6 @@ cvar_t r_fogvol_lighting_mode = { "r_fogvol_lighting_mode", "2", CVAR_ARCHIVE };
 cvar_t r_fogvol_lightgrid = { "r_fogvol_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
 cvar_t r_fogvol_dlightscale = { "r_fogvol_dlightscale", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_light_stats = { "r_fogvol_light_stats", "0", CVAR_NONE };
 cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
@@ -197,7 +183,6 @@ cvar_t r_fogvol_sun_dir = { "r_fogvol_sun_dir", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_color = { "r_fogvol_sun_color", "0 0 0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel = { "r_fogvol_froxel", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_froxel_parity = { "r_fogvol_froxel_parity", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_sun = { "r_fogvol_froxel_sun", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_static = { "r_fogvol_froxel_static", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_godrays = { "r_fogvol_froxel_godrays", "0", CVAR_ARCHIVE };
@@ -228,8 +213,6 @@ typedef struct fogvol_cvar_reg_s
 static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol, "core", "0"},
 	{&r_fogvol_steps, "quality", "32"},
-	{&r_fogvol_maxsteps, "quality", "128"},
-	{&r_fogvol_stepsize, "quality", "0"},
 	{&r_fogvol_halfres, "quality", "0"},
 	{&r_fogvol_upsample, "quality", "1"},
 	{&r_fogvol_upsample_k, "quality", "25"},
@@ -242,8 +225,6 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_noisemode, "noise", "0"},
 	{&r_fogvol_testvolumes, "debug", "0"},
 	{&r_fogvol_testvolumes_dumpstate, "debug", "0"},
-	{&r_fogvol_physblend, "core", "1"},
-	{&r_fogvol_blendmode, "core", "0"},
 	{&r_fogvol_emissive, "lighting", "1"},
 	{&r_fogvol_temporal_alpha, "temporal", "0.9"},
 	{&r_fogvol_temporal_depth_reject, "temporal", "0.01"},
@@ -274,7 +255,6 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_lightgrid, "lighting", "1"},
 	{&r_fogvol_light_max, "lighting", "16"},
 	{&r_fogvol_dlightscale, "lighting", "1"},
-	{&r_fogvol_light_stats, "debug", "0"},
 	{&r_fogvol_shadow, "lighting", "1"},
 	{&r_fogvol_shadow_samples, "lighting", "2"},
 	{&r_fogvol_shadow_strength, "lighting", "0.8"},
@@ -283,7 +263,6 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_sun_scatter, "lighting", "0"},
 	{&r_fogvol_sun_color, "lighting", "0 0 0"},
 	{&r_fogvol_froxel, "lighting", "0"},
-	{&r_fogvol_froxel_parity, "lighting", "0"},
 	{&r_fogvol_froxel_sun, "lighting", "1"},
 	{&r_fogvol_froxel_static, "lighting", "1"},
 	{&r_fogvol_froxel_godrays, "lighting", "0"},
@@ -305,7 +284,6 @@ enum
 	FOGVOL_U_VOLUME_INDEX = 3,
 	FOGVOL_U_INV_VIEWPROJ = 4,
 	FOGVOL_U_NOISE_MODE = 5,
-	FOGVOL_U_PHYS_BLEND = 6,
 	FOGVOL_U_JITTER_ENABLED = 7,
 	FOGVOL_U_CAMERA_POS_WS = 8,
 	FOGVOL_U_VIEWPORT_PARAMS = 9,
@@ -314,7 +292,6 @@ enum
 	FOGVOL_U_DEPTH_PARAMS = 12,
 	FOGVOL_U_DENSITY_PARAMS = 13,
 	FOGVOL_U_EMISSIVE_ENABLED = 14,
-	FOGVOL_U_BLEND_MODE_DEFAULT = 15,
 	FOGVOL_U_LIGHT_ENABLED = 16,
 	FOGVOL_U_SHADOW_ENABLED = 17,
 	FOGVOL_U_SHADOW_SAMPLES = 18,
@@ -337,13 +314,12 @@ enum
 	FOGVOL_U_FROXEL_PARAMS0 = 35,
 	FOGVOL_U_FROXEL_PARAMS1 = 36,
 	FOGVOL_U_FROXEL_DEBUG = 37,
-	FOGVOL_U_FROXEL_PARITY_MODE = 38,
 	FOGVOL_U_LIGHT_SOURCE_SCALES = 39,
 	FOGVOL_U_LIGHTING_MODE = 40,
 	FOGVOL_U_GODRAY_COUPLING = 41,
 	FOGVOL_U_GODRAY_SHAFTS_PARAMS = 42,
 	FOGVOL_U_FROXEL_TEMPORAL_PARAMS = 43,
-	FOGVOL_U_COUNT = 44
+	FOGVOL_U_COUNT = 41 /* 44 locations 0-43 minus 3 removed: 6, 15, 38 */
 };
 
 COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_FROXEL_TEMPORAL_PARAMS == 43);
@@ -363,7 +339,6 @@ typedef struct froxel_state_s
 	vec3_t prev_vieworg;
 	int prev_frame;
 	int prev_lighting_mode;
-	int prev_parity_mode;
 	qboolean prev_froxel_enabled;
 	qboolean prev_mode_valid;
 	qboolean prev_valid;
@@ -1385,7 +1360,7 @@ static void R_FogVol_BuildStaticLightInjection (void)
 		Con_DPrintf ("FogVol: injected %d static lights from lightmaps\n", r_num_fog_static_lights);
 }
 
-static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, const fogvol_light_candidate_t *prefiltered, int prefiltered_count, fog_light_gpu_t *out, int max_count, fogvol_light_stats_t *stats)
+static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, const fogvol_light_candidate_t *prefiltered, int prefiltered_count, fog_light_gpu_t *out, int max_count)
 {
 	vec3_t volume_mins;
 	vec3_t volume_maxs;
@@ -1400,15 +1375,9 @@ static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, const f
 	for (int i = 0; i < prefiltered_count && copy_count < max_count; ++i)
 	{
 		const fogvol_light_candidate_t *candidate = &prefiltered[i];
-		if (stats)
-			stats->narrowphase_candidates++;
-
 		if (!R_FogVol_BoundsOverlap (candidate->bounds_mins, candidate->bounds_maxs, volume_mins, volume_maxs))
 			continue;
-
 		out[copy_count++] = candidate->light;
-		if (stats)
-			stats->narrowphase_accepted++;
 	}
 
 	return copy_count;
@@ -1521,7 +1490,6 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 {
 	int nx, ny, nz;
 	const int lighting_mode = CLAMP (0, (int)Q_rint (r_fogvol_lighting_mode.value), 3);
-	const int parity_mode = CLAMP (0, (int)Q_rint (r_fogvol_froxel_parity.value), 1);
 	const qboolean froxel_enabled = (r_fogvol_froxel.value > 0.f);
 
 	r_froxel.valid = false;
@@ -1543,13 +1511,11 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 
 	if (r_froxel.prev_mode_valid
 		&& (r_froxel.prev_froxel_enabled != froxel_enabled
-			|| r_froxel.prev_lighting_mode != lighting_mode
-			|| r_froxel.prev_parity_mode != parity_mode))
+			|| r_froxel.prev_lighting_mode != lighting_mode))
 		r_froxel.prev_valid = false;
 
 	r_froxel.prev_froxel_enabled = froxel_enabled;
 	r_froxel.prev_lighting_mode = lighting_mode;
-	r_froxel.prev_parity_mode = parity_mode;
 	r_froxel.prev_mode_valid = true;
 
 	memset (r_froxel.light_rgb, 0, sizeof (float) * (size_t)nx * (size_t)ny * (size_t)nz * 3u);
@@ -2682,7 +2648,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 44);
+	assert (FOGVOL_U_COUNT == 41);
 	assert (glwidth > 0);
 	assert (glheight > 0);
 	assert (view_w > 0.f);
@@ -2692,7 +2658,6 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_DEBUG_MODE, mode);
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_MODE, (int)Q_rint (r_fogvol_noisemode.value));
-	GL_Uniform1iFunc (FOGVOL_U_PHYS_BLEND, r_fogvol_physblend.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_JITTER_ENABLED, r_fogvol_jitter.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_FRAME_INDEX, r_framecount);
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_SUBSAMPLE, r_fogvol_noise_subsample.value > 0.f ? 1 : 0);
@@ -2712,7 +2677,6 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_DEPTH_PARAMS, depth_near, depth_far, gl_clipcontrol_able ? 1.f : 0.f, depth_sky_cutoff);
 	GL_Uniform2fFunc (FOGVOL_U_DENSITY_PARAMS, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
 	GL_Uniform1iFunc (FOGVOL_U_EMISSIVE_ENABLED, r_fogvol_emissive.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (FOGVOL_U_BLEND_MODE_DEFAULT, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
 	GL_Uniform1iFunc (FOGVOL_U_LIGHT_ENABLED, fog_light_enabled ? 1 : 0);
 	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
 	if (r_fogvol_sun_dir.value > 0.f && R_WorldHasSun ())
@@ -2765,7 +2729,6 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, r_froxel.log_far_near,
 		(float)q_max (1, r_froxel.dims[0]), (float)q_max (1, r_froxel.dims[1]), (float)q_max (1, r_froxel.dims[2]));
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, CLAMP (0, (int)Q_rint (r_froxel_debug.value), 3));
-	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, r_fogvol_froxel_parity.value > 0.f ? 1 : 0);
 	{
 		vec3_t cam_delta;
 		VectorSubtract (r_refdef.vieworg, r_froxel.prev_vieworg, cam_delta);
@@ -2856,13 +2819,11 @@ void R_FogVol_Render (void)
 	const lightgrid_t *lightgrid = NULL;
 	fogvol_visible_volume_t visible_volumes[MAX_FOGVOLUMES];
 	fogvol_light_candidate_t frame_candidates[256];
-	fogvol_light_stats_t light_stats;
 	vec3_t fog_bounds_mins;
 	vec3_t fog_bounds_maxs;
 	int visible_count = 0;
 	int frame_candidate_count = 0;
 	qboolean has_fog_bounds = false;
-	const qboolean light_stats_enabled = r_fogvol_light_stats.value > 0.f;
 	const fogvol_lighting_mode_t lighting_mode = R_FogVol_LightingMode ();
 	const qboolean froxel_lighting_mode = R_FogVol_UseFroxelLights (lighting_mode);
 	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f) && froxel_lighting_mode;
@@ -2931,12 +2892,7 @@ void R_FogVol_Render (void)
 		steps = (int)Q_rint (r_fogvol_steps.value * r_fogvol_steps_scale_halfres.value);
 	else
 		steps = (int)Q_rint (r_fogvol_steps.value);
-	if (r_fogvol_stepsize.value > 0.f)
-	{
-		float step_size = q_max (1.f, r_fogvol_stepsize.value);
-		steps = (int)Q_rint (depth_far / step_size);
-	}
-	steps = CLAMP (8, steps, q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
+	steps = CLAMP (8, steps, 512);
 
 	if (run_froxel_injection)
 	{
@@ -2956,25 +2912,18 @@ void R_FogVol_Render (void)
 	}
 
 	memset (&fog_lights, 0, sizeof (fog_lights));
-	memset (&light_stats, 0, sizeof (light_stats));
 	lightgrid = Lightgrid_Get ();
 	fog_lightgrid_has_data = (lightgrid && lightgrid->octree && r_lightgrid.value > 0.f);
 	fog_lightgrid_enabled = fog_lightgrid_has_data && (r_fogvol_lightgrid.value > 0.f);
 
 	if (r_fogvol_light.value > 0.f && (R_FogVol_UseRaymarchLights (lighting_mode) || R_FogVol_UseRaymarchDetail (lighting_mode)))
 	{
-		const double broadphase_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
 		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), MAX_FOGLIGHTS);
 		int write_offset = 0;
 
 		visible_count = R_FogVol_BuildVisibleVolumeCache (visible_volumes, countof (visible_volumes), fog_bounds_mins, fog_bounds_maxs, &has_fog_bounds);
 		if (visible_count > 0 && max_lights > 0)
-		{
 			frame_candidate_count = R_FogVol_BuildFrameLightBroadphase (visible_volumes, visible_count, fog_bounds_mins, fog_bounds_maxs, has_fog_bounds, frame_candidates, countof (frame_candidates));
-			light_stats.broadphase_candidates = frame_candidate_count;
-		}
-		if (light_stats_enabled)
-			light_stats.broadphase_seconds = Sys_DoubleTime () - broadphase_start;
 
 		for (int i = 0; i < r_fogvolume_count; ++i)
 		{
@@ -2982,27 +2931,14 @@ void R_FogVol_Render (void)
 			int count = 0;
 			if (remaining > 0 && max_lights > 0 && frame_candidate_count > 0)
 			{
-				const double narrowphase_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
 				int per_volume_cap = q_min (max_lights, remaining);
-				count = R_FogVol_BuildLightListForVolume (&r_fogvolumes[i], frame_candidates, frame_candidate_count, &fog_lights.lights[write_offset], per_volume_cap, light_stats_enabled ? &light_stats : NULL);
-				if (light_stats_enabled)
-					light_stats.narrowphase_seconds += Sys_DoubleTime () - narrowphase_start;
+				count = R_FogVol_BuildLightListForVolume (&r_fogvolumes[i], frame_candidates, frame_candidate_count, &fog_lights.lights[write_offset], per_volume_cap);
 			}
 
 			fog_lights.volumes[i].offset_count[0] = write_offset;
 			fog_lights.volumes[i].offset_count[1] = count;
 			write_offset += count;
 			fog_light_enabled = fog_light_enabled || (count > 0);
-		}
-
-		if (light_stats_enabled)
-		{
-			Con_DPrintf ("fogvol_light_stats: broadphase_candidates=%d narrowphase_candidates=%d accepted=%d broadphase_ms=%.3f narrowphase_ms=%.3f\n",
-				light_stats.broadphase_candidates,
-				light_stats.narrowphase_candidates,
-				light_stats.narrowphase_accepted,
-				light_stats.broadphase_seconds * 1000.0,
-				light_stats.narrowphase_seconds * 1000.0);
 		}
 	}
 
@@ -3052,7 +2988,7 @@ void R_FogVol_Render (void)
 		gpu->misc[3] = v->height;
 
 		gpu->extra[0] = (float)R_FogVol_NormalizeShape (v->shape);
-		gpu->extra[1] = (float)((v->blendMode >= 0) ? v->blendMode : (int)Q_rint (r_fogvol_blendmode.value));
+		gpu->extra[1] = (float)((v->blendMode >= 0) ? v->blendMode : 0);
 		gpu->extra[2] = v->emissiveStrength;
 		gpu->extra[3] = v->heightScale;
 
@@ -3542,7 +3478,7 @@ void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int
 		vec3_t bmins, bmaxs;
 		int min_i[3], max_i[3];
 		const float vol_density = q_max (0.f, vol->density) * q_max (0.f, r_fogvol_density_scale.value);
-		const int blend_mode = (vol->blendMode >= 0) ? vol->blendMode : (int)Q_rint (r_fogvol_blendmode.value);
+		const int blend_mode = (vol->blendMode >= 0) ? vol->blendMode : 0;
 
 		if (!vol->enabled || vol_density <= 0.f)
 			continue;

@@ -1,8 +1,14 @@
 layout(binding=0) uniform sampler2D SceneTexture;
 layout(binding=1) uniform sampler2D MaskTexture;
+// FogVol composite texture for fog-aware bloom threshold compensation.
+// Bound only when fogvol produced a valid composite this frame (FogVolEnabled > 0.5).
+// Alpha channel = 1 - transmittance (0=no fog, 1=fully opaque fog).
+layout(binding=2) uniform sampler2D FogVolTexture;
 
-layout(location=0) uniform vec4 ThresholdParams; // x: threshold, y: mask enabled
+layout(location=0) uniform vec4 ThresholdParams;  // x: threshold, y: mask enabled
 layout(location=1) uniform vec4 DownsampleParams; // xy: source size, zw: scale from target to source
+// When > 0.5, FogVolTexture is valid and bloom threshold should be fog-compensated.
+layout(location=2) uniform float FogVolEnabled;
 
 layout(location=0) out vec4 outColor;
 
@@ -12,6 +18,20 @@ void main()
         float maskEnabled = ThresholdParams.y;
         vec2 sourceSize = DownsampleParams.xy;
         vec2 scale = DownsampleParams.zw;
+        // Fog-aware threshold compensation:
+        // Bright objects attenuated by fog (composite_color ≈ original * T) may fall
+        // below the bloom threshold even though they were HDR before fog.
+        // Lowering the effective threshold by T restores blooming for objects that
+        // were above threshold before attenuation: bloom if (composite / T) > threshold
+        // i.e. composite > threshold * T.  FogVolTexture.a = 1 - T.
+        // UV of the fog buffer at this bloom pixel's source-block center.
+        if (FogVolEnabled > 0.5)
+        {
+                vec2 fogUv = (gl_FragCoord.xy + 0.5) * (scale / sourceSize);
+                float fogDensity = texture(FogVolTexture, fogUv).a; // 0=no fog, 1=opaque
+                float fogTrans = clamp(1.0 - fogDensity, 0.01, 1.0); // avoid /0
+                threshold *= fogTrans;
+        }
         vec2 base = (gl_FragCoord.xy + 0.5) * scale - 0.5;
         vec2 maxCoord = max(sourceSize - vec2(1.0), vec2(0.0));
         ivec2 baseCoord = ivec2(floor(base));

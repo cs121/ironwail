@@ -9,7 +9,10 @@ void ApplyDepthOfField(inout vec4 color, vec2 uv, vec2 invTexSize, bool inView, 
         float maxBlur = max(DoFParams0.w, 0.0);
         float coc = abs(linearDepth - focusDistance);
         float blurFactor = clamp((coc - focusRange) / focusRange, 0.0, 1.0);
-        float blurRadius = blurFactor * maxBlur;
+        // Scale blur by fog transmittance: dense fog obscures depth cues so DoF
+        // should have no effect on fully fogged pixels.  FogVolTransmittance()
+        // returns 1.0 when fogvol is inactive so the line is a no-op in that case.
+        float blurRadius = blurFactor * maxBlur * FogVolTransmittance(uv);
         if (blurRadius <= 0.0001)
                 return;
 

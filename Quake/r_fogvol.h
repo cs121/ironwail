@@ -57,8 +57,6 @@ extern cvar_t r_fogvol_halfres;
 /* BEST PRACTICE #11: Expose all cvars that may be referenced from other
  * translation units (e.g. menu, console completion, test harnesses). */
 extern cvar_t r_fogvol_steps;
-extern cvar_t r_fogvol_maxsteps;
-extern cvar_t r_fogvol_stepsize;
 extern cvar_t r_fogvol_upsample;
 extern cvar_t r_fogvol_upsample_k;
 extern cvar_t r_fogvol_upsample_taps;
@@ -70,8 +68,6 @@ extern cvar_t r_fogvol_noise_subsample;
 extern cvar_t r_fogvol_noise_lod_switch_dist;
 extern cvar_t r_fogvol_domainwarp_dist;
 extern cvar_t r_fogvol_noisemode;
-extern cvar_t r_fogvol_physblend;
-extern cvar_t r_fogvol_blendmode;
 extern cvar_t r_fogvol_emissive;
 extern cvar_t r_fogvol_temporal_alpha;
 extern cvar_t r_fogvol_temporal_depth_reject;

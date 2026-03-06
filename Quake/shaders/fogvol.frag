@@ -91,7 +91,6 @@ layout(location=2)  uniform int   FogDebugMode;
 layout(location=3)  uniform int   FogVolumeIndex;
 layout(location=4)  uniform mat4  FogInvViewProj;
 layout(location=5)  uniform int   FogNoiseMode;
-layout(location=6)  uniform int   FogPhysBlend;
 layout(location=7)  uniform int   FogJitterEnabled;
 layout(location=8)  uniform vec3  FogCameraPosWS;
 layout(location=9)  uniform vec4  FogViewportParams; // xy: screen size, zw: inv screen size
@@ -100,7 +99,6 @@ layout(location=11) uniform vec4  FogViewParams;     // xy: view origin in scree
 layout(location=12) uniform vec4  FogDepthParams;    // x: near, y: far, z: reverse-Z flag, w: sky cutoff
 layout(location=13) uniform vec2  FogDensityParams;  // x: density scale, y: sigma clamp
 layout(location=14) uniform int   FogEmissiveEnabled;
-layout(location=15) uniform int   FogBlendModeDefault;
 layout(location=16) uniform int   FogLightEnabled;
 layout(location=17) uniform int   FogShadowEnabled;
 layout(location=18) uniform int   FogShadowSamples;
@@ -123,7 +121,6 @@ layout(location=34) uniform int   FogFroxelEnabled;
 layout(location=35) uniform vec4  FogFroxelParams0; // x near, y far, z tanHalfFovX, w tanHalfFovY
 layout(location=36) uniform vec4  FogFroxelParams1; // x log(far/near), yzw dims
 layout(location=37) uniform int   FogFroxelDebug;
-layout(location=38) uniform int   FogFroxelParityMode; // 0: froxel perf fast path, 1: legacy per-light parity path
 layout(location=39) uniform vec3  FogLightSourceScales; // x: froxel, y: local light list, z: lightgrid/static
 layout(location=40) uniform int   FogLightingMode; // 0=off, 1=raymarch, 2=froxel, 3=froxel+raymarch detail
 layout(location=41) uniform int   FogGodrayCoupling;
@@ -678,7 +675,7 @@ void main()
 	bool useFroxelLighting = (fogLightingMode == 2 || fogLightingMode == 3);
 	bool doRaymarchLighting = (fogLightingMode == 1);
 	bool doRaymarchDetail = (fogLightingMode == 3);
-	bool doFroxelLights = (FogLightEnabled != 0) && useFroxelLighting && (FogFroxelEnabled != 0) && (FogFroxelParityMode == 0) && (FogLightSourceScales.x > 0.0);
+	bool doFroxelLights = (FogLightEnabled != 0) && useFroxelLighting && (FogFroxelEnabled != 0) && (FogLightSourceScales.x > 0.0);
 	bool doListLightsFull = (FogLightEnabled != 0) && doRaymarchLighting && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
 	bool doListLightsDetail = (FogLightEnabled != 0) && doRaymarchDetail && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
 	bool doLights = doFroxelLights || doListLightsFull || doListLightsDetail;
@@ -915,17 +912,15 @@ void main()
 	// BUG FIX (G-04): Use the 'scene' value cached at the top of main() 
 	// no need to sample SceneColor a second time here.
 	vec3 outColor;
+	// blendMode: 1 = additive (fire/explosion effects), 0 = physical (correct)
+	// Per-volume blendMode takes priority; negative means "use default" (0).
 	int blendMode = int(volume.extra.y + 0.5);
 	if (blendMode < 0)
-		blendMode = FogBlendModeDefault;
+		blendMode = 0;
 	if (blendMode == 1)
-	{
 		outColor = clamp(scene + accum, 0.0, 65504.0);
-	}
-	else if (FogPhysBlend != 0)
-		outColor = scene * transmittance + accum;
 	else
-		outColor = mix(scene, scatterColor, clamp(tau, 0.0, 1.0));
+		outColor = scene * transmittance + accum; // physical compositing (always correct)
 
 	if (FogEmissiveEnabled != 0 && volume.extra.z > 0.0)
 		outColor += scatterColor * volume.extra.z * (1.0 - transmittance);

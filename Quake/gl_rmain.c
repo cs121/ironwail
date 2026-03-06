@@ -1541,6 +1541,13 @@ static GLuint GL_GenerateBloomTexture (void)
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, 0);
+	{
+		/* Fog-aware bloom: when fogvol is active, bind its composite tex so the
+		 * extract shader can compensate the threshold for fog-attenuated pixels. */
+		const qboolean fogvol_active = R_FogVol_HasValidComposite ();
+		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, fogvol_active ? R_FogVol_GetCompositeTex () : 0);
+		GL_Uniform1fFunc (2, fogvol_active ? 1.f : 0.f);
+	}
 	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
 	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
 		(float)vid.width / (float)width,
