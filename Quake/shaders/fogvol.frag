@@ -746,21 +746,30 @@ void main()
 			vec3 lightScatter = lightScatterPrev;
 			if (FogLightSubsample == 0 || (i & 1) == 0)
 			{
-				lightScatter = vec3(0.0);
-				for (int l = 0; l < MAX_FOGLIGHTS; ++l)
+				vec3 froxelLight = SampleFroxelLight(p);
+				float froxelEnergy = max(froxelLight.r, max(froxelLight.g, froxelLight.b));
+				if (FogFroxelEnabled != 0 && froxelEnergy <= 1e-4)
 				{
-					if (l >= lightCount) break;
-					int lightIndex = lightOffset + l;
-					if (lightIndex >= MAX_FOGVOLUMES * MAX_FOGLIGHTS) break;
-					vec3 lightVec = FogLights[lightIndex].pos_rad.xyz - p;
-					float lightDist = length(lightVec);
-					float radius = max(FogLights[lightIndex].pos_rad.w, 1e-3);
-					float atten = clamp(1.0 - lightDist / radius, 0.0, 1.0);
-					atten *= atten;
-					if (atten < 1e-5) continue;
-					vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
-					float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
-					lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal);
+					lightScatter = vec3(0.0);
+				}
+				else
+				{
+					lightScatter = vec3(0.0);
+					for (int l = 0; l < MAX_FOGLIGHTS; ++l)
+					{
+						if (l >= lightCount) break;
+						int lightIndex = lightOffset + l;
+						if (lightIndex >= MAX_FOGVOLUMES * MAX_FOGLIGHTS) break;
+						vec3 lightVec = FogLights[lightIndex].pos_rad.xyz - p;
+						float lightDist = length(lightVec);
+						float radius = max(FogLights[lightIndex].pos_rad.w, 1e-3);
+						float atten = clamp(1.0 - lightDist / radius, 0.0, 1.0);
+						atten *= atten;
+						if (atten < 1e-5) continue;
+						vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
+						float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
+						lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal);
+					}
 				}
 				lightScatterPrev = lightScatter;
 			}
