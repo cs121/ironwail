@@ -196,6 +196,8 @@ cvar_t r_fogvol_froxel_parity = { "r_fogvol_froxel_parity", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_sun = { "r_fogvol_froxel_sun", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_static = { "r_fogvol_froxel_static", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_godrays = { "r_fogvol_froxel_godrays", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_froxel_temporal_alpha = { "r_fogvol_froxel_temporal_alpha", "0.85", CVAR_ARCHIVE };
+cvar_t r_fogvol_froxel_temporal_reject_threshold = { "r_fogvol_froxel_temporal_reject_threshold", "24", CVAR_ARCHIVE };
 cvar_t r_fogvol_godray_coupling = { "r_fogvol_godray_coupling", "1", CVAR_ARCHIVE };
 /* Source weighting policy for local fog lighting contributions.
  * - r_fogvol_froxel_scale controls FogFroxelLightTex contribution when enabled.
@@ -208,7 +210,7 @@ cvar_t r_fogvol_godray_coupling = { "r_fogvol_godray_coupling", "1", CVAR_ARCHIV
 cvar_t r_fogvol_froxel_scale = { "r_fogvol_froxel_scale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_lightlist_scale = { "r_fogvol_lightlist_scale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_lightgrid_scale = { "r_fogvol_lightgrid_scale", "1", CVAR_ARCHIVE };
-/* r_froxel_debug: 0=off, 1=froxel rgb at first hit, 2=max-energy heat */
+/* r_froxel_debug: 0=off, 1=froxel rgb at first hit, 2=max-energy heat, 3=temporal history weight */
 cvar_t r_froxel_debug = { "r_froxel_debug", "0", CVAR_ARCHIVE };
 
 typedef struct fogvol_cvar_reg_s
@@ -279,6 +281,8 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_froxel_sun, "lighting", "1"},
 	{&r_fogvol_froxel_static, "lighting", "1"},
 	{&r_fogvol_froxel_godrays, "lighting", "0"},
+	{&r_fogvol_froxel_temporal_alpha, "temporal", "0.85"},
+	{&r_fogvol_froxel_temporal_reject_threshold, "temporal", "24"},
 	{&r_fogvol_godray_coupling, "lighting", "1"},
 	{&r_fogvol_froxel_scale, "lighting", "1"},
 	{&r_fogvol_lightlist_scale, "lighting", "1"},
@@ -331,14 +335,16 @@ enum
 	FOGVOL_U_LIGHT_SOURCE_SCALES = 39,
 	FOGVOL_U_GODRAY_COUPLING = 40,
 	FOGVOL_U_GODRAY_SHAFTS_PARAMS = 41,
-	FOGVOL_U_COUNT = 42
+	FOGVOL_U_FROXEL_TEMPORAL_PARAMS = 42,
+	FOGVOL_U_COUNT = 43
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_GODRAY_SHAFTS_PARAMS == 41);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_FROXEL_TEMPORAL_PARAMS == 42);
 
 typedef struct froxel_state_s
 {
 	GLuint light_tex;
+	GLuint prev_light_tex;
 	int dims[3];
 	float near_clip;
 	float far_clip;
@@ -346,6 +352,9 @@ typedef struct froxel_state_s
 	float tan_half_fov_y;
 	float log_far_near;
 	float *light_rgb;
+	float *prev_light_rgb;
+	vec3_t prev_vieworg;
+	qboolean prev_valid;
 	qboolean valid;
 } froxel_state_t;
 
@@ -1417,17 +1426,26 @@ static void R_Froxel_FreeCPUBuffer (void)
 		free (r_froxel.light_rgb);
 		r_froxel.light_rgb = NULL;
 	}
+	if (r_froxel.prev_light_rgb)
+	{
+		free (r_froxel.prev_light_rgb);
+		r_froxel.prev_light_rgb = NULL;
+	}
 }
 
 void R_Froxel_ResetResources (void)
 {
 	if (r_froxel.light_tex)
 		glDeleteTextures (1, &r_froxel.light_tex);
+	if (r_froxel.prev_light_tex)
+		glDeleteTextures (1, &r_froxel.prev_light_tex);
 	r_froxel.light_tex = 0;
+	r_froxel.prev_light_tex = 0;
 	R_Froxel_FreeCPUBuffer ();
 	r_froxel.dims[0] = 0;
 	r_froxel.dims[1] = 0;
 	r_froxel.dims[2] = 0;
+	r_froxel.prev_valid = false;
 	r_froxel.valid = false;
 }
 
@@ -1439,20 +1457,32 @@ static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)
 		return false;
 
 	count = (size_t)nx * (size_t)ny * (size_t)nz * 3u;
-	if (!r_froxel.light_rgb || r_froxel.dims[0] != nx || r_froxel.dims[1] != ny || r_froxel.dims[2] != nz)
+	if (!r_froxel.light_rgb || !r_froxel.prev_light_rgb
+		|| r_froxel.dims[0] != nx || r_froxel.dims[1] != ny || r_froxel.dims[2] != nz)
 	{
 		float *newbuf = (float *)calloc (count, sizeof (float));
-		if (!newbuf)
+		float *newprev = (float *)calloc (count, sizeof (float));
+		if (!newbuf || !newprev)
+		{
+			if (newbuf)
+				free (newbuf);
+			if (newprev)
+				free (newprev);
 			return false;
+		}
 		R_Froxel_FreeCPUBuffer ();
 		r_froxel.light_rgb = newbuf;
+		r_froxel.prev_light_rgb = newprev;
 		r_froxel.dims[0] = nx;
 		r_froxel.dims[1] = ny;
 		r_froxel.dims[2] = nz;
+		r_froxel.prev_valid = false;
 	}
 
 	if (!r_froxel.light_tex)
 		glGenTextures (1, &r_froxel.light_tex);
+	if (!r_froxel.prev_light_tex)
+		glGenTextures (1, &r_froxel.prev_light_tex);
 
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.light_tex);
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -1461,6 +1491,14 @@ static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_RGB16F, nx, ny, nz, 0, GL_RGB, GL_FLOAT, r_froxel.light_rgb);
+
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.prev_light_tex);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_RGB16F, nx, ny, nz, 0, GL_RGB, GL_FLOAT, r_froxel.prev_light_rgb);
 
 	return true;
 }
@@ -1488,6 +1526,40 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 
 	memset (r_froxel.light_rgb, 0, sizeof (float) * (size_t)nx * (size_t)ny * (size_t)nz * 3u);
 	r_froxel.valid = true;
+}
+
+static void R_Froxel_BlendWithHistory (void)
+{
+	const float alpha = CLAMP (0.f, r_fogvol_froxel_temporal_alpha.value, 1.f);
+	const float reject_threshold = q_max (0.f, r_fogvol_froxel_temporal_reject_threshold.value);
+	const int nx = r_froxel.dims[0], ny = r_froxel.dims[1], nz = r_froxel.dims[2];
+	const float delta_x = r_refdef.vieworg[0] - r_froxel.prev_vieworg[0];
+	const float delta_y = r_refdef.vieworg[1] - r_froxel.prev_vieworg[1];
+	const float delta_z = r_refdef.vieworg[2] - r_froxel.prev_vieworg[2];
+	const float camera_delta = sqrtf (delta_x * delta_x + delta_y * delta_y + delta_z * delta_z);
+
+	if (!r_froxel.valid || !r_froxel.prev_valid || !r_froxel.prev_light_rgb || alpha <= 0.f)
+		return;
+
+	for (int z = 0; z < nz; ++z)
+	{
+		const float zf = ((float)z + 0.5f) / (float)q_max (1, nz);
+		const float zv = r_froxel.near_clip * expf (r_froxel.log_far_near * zf);
+		const float depth_gate = CLAMP (0.f, 1.f, zv / q_max (reject_threshold, 1.f));
+		const float camera_reject = CLAMP (0.f, 1.f, camera_delta / q_max (reject_threshold, 1.f));
+		const float history_weight = alpha * (1.f - camera_reject) * depth_gate;
+		const float current_weight = 1.f - history_weight;
+		for (int y = 0; y < ny; ++y)
+		{
+			for (int x = 0; x < nx; ++x)
+			{
+				const int idx = ((z * ny + y) * nx + x) * 3;
+				r_froxel.light_rgb[idx + 0] = r_froxel.light_rgb[idx + 0] * current_weight + r_froxel.prev_light_rgb[idx + 0] * history_weight;
+				r_froxel.light_rgb[idx + 1] = r_froxel.light_rgb[idx + 1] * current_weight + r_froxel.prev_light_rgb[idx + 1] * history_weight;
+				r_froxel.light_rgb[idx + 2] = r_froxel.light_rgb[idx + 2] * current_weight + r_froxel.prev_light_rgb[idx + 2] * history_weight;
+			}
+		}
+	}
 }
 
 static void R_Froxel_InjectOneLight (const vec3_t origin, float radius, const vec3_t color, float intensity)
@@ -1848,12 +1920,23 @@ static void R_FogVol_WarnFroxelLightingConfig (void)
 
 void R_Froxel_EndFrame (void)
 {
-	if (!r_froxel.valid || !r_froxel.light_tex)
+	const size_t count = (size_t)r_froxel.dims[0] * (size_t)r_froxel.dims[1] * (size_t)r_froxel.dims[2] * 3u;
+
+	if (!r_froxel.valid || !r_froxel.light_tex || !r_froxel.prev_light_tex || !r_froxel.prev_light_rgb)
 		return;
+
+	R_Froxel_BlendWithHistory ();
 
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.light_tex);
 	GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, 0,
 		r_froxel.dims[0], r_froxel.dims[1], r_froxel.dims[2], GL_RGB, GL_FLOAT, r_froxel.light_rgb);
+
+	memcpy (r_froxel.prev_light_rgb, r_froxel.light_rgb, sizeof (float) * count);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.prev_light_tex);
+	GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, 0,
+		r_froxel.dims[0], r_froxel.dims[1], r_froxel.dims[2], GL_RGB, GL_FLOAT, r_froxel.prev_light_rgb);
+	VectorCopy (r_refdef.vieworg, r_froxel.prev_vieworg);
+	r_froxel.prev_valid = true;
 	GL_MemoryBarrierFunc (GL_TEXTURE_FETCH_BARRIER_BIT);
 }
 
@@ -2693,8 +2776,17 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, r_froxel.near_clip, r_froxel.far_clip, r_froxel.tan_half_fov_x, r_froxel.tan_half_fov_y);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, r_froxel.log_far_near,
 		(float)q_max (1, r_froxel.dims[0]), (float)q_max (1, r_froxel.dims[1]), (float)q_max (1, r_froxel.dims[2]));
-	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, CLAMP (0, (int)Q_rint (r_froxel_debug.value), 2));
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, CLAMP (0, (int)Q_rint (r_froxel_debug.value), 3));
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, r_fogvol_froxel_parity.value > 0.f ? 1 : 0);
+	{
+		vec3_t cam_delta;
+		VectorSubtract (r_refdef.vieworg, r_froxel.prev_vieworg, cam_delta);
+		GL_Uniform4fFunc (FOGVOL_U_FROXEL_TEMPORAL_PARAMS,
+			CLAMP (0.f, r_fogvol_froxel_temporal_alpha.value, 1.f),
+			q_max (1.f, r_fogvol_froxel_temporal_reject_threshold.value),
+			VectorLength (cam_delta),
+			r_froxel.prev_valid ? 1.f : 0.f);
+	}
 	/* Lighting-source policy for fog shading in shaders/fogvol.frag:
 	 *   X (froxel): sampled from FogFroxelLightTex.
 	 *   Y (local list): per-volume FogLights UBO iteration.

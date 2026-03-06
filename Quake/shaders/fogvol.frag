@@ -127,6 +127,7 @@ layout(location=38) uniform int   FogFroxelParityMode; // 0: froxel perf fast pa
 layout(location=39) uniform vec3  FogLightSourceScales; // x: froxel, y: local light list, z: lightgrid/static
 layout(location=40) uniform int   FogGodrayCoupling;
 layout(location=41) uniform vec4  FogGodrayShaftsParams; // xy: shafts texture size, z: coupling strength
+layout(location=42) uniform vec4  FogFroxelTemporalParams; // x: alpha, y: reject threshold, z: camera delta, w: prev valid
 
 layout(location=0) out vec4 FragColor;
 
@@ -408,6 +409,18 @@ vec3 SampleFroxelLight(vec3 p)
 	if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0))))
 		return vec3(0.0);
 	return texture(FogFroxelLightTex, clamp(uvw, 0.0, 1.0)).rgb;
+}
+
+float SampleFroxelHistoryWeight(vec3 p)
+{
+	if (FogFroxelEnabled == 0 || FogFroxelTemporalParams.w <= 0.5)
+		return 0.0;
+	vec3 viewPos = (View * vec4(p, 1.0)).xyz;
+	float z = max(-viewPos.z, FogFroxelParams0.x);
+	float rejectThreshold = max(FogFroxelTemporalParams.y, 1.0);
+	float depthGate = clamp(z / rejectThreshold, 0.0, 1.0);
+	float cameraReject = clamp(FogFroxelTemporalParams.z / rejectThreshold, 0.0, 1.0);
+	return clamp(FogFroxelTemporalParams.x * (1.0 - cameraReject) * depthGate, 0.0, 1.0);
 }
 
 // PERF: lod=0 full quality (near), lod=1 coarse (far). Caller passes based on distance.
@@ -860,6 +873,12 @@ void main()
 		vec3 froxelViz = SampleFroxelLight(ro + rd * max(tEnter, 0.0));
 		float energy = clamp(max(froxelViz.r, max(froxelViz.g, froxelViz.b)) * 0.25, 0.0, 1.0);
 		FragColor = vec4(energy, energy * energy, 0.0, 1.0);
+		return;
+	}
+	if (FogFroxelDebug == 3)
+	{
+		float weight = SampleFroxelHistoryWeight(ro + rd * max(tEnter, 0.0));
+		FragColor = vec4(weight, 1.0 - weight, 0.0, 1.0);
 		return;
 	}
 
