@@ -113,6 +113,7 @@ extern cvar_t r_fogvol_shadow_jitter;
 extern cvar_t r_fogvol_sun_scatter;
 extern cvar_t r_fogvol_froxel;
 extern cvar_t r_fogvol_froxel_sun;
+extern cvar_t r_fogvol_froxel_sun_legacy;
 extern cvar_t r_fogvol_froxel_static;
 extern cvar_t r_fogvol_static_probe_mode;
 extern cvar_t r_fogvol_static_probe_density;
