@@ -192,6 +192,9 @@ cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_color = { "r_fogvol_sun_color", "0 0 0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel = { "r_fogvol_froxel", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_parity = { "r_fogvol_froxel_parity", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_froxel_sun = { "r_fogvol_froxel_sun", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_froxel_static = { "r_fogvol_froxel_static", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_froxel_godrays = { "r_fogvol_froxel_godrays", "0", CVAR_ARCHIVE };
 /* Source weighting policy for local fog lighting contributions.
  * - r_fogvol_froxel_scale controls FogFroxelLightTex contribution when enabled.
  * - r_fogvol_lightlist_scale controls per-volume FogLights list contribution.
@@ -271,6 +274,9 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_sun_color, "lighting", "0 0 0"},
 	{&r_fogvol_froxel, "lighting", "0"},
 	{&r_fogvol_froxel_parity, "lighting", "0"},
+	{&r_fogvol_froxel_sun, "lighting", "1"},
+	{&r_fogvol_froxel_static, "lighting", "1"},
+	{&r_fogvol_froxel_godrays, "lighting", "0"},
 	{&r_fogvol_froxel_scale, "lighting", "1"},
 	{&r_fogvol_lightlist_scale, "lighting", "1"},
 	{&r_fogvol_lightgrid_scale, "lighting", "1"},
@@ -1580,6 +1586,86 @@ static void R_Froxel_InjectOneLight (const vec3_t origin, float radius, const ve
 	}
 }
 
+
+static void R_Froxel_InjectSun (void)
+{
+	const sun_t *sun;
+	vec3_t sun_color;
+	vec3_t inject_origin;
+	vec3_t inject_dir;
+	float inject_radius;
+	float sun_intensity;
+	float sun_scale;
+
+	if (!r_froxel.valid || r_fogvol_froxel_sun.value <= 0.f)
+		return;
+
+	sun = R_GetSun ();
+	if (!sun || !sun->enabled)
+		return;
+
+	sun_intensity = q_max (0.f, sun->intensity);
+	if (sun_intensity <= 0.f)
+		return;
+
+	VectorCopy (sun->color, sun_color);
+	if (sun_color[0] <= 0.f && sun_color[1] <= 0.f && sun_color[2] <= 0.f)
+		VectorSet (sun_color, 1.f, 1.f, 1.f);
+
+	sun_scale = q_max (0.f, r_fogvol_froxel_sun.value);
+	if (sun_scale <= 0.f)
+		return;
+
+	VectorScale (sun->dir, -1.f, inject_dir);
+	if (VectorNormalize (inject_dir) <= 0.f)
+		return;
+
+	inject_radius = q_max (512.f, r_froxel.far_clip * 0.35f);
+	VectorMA (r_refdef.vieworg, r_froxel.far_clip * 0.5f, inject_dir, inject_origin);
+	R_Froxel_InjectOneLight (inject_origin, inject_radius, sun_color, sun_intensity * sun_scale);
+}
+
+static void R_Froxel_InjectStaticLights (void)
+{
+	float static_scale;
+
+	if (!r_froxel.valid || r_fogvol_froxel_static.value <= 0.f)
+		return;
+	if (r_num_fog_static_lights <= 0)
+		return;
+
+	static_scale = q_max (0.f, r_fogvol_froxel_static.value);
+	if (static_scale <= 0.f)
+		return;
+
+	for (int i = 0; i < r_num_fog_static_lights; ++i)
+	{
+		const fog_light_gpu_t *sl = &r_fog_static_lights[i];
+		vec3_t color;
+		float intensity = q_max (0.f, sl->col_int[3]);
+
+		if (sl->pos_rad[3] <= 0.f || intensity <= 0.f)
+			continue;
+
+		color[0] = q_max (0.f, sl->col_int[0]);
+		color[1] = q_max (0.f, sl->col_int[1]);
+		color[2] = q_max (0.f, sl->col_int[2]);
+		if (color[0] <= 0.f && color[1] <= 0.f && color[2] <= 0.f)
+			continue;
+
+		R_Froxel_InjectOneLight (sl->pos_rad, sl->pos_rad[3], color, intensity * static_scale);
+	}
+}
+
+static void R_Froxel_InjectGodraysSource (void)
+{
+	if (!r_froxel.valid || r_fogvol_froxel_godrays.value <= 0.f)
+		return;
+
+	/* Optional path: keep disabled by default until a dedicated reduction
+	 * from godray source/mask buffers is wired for stable 3D injection. */
+}
+
 void R_Froxel_InjectDlights (void)
 {
 	const dlight_t *const *active;
@@ -2610,9 +2696,13 @@ void R_FogVol_Render (void)
 	int frame_candidate_count = 0;
 	qboolean has_fog_bounds = false;
 	const qboolean light_stats_enabled = r_fogvol_light_stats.value > 0.f;
-	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f) && (r_fogvol_light.value > 0.f);
-	const int froxel_dlight_count = froxel_injection_enabled ? R_Froxel_CountInjectableDlights () : 0;
-	const qboolean run_froxel_injection = froxel_injection_enabled && froxel_dlight_count > 0;
+	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f);
+	const qboolean want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
+	const qboolean want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
+	const qboolean want_froxel_godrays = froxel_injection_enabled && (r_fogvol_froxel_godrays.value > 0.f);
+	const qboolean want_froxel_dlights = froxel_injection_enabled && (r_fogvol_light.value > 0.f);
+	const int froxel_dlight_count = want_froxel_dlights ? R_Froxel_CountInjectableDlights () : 0;
+	const qboolean run_froxel_injection = want_froxel_sun || want_froxel_static || want_froxel_godrays || (want_froxel_dlights && froxel_dlight_count > 0);
 
 	R_FogVol_WarnFroxelLightingConfig ();
 
@@ -2683,7 +2773,11 @@ void R_FogVol_Render (void)
 	if (run_froxel_injection)
 	{
 		R_Froxel_BeginFrame (depth_near, depth_far);
-		R_Froxel_InjectDlights ();
+		R_Froxel_InjectSun ();
+		R_Froxel_InjectStaticLights ();
+		R_Froxel_InjectGodraysSource ();
+		if (want_froxel_dlights)
+			R_Froxel_InjectDlights ();
 		R_Froxel_EndFrame ();
 	}
 	else
