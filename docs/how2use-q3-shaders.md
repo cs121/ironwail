@@ -1,94 +1,78 @@
-# Working with Quake III Shader Files in Ironwail
+# Working with Material Shader Files in Ironwail
 
-Ironwail now ships with a lightweight Quake III shader parser. This document explains how to load shader definition files at runtime, inspect the parsed data, and use the new C API from engine code.
+> Note: this file keeps its historical filename, but the runtime feature is now the
+> **material shader system** implemented in `mat_shader.*` (not the old `q3shader_*`
+> console/API names).
+
+Ironwail loads shader definitions from `scripts/*.shader` through the material
+shader pipeline. These definitions are used for texture metadata and selected
+render-stage behavior (including particle material integration).
 
 ## Console workflow
 
-1. **Load shader files**
+1. **List loaded shader materials**
 
    ```
-   q3shader_load scripts/common.shader
+   shaderlist
    ```
 
-   * The command accepts one or more relative paths (use forward slashes).
-   * Each invocation reports how many shader blocks were successfully parsed.
+   Optional argument: `shaderlist <limit>` to clamp printed rows.
 
-   To pull in *every* `scripts/*.shader` file that is visible through the Quake filesystem, run:
-
-   ```
-   q3shader_loadall
-   ```
-
-   * Searches PAKs and loose directories in priority order (mods override base content).
-   * Loads every `scripts/*.shader` it encounters, even when multiple paths share the same filename, so base content stays available for later overrides.
-   * Prints a summary of how many files succeeded versus failed and the total shader count discovered.
-
-2. **List the currently loaded shaders**
+2. **Inspect one material**
 
    ```
-   q3shader_list
+   shaderprint textures/common/nodraw
    ```
 
-   * Displays every shader name and the number of stages the parser discovered for that entry.
+   Prints source file, surface/render/content flags, emissive/bloom/godray
+   settings, and stage details.
 
-3. **Inspect a single shader**
-
-   ```
-   q3shader_info textures/common/nodraw
-   ```
-
-   The command prints:
-
-   * Source file the definition came from.
-   * Cull mode and decoded `surfaceparm` flags.
-   * Metadata such as `qer_editorimage`, transparency, and light parameters when present.
-   * Stage-by-stage details (maps, animMap rate, blend/alpha configuration, tcMods, etc.).
-
-4. **Clear all parsed shader data**
+3. **Reload all material shaders**
 
    ```
-   q3shader_clear
+   r_reloadshaders 1
    ```
 
-   * Useful when reloading a modified `.shader` file while developing content.
+   Setting this cvar triggers a full reload and then resets the cvar to `0`.
+
+4. **Developer-only parser fuzzing**
+
+   ```
+   shaderfuzz
+   ```
+
+   Or set `r_matshader_fuzz 1` for callback-based fuzz runs.
+
+## Relevant CVars
+
+- `r_shaders` (`1`): master enable for loading and applying material shaders.
+- `r_shader_debug` (`0`): runtime shader debug toggle.
+- `r_matshader_debug_parse` (`0`): print parser debug information.
+- `r_matshader_report` (`0`): write markdown parser support report during load.
+- `r_particles_shader_strict` (`0`): strict compatibility policy for particle
+  stage support.
 
 ## C API overview
 
-Include `q3shader.h` to access the parser programmatically. Key helpers:
+Include `mat_shader.h` for public APIs.
 
-* `int Q3Shader_LoadFile(const char *path);`
-  * Parses a `.shader` file and merges/replaces entries in the registry.
-* `int Q3Shader_LoadAll(int *files_loaded, int *files_failed);`
-  * Enumerates `scripts/*.shader` across the virtual filesystem.
-  * Returns the number of shader definitions parsed and optionally reports the number of files that succeeded/failed.
-* `void Q3Shader_Clear(void);`
-  * Empties the registry.
-* `size_t Q3Shader_Count(void);`
-  * Returns the number of loaded shaders. Iterate with `Q3Shader_GetByIndex`.
-* `const q3shader_t *Q3Shader_Find(const char *name);`
-  * Fetches a shader definition by name (case-insensitive).
-* `void Q3Shader_DescribeSurfaceParms(const q3shader_t *shader, char *buffer, size_t bufsize);`
-  * Converts the surface parameter bit-mask into a readable string.
-* Stage helpers such as `Q3ShaderStage_Count`, `Q3ShaderStage_GetMap`, `Q3ShaderStage_GetAnimMapCount`, and `Q3ShaderStage_GetTcModCount` expose render-stage data.
+- Lifecycle/load:
+  - `void Mat_Shader_Init(void);`
+  - `void Mat_Shader_Reload(void);`
+  - `void Mat_Shader_Shutdown(void);`
+- Registry/query:
+  - `size_t Mat_Shader_Count(void);`
+  - `const shader_material_t *Mat_Shader_GetByIndex(size_t index);`
+  - `const shader_material_t *Mat_Shader_Find(const char *name);`
+  - `const shader_material_t *Mat_Shader_FindForTextureName(const char *texname, const char *mapname);`
+- Texture integration:
+  - `void Mat_Shader_ApplyToTexture(texture_t *tex, const char *mapname);`
+  - `unsigned int Mat_Shader_GetTextureFlags(const shader_material_t *material);`
+- Debug/introspection:
+  - `void Mat_Shader_Print(const shader_material_t *material);`
 
-### Sample iteration code
+## Current support scope
 
-```c
-for (size_t i = 0; i < Q3Shader_Count(); ++i) {
-    const q3shader_t *shader = Q3Shader_GetByIndex(i);
-    Con_Printf("%s has %zu stage(s)\n", shader->name, Q3ShaderStage_Count(shader));
-
-    for (size_t s = 0; s < Q3ShaderStage_Count(shader); ++s) {
-        const q3shader_stage_t *stage = Q3Shader_GetStage(shader, s);
-        const char *map = Q3ShaderStage_GetMap(stage);
-        if (map)
-            Con_Printf("  stage %zu map: %s\n", s + 1, map);
-    }
-}
-```
-
-## Notes and limitations
-
-* The parser is designed for Quake III style syntax, including nested stage blocks, `surfaceparm` directives, `animMap`, `tcMod`, and blend instructions. Unknown directives are still stored in the directive lists so nothing is lost.
-* Definitions loaded later replace earlier entries that share the same shader name, mirroring idTech 3 behaviour.
-* Shader data lives in zone memory and is released automatically during `q3shader_clear` or engine shutdown.
+The parser currently focuses on a practical subset (for engine needs), including
+material-level directives and stage fields used by Ironwail. Unknown tokens are
+tracked and summarized in parser reporting instead of aborting load.
