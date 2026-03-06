@@ -1765,78 +1765,6 @@ static void R_Froxel_InjectStaticLights (void)
 	}
 }
 
-static void R_Froxel_InjectGodraysSource (void)
-{
-	GLuint shafts_tex = 0;
-	int shafts_w = 0;
-	int shafts_h = 0;
-	const int nx = q_max (1, r_froxel.dims[0]);
-	const int ny = q_max (1, r_froxel.dims[1]);
-	const int nz = q_max (1, r_froxel.dims[2]);
-	float coupling_scale;
-	byte *pixels = NULL;
-	const float phase_weight = 0.35f;
-	vec3_t sun_color;
-	float sun_intensity;
-
-	if (!r_froxel.valid || r_fogvol_froxel_godrays.value <= 0.f)
-		return;
-	if (r_fogvol_godray_coupling.value <= 0.f)
-		return;
-	if (!R_Godrays_GetFogCouplingSource (&shafts_tex, &shafts_w, &shafts_h))
-		return;
-	if (shafts_tex == 0 || shafts_w <= 0 || shafts_h <= 0)
-		return;
-	if (!R_WorldHasSun ())
-		return;
-
-	coupling_scale = q_max (0.f, r_fogvol_froxel_godrays.value) * q_max (0.f, r_fogvol_godray_coupling.value);
-	if (coupling_scale <= 0.f)
-		return;
-
-	pixels = (byte *)malloc ((size_t)shafts_w * (size_t)shafts_h * 4u);
-	if (!pixels)
-		return;
-
-	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, shafts_tex);
-	glGetTexImage (GL_TEXTURE_2D, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, 0);
-
-	VectorCopy (R_GetSun ()->color, sun_color);
-	if (sun_color[0] <= 0.f && sun_color[1] <= 0.f && sun_color[2] <= 0.f)
-		VectorSet (sun_color, 1.f, 1.f, 1.f);
-	sun_intensity = q_max (0.f, R_GetSun ()->intensity);
-
-	for (int z = 0; z < nz; ++z)
-	{
-		float zf = (float)z / (float)q_max (1, nz - 1);
-		for (int y = 0; y < ny; ++y)
-		{
-			int py = (int)((float)y * (float)(shafts_h - 1) / (float)q_max (1, ny - 1));
-			for (int x = 0; x < nx; ++x)
-			{
-				int px = (int)((float)x * (float)(shafts_w - 1) / (float)q_max (1, nx - 1));
-				const int pidx = (py * shafts_w + px) * 4;
-				const float shafts_r = pixels[pidx + 0] * (1.f / 255.f);
-				const float shafts_g = pixels[pidx + 1] * (1.f / 255.f);
-				const float shafts_b = pixels[pidx + 2] * (1.f / 255.f);
-				const float shaft_energy = q_max (shafts_r, q_max (shafts_g, shafts_b));
-				if (shaft_energy <= 1e-4f)
-					continue;
-
-				const float depth_falloff = 1.f - zf;
-				const float inject = shaft_energy * coupling_scale * depth_falloff;
-				const int idx = ((z * ny + y) * nx + x) * 3;
-				r_froxel.light_rgb[idx + 0] += sun_color[0] * sun_intensity * inject * phase_weight;
-				r_froxel.light_rgb[idx + 1] += sun_color[1] * sun_intensity * inject * phase_weight;
-				r_froxel.light_rgb[idx + 2] += sun_color[2] * sun_intensity * inject * phase_weight;
-			}
-		}
-	}
-
-	free (pixels);
-}
-
 void R_Froxel_InjectDlights (void)
 {
 	const dlight_t *const *active;
@@ -2868,7 +2796,8 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		int shafts_h = 0;
 		const qboolean allow_coupling = (r_fogvol_godray_coupling.value > 0.f);
 		const qboolean shafts_ready = allow_coupling && R_Godrays_GetFogCouplingSource (&shafts_tex, &shafts_w, &shafts_h);
-		const qboolean enable_in_shader = shafts_ready && !r_froxel.valid;
+		const float froxel_godray_scale = r_froxel.valid ? q_max (0.f, r_fogvol_froxel_godrays.value) : 1.f;
+		const qboolean enable_in_shader = shafts_ready && (froxel_godray_scale > 0.f);
 
 		GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, enable_in_shader ? shafts_tex : 0);
 		GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, enable_in_shader ? 1 : 0);
@@ -2876,7 +2805,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 			enable_in_shader ? (float)q_max (1, shafts_w) : 1.f,
 			enable_in_shader ? (float)q_max (1, shafts_h) : 1.f,
 			q_max (0.f, r_fogvol_godray_coupling.value),
-			0.f);
+			froxel_godray_scale);
 	}
 }
 
@@ -2939,10 +2868,9 @@ void R_FogVol_Render (void)
 	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f) && froxel_lighting_mode;
 	const qboolean want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
 	const qboolean want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
-	const qboolean want_froxel_godrays = froxel_injection_enabled && (r_fogvol_froxel_godrays.value > 0.f);
 	const qboolean want_froxel_dlights = froxel_injection_enabled && (r_fogvol_light.value > 0.f);
 	const int froxel_dlight_count = want_froxel_dlights ? R_Froxel_CountInjectableDlights () : 0;
-	const qboolean run_froxel_injection = want_froxel_sun || want_froxel_static || want_froxel_godrays || (want_froxel_dlights && froxel_dlight_count > 0);
+	const qboolean run_froxel_injection = want_froxel_sun || want_froxel_static || (want_froxel_dlights && froxel_dlight_count > 0);
 
 	R_FogVol_WarnFroxelLightingConfig ();
 
@@ -3015,7 +2943,6 @@ void R_FogVol_Render (void)
 		R_Froxel_BeginFrame (depth_near, depth_far);
 		R_Froxel_InjectSun ();
 		R_Froxel_InjectStaticLights ();
-		R_Froxel_InjectGodraysSource ();
 		if (want_froxel_dlights)
 			R_Froxel_InjectDlights ();
 		R_Froxel_EndFrame ();
