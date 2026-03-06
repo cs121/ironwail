@@ -28,6 +28,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
+extern cvar_t r_viewmodel_light_boost;
+extern cvar_t r_viewmodel_minlight;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_lightgrid_debug;
@@ -97,6 +99,19 @@ COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
 static qboolean r_alias_shadow_batch_dlight = false;
+
+static void R_ScaleAliasLighting (vec3_t light, vec3_t ambient, vec3_t dlight, float scale)
+{
+	if (scale <= 0.f || scale == 1.f)
+		return;
+
+	for (int i = 0; i < 3; i++)
+	{
+		light[i] *= scale;
+		ambient[i] *= scale;
+		dlight[i] *= scale;
+	}
+}
 
 static void R_DebugLightgridSample (const entity_t *e, const vec3_t ambient_delta)
 {
@@ -425,33 +440,27 @@ void R_SetupAliasLighting (entity_t     *e)
 
         R_ApplyLightgridLighting (e, ambientcolor);
 
-        // viewmodel lighting is typically darker because world lights aren't placed for a free camera
+	// viewmodel lighting is typically darker because world lights aren't placed for a free camera
 	if (e == &cl.viewent)
 	{
-		for (i = 0; i < 3; i++)
-		{
-			const float L = lightcolor[i];
-			const float new_L = fmaxf (L * 1.5f, L + 40.0f);
-			const float scale = L > 0.0f ? new_L / L : 0.0f;
-			ambientcolor[i] *= scale;
-			dlightcolor[i] *= scale;
-			lightcolor[i] = new_L;
-		}
+		const float light_sum = lightcolor[0] + lightcolor[1] + lightcolor[2];
+		const float boost = fmaxf (r_viewmodel_light_boost.value, 1.f);
+		const float boosted_sum = fmaxf (light_sum * boost, light_sum + 120.f);
+		const float scale = light_sum > 0.f ? boosted_sum / light_sum : 1.f;
+
+		R_ScaleAliasLighting (lightcolor, ambientcolor, dlightcolor, scale);
 	}
 
 	// minimum light value on gun (24)
 	if (e == &cl.viewent)
 	{
-		add = 72.0f - (lightcolor[0] + lightcolor[1] + lightcolor[2]);
-		if (add > 0.0f)
+		const float light_sum = lightcolor[0] + lightcolor[1] + lightcolor[2];
+		const float min_sum = fmaxf (r_viewmodel_minlight.value, 0.f);
+
+		if (light_sum > 0.f && light_sum < min_sum)
 		{
-			add *= 1.0f / 3.0f;
-			lightcolor[0] += add;
-			lightcolor[1] += add;
-			lightcolor[2] += add;
-			ambientcolor[0] += add;
-			ambientcolor[1] += add;
-			ambientcolor[2] += add;
+			const float scale = min_sum / light_sum;
+			R_ScaleAliasLighting (lightcolor, ambientcolor, dlightcolor, scale);
 		}
 	}
 
