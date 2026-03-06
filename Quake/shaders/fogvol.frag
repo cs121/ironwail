@@ -123,6 +123,7 @@ layout(location=35) uniform vec4  FogFroxelParams0; // x near, y far, z tanHalfF
 layout(location=36) uniform vec4  FogFroxelParams1; // x log(far/near), yzw dims
 layout(location=37) uniform int   FogFroxelDebug;
 layout(location=38) uniform int   FogFroxelParityMode; // 0: froxel perf fast path, 1: legacy per-light parity path
+layout(location=39) uniform vec3  FogLightSourceScales; // x: froxel, y: local light list, z: lightgrid/static
 
 layout(location=0) out vec4 FragColor;
 
@@ -656,8 +657,10 @@ void main()
 	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
 	int lightOffset     = max(lightList.offset_count.x, 0);
 	int lightCount      = clamp(lightList.offset_count.y, 0, MAX_FOGLIGHTS);
-	bool  doLights      = (FogLightEnabled != 0) && ((FogFroxelEnabled != 0) || (lightCount > 0));
-	bool  doLightgrid   = (FogLightgridEnabled != 0);
+	bool  doFroxelLights = (FogLightEnabled != 0) && (FogFroxelEnabled != 0) && (FogFroxelParityMode == 0) && (FogLightSourceScales.x > 0.0);
+	bool  doListLights   = (FogLightEnabled != 0) && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
+	bool  doLights       = doFroxelLights || doListLights;
+	bool  doLightgrid    = (FogLightgridEnabled != 0) && (FogLightSourceScales.z > 0.0);
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated  they were
 	// accumulated but never consumed, silently wasting ALU every iteration.
@@ -734,7 +737,7 @@ void main()
 			// probe data; explicit fog volume emissive remains handled separately
 			// by FogEmissiveEnabled/volume.extra.z below.
 			vec3 staticScatter = SampleFogLightgrid(p, volume);
-			stepScatter += staticScatter * (FogDLightScale * (1.0 - att));
+			stepScatter += staticScatter * (FogDLightScale * FogLightSourceScales.z * (1.0 - att));
 		}
 
 		// Froxel local-light contribution can run as a fast path; debug outputs remain
@@ -745,15 +748,17 @@ void main()
 			vec3 lightScatter = lightScatterPrev;
 			if (FogLightSubsample == 0 || (i & 1) == 0)
 			{
-				if (FogFroxelEnabled != 0 && FogFroxelParityMode == 0)
+				vec3 froxelScatter = vec3(0.0);
+				vec3 localScatter = vec3(0.0);
+				if (doFroxelLights)
 				{
-					// Fast path: froxel lighting is mutually exclusive with per-light UBO iteration.
-					// Froxel stores local light energy in world space; no extra local phase term needed here.
-					lightScatter = SampleFroxelLight(p) * FogDLightScale;
+					// Froxel lighting is blended with the per-volume light list.
+					// We normalize by active source weight sum to avoid double-counting
+					// when both represent the same local lights.
+					froxelScatter = SampleFroxelLight(p) * (FogDLightScale * FogLightSourceScales.x);
 				}
-				else
+				if (doListLights)
 				{
-					lightScatter = vec3(0.0);
 					for (int l = 0; l < MAX_FOGLIGHTS; ++l)
 					{
 						if (l >= lightCount) break;
@@ -767,9 +772,19 @@ void main()
 						if (atten < 1e-5) continue;
 						vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
 						float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
-						lightScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal);
+						localScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal);
 					}
+					localScatter *= FogLightSourceScales.y;
 				}
+				if (doFroxelLights && doListLights)
+				{
+					float denom = max(FogLightSourceScales.x + FogLightSourceScales.y, 1e-4);
+					lightScatter = (froxelScatter + localScatter) / denom;
+				}
+				else if (doFroxelLights)
+					lightScatter = froxelScatter;
+				else
+					lightScatter = localScatter;
 				lightScatterPrev = lightScatter;
 			}
 			stepScatter += lightScatter * (1.0 - att);
