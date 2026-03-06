@@ -1566,6 +1566,9 @@ void R_Froxel_InjectDlights (void)
 {
 	const dlight_t *const *active;
 	int active_count = 0;
+	int injected_count = 0;
+	int nonzero_voxels = 0;
+	double aggregate_energy = 0.0;
 
 	if (!r_froxel.valid)
 		return;
@@ -1585,6 +1588,7 @@ void R_Froxel_InjectDlights (void)
 			if (!dl || !CL_DlightIsActive (dl) || dl->radius <= 0.f)
 				continue;
 			R_Froxel_InjectOneLight (dl->origin, dl->radius, dl->color, 1.f);
+			injected_count++;
 		}
 	}
 
@@ -1594,6 +1598,27 @@ void R_Froxel_InjectDlights (void)
 		if (!CL_DlightIsActive (dl) || dl->radius <= 0.f)
 			continue;
 		R_Froxel_InjectOneLight (dl->origin, dl->radius, dl->color, 1.f);
+		injected_count++;
+	}
+
+	if (r_froxel_debug.value > 0.f)
+	{
+		const int voxel_count = r_froxel.dims[0] * r_froxel.dims[1] * r_froxel.dims[2];
+		for (int i = 0; i < voxel_count; ++i)
+		{
+			const float r = r_froxel.light_rgb[i * 3 + 0];
+			const float g = r_froxel.light_rgb[i * 3 + 1];
+			const float b = r_froxel.light_rgb[i * 3 + 2];
+			const float peak = q_max (r, q_max (g, b));
+			if (peak <= 1e-6f)
+				continue;
+			nonzero_voxels++;
+			aggregate_energy += peak;
+		}
+		Con_Printf ("FROXEL inject: lights=%d nonzero_voxels=%d aggregate_energy=%.3f\n",
+			injected_count,
+			nonzero_voxels,
+			aggregate_energy);
 	}
 
 	if (((r_fogvol_inject_debug.value > 0.f) || (r_fogvol_debug.value >= 7.f))
@@ -1604,6 +1629,48 @@ void R_Froxel_InjectDlights (void)
 			(unsigned long long)r_froxel_tested_froxels_before,
 			(unsigned long long)r_froxel_tested_froxels_after,
 			ratio);
+	}
+}
+
+static int R_Froxel_CountInjectableDlights (void)
+{
+	const dlight_t *const *active;
+	int active_count = 0;
+	int count = 0;
+
+	active = DLightPool_GetActiveList (&active_count);
+	if (active)
+	{
+		for (int i = 0; i < active_count; ++i)
+		{
+			const dlight_t *dl = active[i];
+			if (!dl || !CL_DlightIsActive (dl) || dl->radius <= 0.f)
+				continue;
+			count++;
+		}
+	}
+
+	for (int i = 0; i < r_num_fog_dlights; ++i)
+	{
+		const dlight_t *dl = &r_fog_dlights[i];
+		if (!CL_DlightIsActive (dl) || dl->radius <= 0.f)
+			continue;
+		count++;
+	}
+
+	return count;
+}
+
+static void R_FogVol_WarnFroxelLightingConfig (void)
+{
+	static qboolean warned = false;
+
+	if (warned)
+		return;
+	if (r_fogvol_froxel.value > 0.f && r_fogvol_light.value <= 0.f)
+	{
+		Con_Printf ("Warning: r_fogvol_froxel=1 while r_fogvol_light=0. Froxel injection is disabled in this mode and cannot provide performance wins.\n");
+		warned = true;
 	}
 }
 
@@ -1621,6 +1688,7 @@ void R_Froxel_EndFrame (void)
 void R_FogVol_Init (void)
 {
 	memset (&r_froxel, 0, sizeof (r_froxel));
+	R_FogVol_WarnFroxelLightingConfig ();
 }
 
 void R_FogVol_Clear (void)
@@ -2510,6 +2578,11 @@ void R_FogVol_Render (void)
 	int frame_candidate_count = 0;
 	qboolean has_fog_bounds = false;
 	const qboolean light_stats_enabled = r_fogvol_light_stats.value > 0.f;
+	const qboolean froxel_light_enabled = r_fogvol_light.value > 0.f;
+	const int froxel_dlight_count = froxel_light_enabled ? R_Froxel_CountInjectableDlights () : 0;
+	const qboolean run_froxel_injection = froxel_light_enabled && froxel_dlight_count > 0;
+
+	R_FogVol_WarnFroxelLightingConfig ();
 
 	/* Per-frame validity: only expose a fogvol composite texture after this
 	 * frame actually produced one. */
@@ -2575,9 +2648,16 @@ void R_FogVol_Render (void)
 	}
 	steps = CLAMP (8, steps, q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
 
-	R_Froxel_BeginFrame (depth_near, depth_far);
-	R_Froxel_InjectDlights ();
-	R_Froxel_EndFrame ();
+	if (run_froxel_injection)
+	{
+		R_Froxel_BeginFrame (depth_near, depth_far);
+		R_Froxel_InjectDlights ();
+		R_Froxel_EndFrame ();
+	}
+	else
+	{
+		r_froxel.valid = false;
+	}
 
 	memset (&fog_lights, 0, sizeof (fog_lights));
 	memset (&light_stats, 0, sizeof (light_stats));

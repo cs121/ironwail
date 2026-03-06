@@ -40,3 +40,17 @@ The dominant issue was **A + C combined**:
 - Recommended baseline: keep `r_fogvol_shadow_samples=2` for gameplay, use `4` for captures, and avoid `8` unless fog coverage is limited.
 - If performance is tight, first reduce `r_fogvol_shadow_samples`, then disable jitter, and finally disable `r_fogvol_shadow`.
 - Directional sun radiance adds only a few ALU ops per fog step and no extra texture taps; it is effectively free compared to shadow marching. Keep `r_fogvol_sun_scatter=0` for exact legacy output.
+
+## Froxel lighting validation checklist
+1. Enable fog lighting before profiling froxel work:
+   - `r_fogvol_light 1`
+   - `r_fogvol_froxel 1`
+2. Ensure there are active dynamic lights intersecting fog volumes (weapon flashes, explosions, scripted dlights, or fog-only dlights).
+3. Turn on froxel diagnostics and confirm injection activity:
+   - `r_froxel_debug 1` (visualize first-hit froxel RGB)
+   - Check console for `FROXEL inject: lights=... nonzero_voxels=... aggregate_energy=...`.
+4. Compare with heat/debug mode:
+   - `r_froxel_debug 2` (max-energy heat view)
+   - If mode 1/2 shows little-to-no signal and counters stay near zero, froxel acceleration will not help in that scene.
+5. Verify configuration sanity:
+   - If `r_fogvol_froxel=1` while `r_fogvol_light=0`, froxel injection is intentionally skipped and cannot provide performance wins.
