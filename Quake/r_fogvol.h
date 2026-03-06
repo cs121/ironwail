@@ -102,6 +102,7 @@ extern cvar_t r_fogvol_globalfog_height;
 extern cvar_t r_fogvol_globalfog_height_scale;
 extern cvar_t r_fogvol_globalfog_priority;
 extern cvar_t r_fogvol_light;
+extern cvar_t r_fogvol_lighting_mode;
 extern cvar_t r_fogvol_lightgrid;
 extern cvar_t r_fogvol_light_max;
 extern cvar_t r_fogvol_dlightscale;

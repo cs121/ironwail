@@ -125,9 +125,10 @@ layout(location=36) uniform vec4  FogFroxelParams1; // x log(far/near), yzw dims
 layout(location=37) uniform int   FogFroxelDebug;
 layout(location=38) uniform int   FogFroxelParityMode; // 0: froxel perf fast path, 1: legacy per-light parity path
 layout(location=39) uniform vec3  FogLightSourceScales; // x: froxel, y: local light list, z: lightgrid/static
-layout(location=40) uniform int   FogGodrayCoupling;
-layout(location=41) uniform vec4  FogGodrayShaftsParams; // xy: shafts texture size, z: coupling strength
-layout(location=42) uniform vec4  FogFroxelTemporalParams; // x: alpha, y: reject threshold, z: camera delta, w: prev valid
+layout(location=40) uniform int   FogLightingMode; // 0=off, 1=raymarch, 2=froxel, 3=froxel+raymarch detail
+layout(location=41) uniform int   FogGodrayCoupling;
+layout(location=42) uniform vec4  FogGodrayShaftsParams; // xy: shafts texture size, z: coupling strength
+layout(location=43) uniform vec4  FogFroxelTemporalParams; // x: alpha, y: reject threshold, z: camera delta, w: prev valid
 
 layout(location=0) out vec4 FragColor;
 
@@ -673,10 +674,15 @@ void main()
 	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
 	int lightOffset     = max(lightList.offset_count.x, 0);
 	int lightCount      = clamp(lightList.offset_count.y, 0, MAX_FOGLIGHTS);
-	bool  doFroxelLights = (FogLightEnabled != 0) && (FogFroxelEnabled != 0) && (FogFroxelParityMode == 0) && (FogLightSourceScales.x > 0.0);
-	bool  doListLights   = (FogLightEnabled != 0) && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
-	bool  doLights       = doFroxelLights || doListLights;
-	bool  doLightgrid    = (FogLightgridEnabled != 0) && (FogLightSourceScales.z > 0.0);
+	int fogLightingMode = clamp(FogLightingMode, 0, 3);
+	bool useFroxelLighting = (fogLightingMode == 2 || fogLightingMode == 3);
+	bool doRaymarchLighting = (fogLightingMode == 1);
+	bool doRaymarchDetail = (fogLightingMode == 3);
+	bool doFroxelLights = (FogLightEnabled != 0) && useFroxelLighting && (FogFroxelEnabled != 0) && (FogFroxelParityMode == 0) && (FogLightSourceScales.x > 0.0);
+	bool doListLightsFull = (FogLightEnabled != 0) && doRaymarchLighting && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
+	bool doListLightsDetail = (FogLightEnabled != 0) && doRaymarchDetail && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
+	bool doLights = doFroxelLights || doListLightsFull || doListLightsDetail;
+	bool doLightgrid = (FogLightgridEnabled != 0) && (FogLightSourceScales.z > 0.0);
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated  they were
 	// accumulated but never consumed, silently wasting ALU every iteration.
@@ -783,7 +789,7 @@ void main()
 					// when both represent the same local lights.
 					froxelScatter = SampleFroxelLight(p) * (FogDLightScale * FogLightSourceScales.x);
 				}
-				if (doListLights)
+				if (doListLightsFull || doListLightsDetail)
 				{
 					for (int l = 0; l < MAX_FOGLIGHTS; ++l)
 					{
@@ -801,14 +807,19 @@ void main()
 						localScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal);
 					}
 					localScatter *= FogLightSourceScales.y;
+					if (doListLightsDetail)
+					{
+						// Mode 3: conservative add-on only to avoid double-lighting.
+						localScatter *= 0.25;
+					}
 				}
-				if (doFroxelLights && doListLights)
+				if (doFroxelLights && doListLightsFull)
 				{
 					float denom = max(FogLightSourceScales.x + FogLightSourceScales.y, 1e-4);
 					lightScatter = (froxelScatter + localScatter) / denom;
 				}
 				else if (doFroxelLights)
-					lightScatter = froxelScatter;
+					lightScatter = froxelScatter + localScatter;
 				else
 					lightScatter = localScatter;
 				lightScatterPrev = lightScatter;
