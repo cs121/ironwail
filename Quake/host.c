@@ -93,6 +93,10 @@ cvar_t	temp1 = {"temp1","0",CVAR_NONE};
 
 cvar_t devstats = {"devstats","0",CVAR_NONE}; //johnfitz -- track developer statistics that vary every frame
 cvar_t cl_titlestats = {"cl_titlestats","1",CVAR_ARCHIVE};
+static cvar_t host_asyncqueue_overflow_policy = {"host_asyncqueue_overflow_policy", "block", CVAR_ARCHIVE};
+static cvar_t host_asyncqueue_timeout_ms = {"host_asyncqueue_timeout_ms", "2", CVAR_ARCHIVE};
+static cvar_t host_asyncqueue_warn_ms = {"host_asyncqueue_warn_ms", "8", CVAR_ARCHIVE};
+static cvar_t host_asyncqueue_metrics = {"host_asyncqueue_metrics", "0", CVAR_ARCHIVE};
 
 cvar_t	campaign = {"campaign","0",CVAR_NONE}; // for the 2021 rerelease
 cvar_t	horde = {"horde","0",CVAR_NONE}; // for the 2021 rerelease
@@ -434,6 +438,10 @@ void Host_InitLocal (void)
 	Cvar_RegisterVariable (&devstats); //johnfitz
 
 	Cvar_RegisterVariable (&cl_titlestats);
+	Cvar_RegisterVariable (&host_asyncqueue_overflow_policy);
+	Cvar_RegisterVariable (&host_asyncqueue_timeout_ms);
+	Cvar_RegisterVariable (&host_asyncqueue_warn_ms);
+	Cvar_RegisterVariable (&host_asyncqueue_metrics);
 
 	Cvar_RegisterVariable (&sys_ticrate);
 	Cvar_RegisterVariable (&serverprofile);
@@ -746,6 +754,13 @@ typedef struct asyncqueue_s
 	SDL_mutex			*mutex;
 	SDL_cond			*notfull;
 	asyncproc_t			*procs;
+	uint64_t			push_count;
+	uint64_t			queue_full_hits;
+	uint64_t			block_waits;
+	uint64_t			block_timeouts;
+	uint64_t			dropped;
+	uint64_t			immediate_exec;
+	size_t				peak_depth;
 } asyncqueue_t;
 
 static asyncqueue_t		async_queue;
@@ -776,18 +791,65 @@ static void AsyncQueue_Init (asyncqueue_t *queue, size_t capacity)
 static void AsyncQueue_Push (asyncqueue_t *queue, void (*func) (void *param), void *param)
 {
 	asyncproc_t *proc;
+	int timeout_ms;
+	double wait_start = 0.0;
+	qboolean waited = false;
+	size_t depth;
 
 	if (!queue->mutex)
 		return;
 	SDL_LockMutex (queue->mutex);
+	queue->push_count++;
+	timeout_ms = q_max (0, (int) host_asyncqueue_timeout_ms.value);
 	while (!queue->teardown && queue->tail - queue->head >= queue->capacity)
-		SDL_CondWait (queue->notfull, queue->mutex);
+	{
+		const char *policy = host_asyncqueue_overflow_policy.string;
+		queue->queue_full_hits++;
+		if (!q_strcasecmp (policy, "drop") || !q_strcasecmp (policy, "fail"))
+		{
+			queue->dropped++;
+			if (host_asyncqueue_metrics.value > 0.f)
+				Con_DPrintf ("AsyncQueue: drop on full queue (cap=%u)\n", (unsigned int) queue->capacity);
+			SDL_UnlockMutex (queue->mutex);
+			return;
+		}
+		if (!q_strcasecmp (policy, "exec"))
+		{
+			queue->immediate_exec++;
+			SDL_UnlockMutex (queue->mutex);
+			func (param);
+			return;
+		}
+		if (!waited)
+			wait_start = Sys_DoubleTime ();
+		waited = true;
+		queue->block_waits++;
+		if (timeout_ms > 0 && SDL_CondWaitTimeout (queue->notfull, queue->mutex, timeout_ms) == SDL_MUTEX_TIMEDOUT)
+		{
+			queue->block_timeouts++;
+			if (host_asyncqueue_metrics.value > 0.f)
+				Con_DPrintf ("AsyncQueue: block timeout (ms=%d)\n", timeout_ms);
+		}
+		else if (timeout_ms <= 0)
+		{
+			SDL_CondWait (queue->notfull, queue->mutex);
+		}
+	}
 
 	if (!queue->teardown)
 	{
 		proc = &queue->procs[(queue->tail++) & (queue->capacity - 1)];
 		proc->func = func;
 		proc->param = param;
+		depth = queue->tail - queue->head;
+		if (depth > queue->peak_depth)
+			queue->peak_depth = depth;
+		if (waited && host_asyncqueue_warn_ms.value > 0.f)
+		{
+			double waited_ms = (Sys_DoubleTime () - wait_start) * 1000.0;
+			if (waited_ms >= host_asyncqueue_warn_ms.value)
+				Con_DPrintf ("AsyncQueue: waited %.2f ms for free slot\n", waited_ms);
+		}
 	}
 
 	SDL_UnlockMutex (queue->mutex);
@@ -818,6 +880,17 @@ static void AsyncQueue_Destroy (asyncqueue_t *queue)
 	SDL_CondBroadcast (queue->notfull);
 
 	AsyncQueue_Drain (queue);
+	if (host_asyncqueue_metrics.value > 0.f)
+	{
+		Con_DPrintf ("AsyncQueue metrics: pushes=%" SDL_PRIu64 " peak=%u full_hits=%" SDL_PRIu64 " waits=%" SDL_PRIu64 " timeouts=%" SDL_PRIu64 " dropped=%" SDL_PRIu64 " exec=%" SDL_PRIu64 "\n",
+			queue->push_count,
+			(unsigned int) queue->peak_depth,
+			queue->queue_full_hits,
+			queue->block_waits,
+			queue->block_timeouts,
+			queue->dropped,
+			queue->immediate_exec);
+	}
 
 	SDL_DestroyCond (queue->notfull);
 	SDL_DestroyMutex (queue->mutex);

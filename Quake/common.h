@@ -431,9 +431,20 @@ typedef struct jobhandle_s
 
 typedef void (*jobs_func_t)(void *userdata);
 
+typedef enum jobs_priority_e
+{
+	JOBS_PRIORITY_HIGH = 0,
+	JOBS_PRIORITY_NORMAL = 1,
+	JOBS_PRIORITY_LOW = 2,
+	JOBS_PRIORITY_COUNT = 3
+} jobs_priority_t;
+
 JobHandle *Jobs_Submit (jobs_func_t func, void *userdata);
+JobHandle *Jobs_SubmitPriority (jobs_priority_t priority, jobs_func_t func, void *userdata);
 void Jobs_SubmitDetached (jobs_func_t func, void *userdata);
+void Jobs_SubmitDetachedPriority (jobs_priority_t priority, jobs_func_t func, void *userdata);
 qboolean Jobs_TrySubmitDetached (jobs_func_t func, void *userdata);
+qboolean Jobs_TrySubmitDetachedPriority (jobs_priority_t priority, jobs_func_t func, void *userdata);
 void Jobs_Wait (JobHandle *handle);
 void Jobs_Shutdown (void);
 

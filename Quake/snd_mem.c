@@ -215,7 +215,7 @@ static void S_AsyncReadComplete (void *user, uint8_t *data, size_t len, int stat
 		SDL_AtomicSet (&job->done, 1);
 		return;
 	}
-	Jobs_SubmitDetached (S_LoadSoundDecodeJob, job);
+	Jobs_SubmitDetachedPriority (JOBS_PRIORITY_LOW, S_LoadSoundDecodeJob, job);
 }
 
 static sfxcache_t *S_CommitPendingSound (pending_snd_job_t *job)

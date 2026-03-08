@@ -1,6 +1,8 @@
 void ApplyDepthOfField(inout vec4 color, vec2 uv, vec2 invTexSize, bool inView, bool centerOpaque, DepthSamplingInfo depthInfo, float viewModelMask)
 {
-        if (!(DoFParams0.x > 0.5 && inView && depthInfo.valid && viewModelMask < 0.5 && centerOpaque))
+        // Do not gate DoF on color alpha: fogvol/medium passes may repurpose alpha
+        // while depth remains valid for DoF classification.
+        if (!(DoFParams0.x > 0.5 && inView && depthInfo.valid && viewModelMask < 0.5))
                 return;
 
         float linearDepth = SampleLinearDepth(gl_FragCoord.xy, depthInfo);
@@ -34,8 +36,6 @@ void ApplyDepthOfField(inout vec4 color, vec2 uv, vec2 invTexSize, bool inView, 
         {
                 vec2 offset = rotation * kernel[i] * blurRadius * invTexSize;
                 vec4 sampleColor = texture(GammaTexture, uv + offset);
-                if (sampleColor.a < OPAQUE_ALPHA_THRESHOLD)
-                        continue;
                 accum += sampleColor.rgb;
                 weight += 1.0;
         }

@@ -57,6 +57,7 @@ cvar_t	cl_mwheelpitch = {"cl_mwheelpitch", "5", CVAR_ARCHIVE};
 
 cvar_t	cl_startdemos = {"cl_startdemos", "1", CVAR_ARCHIVE};
 cvar_t	cl_confirmquit = {"cl_confirmquit", "0", CVAR_ARCHIVE};
+cvar_t	cl_player_muzzlelight = {"cl_player_muzzlelight", "1", CVAR_ARCHIVE};
 
 client_static_t	cls;
 client_state_t	cl;
@@ -666,6 +667,9 @@ void CL_RelinkEntities (void)
 		if (ent->effects & EF_MUZZLEFLASH)
 		{
 			vec3_t		fv, rv, uv;
+			const float player_muzzlelight_scale = (ent == &cl_entities[cl.viewentity])
+				? q_max (0.f, cl_player_muzzlelight.value)
+				: 1.f;
 
 			dl = CL_AllocDlight (i);
 			VectorCopy (ent->origin,  dl->origin);
@@ -673,11 +677,13 @@ void CL_RelinkEntities (void)
 			AngleVectors (ent->angles, fv, rv, uv);
 
 			VectorMA (dl->origin, 18, fv, dl->origin);
-			dl->radius = 200 + (rand()&31);
+			dl->radius = (200 + (rand()&31)) * player_muzzlelight_scale;
 			dl->baseradius = dl->radius;
-			dl->minlight = 32;
+			dl->minlight = 32 * player_muzzlelight_scale;
 			dl->die = cl.time + 0.1;
-			dl->color[0] = 1.00f; dl->color[1] = 0.70f; dl->color[2] = 0.30f;
+			dl->color[0] = 1.00f * player_muzzlelight_scale;
+			dl->color[1] = 0.70f * player_muzzlelight_scale;
+			dl->color[2] = 0.30f * player_muzzlelight_scale;
 			// Give muzzle flashes a per-shot color flicker for a punchier look.
 			{
 				float flicker = (float) sin (cl.time * 30.0 + dl->flicker_seed);
@@ -1116,6 +1122,7 @@ void CL_Init (void)
 
 	Cvar_RegisterVariable (&cl_startdemos);
 	Cvar_RegisterVariable (&cl_confirmquit);
+	Cvar_RegisterVariable (&cl_player_muzzlelight);
 
 	Cmd_AddCommand ("entities", CL_PrintEntities_f);
 	Cmd_AddCommand ("disconnect", CL_Disconnect_f);

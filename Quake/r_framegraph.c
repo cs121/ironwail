@@ -35,6 +35,8 @@ void R_FrameGraph_RenderView (const r_framegraph_state_t *state)
 	Fog_EnableGFog ();
 	R_RenderScene ();
 	R_WarpScaleView ();
+	if (state && state->prepare_fogvol_inputs)
+		state->prepare_fogvol_inputs();
 
 	if (state && state->fogvol_update_called)
 		(*state->fogvol_update_called)++;

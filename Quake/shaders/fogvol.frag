@@ -786,6 +786,7 @@ void main()
 	}
 	float sigmaEvenPrev = 0.0;
 	vec3 lightScatterPrev = vec3(0.0);
+	vec3 godrayAccum = vec3(0.0);
 	for (int i = 0; i < FogSteps; ++i)
 	{
 		if (i >= adaptiveSteps) break; // PERF: early-out for short rays
@@ -823,13 +824,15 @@ void main()
 
 		// phaseSun is already precomputed per-ray (constant for all steps on same ray).
 		vec3  stepScatter = (1.0 - att) * (scatterColor * phaseSun + sunRadiance); // BUG-F-01 FIX: removed inner *transmittance (caused transmittance^2 weighting for sun term)
-		float godrayInject = 0.0;
-		if (doGodrayCoupling)
-		{
-			float depthGate = clamp(1.0 - (t / max(FogDepthParams.y, 1e-3)), 0.0, 1.0);
-			godrayInject = shaftEnergyPre * depthGate * max(FogGodrayShaftsParams.z, 0.0);
-			stepScatter += FogSunColor * FogSunScatter * (1.0 - att) * godrayInject;
-		}
+vec3 godrayStepScatter = vec3(0.0);
+float godrayInject = 0.0;
+if (doGodrayCoupling)
+{
+	float depthGate = clamp(1.0 - (t / max(FogDepthParams.y, 1e-3)), 0.0, 1.0);
+	godrayInject = shaftEnergyPre * depthGate * max(FogGodrayShaftsParams.z, 0.0);
+	godrayStepScatter = FogSunColor * FogSunScatter * (1.0 - att) * godrayInject;
+	stepScatter += godrayStepScatter;
+}
 		if (doLightgrid)
 		{
 			// Static/emissive world contribution comes from the baked lightgrid
@@ -839,8 +842,8 @@ void main()
 			stepScatter += staticScatter * (FogDLightScale * FogLightSourceScales.z * (1.0 - att));
 		}
 
-		// Froxel local-light contribution can run as a fast path; debug outputs remain
-		// independent below via FogFroxelDebug visualization modes.
+// Froxel local-light contribution can run as a fast path; debug outputs remain
+// independent below via FogFroxelDebug visualization modes.
 
 		if (doLights)
 		{
@@ -895,6 +898,7 @@ void main()
 			stepScatter += lightScatter * (1.0 - att);
 		}
 		stepScatter *= shadowVisibility;
+		godrayAccum += transmittance * (godrayStepScatter * shadowVisibility);
 		accum            += transmittance * stepScatter;
 		transmittance    *= att;
 		tau              += opticalDepth;
@@ -976,6 +980,11 @@ void main()
 		float unshadowedLum = shadowedLum / max(avgShadow, 1e-3);
 		float ratio = clamp(shadowedLum / max(unshadowedLum, 1e-3), 0.0, 1.0);
 		FragColor = vec4(clamp(shadowedLum * 2.0, 0.0, 1.0), clamp(unshadowedLum * 2.0, 0.0, 1.0), ratio, 1.0);
+		return;
+	}
+	if (FogDebugMode == 9)
+	{
+		FragColor = vec4(clamp(godrayAccum * 2.0, 0.0, 1.0), 1.0);
 		return;
 	}
 

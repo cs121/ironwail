@@ -89,6 +89,11 @@ static qboolean r_frame_rendered_this_update;
 static qboolean r_dlight_buffered_frame = false;
 
 static godrays_stabilization_t r_godrays_stabilization;
+static int r_godrays_generated_frame = -1;
+static GLuint r_godrays_cached_shafts = 0;
+static GLuint r_godrays_cached_mask = 0;
+static GLuint r_godrays_cached_source = 0;
+static qboolean r_godrays_cached_debug_source_generated = false;
 
 
 static GLuint r_godrays_coupling_shafts_tex = 0;
@@ -1958,6 +1963,15 @@ static void R_GetGodraysSkyParams_Current (godrays_sky_params_t *params)
 		params);
 }
 
+static void R_InvalidateGodraysFrameCache (void)
+{
+	r_godrays_generated_frame = -1;
+	r_godrays_cached_shafts = 0;
+	r_godrays_cached_mask = 0;
+	r_godrays_cached_source = 0;
+	r_godrays_cached_debug_source_generated = false;
+}
+
 static qboolean R_GodraysMediumEnabled (void)
 {
 	/* Godrays are a volumetric effect and should only run when a volumetric
@@ -1976,15 +1990,16 @@ static void R_GetGodraysLightPos_Current (float *out_x, float *out_y)
 	vec3_t sun_world;
 	vec3_t proj;
 	float x = 0.5f;
-	float y = 0.5f;
+	float y = 0.0f;
 
 	if (!out_x || !out_y)
 		return;
 
 	if (!R_WorldHasSun ())
 	{
-		*out_x = x;
-		*out_y = y;
+		/* Maps without sun keys: force a sky-anchored source. */
+		*out_x = 0.5f;
+		*out_y = 0.0f;
 		return;
 	}
 
@@ -1997,6 +2012,25 @@ static void R_GetGodraysLightPos_Current (float *out_x, float *out_y)
 	{
 		x = CLAMP (0.f, proj[0] * 0.5f + 0.5f, 1.f);
 		y = CLAMP (0.f, proj[1] * 0.5f + 0.5f, 1.f);
+	}
+	else
+	{
+		/*
+		 * Keep the source anchored to the sky even when the sun direction is
+		 * behind the camera: project toward the nearest screen edge instead of
+		 * collapsing to screen center.
+		 */
+		float edge_x = proj[0];
+		float edge_y = proj[1];
+		float edge_scale = q_max (fabsf (edge_x), fabsf (edge_y));
+
+		if (edge_scale > 1e-6f)
+		{
+			edge_x /= edge_scale;
+			edge_y /= edge_scale;
+			x = CLAMP (0.f, edge_x * 0.5f + 0.5f, 1.f);
+			y = CLAMP (0.f, edge_y * 0.5f + 0.5f, 1.f);
+		}
 	}
 
 	*out_x = x;
@@ -2120,7 +2154,8 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 
 	R_GetGodraysSkyParams_Current (&sky_params);
 	emit_sky = (glprogs.godrays_source_sky != 0 && sky_params.enabled);
-	qboolean emit_brush = glprogs.godrays_source;
+	/* Force sky-driven godrays only: ignore local brush/lighttex emitters. */
+	qboolean emit_brush = false;
 	if (!emit_sky && !emit_brush)
 		return fallback;
 
@@ -2259,6 +2294,80 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 		*out_mask = framebufs.godrays.mask_tex;
 
 	return framebufs.godrays.shafts_tex;
+}
+
+static void R_EnsureGodraysTexturesForFrame (qboolean allow_debug_source)
+{
+	qboolean godrays_enabled;
+	qboolean godrays_debug_enabled;
+	qboolean godrays_preview;
+	float godrays_debug;
+	float godrays_debug_source;
+	qboolean ready;
+	qboolean medium_enabled;
+
+	if (r_godrays_generated_frame == r_framecount)
+	{
+		if (allow_debug_source
+			&& !r_godrays_cached_debug_source_generated
+			&& R_Godrays_IsReady (cl.worldmodel, r_framecount)
+			&& r_godrays_debug_source.value > 0.f)
+		{
+			GL_GenerateGodraysSource (
+				(glprogs.godrays_source_sky != 0),
+				true);
+			r_godrays_cached_debug_source_generated = true;
+			r_godrays_cached_source = framebufs.godrays.source_tex;
+		}
+		return;
+	}
+
+	r_godrays_generated_frame = r_framecount;
+	r_godrays_cached_shafts = 0;
+	r_godrays_cached_mask = 0;
+	r_godrays_cached_source = 0;
+	r_godrays_cached_debug_source_generated = false;
+
+	ready = R_Godrays_IsReady (cl.worldmodel, r_framecount);
+	medium_enabled = R_GodraysMediumEnabled ();
+	godrays_enabled = (r_godrays.value > 0.f && medium_enabled && ready);
+	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
+	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
+	godrays_debug_enabled = (godrays_debug > 0.f || godrays_debug_source > 0.f);
+	godrays_preview = (godrays_enabled || (godrays_debug_enabled && ready));
+	if (!godrays_preview)
+		return;
+
+	if (allow_debug_source && godrays_debug_source > 0.f && ready)
+	{
+		GL_GenerateGodraysSource (
+			(glprogs.godrays_source_sky != 0),
+			true);
+		r_godrays_cached_debug_source_generated = true;
+	}
+
+	if (godrays_enabled || godrays_debug > 0.f)
+		r_godrays_cached_shafts = GL_GenerateGodraysTexture (&r_godrays_cached_mask);
+
+	r_godrays_cached_source = framebufs.godrays.source_tex;
+}
+
+static void R_PrepareFogVolInputs (void)
+{
+	const qboolean need_godray_inputs = (r_fogvol_godray_coupling.value > 0.f || r_fogvol_froxel_godrays.value > 0.f);
+
+	if (r_fogvol.value <= 0.f || !need_godray_inputs)
+	{
+		R_FogVol_SetGodrayCouplingTextures (0, 0, 0, false);
+		return;
+	}
+
+	R_EnsureGodraysTexturesForFrame (false);
+	R_FogVol_SetGodrayCouplingTextures (
+		r_godrays_cached_shafts,
+		r_godrays_cached_mask,
+		r_godrays_cached_source,
+		r_godrays_cached_shafts != 0);
 }
 
 
@@ -2817,21 +2926,10 @@ void GL_PostProcess (void)
 	godrays_source = 0;
 	if (godrays_preview)
 	{
-		/* Keep source debug useful even when scatter generation is disabled/unsupported. */
-		if (godrays_debug_source > 0.f && R_Godrays_IsReady (cl.worldmodel, r_framecount))
-			GL_GenerateGodraysSource (
-				(glprogs.godrays_source_sky != 0),
-				true);
-
-		if (godrays_enabled || godrays_debug > 0.f)
-			godrays_texture = GL_GenerateGodraysTexture (&godrays_mask);
-		godrays_source = framebufs.godrays.source_tex;
-		if (godrays_texture)
-		{
-			r_godrays_coupling_shafts_tex = godrays_texture;
-			r_godrays_coupling_shafts_w = framebufs.godrays.width;
-			r_godrays_coupling_shafts_h = framebufs.godrays.height;
-		}
+		R_EnsureGodraysTexturesForFrame (true);
+		godrays_texture = r_godrays_cached_shafts;
+		godrays_mask = r_godrays_cached_mask;
+		godrays_source = r_godrays_cached_source;
 	}
 
 	view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
@@ -5628,8 +5726,10 @@ void R_RenderView (void)
                 glFinish ();
 
 	r_framegraph_state_t framegraph_state;
+	R_InvalidateGodraysFrameCache ();
 	framegraph_state.fogvol_update_called = &r_fogvol_update_called;
 	framegraph_state.fogvol_draw_called = &r_fogvol_draw_called;
+	framegraph_state.prepare_fogvol_inputs = R_PrepareFogVolInputs;
 	framegraph_state.frame_rendered_this_update = &r_frame_rendered_this_update;
 	framegraph_state.ssao_fog_state = &r_ssao_fog_state;
 	R_FrameGraph_RenderView (&framegraph_state);
