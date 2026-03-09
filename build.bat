@@ -100,11 +100,16 @@ if errorlevel 8  echo [ERROR] Robocopy Shader: Kopierfehler       & exit /b 8
 
 REM ========== Game ==========
 echo [5/5] Kopiere Game...
+if not exist "%SRC_GAME%" (
+  echo [WARN] Game-Ordner fehlt, ueberspringe: %SRC_GAME%
+  goto :done
+)
 robocopy "%SRC_GAME%" "%DST_GAME%" *.* /E /R:1 /W:1 >nul
 if errorlevel 16 echo [ERROR] Robocopy Game: Schwerer Fehler& exit /b 16
 if errorlevel 8  echo [ERROR] Robocopy Game: Kopierfehler       & exit /b 8
 
 
+:done
 echo Fertig. Deploy unter: %DST_DIR%
 pause
 exit /b 0

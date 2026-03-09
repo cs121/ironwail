@@ -507,7 +507,6 @@ void main()
 	}
 
 	bool additive_dlights = DLightParams.x > 0.5;
-	bool dlight_debug     = DLightParams.y > 0.5;
 
 	// Lightmap sampling
 	vec2 lmuv = in_lmuv;
@@ -597,13 +596,6 @@ void main()
 			out_velocity = vec4(0.0);
 #endif
 			return;
-		}
-
-		if (dlight_debug)
-		{
-			static_light = vec3(0.0);
-			fullbright   = vec3(0.0);
-			emissive     = vec3(0.0);
 		}
 
 		// Directional lightmap
@@ -799,4 +791,3 @@ void main()
 	OUT_COLOR.rgb += SUPPRESS_BANDING() * ScreenDither;
 #endif
 }
-

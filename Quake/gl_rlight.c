@@ -31,11 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
-extern cvar_t r_dlight_style;
-extern cvar_t r_dlight_debug_spawn;
 extern cvar_t r_dlight_entities;
-extern cvar_t r_dlight_mode;
-extern cvar_t r_dlight_radius_scale;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_rgblighting_enable;
@@ -320,52 +316,6 @@ void GLLight_DeleteResources (void)
 }
 
 
-static void R_SpawnDebugPlayerDlight (void)
-{
-	vec3_t color;
-	vec3_t origin;
-	const int key = -900001;
-	dlight_t *dl;
-
-	if (r_dlight_debug_spawn.value <= 0.f)
-		return;
-
-	if (cls.state != ca_connected || cl.worldmodel == NULL)
-	{
-		Con_Printf ("r_dlight_debug_spawn: not connected to a world.\n");
-		Cvar_SetValueQuick (&r_dlight_debug_spawn, 0.f);
-		return;
-	}
-
-	VectorCopy (cl_entities[cl.viewentity].origin, origin);
-	origin[2] += 16.f;
-
-	color[0] = 0.35f + ((float) rand() / (float) RAND_MAX) * 0.40f;
-	color[1] = 0.35f + ((float) rand() / (float) RAND_MAX) * 0.40f;
-	color[2] = 0.35f + ((float) rand() / (float) RAND_MAX) * 0.40f;
-
-	dl = DLightPool_GetOrCreatePersistent (key, cl.time);
-	VectorCopy (origin, dl->origin);
-	VectorCopy (color, dl->color);
-	dl->baseradius = 220.f;
-	dl->radius = 220.f;
-	dl->spawn = cl.time - 0.001f;
-	dl->die = FLT_MAX;
-	dl->decay = 0.f;
-	dl->minlight = 0.f;
-	dl->key = key;
-	dl->type = DLIGHT_DEFAULT;
-	dl->style = 0;
-	dl->flicker_seed = (float) rand ();
-	dl->kind = DL_PERSISTENT;
-	dl->active = true;
-
-	Con_Printf ("Spawned debug dlight at %.1f %.1f %.1f color %.2f %.2f %.2f\n",
-		dl->origin[0], dl->origin[1], dl->origin[2], dl->color[0], dl->color[1], dl->color[2]);
-
-	Cvar_SetValueQuick (&r_dlight_debug_spawn, 0.f);
-}
-
 static void R_PushDlightArray (dlight_t *const *lights, int count)
 {
 	int	j;
@@ -387,7 +337,6 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 			radius = l->baseradius * (1.f + 0.1f * (float) sin (cl.time * 9.0 + l->flicker_seed));
 		else
 			radius = l->baseradius;
-		radius *= q_max (0.f, r_dlight_radius_scale.value);
 		radius = q_max (radius, 0.f);
 		l->radius = radius;
 
@@ -445,27 +394,17 @@ void R_PushDlights (void)
 	dlight_t *submit[DLIGHT_GPU_MAX];
 
 	r_framedata.numlights = 0;
-	R_SpawnDebugPlayerDlight ();
 	memset (r_dlight_sources, 0, sizeof (r_dlight_sources));
-
-        // Collect dynamic lights both when the legacy r_dynamic toggle is
-        // enabled and when the Quake3-style additive path is requested via
-        // r_dlight_style. The latter needs the light list even if r_dynamic
-        // was disabled by the user.
-        if (r_dynamic.value > 0.f || r_dlight_style.value > 0.f)
-        {
+	if (r_dynamic.value > 0.f)
+	{
 		const int budget = q_min (DLightPool_GetBudget (), DLIGHT_GPU_MAX);
 		DLightPool_NewFrame (cl.time, r_framecount);
 		const int num_submit = DLightPool_CollectForRender (cl.time, r_refdef.vieworg, r_viewleaf, submit, budget);
 		if (num_submit > 0)
 			R_PushDlightArray (submit, num_submit);
-		DLightPool_DebugPrintIfEnabled ();
 	}
 	else
-	{
 		DLightPool_NewFrame (cl.time, r_framecount);
-		DLightPool_DebugPrintIfEnabled ();
-	}
 
 	R_UploadFrameData ();
 }

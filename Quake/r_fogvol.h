@@ -59,9 +59,6 @@ extern cvar_t r_fogvol_halfres;
 extern cvar_t r_fogvol_steps;
 extern cvar_t r_fogvol_maxsteps;
 extern cvar_t r_fogvol_stepsize;
-extern cvar_t r_fogvol_upsample;
-extern cvar_t r_fogvol_upsample_k;
-extern cvar_t r_fogvol_upsample_taps;
 /* BUG FIX (C-05): r_fogvol_steps_scale_halfres was defined in r_fogvol.c but
  * not exported — violates BEST PRACTICE #11. */
 extern cvar_t r_fogvol_steps_scale_halfres;

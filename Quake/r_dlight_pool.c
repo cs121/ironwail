@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern cvar_t r_dlight_debug;
 extern cvar_t r_dlight_entities;
 
 typedef struct dlight_pool_s
@@ -23,44 +22,17 @@ typedef struct dlight_pool_s
 
 static dlight_pool_t dlight_pool;
 static dlight_t dlight_fallback;
-
-cvar_t r_dlight_budget = { "r_dlight_budget", "64", CVAR_ARCHIVE };
-cvar_t r_dlight_pool_max = { "r_dlight_pool_max", "512", CVAR_ARCHIVE };
+static const int k_dlight_budget = 64;
+static const int k_dlight_pool_max = 512;
 
 int DLightPool_GetBudget (void)
 {
-	return CLAMP (0, (int)r_dlight_budget.value, 1024);
+	return k_dlight_budget;
 }
 
 static int DLightPool_GetPoolMax (void)
 {
-	return CLAMP (0, (int)r_dlight_pool_max.value, 8192);
-}
-
-static void DLightPool_ClampCvar (cvar_t *var, int minval, int maxval)
-{
-	const int value = (int)var->value;
-	const int clamped = CLAMP (minval, value, maxval);
-	if (clamped != value)
-		Cvar_SetValueQuick (var, (float)clamped);
-}
-
-static void DLightPool_Budget_Changed (cvar_t *var)
-{
-	DLightPool_ClampCvar (var, 0, 1024);
-}
-
-static void DLightPool_PoolMax_Changed (cvar_t *var)
-{
-	DLightPool_ClampCvar (var, 0, 8192);
-}
-
-void DLightPool_RegisterCvars (void)
-{
-	Cvar_RegisterVariable (&r_dlight_budget);
-	Cvar_RegisterVariable (&r_dlight_pool_max);
-	Cvar_SetCallback (&r_dlight_budget, DLightPool_Budget_Changed);
-	Cvar_SetCallback (&r_dlight_pool_max, DLightPool_PoolMax_Changed);
+	return k_dlight_pool_max;
 }
 
 static void DLightPool_ResetStats (void)
@@ -184,6 +156,27 @@ static float DLightPool_ScoreLight (dlight_t *dl, double time, const vec3_t view
 	else
 	{
 		bias *= 1.05f;
+	}
+
+	/* Keep gameplay-critical transient lights (rocket/plasma/explosion) visible
+	 * under budget pressure. Without this, torch/entity lights can crowd out
+	 * projectile lights, causing intermittent "missing rocket light". */
+	switch (dl->type)
+	{
+	case DLIGHT_ROCKET:
+		bias *= 1.9f;
+		break;
+	case DLIGHT_EXPLOSION:
+		bias *= 1.6f;
+		break;
+	case DLIGHT_PLASMA:
+		bias *= 1.5f;
+		break;
+	case DLIGHT_TORCH:
+		bias *= 0.9f;
+		break;
+	default:
+		break;
 	}
 
 	return influence * lum * bias;
@@ -530,20 +523,4 @@ void DLightPool_GetStats (dlight_pool_stats_t *out)
 		return;
 	DLightPool_UpdateStats ();
 	*out = dlight_pool.stats;
-}
-
-void DLightPool_DebugPrintIfEnabled (void)
-{
-	if (r_dlight_debug.value <= 0.f)
-		return;
-
-	DLightPool_UpdateStats ();
-
-	Con_DPrintf ("pool active=%d persistent=%d transient=%d submitted=%d expired=%d evicted=%d\n",
-			dlight_pool.stats.active,
-			dlight_pool.stats.persistent,
-			dlight_pool.stats.transient,
-			dlight_pool.stats.submitted,
-			dlight_pool.stats.expired,
-			dlight_pool.stats.evicted);
 }

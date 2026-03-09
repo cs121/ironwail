@@ -108,7 +108,6 @@ extern	cvar_t	r_norefresh;
 extern	cvar_t	r_drawentities;
 extern	cvar_t	r_drawworld;
 extern	cvar_t	r_drawviewmodel;
-extern	cvar_t	r_dlight_debug_models;
 extern	cvar_t	r_gl_state_validate;
 extern	cvar_t	r_speeds;
 extern	cvar_t	r_pos;
@@ -649,8 +648,8 @@ typedef struct glprogs_s {
 	GLuint		godrays_source;
 	GLuint		godrays_source_sky;
 	GLuint		fogvol;
-	GLuint		fogvol_upsample;
 	GLuint		fogvol_temporal;
+	GLuint		fogvol_froxel_inject;
 	GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */

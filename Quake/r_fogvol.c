@@ -138,15 +138,6 @@ cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
 cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
 cvar_t r_fogvol_stepsize = { "r_fogvol_stepsize", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_upsample = { "r_fogvol_upsample", "1", CVAR_ARCHIVE };
-/* r_fogvol_upsample_k: bilateral weight scale for depth difference in the
- * upsample pass.  exp(-|delta_depth| * K) — higher K = sharper depth edges.
- * Default changed from 100 to 25: value 100 produced extremely harsh depth
- * discontinuities at fog/geometry edges visible as a 1-pixel black fringe.
- * 25 gives well-defined edges while preserving smooth gradients in open areas.
- * Recommended range: 10–50. */
-cvar_t r_fogvol_upsample_k = { "r_fogvol_upsample_k", "25", CVAR_ARCHIVE };
-cvar_t r_fogvol_upsample_taps = { "r_fogvol_upsample_taps", "4", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps_scale_halfres = { "r_fogvol_steps_scale_halfres", "0.5", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise_subsample = { "r_fogvol_noise_subsample", "1", CVAR_ARCHIVE };
@@ -265,9 +256,6 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_maxsteps, "quality", "128"},
 	{&r_fogvol_stepsize, "quality", "0"},
 	{&r_fogvol_halfres, "quality", "0"},
-	{&r_fogvol_upsample, "quality", "1"},
-	{&r_fogvol_upsample_k, "quality", "25"},
-	{&r_fogvol_upsample_taps, "quality", "4"},
 	{&r_fogvol_steps_scale_halfres, "quality", "0.5"},
 	{&r_fogvol_noise, "noise", "1"},
 	{&r_fogvol_noise_subsample, "noise", "1"},
@@ -398,16 +386,14 @@ COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_LOCAL_OCCLUSION_PARAM
 typedef struct froxel_state_s
 {
 	GLuint light_tex;
-	GLuint prev_light_tex;
+	GLuint history_tex;
+	GLuint light_ssbo;
 	int dims[3];
 	float near_clip;
 	float far_clip;
 	float tan_half_fov_x;
 	float tan_half_fov_y;
 	float log_far_near;
-	float *light_rgb;
-	float *prev_light_rgb;
-	float *sun_debug_rgb;
 	vec3_t prev_vieworg;
 	int prev_frame;
 	int prev_lighting_mode;
@@ -416,11 +402,21 @@ typedef struct froxel_state_s
 	qboolean prev_mode_valid;
 	qboolean prev_valid;
 	qboolean valid;
+	int light_count;
 } froxel_state_t;
 
 static froxel_state_t r_froxel;
-static uint64_t r_froxel_tested_froxels_before = 0;
-static uint64_t r_froxel_tested_froxels_after = 0;
+
+#define MAX_FROXEL_GPU_LIGHTS 32
+typedef struct froxel_gpu_light_s
+{
+	float pos_rad[4];
+	float color_intensity[4];
+	uint32_t type;
+	uint32_t _pad[3];
+} froxel_gpu_light_t;
+
+static froxel_gpu_light_t r_froxel_gpu_lights[MAX_FROXEL_GPU_LIGHTS];
 static GLuint r_fogvol_godray_shafts_tex = 0;
 static GLuint r_fogvol_godray_mask_tex = 0;
 static GLuint r_fogvol_godray_source_tex = 0;
@@ -777,6 +773,39 @@ static void R_FogDlights_Add (const vec3_t origin, float radius, const vec3_t co
 	dl->color[1] = CLAMP (0.f, color[1], 1.f);
 	dl->color[2] = CLAMP (0.f, color[2], 1.f);
 	dl->active = true;
+	dl->spawn = cl.time;
+	dl->die = cl.time + 0.1;
+	dl->baseradius = dl->radius;
+}
+
+static qboolean R_FogVol_DlightIsInjectable (const dlight_t *dl)
+{
+	if (!dl || !dl->active || dl->radius <= 0.f)
+		return false;
+	if (dl->spawn > cl.time)
+		return false;
+	if (dl->die > 0.0 && dl->die < cl.time)
+		return false;
+	return true;
+}
+
+static float R_FogVol_DlightScoreBias (const dlight_t *dl)
+{
+	if (!dl)
+		return 1.f;
+	switch (dl->type)
+	{
+	case DLIGHT_ROCKET:
+		return 1.9f;
+	case DLIGHT_EXPLOSION:
+		return 1.6f;
+	case DLIGHT_PLASMA:
+		return 1.5f;
+	case DLIGHT_TORCH:
+		return 0.9f;
+	default:
+		return 1.f;
+	}
 }
 
 static GLuint R_FogVol_GetFramebufferColorAttachmentTexture (GLenum target)
@@ -1212,7 +1241,7 @@ static int R_FogVol_BuildFrameLightBroadphase (const fogvol_visible_volume_t *vi
 			float intensity;
 			float radius;
 
-			if (!dl || !CL_DlightIsActive (dl))
+			if (!R_FogVol_DlightIsInjectable (dl))
 				continue;
 
 			radius = dl->radius;
@@ -1270,7 +1299,7 @@ static int R_FogVol_BuildFrameLightBroadphase (const fogvol_visible_volume_t *vi
 		const dlight_t *dl = &r_fog_dlights[i];
 		float overlap_score = 0.f;
 
-		if (!CL_DlightIsActive (dl) || dl->radius <= 0.f)
+		if (!R_FogVol_DlightIsInjectable (dl))
 			continue;
 
 		for (int v = 0; v < visible_count; ++v)
@@ -1579,7 +1608,7 @@ static void R_FogVol_BuildEffectiveVolumeColor (const fog_volume_t *volume, qboo
 	out_color[2] = q_max (0.f, volume->color[2] * (tint_mix + tint_chroma[2] * strength));
 }
 
-static qboolean R_FogVol_TryGetSurfaceLightSample (const qmodel_t *model, const msurface_t *surf, vec3_t out_rgb)
+static qboolean R_FogVol_TryGetSurfaceLightSampleAtTexel (const qmodel_t *model, const msurface_t *surf, int sample_s, int sample_t, vec3_t out_rgb)
 {
 	const byte *samples;
 	int bytes_per_pixel;
@@ -1955,25 +1984,6 @@ void R_FogVol_RegisterCvars (void)
 	}
 }
 
-static void R_Froxel_FreeCPUBuffer (void)
-{
-	if (r_froxel.light_rgb)
-	{
-		free (r_froxel.light_rgb);
-		r_froxel.light_rgb = NULL;
-	}
-	if (r_froxel.prev_light_rgb)
-	{
-		free (r_froxel.prev_light_rgb);
-		r_froxel.prev_light_rgb = NULL;
-	}
-	if (r_froxel.sun_debug_rgb)
-	{
-		free (r_froxel.sun_debug_rgb);
-		r_froxel.sun_debug_rgb = NULL;
-	}
-}
-
 static void R_FogVol_FreeGodrayReadbackBuffers (void)
 {
 	if (r_fogvol_godray_mask_cpu)
@@ -1996,15 +2006,18 @@ void R_Froxel_ResetResources (void)
 {
 	if (r_froxel.light_tex)
 		glDeleteTextures (1, &r_froxel.light_tex);
-	if (r_froxel.prev_light_tex)
-		glDeleteTextures (1, &r_froxel.prev_light_tex);
+	if (r_froxel.history_tex)
+		glDeleteTextures (1, &r_froxel.history_tex);
+	if (r_froxel.light_ssbo)
+		GL_DeleteBuffersFunc (1, &r_froxel.light_ssbo);
 	r_froxel.light_tex = 0;
-	r_froxel.prev_light_tex = 0;
-	R_Froxel_FreeCPUBuffer ();
+	r_froxel.history_tex = 0;
+	r_froxel.light_ssbo = 0;
 	R_FogVol_FreeGodrayReadbackBuffers ();
 	r_froxel.dims[0] = 0;
 	r_froxel.dims[1] = 0;
 	r_froxel.dims[2] = 0;
+	r_froxel.light_count = 0;
 	r_froxel.prev_frame = 0;
 	r_froxel.prev_mode_valid = false;
 	r_froxel.prev_valid = false;
@@ -2013,32 +2026,17 @@ void R_Froxel_ResetResources (void)
 
 static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)
 {
-	size_t count;
-
 	if (nx <= 0 || ny <= 0 || nz <= 0)
 		return false;
 
-	count = (size_t)nx * (size_t)ny * (size_t)nz * 3u;
-	if (!r_froxel.light_rgb || !r_froxel.prev_light_rgb || !r_froxel.sun_debug_rgb
-		|| r_froxel.dims[0] != nx || r_froxel.dims[1] != ny || r_froxel.dims[2] != nz)
+	if (r_froxel.dims[0] != nx || r_froxel.dims[1] != ny || r_froxel.dims[2] != nz)
 	{
-		float *newbuf = (float *)calloc (count, sizeof (float));
-		float *newprev = (float *)calloc (count, sizeof (float));
-		float *newsun = (float *)calloc (count, sizeof (float));
-		if (!newbuf || !newprev || !newsun)
-		{
-			if (newbuf)
-				free (newbuf);
-			if (newprev)
-				free (newprev);
-			if (newsun)
-				free (newsun);
-			return false;
-		}
-		R_Froxel_FreeCPUBuffer ();
-		r_froxel.light_rgb = newbuf;
-		r_froxel.prev_light_rgb = newprev;
-		r_froxel.sun_debug_rgb = newsun;
+		if (r_froxel.light_tex)
+			glDeleteTextures (1, &r_froxel.light_tex);
+		if (r_froxel.history_tex)
+			glDeleteTextures (1, &r_froxel.history_tex);
+		r_froxel.light_tex = 0;
+		r_froxel.history_tex = 0;
 		r_froxel.dims[0] = nx;
 		r_froxel.dims[1] = ny;
 		r_froxel.dims[2] = nz;
@@ -2047,8 +2045,10 @@ static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)
 
 	if (!r_froxel.light_tex)
 		glGenTextures (1, &r_froxel.light_tex);
-	if (!r_froxel.prev_light_tex)
-		glGenTextures (1, &r_froxel.prev_light_tex);
+	if (!r_froxel.history_tex)
+		glGenTextures (1, &r_froxel.history_tex);
+	if (!r_froxel.light_ssbo)
+		GL_GenBuffersFunc (1, &r_froxel.light_ssbo);
 
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.light_tex);
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -2056,15 +2056,15 @@ static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_RGB16F, nx, ny, nz, 0, GL_RGB, GL_FLOAT, r_froxel.light_rgb);
+	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_RGBA16F, nx, ny, nz, 0, GL_RGBA, GL_FLOAT, NULL);
 
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.prev_light_tex);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.history_tex);
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_RGB16F, nx, ny, nz, 0, GL_RGB, GL_FLOAT, r_froxel.prev_light_rgb);
+	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_RGBA16F, nx, ny, nz, 0, GL_RGBA, GL_FLOAT, NULL);
 
 	return true;
 }
@@ -2103,209 +2103,46 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 	r_froxel.prev_lighting_mode = lighting_mode;
 	r_froxel.prev_parity_mode = parity_mode;
 	r_froxel.prev_mode_valid = true;
-
-	memset (r_froxel.light_rgb, 0, sizeof (float) * (size_t)nx * (size_t)ny * (size_t)nz * 3u);
-	memset (r_froxel.sun_debug_rgb, 0, sizeof (float) * (size_t)nx * (size_t)ny * (size_t)nz * 3u);
+	r_froxel.light_count = 0;
 	r_froxel.valid = true;
 }
 
-static void R_Froxel_BlendWithHistory (void)
+static void R_Froxel_AddLight (const vec3_t origin, float radius, const vec3_t color, float intensity, uint32_t type)
 {
-	const float alpha = CLAMP (0.f, r_fogvol_froxel_temporal_alpha.value, 1.f);
-	const float reject_threshold = q_max (0.f, r_fogvol_froxel_temporal_reject_threshold.value);
-	const int nx = r_froxel.dims[0], ny = r_froxel.dims[1], nz = r_froxel.dims[2];
-	const float delta_x = r_refdef.vieworg[0] - r_froxel.prev_vieworg[0];
-	const float delta_y = r_refdef.vieworg[1] - r_froxel.prev_vieworg[1];
-	const float delta_z = r_refdef.vieworg[2] - r_froxel.prev_vieworg[2];
-	const float camera_delta = sqrtf (delta_x * delta_x + delta_y * delta_y + delta_z * delta_z);
+	froxel_gpu_light_t *out;
 
-	if (!r_froxel.valid || !r_froxel.prev_valid || !r_froxel.prev_light_rgb || alpha <= 0.f)
+	if (!r_froxel.valid || r_froxel.light_count >= MAX_FROXEL_GPU_LIGHTS)
 		return;
-
-	if (r_froxel.prev_frame != (r_framecount - 1))
+	if (radius <= 0.f || intensity <= 0.f)
 		return;
-
-	for (int z = 0; z < nz; ++z)
-	{
-		const float zf = ((float)z + 0.5f) / (float)q_max (1, nz);
-		const float zv = r_froxel.near_clip * expf (r_froxel.log_far_near * zf);
-		const float depth_gate = CLAMP (0.f, 1.f, zv / q_max (reject_threshold, 1.f));
-		const float camera_reject = CLAMP (0.f, 1.f, camera_delta / q_max (reject_threshold, 1.f));
-		const float history_weight = alpha * (1.f - camera_reject) * depth_gate;
-		const float current_weight = 1.f - history_weight;
-		for (int y = 0; y < ny; ++y)
-		{
-			for (int x = 0; x < nx; ++x)
-			{
-				const int idx = ((z * ny + y) * nx + x) * 3;
-				r_froxel.light_rgb[idx + 0] = r_froxel.light_rgb[idx + 0] * current_weight + r_froxel.prev_light_rgb[idx + 0] * history_weight;
-				r_froxel.light_rgb[idx + 1] = r_froxel.light_rgb[idx + 1] * current_weight + r_froxel.prev_light_rgb[idx + 1] * history_weight;
-				r_froxel.light_rgb[idx + 2] = r_froxel.light_rgb[idx + 2] * current_weight + r_froxel.prev_light_rgb[idx + 2] * history_weight;
-			}
-		}
-	}
-}
-
-static void R_Froxel_InjectOneLight (const vec3_t origin, float radius, const vec3_t color, float intensity)
-{
-	int nx = r_froxel.dims[0], ny = r_froxel.dims[1], nz = r_froxel.dims[2];
-	vec3_t rel;
-	const float radius2 = radius * radius;
-	const float near_clip = r_froxel.near_clip;
-	const float far_clip = r_froxel.far_clip;
-	const float inv_log_far_near = 1.f / q_max (r_froxel.log_far_near, 1e-6f);
-	const qboolean inject_debug = (r_fogvol_inject_debug.value > 0.f) || (r_fogvol_debug.value >= 7.f);
-	float cx, cy, cz;
-	float zmin_depth, zmax_depth;
-	float zf_min, zf_max;
-	int z0, z1;
-
-	if (!r_froxel.valid || radius <= 0.f)
-		return;
-
-	if (inject_debug)
-		r_froxel_tested_froxels_before += (uint64_t)nx * (uint64_t)ny * (uint64_t)nz;
-
-	VectorSubtract (origin, r_refdef.vieworg, rel);
-	cx = DotProduct (rel, vright);
-	cy = DotProduct (rel, vup);
-	cz = DotProduct (rel, vpn);
-
-	zmin_depth = q_max (near_clip, cz - radius);
-	zmax_depth = q_min (far_clip, cz + radius);
-	if (zmax_depth < zmin_depth)
-		return;
-
-	zf_min = logf (q_max (zmin_depth, near_clip) / near_clip) * inv_log_far_near;
-	zf_max = logf (q_max (zmax_depth, near_clip) / near_clip) * inv_log_far_near;
-	z0 = CLAMP (0, (int)floorf (zf_min * (float)nz - 0.5f), nz - 1);
-	z1 = CLAMP (0, (int)ceilf (zf_max * (float)nz - 0.5f), nz - 1);
-	if (z1 < z0)
-		return;
-
-	for (int z = z0; z <= z1; ++z)
-	{
-		float zf = ((float)z + 0.5f) / (float)nz;
-		float zv = r_froxel.near_clip * expf (r_froxel.log_far_near * zf);
-		float half_w = q_max (1e-3f, zv * r_froxel.tan_half_fov_x);
-		float half_h = q_max (1e-3f, zv * r_froxel.tan_half_fov_y);
-		float dz = zv - cz;
-		float cross2 = radius2 - dz * dz;
-		float cross;
-		float min_xf, max_xf, min_yf, max_yf;
-		int x0, x1, y0, y1;
-
-		if (cross2 <= 0.f)
-			continue;
-
-		cross = sqrtf (cross2);
-		min_xf = (cx - cross) / half_w;
-		max_xf = (cx + cross) / half_w;
-		min_yf = (cy - cross) / half_h;
-		max_yf = (cy + cross) / half_h;
-
-		x0 = CLAMP (0, (int)ceilf (((min_xf + 1.f) * 0.5f) * (float)nx - 0.5f), nx - 1);
-		x1 = CLAMP (0, (int)floorf (((max_xf + 1.f) * 0.5f) * (float)nx - 0.5f), nx - 1);
-		y0 = CLAMP (0, (int)ceilf (((min_yf + 1.f) * 0.5f) * (float)ny - 0.5f), ny - 1);
-		y1 = CLAMP (0, (int)floorf (((max_yf + 1.f) * 0.5f) * (float)ny - 0.5f), ny - 1);
-
-		if (x1 < x0 || y1 < y0)
-			continue;
-
-		if (inject_debug)
-			r_froxel_tested_froxels_after += (uint64_t)(x1 - x0 + 1) * (uint64_t)(y1 - y0 + 1);
-
-		for (int y = y0; y <= y1; ++y)
-		for (int x = x0; x <= x1; ++x)
-		{
-			float xf = (((float)x + 0.5f) / (float)nx) * 2.f - 1.f;
-			float yf = (((float)y + 0.5f) / (float)ny) * 2.f - 1.f;
-			vec3_t p;
-			float dist2;
-			float dist;
-			float att;
-			int idx = (x + nx * (y + ny * z)) * 3;
-
-			VectorCopy (r_refdef.vieworg, p);
-			VectorMA (p, zv, vpn, p);
-			VectorMA (p, xf * half_w, vright, p);
-			VectorMA (p, yf * half_h, vup, p);
-
-			dist2 = (origin[0] - p[0]) * (origin[0] - p[0])
-				+ (origin[1] - p[1]) * (origin[1] - p[1])
-				+ (origin[2] - p[2]) * (origin[2] - p[2]);
-			dist = sqrtf (dist2);
-			att = CLAMP (0.f, 1.f - dist / radius, 1.f);
-			att *= att * intensity;
-			if (att <= 0.f)
-				continue;
-
-			r_froxel.light_rgb[idx + 0] += color[0] * att;
-			r_froxel.light_rgb[idx + 1] += color[1] * att;
-			r_froxel.light_rgb[idx + 2] += color[2] * att;
-		}
-	}
-}
-
-
-static float R_Froxel_SunVisibilityAtPoint (const vec3_t point, const vec3_t blocker_dir, float max_dist)
-{
-	const hull_t *world_hull;
-	int samples;
-	float shadow_strength;
-	float blocked = 0.f;
-
-	if (r_fogvol_shadow.value <= 0.f || max_dist <= 1.f || !cl.worldmodel)
-		return 1.f;
-
-	world_hull = &cl.worldmodel->hulls[0];
-	if (!world_hull->clipnodes || !world_hull->planes)
-		return 1.f;
-
-	samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
-	shadow_strength = CLAMP (0.f, r_fogvol_shadow_strength.value, 1.f);
-	for (int i = 0; i < samples; ++i)
-	{
-		trace_t trace;
-		vec3_t start;
-		vec3_t end;
-		float jitter = 0.f;
-
-		VectorCopy (point, start);
-		if (r_fogvol_shadow_jitter.value > 0.f)
-		{
-			float hash = sinf ((point[0] + point[1] * 0.71f + point[2] * 0.37f + (float)i * 1.618f) * 0.0137f);
-			jitter = (hash * 0.5f + 0.5f) * 16.f;
-		}
-		VectorMA (start, 2.f + jitter, blocker_dir, start);
-		VectorMA (start, max_dist, blocker_dir, end);
-
-		memset (&trace, 0, sizeof (trace));
-		trace.fraction = 1.f;
-		VectorCopy (end, trace.endpos);
-		SV_RecursiveHullCheck (world_hull, 0, 0.f, 1.f, start, end, &trace);
-		blocked += 1.f - CLAMP (0.f, trace.fraction, 1.f);
-	}
-
-	blocked /= (float)samples;
-	return CLAMP (0.f, 1.f - shadow_strength * blocked, 1.f);
+	out = &r_froxel_gpu_lights[r_froxel.light_count++];
+	out->pos_rad[0] = origin[0];
+	out->pos_rad[1] = origin[1];
+	out->pos_rad[2] = origin[2];
+	out->pos_rad[3] = radius;
+	out->color_intensity[0] = q_max (0.f, color[0]);
+	out->color_intensity[1] = q_max (0.f, color[1]);
+	out->color_intensity[2] = q_max (0.f, color[2]);
+	out->color_intensity[3] = intensity;
+	out->type = type;
+	out->_pad[0] = out->_pad[1] = out->_pad[2] = 0u;
 }
 
 static void R_Froxel_InjectSun (void)
 {
 	const sun_t *sun;
 	vec3_t sun_color;
-	vec3_t inject_dir;
-	vec3_t blocker_dir;
 	float sun_intensity;
 	float sun_scale;
-	int nx, ny, nz;
+	vec3_t inject_origin;
+	vec3_t inject_dir;
+	float inject_radius;
 
 	if (!r_froxel.valid || r_fogvol_froxel_sun.value <= 0.f)
 		return;
 
 	sun = R_GetSun ();
-	if (!sun || !sun->enabled)
+	if (!sun || !R_WorldHasSun ())
 		return;
 
 	sun_intensity = q_max (0.f, sun->intensity);
@@ -2320,76 +2157,19 @@ static void R_Froxel_InjectSun (void)
 	if (sun_scale <= 0.f)
 		return;
 
-	if (r_fogvol_froxel_sun_legacy.value > 0.f)
-	{
-		vec3_t inject_origin;
-		float inject_radius;
-		VectorScale (sun->dir, -1.f, inject_dir);
-		if (VectorNormalize (inject_dir) <= 0.f)
-			return;
-		inject_radius = q_max (512.f, r_froxel.far_clip * 0.35f);
-		VectorMA (r_refdef.vieworg, r_froxel.far_clip * 0.5f, inject_dir, inject_origin);
-		R_Froxel_InjectOneLight (inject_origin, inject_radius, sun_color, sun_intensity * sun_scale);
-		return;
-	}
-
 	VectorScale (sun->dir, -1.f, inject_dir);
 	if (VectorNormalize (inject_dir) <= 0.f)
 		return;
-	VectorCopy (sun->dir, blocker_dir);
-	if (VectorNormalize (blocker_dir) <= 0.f)
-		VectorScale (inject_dir, -1.f, blocker_dir);
-
-	nx = r_froxel.dims[0];
-	ny = r_froxel.dims[1];
-	nz = r_froxel.dims[2];
-
-	for (int z = 0; z < nz; ++z)
-	{
-		float zf = ((float)z + 0.5f) / (float)nz;
-		float zv = r_froxel.near_clip * expf (r_froxel.log_far_near * zf);
-		float half_w = q_max (1e-3f, zv * r_froxel.tan_half_fov_x);
-		float half_h = q_max (1e-3f, zv * r_froxel.tan_half_fov_y);
-		float density_factor = CLAMP (0.1f, zf, 1.f);
-		for (int y = 0; y < ny; ++y)
-		for (int x = 0; x < nx; ++x)
-		{
-			float xf = (((float)x + 0.5f) / (float)nx) * 2.f - 1.f;
-			float yf = (((float)y + 0.5f) / (float)ny) * 2.f - 1.f;
-			vec3_t p;
-			vec3_t view_dir;
-			float alignment;
-			float visibility;
-			float energy;
-			int idx = (x + nx * (y + ny * z)) * 3;
-
-			VectorCopy (r_refdef.vieworg, p);
-			VectorMA (p, zv, vpn, p);
-			VectorMA (p, xf * half_w, vright, p);
-			VectorMA (p, yf * half_h, vup, p);
-
-			VectorSubtract (p, r_refdef.vieworg, view_dir);
-			if (VectorNormalize (view_dir) <= 0.f)
-				continue;
-
-			alignment = CLAMP (0.f, DotProduct (view_dir, inject_dir), 1.f);
-			if (alignment <= 0.f)
-				continue;
-
-			visibility = R_Froxel_SunVisibilityAtPoint (p, blocker_dir, r_froxel.far_clip);
-			energy = sun_intensity * sun_scale * density_factor * alignment * visibility;
-			if (energy <= 0.f)
-				continue;
-
-			r_froxel.light_rgb[idx + 0] += sun_color[0] * energy;
-			r_froxel.light_rgb[idx + 1] += sun_color[1] * energy;
-			r_froxel.light_rgb[idx + 2] += sun_color[2] * energy;
-			r_froxel.sun_debug_rgb[idx + 0] += sun_color[0] * energy;
-			r_froxel.sun_debug_rgb[idx + 1] += sun_color[1] * energy;
-			r_froxel.sun_debug_rgb[idx + 2] += sun_color[2] * energy;
-		}
-	}
+	inject_radius = q_max (384.f, r_froxel.far_clip * 0.40f);
+	VectorMA (r_refdef.vieworg, r_froxel.far_clip * 0.55f, inject_dir, inject_origin);
+	R_Froxel_AddLight (inject_origin, inject_radius, sun_color, sun_intensity * sun_scale, (uint32_t)DLIGHT_DEFAULT);
 }
+
+typedef struct froxel_dlight_candidate_s
+{
+	const dlight_t *dl;
+	float score;
+} froxel_dlight_candidate_t;
 
 static void R_Froxel_InjectStaticLights (void)
 {
@@ -2401,38 +2181,6 @@ static void R_Froxel_InjectStaticLights (void)
 	static_scale = q_max (0.f, r_fogvol_froxel_static.value);
 	if (static_scale <= 0.f)
 		return;
-
-	if (r_fogvol_static_probe_mode.value > 0.f && r_fog_static_field.valid)
-	{
-		const int nx = r_fog_static_field.dims[0];
-		const int ny = r_fog_static_field.dims[1];
-		const int nz = r_fog_static_field.dims[2];
-		const float sx = (r_fog_static_field.maxs[0] - r_fog_static_field.mins[0]) / (float)q_max (1, nx);
-		const float sy = (r_fog_static_field.maxs[1] - r_fog_static_field.mins[1]) / (float)q_max (1, ny);
-		const float sz = (r_fog_static_field.maxs[2] - r_fog_static_field.mins[2]) / (float)q_max (1, nz);
-		const float radius = CLAMP (24.f, 1.1f * q_max (sx, q_max (sy, sz)), 192.f);
-		for (int z = 0; z < nz; ++z)
-		for (int y = 0; y < ny; ++y)
-		for (int x = 0; x < nx; ++x)
-		{
-			int idx = x + nx * (y + ny * z);
-			float w = r_fog_static_field.weight[idx];
-			vec3_t origin;
-			vec3_t color;
-			if (w <= 0.f)
-				continue;
-			color[0] = q_max (0.f, r_fog_static_field.rgb[idx * 3 + 0] / w);
-			color[1] = q_max (0.f, r_fog_static_field.rgb[idx * 3 + 1] / w);
-			color[2] = q_max (0.f, r_fog_static_field.rgb[idx * 3 + 2] / w);
-			if (color[0] <= 0.f && color[1] <= 0.f && color[2] <= 0.f)
-				continue;
-			origin[0] = r_fog_static_field.mins[0] + ((float)x + 0.5f) * sx;
-			origin[1] = r_fog_static_field.mins[1] + ((float)y + 0.5f) * sy;
-			origin[2] = r_fog_static_field.mins[2] + ((float)z + 0.5f) * sz;
-			R_Froxel_InjectOneLight (origin, radius, color, static_scale);
-		}
-		return;
-	}
 
 	if (r_num_fog_static_lights <= 0)
 		return;
@@ -2452,26 +2200,25 @@ static void R_Froxel_InjectStaticLights (void)
 		if (color[0] <= 0.f && color[1] <= 0.f && color[2] <= 0.f)
 			continue;
 
-		R_Froxel_InjectOneLight (sl->pos_rad, sl->pos_rad[3], color, intensity * static_scale);
+		R_Froxel_AddLight (sl->pos_rad, sl->pos_rad[3], color, intensity * static_scale, (uint32_t)DLIGHT_DEFAULT);
 	}
 }
 
 void R_Froxel_InjectDlights (void)
 {
 	const dlight_t *const *active;
+	froxel_dlight_candidate_t selected[64];
+	int selected_count = 0;
+	int selected_cap;
 	int active_count = 0;
-	int injected_count = 0;
-	int nonzero_voxels = 0;
-	double aggregate_energy = 0.0;
+	const float dlight_scale = q_max (0.f, r_fogvol_dlightscale.value);
+	const int froxel_dlight_cap = MAX_FROXEL_GPU_LIGHTS;
 
-	if (!r_froxel.valid)
+	if (!r_froxel.valid || dlight_scale <= 0.f)
 		return;
 
-	if ((r_fogvol_inject_debug.value > 0.f) || (r_fogvol_debug.value >= 7.f))
-	{
-		r_froxel_tested_froxels_before = 0;
-		r_froxel_tested_froxels_after = 0;
-	}
+	selected_cap = CLAMP (1, (int)Q_rint (r_fogvol_light_max.value), froxel_dlight_cap);
+	selected_cap = CLAMP (1, selected_cap, (int)countof (selected));
 
 	active = DLightPool_GetActiveList (&active_count);
 	if (active)
@@ -2479,281 +2226,98 @@ void R_Froxel_InjectDlights (void)
 		for (int i = 0; i < active_count; ++i)
 		{
 			const dlight_t *dl = active[i];
-			if (!dl || !CL_DlightIsActive (dl) || dl->radius <= 0.f)
+			float score;
+			float intensity;
+			vec3_t to_light;
+			int min_index = 0;
+			float min_score;
+
+			if (!R_FogVol_DlightIsInjectable (dl))
 				continue;
-			R_Froxel_InjectOneLight (dl->origin, dl->radius, dl->color, 1.f);
-			injected_count++;
-		}
-	}
-
-	for (int i = 0; i < r_num_fog_dlights; ++i)
-	{
-		const dlight_t *dl = &r_fog_dlights[i];
-		if (!CL_DlightIsActive (dl) || dl->radius <= 0.f)
-			continue;
-		R_Froxel_InjectOneLight (dl->origin, dl->radius, dl->color, 1.f);
-		injected_count++;
-	}
-
-	if ((int)Q_rint (r_froxel_debug.value) == 4 && r_froxel.sun_debug_rgb)
-	{
-		const size_t count = (size_t)r_froxel.dims[0] * (size_t)r_froxel.dims[1] * (size_t)r_froxel.dims[2] * 3u;
-		memcpy (r_froxel.light_rgb, r_froxel.sun_debug_rgb, sizeof (float) * count);
-	}
-
-	if (r_froxel_debug.value > 0.f)
-	{
-		const int voxel_count = r_froxel.dims[0] * r_froxel.dims[1] * r_froxel.dims[2];
-		for (int i = 0; i < voxel_count; ++i)
-		{
-			const float r = r_froxel.light_rgb[i * 3 + 0];
-			const float g = r_froxel.light_rgb[i * 3 + 1];
-			const float b = r_froxel.light_rgb[i * 3 + 2];
-			const float peak = q_max (r, q_max (g, b));
-			if (peak <= 1e-6f)
+			intensity = q_max (0.f, q_max (dl->color[0], q_max (dl->color[1], dl->color[2])));
+			if (intensity <= 0.f)
 				continue;
-			nonzero_voxels++;
-			aggregate_energy += peak;
-		}
-		Con_Printf ("FROXEL inject: lights=%d nonzero_voxels=%d aggregate_energy=%.3f\n",
-			injected_count,
-			nonzero_voxels,
-			aggregate_energy);
-	}
+			VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
+			score = dl->radius * intensity * R_FogVol_DlightScoreBias (dl) * (1.f / (1.f + 0.0025f * sqrtf (DotProduct (to_light, to_light))));
 
-	if (((r_fogvol_inject_debug.value > 0.f) || (r_fogvol_debug.value >= 7.f))
-		&& r_froxel_tested_froxels_before > 0)
-	{
-		double ratio = (double)r_froxel_tested_froxels_after / (double)r_froxel_tested_froxels_before;
-		Con_DPrintf ("FROXEL inject tested_froxels before=%llu after=%llu ratio=%.3f\n",
-			(unsigned long long)r_froxel_tested_froxels_before,
-			(unsigned long long)r_froxel_tested_froxels_after,
-			ratio);
-	}
-}
-
-static void R_Froxel_InjectSun (void)
-{
-	const sun_t *sun;
-	float intensity_scale;
-	float base_energy;
-	vec3_t sun_color;
-	int nx, ny, nz;
-
-	if (!r_froxel.valid)
-		return;
-	if (r_fogvol_froxel_sun.value <= 0.f)
-		return;
-	if (r_sun_light.value <= 0.f || !R_WorldHasSun ())
-		return;
-
-	sun = R_GetSun ();
-	if (!sun)
-		return;
-
-	intensity_scale = q_max (0.f, r_fogvol_froxel_sun.value);
-	base_energy = q_max (0.f, sun->intensity) * q_max (0.f, sun->volumetric_intensity) * intensity_scale;
-	if (base_energy <= 0.f)
-		return;
-
-	sun_color[0] = q_max (0.f, sun->color[0]) * base_energy;
-	sun_color[1] = q_max (0.f, sun->color[1]) * base_energy;
-	sun_color[2] = q_max (0.f, sun->color[2]) * base_energy;
-
-	nx = r_froxel.dims[0];
-	ny = r_froxel.dims[1];
-	nz = r_froxel.dims[2];
-	for (int z = 0; z < nz; ++z)
-	{
-		const float zf = ((float)z + 0.5f) / (float)nz;
-		const float zv = r_froxel.near_clip * expf (r_froxel.log_far_near * zf);
-		const float depth_atten = 1.f / (1.f + 0.01f * q_max (0.f, zv));
-		const float e = depth_atten;
-		for (int y = 0; y < ny; ++y)
-		for (int x = 0; x < nx; ++x)
-		{
-			const int idx = (x + nx * (y + ny * z)) * 3;
-			r_froxel.light_rgb[idx + 0] += sun_color[0] * e;
-			r_froxel.light_rgb[idx + 1] += sun_color[1] * e;
-			r_froxel.light_rgb[idx + 2] += sun_color[2] * e;
-		}
-	}
-}
-
-static void R_Froxel_InjectStaticLights (void)
-{
-	float intensity_scale;
-
-	if (!r_froxel.valid)
-		return;
-	if (r_fogvol_froxel_static.value <= 0.f)
-		return;
-	if (r_num_fog_static_lights <= 0)
-		return;
-
-	intensity_scale = q_max (0.f, r_fogvol_froxel_static.value);
-	for (int i = 0; i < r_num_fog_static_lights; ++i)
-	{
-		const fog_light_gpu_t *sl = &r_fog_static_lights[i];
-		vec3_t origin;
-		vec3_t color;
-		const float radius = sl->pos_rad[3];
-
-		if (radius <= 0.f)
-			continue;
-
-		origin[0] = sl->pos_rad[0];
-		origin[1] = sl->pos_rad[1];
-		origin[2] = sl->pos_rad[2];
-		color[0] = q_max (0.f, sl->col_int[0]);
-		color[1] = q_max (0.f, sl->col_int[1]);
-		color[2] = q_max (0.f, sl->col_int[2]);
-		R_Froxel_InjectOneLight (origin, radius, color, intensity_scale);
-	}
-}
-
-static qboolean R_FogVol_EnsureGodrayReadbackBuffers (int mask_w, int mask_h, int source_w, int source_h)
-{
-	size_t mask_count;
-	size_t source_count;
-
-	if (mask_w <= 0 || mask_h <= 0 || source_w <= 0 || source_h <= 0)
-		return false;
-
-	mask_count = (size_t)mask_w * (size_t)mask_h * 4u;
-	source_count = (size_t)source_w * (size_t)source_h * 4u;
-	if (!r_fogvol_godray_mask_cpu || r_fogvol_godray_mask_w != mask_w || r_fogvol_godray_mask_h != mask_h)
-	{
-		float *newbuf = (float *)malloc (sizeof (float) * mask_count);
-		if (!newbuf)
-			return false;
-		if (r_fogvol_godray_mask_cpu)
-			free (r_fogvol_godray_mask_cpu);
-		r_fogvol_godray_mask_cpu = newbuf;
-		r_fogvol_godray_mask_w = mask_w;
-		r_fogvol_godray_mask_h = mask_h;
-	}
-	if (!r_fogvol_godray_source_cpu || r_fogvol_godray_source_w != source_w || r_fogvol_godray_source_h != source_h)
-	{
-		float *newbuf = (float *)malloc (sizeof (float) * source_count);
-		if (!newbuf)
-			return false;
-		if (r_fogvol_godray_source_cpu)
-			free (r_fogvol_godray_source_cpu);
-		r_fogvol_godray_source_cpu = newbuf;
-		r_fogvol_godray_source_w = source_w;
-		r_fogvol_godray_source_h = source_h;
-	}
-
-	return r_fogvol_godray_mask_cpu != NULL && r_fogvol_godray_source_cpu != NULL;
-}
-
-static void R_Froxel_InjectGodraysSource (void)
-{
-	const int nx = r_froxel.dims[0];
-	const int ny = r_froxel.dims[1];
-	const int nz = r_froxel.dims[2];
-	const int mask_w = framebufs.godrays.width;
-	const int mask_h = framebufs.godrays.height;
-	const int source_w = vid.width;
-	const int source_h = vid.height;
-	const float coupling = q_max (0.f, r_fogvol_froxel_godrays.value);
-
-	if (!r_froxel.valid)
-		return;
-	if (coupling <= 0.f)
-		return;
-	if (!r_fogvol_godray_ready || !r_fogvol_godray_mask_tex || !r_fogvol_godray_source_tex)
-		return;
-	if (!R_FogVol_EnsureGodrayReadbackBuffers (mask_w, mask_h, source_w, source_h))
-		return;
-
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, r_fogvol_godray_mask_tex);
-	glGetTexImage (GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, r_fogvol_godray_mask_cpu);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, r_fogvol_godray_source_tex);
-	glGetTexImage (GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, r_fogvol_godray_source_cpu);
-
-	for (int z = 0; z < nz; ++z)
-	{
-		const float zf = ((float)z + 0.5f) / (float)nz;
-		const float zv = r_froxel.near_clip * expf (r_froxel.log_far_near * zf);
-		const float depth_weight = expf (-zv / q_max (r_froxel.far_clip, 1.f));
-
-		for (int y = 0; y < ny; ++y)
-		for (int x = 0; x < nx; ++x)
-		{
-			const float u = ((float)x + 0.5f) / (float)nx;
-			const float v = ((float)y + 0.5f) / (float)ny;
-			const int mx = CLAMP (0, (int)(u * (float)mask_w), mask_w - 1);
-			const int my = CLAMP (0, (int)(v * (float)mask_h), mask_h - 1);
-			const int sx = CLAMP (0, (int)(u * (float)source_w), source_w - 1);
-			const int sy = CLAMP (0, (int)(v * (float)source_h), source_h - 1);
-			const int midx = (mx + mask_w * my) * 4;
-			const int sidx = (sx + source_w * sy) * 4;
-			float mask_lum;
-			float color_lum;
-			float energy;
-			float inv_lum;
-			float color_r;
-			float color_g;
-			float color_b;
-			const int idx = (x + nx * (y + ny * z)) * 3;
-
-			mask_lum = q_max (0.f,
-				r_fogvol_godray_mask_cpu[midx + 0] * 0.2126f
-				+ r_fogvol_godray_mask_cpu[midx + 1] * 0.7152f
-				+ r_fogvol_godray_mask_cpu[midx + 2] * 0.0722f);
-			if (mask_lum <= 1e-6f)
-				continue;
-
-			color_r = q_max (0.f, r_fogvol_godray_source_cpu[sidx + 0]);
-			color_g = q_max (0.f, r_fogvol_godray_source_cpu[sidx + 1]);
-			color_b = q_max (0.f, r_fogvol_godray_source_cpu[sidx + 2]);
-			color_lum = color_r * 0.2126f + color_g * 0.7152f + color_b * 0.0722f;
-			if (color_lum <= 1e-6f)
+			if (selected_count < selected_cap)
 			{
-				color_r = 1.f;
-				color_g = 1.f;
-				color_b = 1.f;
-				color_lum = 1.f;
-			}
-			inv_lum = 1.f / color_lum;
-
-			energy = mask_lum * depth_weight * coupling;
-			r_froxel.light_rgb[idx + 0] += color_r * inv_lum * energy;
-			r_froxel.light_rgb[idx + 1] += color_g * inv_lum * energy;
-			r_froxel.light_rgb[idx + 2] += color_b * inv_lum * energy;
-		}
-	}
-}
-
-static int R_Froxel_CountInjectableDlights (void)
-{
-	const dlight_t *const *active;
-	int active_count = 0;
-	int count = 0;
-
-	active = DLightPool_GetActiveList (&active_count);
-	if (active)
-	{
-		for (int i = 0; i < active_count; ++i)
-		{
-			const dlight_t *dl = active[i];
-			if (!dl || !CL_DlightIsActive (dl) || dl->radius <= 0.f)
+				selected[selected_count].dl = dl;
+				selected[selected_count].score = score;
+				selected_count++;
 				continue;
-			count++;
+			}
+
+			min_score = selected[0].score;
+			for (int k = 1; k < selected_count; ++k)
+			{
+				if (selected[k].score < min_score)
+				{
+					min_score = selected[k].score;
+					min_index = k;
+				}
+			}
+			if (score > min_score)
+			{
+				selected[min_index].dl = dl;
+				selected[min_index].score = score;
+			}
 		}
 	}
 
 	for (int i = 0; i < r_num_fog_dlights; ++i)
 	{
 		const dlight_t *dl = &r_fog_dlights[i];
-		if (!CL_DlightIsActive (dl) || dl->radius <= 0.f)
+		float score;
+		float intensity;
+		vec3_t to_light;
+		int min_index = 0;
+		float min_score;
+
+		if (!R_FogVol_DlightIsInjectable (dl))
 			continue;
-		count++;
+		intensity = q_max (0.f, q_max (dl->color[0], q_max (dl->color[1], dl->color[2])));
+		if (intensity <= 0.f)
+			continue;
+		VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
+		score = dl->radius * intensity * R_FogVol_DlightScoreBias (dl) * (1.f / (1.f + 0.0025f * sqrtf (DotProduct (to_light, to_light))));
+
+		if (selected_count < selected_cap)
+		{
+			selected[selected_count].dl = dl;
+			selected[selected_count].score = score;
+			selected_count++;
+			continue;
+		}
+
+		min_score = selected[0].score;
+		for (int k = 1; k < selected_count; ++k)
+		{
+			if (selected[k].score < min_score)
+			{
+				min_score = selected[k].score;
+				min_index = k;
+			}
+		}
+		if (score > min_score)
+		{
+			selected[min_index].dl = dl;
+			selected[min_index].score = score;
+		}
 	}
 
-	return count;
+	for (int i = 0; i < selected_count; ++i)
+	{
+		float lum;
+		float energy;
+		if (!selected[i].dl)
+			continue;
+		lum = q_max (selected[i].dl->color[0], q_max (selected[i].dl->color[1], selected[i].dl->color[2]));
+		energy = dlight_scale * (0.5f + lum) * R_FogVol_DlightScoreBias (selected[i].dl);
+		if (selected[i].dl->type == DLIGHT_ROCKET || selected[i].dl->type == DLIGHT_EXPLOSION)
+			energy *= 1.35f;
+		R_Froxel_AddLight (selected[i].dl->origin, selected[i].dl->radius, selected[i].dl->color, energy, (uint32_t)selected[i].dl->type);
+	}
 }
 
 typedef enum fogvol_lighting_mode_e
@@ -2792,32 +2356,67 @@ static void R_FogVol_WarnFroxelLightingConfig (void)
 		return;
 	if (r_fogvol_froxel.value > 0.f && R_FogVol_UseFroxelLights (R_FogVol_LightingMode ()) && r_fogvol_light.value <= 0.f)
 	{
-		Con_Printf ("Warning: r_fogvol_lighting_mode uses froxel lighting, but r_fogvol_light<=0 disables dlight injection into froxels.\n");
+		Con_Printf ("Note: r_fogvol_light<=0 disables raymarch light lists, but froxel dlight injection stays enabled.\n");
 		warned = true;
 	}
 }
 
 void R_Froxel_EndFrame (void)
 {
-	const size_t count = (size_t)r_froxel.dims[0] * (size_t)r_froxel.dims[1] * (size_t)r_froxel.dims[2] * 3u;
+	float inv_view[16];
+	float camera_delta = 0.f;
+	GLuint out_tex;
+	GLuint history_tex;
+	GLuint tmp_tex;
+	int groups_x;
+	int groups_y;
+	int groups_z;
 
-	if (!r_froxel.valid || !r_froxel.light_tex || !r_froxel.prev_light_tex || !r_froxel.prev_light_rgb)
+	if (!r_froxel.valid || !r_froxel.light_tex || !r_froxel.history_tex || !r_froxel.light_ssbo || !glprogs.fogvol_froxel_inject)
 		return;
+	if (!Mat4_Inverse (r_matview, inv_view))
+		return;
+	if (r_froxel.prev_valid)
+	{
+		vec3_t delta;
+		VectorSubtract (r_refdef.vieworg, r_froxel.prev_vieworg, delta);
+		camera_delta = sqrtf (DotProduct (delta, delta));
+	}
 
-	R_Froxel_BlendWithHistory ();
+	out_tex = r_froxel.light_tex;
+	history_tex = r_froxel.history_tex;
+	groups_x = (r_froxel.dims[0] + 3) / 4;
+	groups_y = (r_froxel.dims[1] + 3) / 4;
+	groups_z = (r_froxel.dims[2] + 3) / 4;
 
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.light_tex);
-	GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, 0,
-		r_froxel.dims[0], r_froxel.dims[1], r_froxel.dims[2], GL_RGB, GL_FLOAT, r_froxel.light_rgb);
+	GL_UseProgram (glprogs.fogvol_froxel_inject);
+	glBindTexture (GL_TEXTURE_3D, 0);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, r_froxel.light_ssbo, 0, sizeof (froxel_gpu_light_t) * q_max (1, MAX_FROXEL_GPU_LIGHTS));
+	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (froxel_gpu_light_t) * q_max (1, MAX_FROXEL_GPU_LIGHTS), r_froxel_gpu_lights, GL_STREAM_DRAW);
+	GL_BindImageTextureFunc (0, out_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, history_tex);
+	GL_Uniform4fFunc (0,
+		(float)r_froxel.dims[0],
+		(float)r_froxel.dims[1],
+		(float)r_froxel.dims[2],
+		(float)CLAMP (0, r_froxel.light_count, MAX_FROXEL_GPU_LIGHTS));
+	GL_Uniform4fFunc (1, r_froxel.near_clip, r_froxel.far_clip, r_froxel.tan_half_fov_x, r_froxel.tan_half_fov_y);
+	GL_Uniform4fFunc (2, r_froxel.log_far_near, 0.f, 0.f, 0.f);
+	GL_UniformMatrix4fvFunc (3, 1, GL_FALSE, inv_view);
+	GL_Uniform4fFunc (7,
+		CLAMP (0.f, r_fogvol_froxel_temporal_alpha.value, 1.f),
+		q_max (1.f, r_fogvol_froxel_temporal_reject_threshold.value),
+		camera_delta,
+		r_froxel.prev_valid ? 1.f : 0.f);
+	GL_DispatchComputeFunc (groups_x, groups_y, groups_z);
+	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
-	memcpy (r_froxel.prev_light_rgb, r_froxel.light_rgb, sizeof (float) * count);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.prev_light_tex);
-	GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, 0,
-		r_froxel.dims[0], r_froxel.dims[1], r_froxel.dims[2], GL_RGB, GL_FLOAT, r_froxel.prev_light_rgb);
+	tmp_tex = r_froxel.light_tex;
+	r_froxel.light_tex = r_froxel.history_tex;
+	r_froxel.history_tex = tmp_tex;
 	VectorCopy (r_refdef.vieworg, r_froxel.prev_vieworg);
 	r_froxel.prev_frame = r_framecount;
 	r_froxel.prev_valid = true;
-	GL_MemoryBarrierFunc (GL_TEXTURE_FETCH_BARRIER_BIT);
 }
 
 void R_FogVol_Init (void)
@@ -3658,15 +3257,29 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, r_froxel.near_clip, r_froxel.far_clip, r_froxel.tan_half_fov_x, r_froxel.tan_half_fov_y);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, r_froxel.log_far_near,
 		(float)q_max (1, r_froxel.dims[0]), (float)q_max (1, r_froxel.dims[1]), (float)q_max (1, r_froxel.dims[2]));
-const fogvol_lighting_mode_t lighting_mode = R_FogVol_LightingMode ();
-const qboolean froxel_lighting_mode = R_FogVol_UseFroxelLights (lighting_mode);
-const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f) && froxel_lighting_mode;
-const qboolean want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
-const qboolean want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
-const qboolean want_froxel_dlights = froxel_injection_enabled && (r_fogvol_light.value > 0.f);
-const int froxel_dlight_count = want_froxel_dlights ? R_Froxel_CountInjectableDlights () : 0;
-const qboolean run_froxel_injection = want_froxel_sun || want_froxel_static || (want_froxel_dlights && froxel_dlight_count > 0);
-qboolean screen_probe_valid = false;
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, CLAMP (0, (int)Q_rint (r_froxel_debug.value), 4));
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, CLAMP (0, (int)Q_rint (r_fogvol_froxel_parity.value), 1));
+	GL_Uniform3fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES,
+		q_max (0.f, r_fogvol_froxel_scale.value),
+		q_max (0.f, r_fogvol_lightlist_scale.value),
+		q_max (0.f, r_fogvol_lightgrid_scale.value));
+	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, CLAMP (0, (int)Q_rint (r_fogvol_lighting_mode.value), 3));
+	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, r_fogvol_godray_coupling.value > 0.f ? 1 : 0);
+	GL_Uniform4fFunc (FOGVOL_U_GODRAY_SHAFTS_PARAMS,
+		(float)q_max (1, framebufs.godrays.width),
+		(float)q_max (1, framebufs.godrays.height),
+		q_max (0.f, r_fogvol_godray_coupling.value),
+		q_max (0.f, r_fogvol_froxel_godrays.value));
+	GL_Uniform4fFunc (FOGVOL_U_FROXEL_TEMPORAL_PARAMS,
+		CLAMP (0.f, r_fogvol_froxel_temporal_alpha.value, 1.f),
+		q_max (1.f, r_fogvol_froxel_temporal_reject_threshold.value),
+		(r_froxel.prev_valid ? sqrtf (
+			(r_refdef.vieworg[0] - r_froxel.prev_vieworg[0]) * (r_refdef.vieworg[0] - r_froxel.prev_vieworg[0]) +
+			(r_refdef.vieworg[1] - r_froxel.prev_vieworg[1]) * (r_refdef.vieworg[1] - r_froxel.prev_vieworg[1]) +
+			(r_refdef.vieworg[2] - r_froxel.prev_vieworg[2]) * (r_refdef.vieworg[2] - r_froxel.prev_vieworg[2])) : 0.f),
+		r_froxel.prev_valid ? 1.f : 0.f);
+	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, CLAMP (0, (int)Q_rint (r_fogvol_local_occlusion.value), 2));
+	GL_Uniform4fFunc (FOGVOL_U_LOCAL_OCCLUSION_PARAMS, 4.f, 0.02f, 1.f, 0.f);
 }
 
 void R_FogVol_Render (void)
@@ -3681,15 +3294,7 @@ void R_FogVol_Render (void)
 	GLbyte *ofs;
 	fog_volume_gpu_t gpu_volumes[MAX_FOGVOLUMES];
 	fog_light_lists_gpu_t fog_lights;
-R_Froxel_BeginFrame (depth_near, depth_far);
-if (want_froxel_dlights)
-	R_Froxel_InjectDlights ();
-if (want_froxel_sun)
-	R_Froxel_InjectSun ();
-if (want_froxel_static)
-	R_Froxel_InjectStaticLights ();
-R_Froxel_InjectGodraysSource ();
-R_Froxel_EndFrame ();
+	fog_lightgrid_gpu_t fog_lightgrid[MAX_FOGVOLUMES];
 	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 9);
 	float inv_viewproj[16];
 	GLuint src_tex;
@@ -3742,9 +3347,9 @@ R_Froxel_EndFrame ();
 	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f) && froxel_lighting_mode;
 	const qboolean want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
 	const qboolean want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
-	const qboolean want_froxel_dlights = froxel_injection_enabled && (r_fogvol_light.value > 0.f);
-	const int froxel_dlight_count = want_froxel_dlights ? R_Froxel_CountInjectableDlights () : 0;
-	const qboolean run_froxel_injection = want_froxel_sun || want_froxel_static || (want_froxel_dlights && froxel_dlight_count > 0);
+	const qboolean want_froxel_dlights = froxel_injection_enabled && (r_fogvol_dlightscale.value > 0.f);
+	const qboolean run_froxel_injection = froxel_injection_enabled;
+	qboolean screen_probe_valid = false;
 
 	R_FogVol_WarnFroxelLightingConfig ();
 	if (r_fogvol_static_probe_mode.value > 0.f && r_fog_static_field.valid && !r_fog_static_field.build_complete)
@@ -3816,6 +3421,14 @@ R_Froxel_EndFrame ();
 
 	if (run_froxel_injection)
 	{
+		R_Froxel_BeginFrame (depth_near, depth_far);
+		if (want_froxel_dlights)
+			R_Froxel_InjectDlights ();
+		if (want_froxel_sun)
+			R_Froxel_InjectSun ();
+		if (want_froxel_static)
+			R_Froxel_InjectStaticLights ();
+		R_Froxel_EndFrame ();
 	}
 	else
 	{
@@ -4265,41 +3878,17 @@ R_Froxel_EndFrame ();
 				final_tex = composite_src_tex;
 				final_fbo = composite_src_fbo;
 			}
-			if (r_fogvol_upsample.value > 0.f && glprogs.fogvol_upsample)
-			{
-				int taps = (int)Q_rint (r_fogvol_upsample_taps.value);
-				taps = (taps == 9) ? 9 : 4;
-				R_FogVol_UseProgram (glprogs.fogvol_upsample);
-				GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-				R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
-				GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
-				GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
-				R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
-				GL_Uniform4fFunc (0, (float)glwidth, (float)glheight, (float)fog_width, (float)fog_height);
-				GL_Uniform1fFunc (1, r_fogvol_upsample_k.value);
-				GL_Uniform1iFunc (2, taps);
-				/* BUG FIX (white screen): protect alpha channel — upsample shader
-				 * outputs alpha=1.0 (fixed in fogvol_upsample.frag), but guard here
-				 * so the composite FBO alpha is never overwritten. */
-				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-				glDrawArrays (GL_TRIANGLES, 0, 3);
-				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-			}
-			else
-			{
-				R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, final_fbo);
-				R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
-				R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY read=COLOR_ATTACHMENT0");
-				R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
-				R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
-				R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
-				/* BUG FIX (white screen): protect alpha channel on linear upscale blit. */
-				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-				GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
-					0, 0, glwidth, glheight,
-					GL_COLOR_BUFFER_BIT, GL_LINEAR);
-				glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-			}
+			R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, final_fbo);
+			R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+			R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY read=COLOR_ATTACHMENT0");
+			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
+			R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
+			R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
+			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+			GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
+				0, 0, glwidth, glheight,
+				GL_COLOR_BUFFER_BIT, GL_LINEAR);
+			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		}
 		else
 		{

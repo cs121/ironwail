@@ -14,9 +14,7 @@ layout(binding=8) uniform samplerCubeArray DLightShadowTex;
 #define ALPHATEST 0
 #endif
 
-layout(location=0) uniform vec4 DLightConfig0; // x: scale, y: radius scale, z: falloff mode, w: exp
-layout(location=1) uniform vec4 DLightConfig1; // x: core boost, y: core exp, z: soft knee, w: ndotl mix
-layout(location=2) uniform vec4 DLightConfig2; // x: saturation chop
+layout(location=0) uniform float DLightScale;
 
 layout(location=30) uniform mat4 ShadowSunViewProj;
 layout(location=34) uniform vec4 ShadowEnableDebug;   // x=enabled, y=sun, z=dlight, w=debug mode
@@ -71,15 +69,9 @@ float whitenoise01(vec2 p)
 	return fract((p3.x + p3.y) * p3.z);
 }
 
-float ComputeFalloff(float x, float mode, float expval)
+float ComputeFalloff(float x)
 {
-	if (mode < 0.5)
-		return x;
-	if (mode < 1.5)
-		return x * x;
-	if (mode < 2.5)
-		return x * x * (3.0 - 2.0 * x);
-	return pow(max(x, 0.0), expval);
+	return x * x * (3.0 - 2.0 * x);
 }
 
 uvec3 ComputeLightTileCoord(vec2 tile_coord, float view_depth)
@@ -169,12 +161,11 @@ void main()
 	if (NumLights > 0u)
 	{
 		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-		float falloff_mode = DLightConfig0.z;
-		float falloff_exp = max(DLightConfig0.w, 0.01);
-		float core_boost = max(DLightConfig1.x, 0.0);
-		float core_exp = max(DLightConfig1.y, 0.01);
-		float knee = max(DLightConfig1.z, 0.0);
-		float ndotl_mix = clamp(DLightConfig1.w, 0.0, 1.0);
+		const float core_boost = 0.75;
+		const float core_exp = 6.0;
+		const float knee = 1.5;
+		const float ndotl_mix = 0.2;
+		const float saturation_chop = 0.1;
 
 		for (uint light_index = 0u; light_index < NumLights; light_index++)
 		{
@@ -193,7 +184,7 @@ void main()
 
 			float normalized_dist = surface_dist / max(rad, 1e-4);
 			float x = clamp(1.0 - normalized_dist, 0.0, 1.0);
-			float falloff = ComputeFalloff(x, falloff_mode, falloff_exp);
+			float falloff = ComputeFalloff(x);
 			float minlight_norm = minlight / max(rad, 1e-4);
 			float attenuation = clamp((x - minlight_norm) / max(1.0 - minlight_norm, 1e-4), 0.0, 1.0);
 			float intensity = attenuation * falloff;
@@ -212,16 +203,15 @@ void main()
 			vec3 light_contrib = shaped * ndotl * shadow * l.color * dynamic_light_noise;
 			dynamic_light += light_contrib;
 		}
+
+		if (saturation_chop > 0.0)
+		{
+			float luma = dot(dynamic_light, vec3(0.299, 0.587, 0.114));
+			dynamic_light = mix(dynamic_light, vec3(luma), saturation_chop);
+		}
 	}
 
-	float satchop = clamp(DLightConfig2.x, 0.0, 1.0);
-	if (satchop > 0.0)
-	{
-		float luma = dot(dynamic_light, vec3(0.299, 0.587, 0.114));
-		dynamic_light = mix(dynamic_light, vec3(luma), satchop);
-	}
-
-	vec3 contrib = clamp(dynamic_light * DLightConfig0.x * Overbright, 0.0, Overbright);
+	vec3 contrib = clamp(dynamic_light * DLightScale * Overbright, 0.0, Overbright);
 	vec3 color = albedo * contrib;
 
 	if (ShadowEnableDebug.w > 1.5)
@@ -232,5 +222,4 @@ void main()
 	out_fragcolor = vec4(color, alpha); // FIX: war "alpha * 0.0" → Fragment immer transparent
 	out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
 }
-
 

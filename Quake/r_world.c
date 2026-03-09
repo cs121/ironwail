@@ -33,7 +33,6 @@ extern cvar_t r_oit;
 extern gltexture_t *lightmap_texture;
 extern gltexture_t *lightmap_dir_texture;
 extern cvar_t r_lightingdir;
-extern cvar_t r_dlight_mode;
 
 
 extern GLuint gl_bmodel_vbo;

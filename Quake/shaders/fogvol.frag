@@ -739,7 +739,10 @@ void main()
 	bool useFroxelLighting = (fogLightingMode == 2 || fogLightingMode == 3);
 	bool doRaymarchLighting = (fogLightingMode == 1);
 	bool doRaymarchDetail = (fogLightingMode == 3);
-	bool doFroxelLights = (FogLightEnabled != 0) && useFroxelLighting && (FogFroxelEnabled != 0) && (FogFroxelParityMode == 0) && (FogLightSourceScales.x > 0.0);
+	// Froxel lighting must not depend on FogLightEnabled (that flag tracks the
+	// raymarch light-list path only). Otherwise froxel dlight injection can run
+	// on CPU but be completely invisible in shader.
+	bool doFroxelLights = useFroxelLighting && (FogFroxelEnabled != 0) && (FogLightSourceScales.x > 0.0);
 	bool doListLightsFull = (FogLightEnabled != 0) && doRaymarchLighting && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
 	bool doListLightsDetail = (FogLightEnabled != 0) && doRaymarchDetail && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
 	bool doLights = doFroxelLights || doListLightsFull || doListLightsDetail;
@@ -775,6 +778,10 @@ void main()
 	}
 
 	int adaptiveSteps = int(stepCount); // adaptive, already capped at FogSteps
+	if (fogLightingMode == 2)
+		adaptiveSteps = clamp(adaptiveSteps, 8, 16);
+	else if (fogLightingMode == 3)
+		adaptiveSteps = clamp(adaptiveSteps, 8, 20);
 	bool doGodrayCoupling = (FogGodrayCoupling != 0);
 	float shaftEnergyPre = 0.0;
 	if (doGodrayCoupling)
@@ -848,7 +855,8 @@ if (doGodrayCoupling)
 		if (doLights)
 		{
 			vec3 lightScatter = lightScatterPrev;
-			if (FogLightSubsample == 0 || (i & 1) == 0)
+			bool forceHalfRateLighting = (fogLightingMode == 2 || fogLightingMode == 3);
+			if ((!forceHalfRateLighting && FogLightSubsample == 0) || (i & 1) == 0)
 			{
 				vec3 froxelScatter = vec3(0.0);
 				vec3 localScatter = vec3(0.0);
@@ -861,9 +869,10 @@ if (doGodrayCoupling)
 				}
 				if (doListLightsFull || doListLightsDetail)
 				{
+					int detailCap = doListLightsDetail ? min(lightCount, 4) : lightCount;
 					for (int l = 0; l < MAX_FOGLIGHTS; ++l)
 					{
-						if (l >= lightCount) break;
+						if (l >= detailCap) break;
 						int lightIndex = lightOffset + l;
 						if (lightIndex >= MAX_FOGVOLUMES * MAX_FOGLIGHTS) break;
 						vec3 lightVec = FogLights[lightIndex].pos_rad.xyz - p;
@@ -880,8 +889,7 @@ if (doGodrayCoupling)
 					localScatter *= FogLightSourceScales.y;
 					if (doListLightsDetail)
 					{
-						// Mode 3: conservative add-on only to avoid double-lighting.
-						localScatter *= 0.25;
+						localScatter *= 0.2;
 					}
 				}
 				if (doFroxelLights && doListLightsFull)

@@ -15,22 +15,13 @@ float BrightPartMask(vec3 color, float threshold, float knee)
 
 float SkyDepthMask(float depth)
 {
-	/*
-	 * Be tolerant about depth convention: some pipelines can expose regular or
-	 * reversed depth depending on runtime capabilities/state.  Accept either
-	 * sky extreme near the far plane so source debug remains
-	 * visible instead of going fully black on convention mismatches.
-	 */
-	const float edgeEpsilon = 0.003;
+	/* Strict sky test: only pass pixels that match the active depth convention.
+	 * This prevents non-sky bright surfaces from becoming godray sources. */
+	const float edgeEpsilon = 0.0015;
 	float cpuCutoff = clamp(SkyParams.x, 0.0, 1.0);
-	float reversedLike = step(depth, min(cpuCutoff + edgeEpsilon, 1.0));
-	float regularLike = step(max(cpuCutoff - edgeEpsilon, 0.0), depth);
-	float nearZero = step(depth, edgeEpsilon);
-	float nearOne = step(1.0 - edgeEpsilon, depth);
-
 	if (SkyParams.z > 0.5)
-		return clamp(max(reversedLike, nearOne), 0.0, 1.0);
-	return clamp(max(regularLike, nearZero), 0.0, 1.0);
+		return step(depth, min(cpuCutoff + edgeEpsilon, 1.0));  // reversed-Z sky near 0
+	return step(max(cpuCutoff - edgeEpsilon, 0.0), depth);      // regular-Z sky near 1
 }
 
 void main()

@@ -11,10 +11,6 @@ typedef struct dlight_pool_stats_s
 	int evicted;
 } dlight_pool_stats_t;
 
-extern cvar_t r_dlight_budget;
-extern cvar_t r_dlight_pool_max;
-
-void DLightPool_RegisterCvars (void);
 void DLightPool_Init (void);
 void DLightPool_Shutdown (void);
 void DLightPool_Clear (void);
@@ -30,6 +26,5 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 		dlight_t **out, int out_max);
 const dlight_t *const *DLightPool_GetActiveList (int *count);
 void DLightPool_GetStats (dlight_pool_stats_t *out);
-void DLightPool_DebugPrintIfEnabled (void);
 
 #endif // R_DLIGHT_POOL_H

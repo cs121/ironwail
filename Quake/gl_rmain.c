@@ -585,27 +585,8 @@ cvar_t	r_lightmap_colorspace_debug = { "r_lightmap_colorspace_debug", "0", CVAR_
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
-cvar_t  r_dlight_style = { "r_dlight_style", "0", CVAR_ARCHIVE };
-cvar_t  r_dlight_debug = { "r_dlight_debug", "0", CVAR_NONE };
-cvar_t  r_dlight_debug_spawn = { "r_dlight_debug_spawn", "0", CVAR_NONE };
-cvar_t  r_dlight_debug_models = { "r_dlight_debug_models", "0", CVAR_NONE };
 cvar_t  r_gl_state_validate = { "r_gl_state_validate", "0", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
-cvar_t  r_dlight_mode = { "r_dlight_mode", "0", CVAR_ARCHIVE };
-cvar_t  r_dlight_scale = { "r_dlight_scale", "1.0", CVAR_ARCHIVE };
-cvar_t  r_dlight_radius_scale = { "r_dlight_radius_scale", "1.0", CVAR_ARCHIVE };
-cvar_t  r_dlight_falloff = { "r_dlight_falloff", "3", CVAR_ARCHIVE };
-cvar_t  r_dlight_exp = { "r_dlight_exp", "2.2", CVAR_ARCHIVE };
-cvar_t  r_dlight_core_boost = { "r_dlight_core_boost", "0.75", CVAR_ARCHIVE };
-cvar_t  r_dlight_core_exp = { "r_dlight_core_exp", "6.0", CVAR_ARCHIVE };
-cvar_t  r_dlight_softknee = { "r_dlight_softknee", "1.5", CVAR_ARCHIVE };
-cvar_t  r_dlight_buffer = { "r_dlight_buffer", "1", CVAR_ARCHIVE };
-cvar_t  r_dlight_bloom = { "r_dlight_bloom", "1", CVAR_ARCHIVE };
-cvar_t  r_dlight_bloom_scale = { "r_dlight_bloom_scale", "0.15", CVAR_ARCHIVE };
-cvar_t  r_dlight_bloom_radius = { "r_dlight_bloom_radius", "1.0", CVAR_ARCHIVE };
-cvar_t  r_dlight_bloom_threshold = { "r_dlight_bloom_threshold", "0.1", CVAR_ARCHIVE };
-cvar_t  r_dlight_ndotl = { "r_dlight_ndotl", "0.2", CVAR_ARCHIVE };
-cvar_t  r_dlight_satchop = { "r_dlight_satchop", "0.1", CVAR_ARCHIVE };
 cvar_t  r_shadow = { "r_shadow", "1", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
 cvar_t  r_shadow_dlight = { "r_shadow_dlight", "1", CVAR_ARCHIVE };
@@ -1724,43 +1705,18 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 
 static void R_CompositeDlightBuffer (void)
 {
-	if (!r_dlight_buffered_frame || r_dlight_mode.value <= 0.f || r_dlight_buffer.value <= 0.f)
+	if (!r_dlight_buffered_frame)
 		return;
 	if (!framebufs.dlight.tex || !glprogs.dlight_composite)
-		return;
-
-	float scale = q_max (0.f, r_dlight_scale.value);
-	float bloom_master = q_max (0.f, r_bloom.value);
-	float bloom_enabled = (bloom_master > 0.f) ? q_max (0.f, r_dlight_bloom.value) : 0.f;
-	float bloom_scale = q_max (0.f, r_dlight_bloom_scale.value) * bloom_master;
-	float bloom_radius = q_max (0.f, r_dlight_bloom_radius.value);
-	float bloom_threshold = q_max (0.f, r_dlight_bloom_threshold.value);
-
-	if (scale <= 0.f && (bloom_enabled <= 0.f || bloom_scale <= 0.f))
 		return;
 
 	GL_BeginGroup ("Dlight composite");
 	GL_UseProgram (glprogs.dlight_composite);
 	GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.dlight.tex);
-	GL_Uniform1fFunc (0, scale);
+	GL_Uniform1fFunc (0, 1.f);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_EndGroup ();
-
-	if (bloom_enabled > 0.f && bloom_scale > 0.f)
-	{
-		GLuint bloom_tex = GL_GenerateBloomTextureFrom (framebufs.dlight.tex, bloom_threshold, bloom_radius);
-		if (bloom_tex)
-		{
-			GL_BeginGroup ("Dlight bloom composite");
-			GL_UseProgram (glprogs.dlight_composite);
-			GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, bloom_tex);
-			GL_Uniform1fFunc (0, bloom_scale);
-			glDrawArrays (GL_TRIANGLES, 0, 3);
-			GL_EndGroup ();
-		}
-	}
 }
 
 static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
@@ -3746,7 +3702,7 @@ qboolean GL_NeedsSceneEffects (void)
 	if (r_bloom.value > 0.f)
 		return true;
 
-	if (r_dlight_mode.value > 0.f && r_dlight_style.value > 0.f && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo)
+	if (r_dynamic.value > 0.f && framebufs.dlight.fbo)
 		return true;
 
         if (GL_ShouldApplyMotionBlur ())
@@ -4023,8 +3979,8 @@ void R_SetupView (void)
         r_framedata.lightgrid_params[1] = (r_lightgrid_debug.value >= 2.f) ? 1.f : 0.f;
         r_framedata.lightgrid_params[2] = 0.f;
         r_framedata.lightgrid_params[3] = 0.f;
-        r_framedata.dlight_params[0] = r_dlight_style.value > 0.f ? 1.f : 0.f;
-        r_framedata.dlight_params[1] = r_dlight_debug.value > 0.f ? 1.f : 0.f;
+        r_framedata.dlight_params[0] = 1.f;
+        r_framedata.dlight_params[1] = 0.f;
         r_framedata.dlight_params[2] = 0.f;
         r_framedata.dlight_params[3] = 0.f;
         r_framedata.colorspace_params[0] = CLAMP (0.f, r_debug_colorspace.value, 4.f);
@@ -5269,17 +5225,9 @@ void R_Shadow_ApplyAliasReceiverUniforms (GLuint program)
 		r_framedata.sun_color_intensity[3]);
 	GL_Uniform1fFunc (40, r_framedata.shader_params[2]);
 	GL_Uniform1fFunc (41, (float)r_framedata.numlights);
-	GL_Uniform4fFunc (42,
-		q_max (0.f, r_dlight_scale.value),
-		r_dlight_radius_scale.value,
-		(float)CLAMP (0, (int)Q_rint (r_dlight_falloff.value), 3),
-		q_max (0.01f, r_dlight_exp.value));
-	GL_Uniform4fFunc (43,
-		q_max (0.f, r_dlight_core_boost.value),
-		q_max (0.01f, r_dlight_core_exp.value),
-		q_max (0.f, r_dlight_softknee.value),
-		CLAMP (0.f, r_dlight_ndotl.value, 1.f));
-	GL_Uniform4fFunc (44, CLAMP (0.f, r_dlight_satchop.value, 1.f), 0.f, 0.f, 0.f);
+	GL_Uniform4fFunc (42, 1.f, 1.f, 3.f, 2.2f);
+	GL_Uniform4fFunc (43, 0.75f, 6.f, 1.5f, 0.2f);
+	GL_Uniform4fFunc (44, 0.1f, 0.f, 0.f, 0.f);
 }
 
 void R_Shadow_ApplyWorldCasterUniforms (GLuint program)
@@ -5422,32 +5370,27 @@ void R_RenderShadowMaps (void)
 // contributions (albedo * dlight) in a separate pass to preserve contrast of
 // the baked lighting while avoiding gamma artifacts from modulating the base
 // color. Static lighting remains untouched in the base pass.
-static void R_SetDlightConfig (GLuint program, float scale, float falloff, float expval,
-			       float core_boost, float core_exp, float knee, float ndotl,
-			       float satchop)
+static void R_SetDlightConfig (GLuint program, float scale)
 {
 	if (!program)
 		return;
 
 	GL_UseProgram (program);
-	GL_Uniform4fFunc (0, scale, r_dlight_radius_scale.value, falloff, expval);
-	GL_Uniform4fFunc (1, core_boost, core_exp, knee, ndotl);
-	GL_Uniform4fFunc (2, satchop, 0.f, 0.f, 0.f);
+	GL_Uniform1fFunc (0, scale);
 }
 
 static void R_DrawDLightPass (void)
 {
         int count = 0;
         entity_t **ents;
-	qboolean use_buffer = false;
 
 	r_dlight_buffered_frame = false;
 
-        if (r_dlight_style.value <= 0.f)
-                return;
-
         if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
                 return;
+
+	if (!framebufs.dlight.fbo || framebufs.scene.samples != 1)
+		return;
 
         ents = R_GetVisEntities (mod_brush, false, &count);
         if (count <= 0)
@@ -5455,17 +5398,13 @@ static void R_DrawDLightPass (void)
 
         GL_BeginGroup ("Dynamic lights (additive)");
 
-	if (r_dlight_mode.value > 0.f && r_dlight_buffer.value > 0.f && framebufs.dlight.fbo && framebufs.scene.samples == 1)
+	r_dlight_buffered_frame = true;
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.dlight.fbo);
+	glDrawBuffer (GL_COLOR_ATTACHMENT0);
+	glReadBuffer (GL_COLOR_ATTACHMENT0);
 	{
-		use_buffer = true;
-		r_dlight_buffered_frame = true;
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.dlight.fbo);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		{
-			static const float zeroes[4] = { 0.f, 0.f, 0.f, 0.f };
-			GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
-		}
+		static const float zeroes[4] = { 0.f, 0.f, 0.f, 0.f };
+		GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
 	}
 
         r_framedata.dlight_params[2] = 1.f;
@@ -5476,21 +5415,8 @@ static void R_DrawDLightPass (void)
                 GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
         }
 
-	{
-		float scale = use_buffer ? 1.f : q_max (0.f, r_dlight_scale.value);
-		float falloff = (float)CLAMP (0, (int)Q_rint (r_dlight_falloff.value), 3);
-		float expval = q_max (0.01f, r_dlight_exp.value);
-		float core_boost = q_max (0.f, r_dlight_core_boost.value);
-		float core_exp = q_max (0.01f, r_dlight_core_exp.value);
-		float knee = q_max (0.f, r_dlight_softknee.value);
-		float ndotl = CLAMP (0.f, r_dlight_ndotl.value, 1.f);
-		float satchop = CLAMP (0.f, r_dlight_satchop.value, 1.f);
-
-		R_SetDlightConfig (glprogs.world_dlight[0], scale, falloff, expval,
-			core_boost, core_exp, knee, ndotl, satchop);
-		R_SetDlightConfig (glprogs.world_dlight[1], scale, falloff, expval,
-			core_boost, core_exp, knee, ndotl, satchop);
-	}
+	R_SetDlightConfig (glprogs.world_dlight[0], 1.f);
+	R_SetDlightConfig (glprogs.world_dlight[1], 1.f);
 
         R_DrawBrushModels_DLights (ents, count);
 
@@ -5502,19 +5428,16 @@ static void R_DrawDLightPass (void)
                 GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
         }
 
-	if (use_buffer)
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
+	if (framesetup.scene_fbo)
 	{
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
-		if (framesetup.scene_fbo)
-		{
-			glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			glReadBuffer (GL_COLOR_ATTACHMENT0);
-		}
-		else
-		{
-			glDrawBuffer (GL_BACK);
-			glReadBuffer (GL_BACK);
-		}
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+	}
+	else
+	{
+		glDrawBuffer (GL_BACK);
+		glReadBuffer (GL_BACK);
 	}
 
         GL_EndGroup ();
