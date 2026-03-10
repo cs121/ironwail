@@ -46,6 +46,8 @@ cvar_t	r_particles_sort = {"r_particles_sort", "0", CVAR_ARCHIVE};
 cvar_t	r_particles_cull_dist = {"r_particles_cull_dist", "4096", CVAR_ARCHIVE};
 cvar_t	r_particles_collision = {"r_particles_collision", "1", CVAR_ARCHIVE};
 cvar_t	r_particles_spawn_max = { "r_particles_spawn_max", "2048", CVAR_ARCHIVE};
+cvar_t	r_particles_gpu_sim = { "r_particles_gpu_sim", "0", CVAR_ARCHIVE};
+cvar_t	r_particles_gpu_cullsort = { "r_particles_gpu_cullsort", "0", CVAR_ARCHIVE};
 cvar_t	r_particles_debug = { "r_particles_debug", "0", CVAR_ARCHIVE};
 cvar_t	r_particles_prt_debug = { "r_particles_prt_debug", "0", CVAR_ARCHIVE};
 
@@ -142,8 +144,10 @@ static void R_Q3P_DebugStats_f (void)
 	q3p_debug_stats_t stats;
 
 	Q3P_GetDebugStats (&stats);
-	Con_Printf ("q3p: active=%d spawned=%d dropped=%d culled=%d\n",
-		stats.active, stats.spawned, stats.dropped, stats.culled);
+	Con_Printf ("q3p: active=%d spawned=%d dropped=%d culled=%d | gpu_sim_frames=%d gpu_sim_fallbacks=%d gpu_cullsort_frames=%d gpu_visible=%d gpu_culled=%d\n",
+		stats.active, stats.spawned, stats.dropped, stats.culled,
+		stats.gpu_sim_frames, stats.gpu_sim_fallbacks,
+		stats.gpu_cullsort_frames, stats.gpu_visible, stats.gpu_culled);
 }
 
 static void R_Q3P_ResetStats_f (void)
@@ -608,6 +612,8 @@ void R_InitParticles (void)
 	Cvar_RegisterVariable (&r_particles_cull_dist);
 	Cvar_RegisterVariable (&r_particles_collision);
 	Cvar_RegisterVariable (&r_particles_spawn_max);
+	Cvar_RegisterVariable (&r_particles_gpu_sim);
+	Cvar_RegisterVariable (&r_particles_gpu_cullsort);
 	Cvar_RegisterVariable (&r_particles_debug);
 	Cvar_RegisterVariable (&r_particles_prt_debug);
 
@@ -716,6 +722,21 @@ void R_ParseParticleEffect (void)
 		count = 1024;
 	else
 		count = msgcount;
+
+	{
+		int color_base = color & ~7;
+		if (color_base == 64 || color_base == 72)
+		{
+			vec3_t hit_dir, normal;
+			if (VectorLengthSquared (dir) > 0.0001f)
+			{
+				VectorCopy (dir, hit_dir);
+				VectorNormalizeFast (hit_dir);
+				VectorScale (hit_dir, -1.f, normal);
+				R_SpawnImpactDecalEx ("blood", org, normal, hit_dir, count >= 24);
+			}
+		}
+	}
 
 	if (R_TrySpawnQ3PLegacyParticleEffect (org, dir, color, count))
 		return;
@@ -1156,6 +1177,11 @@ void R_GetParticleDebugStats (particle_debug_stats_t *stats)
 	stats->q3p_spawned = q3p_stats.spawned;
 	stats->q3p_dropped = q3p_stats.dropped;
 	stats->q3p_culled = q3p_stats.culled;
+	stats->q3p_gpu_sim_frames = q3p_stats.gpu_sim_frames;
+	stats->q3p_gpu_sim_fallbacks = q3p_stats.gpu_sim_fallbacks;
+	stats->q3p_gpu_cullsort_frames = q3p_stats.gpu_cullsort_frames;
+	stats->q3p_gpu_visible = q3p_stats.gpu_visible;
+	stats->q3p_gpu_culled = q3p_stats.gpu_culled;
 }
 
 /*

@@ -3,12 +3,13 @@
 This directory tracks engine-facing implementation notes and feature references.
 
 ## Current runtime feature docs
-- `EMISSIVE_MAPS.md` — emissive/glow map naming and behavior.
-- `async_threading.md` — async worker model and controlling CVars.
-- `bspx_lumps.md` — BSPX lump handling status.
-- `how2use-q3-shaders.md` — current material shader workflow/API (legacy filename).
-- `shadow_mapping.md` — shadow mapping runtime behavior and tuning CVars.
-- `ssao.md` — SSAO conventions, debug modes, and controls.
+- `EMISSIVE_MAPS.md` - emissive/glow map naming and behavior.
+- `async_threading.md` - async worker model and controlling CVars.
+- `bspx_lumps.md` - BSPX lump handling status.
+- `decal_shader_manual.md` - Decal workflow, shader syntax, keywords, manifest model, and debug usage.
+- `how2use-q3-shaders.md` - current material shader workflow/API (legacy filename).
+- `shadow_mapping.md` - shadow mapping runtime behavior and tuning CVars.
+- `ssao.md` - SSAO conventions, debug modes, and controls.
 
 ## Design/debug notes
 - `fogvol_debug_notes.md`

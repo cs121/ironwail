@@ -5383,14 +5383,14 @@ static void R_DrawDLightPass (void)
 {
         int count = 0;
         entity_t **ents;
+	qboolean use_buffer;
 
 	r_dlight_buffered_frame = false;
 
         if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
                 return;
 
-	if (!framebufs.dlight.fbo || framebufs.scene.samples != 1)
-		return;
+	use_buffer = (framebufs.dlight.fbo && framebufs.scene.samples == 1);
 
         ents = R_GetVisEntities (mod_brush, false, &count);
         if (count <= 0)
@@ -5398,13 +5398,16 @@ static void R_DrawDLightPass (void)
 
         GL_BeginGroup ("Dynamic lights (additive)");
 
-	r_dlight_buffered_frame = true;
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.dlight.fbo);
-	glDrawBuffer (GL_COLOR_ATTACHMENT0);
-	glReadBuffer (GL_COLOR_ATTACHMENT0);
+	if (use_buffer)
 	{
-		static const float zeroes[4] = { 0.f, 0.f, 0.f, 0.f };
-		GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
+		r_dlight_buffered_frame = true;
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.dlight.fbo);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		{
+			static const float zeroes[4] = { 0.f, 0.f, 0.f, 0.f };
+			GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
+		}
 	}
 
         r_framedata.dlight_params[2] = 1.f;
@@ -5428,16 +5431,19 @@ static void R_DrawDLightPass (void)
                 GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
         }
 
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
-	if (framesetup.scene_fbo)
+	if (use_buffer)
 	{
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
-	}
-	else
-	{
-		glDrawBuffer (GL_BACK);
-		glReadBuffer (GL_BACK);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
+		if (framesetup.scene_fbo)
+		{
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
+		}
+		else
+		{
+			glDrawBuffer (GL_BACK);
+			glReadBuffer (GL_BACK);
+		}
 	}
 
         GL_EndGroup ();

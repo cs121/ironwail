@@ -8,6 +8,8 @@ extern cvar_t r_particles_shader_strict;
 extern cvar_t r_particles_cull_dist;
 extern cvar_t r_particles_collision;
 extern cvar_t r_particles_spawn_max;
+extern cvar_t r_particles_gpu_sim;
+extern cvar_t r_particles_gpu_cullsort;
 extern cvar_t r_particles_prt_debug;
 
 static q3p_particle_t *q3p_particles;
@@ -73,6 +75,45 @@ static q3p_particlevert_t *q3p_partverts;
 static int q3p_numdrawitems;
 static int q3p_numpartverts;
 
+#define Q3P_GPU_LOCAL_SIZE 64
+
+typedef struct q3p_particle_gpu_s {
+	/* std430-compatible vec4 blocks mirrored in shaders/q3p_sim.comp */
+	float spawn_life_size_sizeramp[4];
+	float alpha_alpharamp_gravity_drag[4];
+	float org[4];
+	float vel[4];
+	unsigned int color_flags_material_alive[4];
+	float bounce[4];
+} q3p_particle_gpu_t;
+
+typedef struct q3p_sort_entry_gpu_s {
+	unsigned int key0;
+	unsigned int key1;
+	unsigned int index;
+	unsigned int visible;
+} q3p_sort_entry_gpu_t;
+
+typedef struct q3p_gpu_state_s {
+	GLuint sim_buffer[2];
+	GLuint sort_buffer;
+	GLuint visible_count_buffer;
+	int sim_src_index;
+	int sort_capacity;
+	q3p_particle_gpu_t *particle_staging;
+	q3p_sort_entry_gpu_t *sort_staging;
+	int sim_frames;
+	int sim_fallbacks;
+	int cullsort_frames;
+	int last_visible;
+	int last_culled;
+} q3p_gpu_state_t;
+
+static q3p_gpu_state_t q3p_gpu;
+
+COMPILE_TIME_ASSERT (q3p_particle_gpu_std430_align, (sizeof (q3p_particle_gpu_t) % 16) == 0);
+COMPILE_TIME_ASSERT (q3p_sort_entry_gpu_std430_size, sizeof (q3p_sort_entry_gpu_t) == 16);
+
 #define Q3P_MAX_EFFECT_DEFS 256
 typedef struct q3p_named_effectdef_s {
 	qboolean used;
@@ -97,6 +138,17 @@ typedef struct q3p_prt_parser_s {
 	int errors;
 	qboolean had_error;
 } q3p_prt_parser_t;
+
+static int Q3P_NextPow2 (int value);
+static qboolean Q3P_GPU_ComputeAvailable (void);
+static void Q3P_GPU_ResetResources (void);
+static qboolean Q3P_GPU_EnsureBuffers (void);
+static void Q3P_GPU_PackParticle (const q3p_particle_t *src, q3p_particle_gpu_t *dst);
+static void Q3P_GPU_UnpackParticle (const q3p_particle_gpu_t *src, q3p_particle_t *dst);
+static qboolean Q3P_GPU_ReadBuffer (GLuint buffer, size_t size, void *dst);
+static qboolean Q3P_GPU_RunSim (float frametime, qboolean collision_enabled);
+static qboolean Q3P_GPU_BuildDrawList (qboolean alpha, qboolean showtris);
+static void Q3P_GPU_BitonicSortEntries (int count);
 
 static void Q3P_PRT_Log (q3p_prt_parser_t *parser, int level, const char *fmt, ...)
 {
@@ -899,6 +951,335 @@ static qboolean Q3P_ParticleFinite (const q3p_particle_t *p)
 		&& !IS_NAN (p->alpha) && !IS_NAN (p->size);
 }
 
+static int Q3P_NextPow2 (int value)
+{
+	int pow2 = 1;
+
+	while (pow2 < value && pow2 < (1 << 30))
+		pow2 <<= 1;
+	return q_max (1, pow2);
+}
+
+static qboolean Q3P_GPU_ComputeAvailable (void)
+{
+	return GL_DispatchComputeFunc
+		&& GL_MemoryBarrierFunc
+		&& GL_MapBufferRangeFunc
+		&& GL_UnmapBufferFunc
+		&& glprogs.q3p_sim
+		&& glprogs.q3p_cull_key
+		&& glprogs.gpu_bitonic_pairs;
+}
+
+static void Q3P_GPU_ResetResources (void)
+{
+	if (GL_DeleteBuffersFunc)
+	{
+		if (q3p_gpu.sim_buffer[0] || q3p_gpu.sim_buffer[1])
+			GL_DeleteBuffersFunc (2, q3p_gpu.sim_buffer);
+		if (q3p_gpu.sort_buffer)
+			GL_DeleteBuffersFunc (1, &q3p_gpu.sort_buffer);
+		if (q3p_gpu.visible_count_buffer)
+			GL_DeleteBuffersFunc (1, &q3p_gpu.visible_count_buffer);
+	}
+
+	q3p_gpu.sim_buffer[0] = 0;
+	q3p_gpu.sim_buffer[1] = 0;
+	q3p_gpu.sort_buffer = 0;
+	q3p_gpu.visible_count_buffer = 0;
+	q3p_gpu.sim_src_index = 0;
+}
+
+static qboolean Q3P_GPU_EnsureBuffers (void)
+{
+	const GLsizeiptr particle_bytes = (GLsizeiptr)(sizeof (q3p_particle_gpu_t) * q3p_maxparticles);
+	const GLsizeiptr sort_bytes = (GLsizeiptr)(sizeof (q3p_sort_entry_gpu_t) * q3p_gpu.sort_capacity);
+
+	if (!Q3P_GPU_ComputeAvailable ())
+		return false;
+	if (!q3p_gpu.sort_capacity)
+		q3p_gpu.sort_capacity = Q3P_NextPow2 (q3p_maxparticles);
+
+	if (!q3p_gpu.sim_buffer[0] || !q3p_gpu.sim_buffer[1])
+	{
+		GL_GenBuffersFunc (2, q3p_gpu.sim_buffer);
+		if (!q3p_gpu.sim_buffer[0] || !q3p_gpu.sim_buffer[1])
+			return false;
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, q3p_gpu.sim_buffer[0]);
+		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, particle_bytes, NULL, GL_DYNAMIC_DRAW);
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, q3p_gpu.sim_buffer[1]);
+		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, particle_bytes, NULL, GL_DYNAMIC_DRAW);
+	}
+
+	if (!q3p_gpu.sort_buffer)
+	{
+		GL_GenBuffersFunc (1, &q3p_gpu.sort_buffer);
+		if (!q3p_gpu.sort_buffer)
+			return false;
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, q3p_gpu.sort_buffer);
+		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sort_bytes, NULL, GL_DYNAMIC_DRAW);
+	}
+
+	if (!q3p_gpu.visible_count_buffer)
+	{
+		GL_GenBuffersFunc (1, &q3p_gpu.visible_count_buffer);
+		if (!q3p_gpu.visible_count_buffer)
+			return false;
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, q3p_gpu.visible_count_buffer);
+		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (unsigned int), NULL, GL_DYNAMIC_DRAW);
+	}
+
+	return true;
+}
+
+static void Q3P_GPU_PackParticle (const q3p_particle_t *src, q3p_particle_gpu_t *dst)
+{
+	dst->spawn_life_size_sizeramp[0] = src->spawn_time;
+	dst->spawn_life_size_sizeramp[1] = src->lifetime;
+	dst->spawn_life_size_sizeramp[2] = src->size;
+	dst->spawn_life_size_sizeramp[3] = src->size_ramp;
+
+	dst->alpha_alpharamp_gravity_drag[0] = src->alpha;
+	dst->alpha_alpharamp_gravity_drag[1] = src->alpha_ramp;
+	dst->alpha_alpharamp_gravity_drag[2] = src->gravity;
+	dst->alpha_alpharamp_gravity_drag[3] = src->drag;
+
+	dst->org[0] = src->org[0];
+	dst->org[1] = src->org[1];
+	dst->org[2] = src->org[2];
+	dst->org[3] = 0.f;
+
+	dst->vel[0] = src->vel[0];
+	dst->vel[1] = src->vel[1];
+	dst->vel[2] = src->vel[2];
+	dst->vel[3] = 0.f;
+
+	dst->color_flags_material_alive[0] = (unsigned int)src->color;
+	dst->color_flags_material_alive[1] = (unsigned int)src->flags;
+	dst->color_flags_material_alive[2] = (unsigned int)src->material_id;
+	dst->color_flags_material_alive[3] = 1u;
+
+	dst->bounce[0] = src->restitution;
+	dst->bounce[1] = src->min_bounce_speed;
+	dst->bounce[2] = 0.f;
+	dst->bounce[3] = 0.f;
+}
+
+static void Q3P_GPU_UnpackParticle (const q3p_particle_gpu_t *src, q3p_particle_t *dst)
+{
+	dst->size = src->spawn_life_size_sizeramp[2];
+	dst->alpha = src->alpha_alpharamp_gravity_drag[0];
+	dst->org[0] = src->org[0];
+	dst->org[1] = src->org[1];
+	dst->org[2] = src->org[2];
+	dst->vel[0] = src->vel[0];
+	dst->vel[1] = src->vel[1];
+	dst->vel[2] = src->vel[2];
+	dst->material_id = src->color_flags_material_alive[2];
+}
+
+static qboolean Q3P_GPU_ReadBuffer (GLuint buffer, size_t size, void *dst)
+{
+	void *mapped;
+
+	if (!buffer || !dst || !size)
+		return false;
+
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, buffer);
+	mapped = GL_MapBufferRangeFunc (GL_SHADER_STORAGE_BUFFER, 0, (GLsizeiptr)size, GL_MAP_READ_BIT);
+	if (!mapped)
+		return false;
+
+	memcpy (dst, mapped, size);
+	if (!GL_UnmapBufferFunc (GL_SHADER_STORAGE_BUFFER))
+		return false;
+	return true;
+}
+
+static void Q3P_GPU_BitonicSortEntries (int count)
+{
+	int groups;
+	int k;
+
+	if (count <= 1)
+		return;
+
+	groups = (count + (Q3P_GPU_LOCAL_SIZE - 1)) / Q3P_GPU_LOCAL_SIZE;
+	GL_UseProgram (glprogs.gpu_bitonic_pairs);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, q3p_gpu.sort_buffer, 0, sizeof (q3p_sort_entry_gpu_t) * count);
+
+	for (k = 2; k <= count; k <<= 1)
+	{
+		int j;
+		for (j = k >> 1; j > 0; j >>= 1)
+		{
+			GL_Uniform4fFunc (0, (float)count, (float)j, (float)k, 0.f);
+			GL_DispatchComputeFunc (groups, 1, 1);
+			GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+		}
+	}
+}
+
+static qboolean Q3P_GPU_RunSim (float frametime, qboolean collision_enabled)
+{
+	const int src_index = q3p_gpu.sim_src_index & 1;
+	const int dst_index = (src_index + 1) & 1;
+	const GLuint src_buffer = q3p_gpu.sim_buffer[src_index];
+	const GLuint dst_buffer = q3p_gpu.sim_buffer[dst_index];
+	const int groups = (q3p_numactive + (Q3P_GPU_LOCAL_SIZE - 1)) / Q3P_GPU_LOCAL_SIZE;
+	int i;
+	int active = 0;
+	qboolean allow_gpu_collision = false;
+
+	if (q3p_numactive <= 0)
+		return true;
+	if (!Q3P_GPU_EnsureBuffers () || !src_buffer || !dst_buffer || !q3p_gpu.particle_staging)
+		return false;
+
+	/* Keep CPU collision as authoritative world behavior until a BSP-aware GPU trace path exists. */
+	if (collision_enabled)
+		return false;
+
+	for (i = 0; i < q3p_numactive; ++i)
+		Q3P_GPU_PackParticle (&q3p_particles[i], &q3p_gpu.particle_staging[i]);
+
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, src_buffer);
+	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (q3p_particle_gpu_t) * q3p_numactive, q3p_gpu.particle_staging);
+
+	GL_UseProgram (glprogs.q3p_sim);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, src_buffer, 0, sizeof (q3p_particle_gpu_t) * q3p_numactive);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, dst_buffer, 0, sizeof (q3p_particle_gpu_t) * q3p_numactive);
+	GL_Uniform4fFunc (0, cl.time, frametime, allow_gpu_collision ? 1.f : 0.f, (float)q3p_numactive);
+	GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
+	GL_DispatchComputeFunc (groups, 1, 1);
+	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+
+	if (!Q3P_GPU_ReadBuffer (dst_buffer, sizeof (q3p_particle_gpu_t) * q3p_numactive, q3p_gpu.particle_staging))
+		return false;
+
+	for (i = 0; i < q3p_numactive; ++i)
+	{
+		const q3p_particle_gpu_t *gpu = &q3p_gpu.particle_staging[i];
+		q3p_particle_t *dst;
+
+		if (!gpu->color_flags_material_alive[3])
+			continue;
+
+		if (i != active)
+			q3p_particles[active] = q3p_particles[i];
+		dst = &q3p_particles[active];
+		Q3P_GPU_UnpackParticle (gpu, dst);
+		++active;
+	}
+
+	q3p_numactive = active;
+	q3p_gpu.sim_src_index = dst_index;
+	q3p_gpu.sim_frames++;
+	return true;
+}
+
+static qboolean Q3P_GPU_BuildDrawList (qboolean alpha, qboolean showtris)
+{
+	const int active_count = q3p_numactive;
+	const int sort_count = q3p_gpu.sort_capacity;
+	const GLuint particle_buffer = q3p_gpu.sim_buffer[q3p_gpu.sim_src_index & 1];
+	const int groups = (sort_count + (Q3P_GPU_LOCAL_SIZE - 1)) / Q3P_GPU_LOCAL_SIZE;
+	const float cull_dist = q_max (0.f, r_particles_cull_dist.value);
+	unsigned int visible_count = 0u;
+	int i;
+
+	if (active_count <= 0)
+	{
+		q3p_numdrawitems = 0;
+		return true;
+	}
+	if (!Q3P_GPU_EnsureBuffers () || !particle_buffer || !q3p_gpu.sort_staging || sort_count < active_count)
+		return false;
+
+	for (i = 0; i < active_count; ++i)
+		Q3P_GPU_PackParticle (&q3p_particles[i], &q3p_gpu.particle_staging[i]);
+
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, particle_buffer);
+	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (q3p_particle_gpu_t) * active_count, q3p_gpu.particle_staging);
+
+	visible_count = 0u;
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, q3p_gpu.visible_count_buffer);
+	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (visible_count), &visible_count);
+
+	GL_UseProgram (glprogs.q3p_cull_key);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, particle_buffer, 0, sizeof (q3p_particle_gpu_t) * q_max (1, active_count));
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, q3p_gpu.sort_buffer, 0, sizeof (q3p_sort_entry_gpu_t) * q_max (1, sort_count));
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, q3p_gpu.visible_count_buffer, 0, sizeof (visible_count));
+	GL_Uniform4fFunc (0, (float)active_count, cull_dist * cull_dist, (r_particles_sort.value > 0.f) ? 1.f : 0.f, alpha ? 1.f : 0.f);
+	GL_Uniform4fFunc (1, showtris ? 1.f : 0.f, DotProduct (r_origin, vpn), 0.f, 0.f);
+	GL_Uniform4fFunc (2, frustum[0].normal[0], frustum[0].normal[1], frustum[0].normal[2], frustum[0].dist);
+	GL_Uniform4fFunc (3, frustum[1].normal[0], frustum[1].normal[1], frustum[1].normal[2], frustum[1].dist);
+	GL_Uniform4fFunc (4, frustum[2].normal[0], frustum[2].normal[1], frustum[2].normal[2], frustum[2].dist);
+	GL_Uniform4fFunc (5, frustum[3].normal[0], frustum[3].normal[1], frustum[3].normal[2], frustum[3].dist);
+	GL_Uniform4fFunc (6, r_origin[0], r_origin[1], r_origin[2], 0.f);
+	GL_Uniform4fFunc (7, vpn[0], vpn[1], vpn[2], 0.f);
+	GL_DispatchComputeFunc (groups, 1, 1);
+	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+
+	Q3P_GPU_BitonicSortEntries (sort_count);
+
+	if (!Q3P_GPU_ReadBuffer (q3p_gpu.visible_count_buffer, sizeof (visible_count), &visible_count))
+		return false;
+	if ((int)visible_count > active_count)
+		visible_count = (unsigned int)active_count;
+	if ((int)visible_count > q3p_maxparticles)
+		visible_count = (unsigned int)q3p_maxparticles;
+
+	if (visible_count > 0
+		&& !Q3P_GPU_ReadBuffer (q3p_gpu.sort_buffer, sizeof (q3p_sort_entry_gpu_t) * visible_count, q3p_gpu.sort_staging))
+		return false;
+
+	q3p_numdrawitems = 0;
+	for (i = 0; i < (int)visible_count && q3p_numdrawitems < q3p_maxparticles; ++i)
+	{
+		const q3p_sort_entry_gpu_t *entry_gpu = &q3p_gpu.sort_staging[i];
+		int particle_index = (int)entry_gpu->index;
+		q3p_particle_t *p;
+		const q3p_material_cache_entry_t *entry;
+		unsigned material_id;
+		int blend_group;
+
+		if (!entry_gpu->visible || particle_index < 0 || particle_index >= active_count)
+			continue;
+
+		p = &q3p_particles[particle_index];
+		blend_group = p->alpha < 1.f;
+		if (!showtris && alpha != blend_group)
+			continue;
+
+		entry = Q3P_ResolveMaterialCached (p->material);
+		material_id = entry ? entry->resolved_material_id : p->material_id;
+		q3p_drawitems[q3p_numdrawitems].particle_index = particle_index;
+		q3p_drawitems[q3p_numdrawitems].blend_group = blend_group;
+		q3p_drawitems[q3p_numdrawitems].material_id = material_id;
+		q3p_drawitems[q3p_numdrawitems].material_entry = entry;
+		q3p_drawitems[q3p_numdrawitems].depth = DotProduct (p->org, vpn) - DotProduct (r_origin, vpn);
+		++q3p_numdrawitems;
+	}
+
+	q3p_gpu.cullsort_frames++;
+	q3p_gpu.last_visible = q3p_numdrawitems;
+	q3p_gpu.last_culled = 0;
+	if (!showtris && !alpha)
+	{
+		int opaque_total = 0;
+		for (i = 0; i < active_count; ++i)
+		{
+			if (q3p_particles[i].alpha >= 1.f)
+				++opaque_total;
+		}
+		q3p_gpu.last_culled = q_max (0, opaque_total - q3p_numdrawitems);
+		q3p_culled_counter += q3p_gpu.last_culled;
+	}
+
+	return true;
+}
+
 static qboolean Q3P_TraceWorld (const vec3_t start, const vec3_t end, trace_t *trace)
 {
 	vec3_t start_copy, end_copy;
@@ -978,6 +1359,10 @@ void Q3P_Init (void)
 	q3p_particles = (q3p_particle_t *)Hunk_AllocName (q3p_maxparticles * sizeof(*q3p_particles), "q3particles");
 	q3p_drawitems = (q3p_drawitem_t *)Hunk_AllocName (q3p_maxparticles * sizeof(*q3p_drawitems), "q3pdrawitems");
 	q3p_partverts = (q3p_particlevert_t *)Hunk_AllocName (q3p_maxparticles * sizeof(*q3p_partverts), "q3ppartverts");
+	memset (&q3p_gpu, 0, sizeof (q3p_gpu));
+	q3p_gpu.sort_capacity = Q3P_NextPow2 (q3p_maxparticles);
+	q3p_gpu.particle_staging = (q3p_particle_gpu_t *)Hunk_AllocName (q3p_maxparticles * sizeof (*q3p_gpu.particle_staging), "q3pgpupart");
+	q3p_gpu.sort_staging = (q3p_sort_entry_gpu_t *)Hunk_AllocName (q3p_gpu.sort_capacity * sizeof (*q3p_gpu.sort_staging), "q3pgpusort");
 	q3p_numactive = 0;
 	q3p_numdrawitems = 0;
 	q3p_numpartverts = 0;
@@ -995,9 +1380,19 @@ void Q3P_Init (void)
 
 void Q3P_Shutdown (void)
 {
+	Q3P_GPU_ResetResources ();
+
 	q3p_particles = NULL;
 	q3p_drawitems = NULL;
 	q3p_partverts = NULL;
+	q3p_gpu.particle_staging = NULL;
+	q3p_gpu.sort_staging = NULL;
+	q3p_gpu.sort_capacity = 0;
+	q3p_gpu.sim_frames = 0;
+	q3p_gpu.sim_fallbacks = 0;
+	q3p_gpu.cullsort_frames = 0;
+	q3p_gpu.last_visible = 0;
+	q3p_gpu.last_culled = 0;
 	q3p_maxparticles = 0;
 	q3p_numactive = 0;
 	q3p_numdrawitems = 0;
@@ -1015,6 +1410,7 @@ void Q3P_Shutdown (void)
 
 void Q3P_Clear (void)
 {
+	q3p_gpu.sim_src_index = 0;
 	q3p_numactive = 0;
 	q3p_numdrawitems = 0;
 	q3p_numpartverts = 0;
@@ -1080,6 +1476,13 @@ void Q3P_Update (float frametime)
 	Q3P_UpdateEmitters (frametime);
 	if (q3p_numactive <= 0)
 		return;
+
+	if (r_particles_gpu_sim.value > 0.f)
+	{
+		if (!collision_enabled && Q3P_GPU_RunSim (frametime, false))
+			return;
+		q3p_gpu.sim_fallbacks++;
+	}
 
 	for (i = active = 0, p = q3p_particles; i < q3p_numactive; ++i, ++p)
 	{
@@ -1246,37 +1649,45 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 	}
 
 	q3p_numdrawitems = 0;
-	for (i = 0; i < q3p_numactive; ++i)
+	if (r_particles_gpu_cullsort.value > 0.f && Q3P_GPU_BuildDrawList (alpha, showtris))
 	{
-		q3p_particle_t *p = &q3p_particles[i];
-		const q3p_material_cache_entry_t *entry = Q3P_ResolveMaterialCached (p->material);
-		unsigned material_id = p->material_id;
-		int blend_group = p->alpha < 1.f;
-
-		if (!showtris && alpha != blend_group)
-			continue;
-		if (Q3P_ShouldCullParticle (p))
+		/* draw items are already culled and sorted on GPU */
+	}
+	else
+	{
+		for (i = 0; i < q3p_numactive; ++i)
 		{
-			if (!showtris && !alpha)
-				++q3p_culled_counter;
-			continue;
+			q3p_particle_t *p = &q3p_particles[i];
+			const q3p_material_cache_entry_t *entry = Q3P_ResolveMaterialCached (p->material);
+			unsigned material_id = p->material_id;
+			int blend_group = p->alpha < 1.f;
+
+			if (!showtris && alpha != blend_group)
+				continue;
+			if (Q3P_ShouldCullParticle (p))
+			{
+				if (!showtris && !alpha)
+					++q3p_culled_counter;
+				continue;
+			}
+
+			if (entry)
+				material_id = entry->resolved_material_id;
+
+			q3p_drawitems[q3p_numdrawitems].particle_index = i;
+			q3p_drawitems[q3p_numdrawitems].blend_group = blend_group;
+			q3p_drawitems[q3p_numdrawitems].material_id = material_id;
+			q3p_drawitems[q3p_numdrawitems].material_entry = entry;
+			q3p_drawitems[q3p_numdrawitems].depth = DotProduct (p->org, vpn) - DotProduct (r_origin, vpn);
+			++q3p_numdrawitems;
 		}
 
-		if (entry)
-			material_id = entry->resolved_material_id;
-
-		q3p_drawitems[q3p_numdrawitems].particle_index = i;
-		q3p_drawitems[q3p_numdrawitems].blend_group = blend_group;
-		q3p_drawitems[q3p_numdrawitems].material_id = material_id;
-		q3p_drawitems[q3p_numdrawitems].material_entry = entry;
-		q3p_drawitems[q3p_numdrawitems].depth = DotProduct (p->org, vpn) - DotProduct (r_origin, vpn);
-		++q3p_numdrawitems;
+		if (q3p_numdrawitems)
+			qsort (q3p_drawitems, q3p_numdrawitems, sizeof(q3p_drawitems[0]), Q3P_DrawSortCmp);
 	}
 
 	if (!q3p_numdrawitems)
 		return;
-
-	qsort (q3p_drawitems, q3p_numdrawitems, sizeof(q3p_drawitems[0]), Q3P_DrawSortCmp);
 
 	for (i = 0; i < q3p_numdrawitems; ++i)
 	{
@@ -1372,6 +1783,11 @@ void Q3P_GetDebugStats (q3p_debug_stats_t *stats)
 	stats->spawned = q3p_spawned_counter;
 	stats->dropped = q3p_dropped_counter;
 	stats->culled = q3p_culled_counter;
+	stats->gpu_sim_frames = q3p_gpu.sim_frames;
+	stats->gpu_sim_fallbacks = q3p_gpu.sim_fallbacks;
+	stats->gpu_cullsort_frames = q3p_gpu.cullsort_frames;
+	stats->gpu_visible = q3p_gpu.last_visible;
+	stats->gpu_culled = q3p_gpu.last_culled;
 }
 
 void Q3P_ResetDebugStats (void)
@@ -1380,6 +1796,11 @@ void Q3P_ResetDebugStats (void)
 	q3p_dropped_counter = 0;
 	q3p_culled_counter = 0;
 	q3p_culled_counter_frame = -1;
+	q3p_gpu.sim_frames = 0;
+	q3p_gpu.sim_fallbacks = 0;
+	q3p_gpu.cullsort_frames = 0;
+	q3p_gpu.last_visible = 0;
+	q3p_gpu.last_culled = 0;
 }
 
 int Q3P_AddWorldEmitter (const q3p_emitter_t *emitter)

@@ -74,6 +74,11 @@ typedef struct particle_debug_stats_s
 	int	q3p_spawned;
 	int	q3p_dropped;
 	int	q3p_culled;
+	int	q3p_gpu_sim_frames;
+	int	q3p_gpu_sim_fallbacks;
+	int	q3p_gpu_cullsort_frames;
+	int	q3p_gpu_visible;
+	int	q3p_gpu_culled;
 	float	overdraw_score;
 	qboolean has_bounds;
 	vec3_t	bounds_mins;
@@ -666,6 +671,7 @@ typedef struct glprogs_s {
 	GLuint		alias_shadow[2];		// [md5]
 	GLuint		sprites[2];			// [dither]
 	GLuint		decal;
+	GLuint		decal_instanced;
 	GLuint		particles[2][2];	// [OIT][dither]
 	GLuint		debug3d;
 	GLuint		dlight_composite;
@@ -674,6 +680,11 @@ typedef struct glprogs_s {
 	GLuint		clear_indirect;
 	GLuint		gather_indirect;
 	GLuint		cull_mark;
+	GLuint		q3p_sim;
+	GLuint		q3p_cull_key;
+	GLuint		gpu_bitonic_pairs;
+	GLuint		fogvol_dlight_score;
+	GLuint		fogvol_static_build;
 	GLuint		palette_init[3];	// [metric:naive/riemersma/oklab]
 	GLuint		palette_postprocess;
 } glprogs_t;

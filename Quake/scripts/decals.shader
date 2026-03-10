@@ -13,19 +13,6 @@ decal bullet_hole_default {
   category bullet
 }
 
-decal bullet_hole_metal {
-  texture "decals/bullet/bhole_01"
-  size 4 7
-  alpha 0.60 0.85
-  color 1 1 1
-  lifetime 28
-  fade 6
-  blend alpha
-  random_rotation 1
-  priority 4
-  category bullet
-}
-
 decal blood_splat_small {
   texture "decals/blood/splat_01"
   size 5 10
@@ -82,32 +69,6 @@ decal dirt_hit {
   texture "decals/bullet/bhole_01"
   size 8 14
   alpha 0.40 0.65
-  color 1 1 1
-  lifetime 24
-  fade 6
-  blend alpha
-  random_rotation 1
-  priority 2
-  category dirt
-}
-
-decal plaster_hit {
-  texture "decals/bullet/bhole_01"
-  size 7 12
-  alpha 0.45 0.70
-  color 1 1 1
-  lifetime 24
-  fade 6
-  blend alpha
-  random_rotation 1
-  priority 2
-  category dirt
-}
-
-decal concrete_hit {
-  texture "decals/bullet/bhole_01"
-  size 7 12
-  alpha 0.45 0.70
   color 1 1 1
   lifetime 24
   fade 6

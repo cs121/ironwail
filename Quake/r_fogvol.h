@@ -107,6 +107,8 @@ extern cvar_t r_fogvol_autotint_min_luma;
 extern cvar_t r_fogvol_autotint_screenprobe;
 extern cvar_t r_fogvol_light_max;
 extern cvar_t r_fogvol_dlightscale;
+extern cvar_t r_fogvol_gpu_light_select;
+extern cvar_t r_fogvol_gpu_static_build;
 extern cvar_t r_fogvol_shadow;
 extern cvar_t r_fogvol_shadow_samples;
 extern cvar_t r_fogvol_shadow_strength;

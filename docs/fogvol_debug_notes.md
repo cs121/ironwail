@@ -72,3 +72,16 @@ The dominant issue was **A + C combined**:
 - `r_fogvol_local_occlusion 1`: adds one depth sample + one depth reconstruction per contributing light at each marched fog step. This is the recommended low-cost default when you need basic blocker awareness near geometry edges.
 - `r_fogvol_local_occlusion 2`: adds multiple projected depth taps per contributing light for a cone-like blocker test. This reduces false positives/negatives from a single depth sample, but cost scales with both light count and fog step count; reserve for capture-quality settings or scenes with few active local lights.
 - Since cost multiplies with local light-list evaluation, prefer `r_fogvol_lighting_mode 2` (pure froxel) for performance-sensitive gameplay and use modes `1`/`3` when local occlusion detail is important.
+
+## GPU Offload Flags (neu)
+
+- `r_fogvol_gpu_light_select 0|1`
+  - `0`: CPU-Scoring/Top-K fuer Froxel-Dlight-Injection.
+  - `1`: GPU-Scoring + GPU-Top-K (Compute `fogvol_dlight_score.comp` + `gpu_bitonic_pairs.comp`) mit CPU-Fallback.
+- `r_fogvol_gpu_static_build 0|1`
+  - `0`: CPU-Summarization des statischen Fog-Lightfields.
+  - `1`: Compute-Batch fuer die Field->Light Summarization (`fogvol_static_build.comp`) mit CPU-Fallback.
+
+Fallback:
+- Bei fehlenden Compute-Ressourcen oder Buffer-Fehlern wird automatisch der bestehende CPU-Pfad verwendet.
+- `r_fogvol_light_stats 1` zeigt weiterhin die bekannten Stats; zusaetzlich werden GPU-Dlight-Selection-Zaehler protokolliert.

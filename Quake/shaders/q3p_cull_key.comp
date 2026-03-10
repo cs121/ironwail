@@ -1,0 +1,122 @@
+layout(local_size_x=64) in;
+
+struct Q3PParticle
+{
+	vec4 spawn_life_size_sizeramp;   // x spawn_time, y lifetime, z size, w size_ramp
+	vec4 alpha_alpharamp_gravity_drag; // x alpha, y alpha_ramp, z gravity, w drag
+	vec4 org;                        // xyz origin
+	vec4 vel;                        // xyz velocity
+	uvec4 color_flags_material_alive; // x color, y flags, z material_id, w alive
+	vec4 bounce;                     // x restitution, y min_bounce_speed
+};
+
+layout(std430, binding=0) readonly buffer ParticleBuffer
+{
+	Q3PParticle particles[];
+};
+
+layout(std430, binding=1) writeonly buffer SortEntryBuffer
+{
+	uvec4 entries[]; // x key0, y key1, z particle index, w visible flag
+};
+
+layout(std430, binding=2) buffer VisibleCountBuffer
+{
+	uint visible_count;
+};
+
+layout(location=0) uniform vec4 CullParams0; // x active_count, y cull_dist_sq, z sort_enabled, w alpha_pass
+layout(location=1) uniform vec4 CullParams1; // x showtris, y origin_dot_vpn
+layout(location=2) uniform vec4 FrustumPlane0;
+layout(location=3) uniform vec4 FrustumPlane1;
+layout(location=4) uniform vec4 FrustumPlane2;
+layout(location=5) uniform vec4 FrustumPlane3;
+layout(location=6) uniform vec4 ViewOrg;
+layout(location=7) uniform vec4 ViewDir;
+
+uint Q3P_FloatSortableAsc(float v)
+{
+	uint f = floatBitsToUint(v);
+	return ((f & 0x80000000u) != 0u) ? ~f : (f ^ 0x80000000u);
+}
+
+uint Q3P_FloatSortableDesc(float v)
+{
+	return ~Q3P_FloatSortableAsc(v);
+}
+
+bool Q3P_InsideFrustum(vec3 p, float radius)
+{
+	if (dot(FrustumPlane0.xyz, p) - FrustumPlane0.w <= -radius)
+		return false;
+	if (dot(FrustumPlane1.xyz, p) - FrustumPlane1.w <= -radius)
+		return false;
+	if (dot(FrustumPlane2.xyz, p) - FrustumPlane2.w <= -radius)
+		return false;
+	if (dot(FrustumPlane3.xyz, p) - FrustumPlane3.w <= -radius)
+		return false;
+	return true;
+}
+
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	uint active_count = uint(max(CullParams0.x, 0.0));
+	if (i >= entries.length())
+		return;
+
+	if (i >= active_count)
+	{
+		entries[i] = uvec4(0xffffffffu, 0xffffffffu, i, 0u);
+		return;
+	}
+
+	Q3PParticle p = particles[i];
+	bool showtris = (CullParams1.x > 0.5);
+	bool sort_enabled = (CullParams0.z > 0.5);
+	bool alpha_pass = (CullParams0.w > 0.5);
+	bool visible = (p.color_flags_material_alive.w != 0u);
+	uint blend_group = (p.alpha_alpharamp_gravity_drag.x < 1.0) ? 1u : 0u;
+	uint material_id = p.color_flags_material_alive.z;
+	float radius = max(0.5, p.spawn_life_size_sizeramp.z * 0.5);
+	uint key0 = 0xffffffffu;
+	uint key1 = 0xffffffffu;
+
+	if (!showtris && ((blend_group != 0u) != alpha_pass))
+		visible = false;
+
+	if (visible && CullParams0.y > 0.0)
+	{
+		vec3 to_particle = p.org.xyz - ViewOrg.xyz;
+		visible = dot(to_particle, to_particle) <= CullParams0.y;
+	}
+
+	if (visible)
+		visible = Q3P_InsideFrustum(p.org.xyz, radius);
+
+	if (visible)
+	{
+		float depth = dot(p.org.xyz, ViewDir.xyz) - CullParams1.y;
+		uint depth_key = Q3P_FloatSortableDesc(depth);
+
+		if (sort_enabled && alpha_pass)
+		{
+			key0 = depth_key;
+			key1 = material_id;
+		}
+		else if (sort_enabled && !alpha_pass)
+		{
+			key0 = material_id;
+			key1 = depth_key;
+		}
+		else
+		{
+			key0 = material_id;
+			key1 = i;
+		}
+
+		atomicAdd(visible_count, 1u);
+	}
+
+	entries[i] = uvec4(key0, key1, i, visible ? 1u : 0u);
+}

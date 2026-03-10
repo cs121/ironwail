@@ -1077,13 +1077,17 @@ void SCR_DrawParticleDebug (void)
 		overdraw = "high";
 
 	GL_SetCanvas (CANVAS_BOTTOMLEFT);
-	Draw_Fill (x, y * 8, 36 * 8, ((int)r_particles_debug.value >= 2 ? 8 : 5) * 8, 0, 0.5f);
+	Draw_Fill (x, y * 8, 44 * 8, ((int)r_particles_debug.value >= 2 ? 9 : 6) * 8, 0, 0.5f);
 
 	q_snprintf (str, sizeof (str), "particles debug");
 	Draw_String (x, (y++) * 8 - x, str);
 	q_snprintf (str, sizeof (str), "active legacy=%4d q3p=%4d", stats.active_legacy, stats.active_q3p);
 	Draw_String (x, (y++) * 8 - x, str);
 	q_snprintf (str, sizeof (str), "q3p spawned=%4d drop=%4d cull=%4d", stats.q3p_spawned, stats.q3p_dropped, stats.q3p_culled);
+	Draw_String (x, (y++) * 8 - x, str);
+	q_snprintf (str, sizeof (str), "gpu sim=%4d fb=%3d cs=%4d vis=%4d cul=%4d",
+		stats.q3p_gpu_sim_frames, stats.q3p_gpu_sim_fallbacks, stats.q3p_gpu_cullsort_frames,
+		stats.q3p_gpu_visible, stats.q3p_gpu_culled);
 	Draw_String (x, (y++) * 8 - x, str);
 	q_snprintf (str, sizeof (str), "overdraw=%0.3f (%s)", stats.overdraw_score, overdraw);
 	Draw_String (x, (y++) * 8 - x, str);

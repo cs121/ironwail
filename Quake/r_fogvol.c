@@ -205,6 +205,8 @@ cvar_t r_fogvol_autotint_screenprobe = { "r_fogvol_autotint_screenprobe", "1", C
 cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
 cvar_t r_fogvol_dlightscale = { "r_fogvol_dlightscale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_stats = { "r_fogvol_light_stats", "0", CVAR_NONE };
+cvar_t r_fogvol_gpu_light_select = { "r_fogvol_gpu_light_select", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_gpu_static_build = { "r_fogvol_gpu_static_build", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
@@ -303,6 +305,8 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_light_max, "lighting", "16"},
 	{&r_fogvol_dlightscale, "lighting", "1"},
 	{&r_fogvol_light_stats, "debug", "0"},
+	{&r_fogvol_gpu_light_select, "lighting", "0"},
+	{&r_fogvol_gpu_static_build, "lighting", "0"},
 	{&r_fogvol_shadow, "lighting", "1"},
 	{&r_fogvol_shadow_samples, "lighting", "2"},
 	{&r_fogvol_shadow_strength, "lighting", "0.8"},
@@ -419,6 +423,46 @@ typedef struct froxel_gpu_light_s
 } froxel_gpu_light_t;
 
 static froxel_gpu_light_t r_froxel_gpu_lights[MAX_FROXEL_GPU_LIGHTS];
+
+#define FOGVOL_GPU_LOCAL_SIZE 64
+#define FOGVOL_GPU_DLIGHT_MAX_CANDIDATES 256
+typedef struct fogvol_dlight_score_gpu_s
+{
+	float pos_rad[4];
+	float color_bias[4];   /* rgb color, w score bias */
+	uint32_t meta[4];      /* x flags(bit0 inject), y stable id */
+} fogvol_dlight_score_gpu_t;
+
+typedef struct fogvol_sort_entry_gpu_s
+{
+	uint32_t key0;
+	uint32_t key1;
+	uint32_t index;
+	uint32_t _pad;
+} fogvol_sort_entry_gpu_t;
+
+typedef struct fogvol_gpu_light_select_state_s
+{
+	GLuint candidate_ssbo;
+	GLuint sort_ssbo;
+	int sort_capacity;
+	fogvol_dlight_score_gpu_t staging_candidates[FOGVOL_GPU_DLIGHT_MAX_CANDIDATES];
+	fogvol_sort_entry_gpu_t staging_sorted[FOGVOL_GPU_DLIGHT_MAX_CANDIDATES];
+	int gpu_frames;
+	int gpu_fallbacks;
+	int last_candidates;
+	int last_selected;
+} fogvol_gpu_light_select_state_t;
+
+static fogvol_gpu_light_select_state_t r_fogvol_gpu_light_select_state;
+static void R_FogVol_GPUSelectReset (void);
+
+static GLuint r_fogvol_static_rgb_ssbo = 0;
+static GLuint r_fogvol_static_weight_ssbo = 0;
+static GLuint r_fogvol_static_out_ssbo = 0;
+static int r_fogvol_static_capacity_cells = 0;
+static void R_FogVol_GPUStaticBuildReset (void);
+
 static GLuint r_fogvol_godray_shafts_tex = 0;
 static GLuint r_fogvol_godray_mask_tex = 0;
 static GLuint r_fogvol_godray_source_tex = 0;
@@ -1695,7 +1739,115 @@ static void R_FogVol_FreeStaticField (void)
 		free (r_fog_static_field.rgb);
 	if (r_fog_static_field.weight)
 		free (r_fog_static_field.weight);
+	R_FogVol_GPUStaticBuildReset ();
 	memset (&r_fog_static_field, 0, sizeof (r_fog_static_field));
+}
+
+static qboolean R_FogVol_GPUStaticBuildAvailable (void)
+{
+	return GL_DispatchComputeFunc
+		&& GL_MemoryBarrierFunc
+		&& GL_MapBufferRangeFunc
+		&& GL_UnmapBufferFunc
+		&& glprogs.fogvol_static_build;
+}
+
+static void R_FogVol_GPUStaticBuildReset (void)
+{
+	if (GL_DeleteBuffersFunc)
+	{
+		if (r_fogvol_static_rgb_ssbo)
+			GL_DeleteBuffersFunc (1, &r_fogvol_static_rgb_ssbo);
+		if (r_fogvol_static_weight_ssbo)
+			GL_DeleteBuffersFunc (1, &r_fogvol_static_weight_ssbo);
+		if (r_fogvol_static_out_ssbo)
+			GL_DeleteBuffersFunc (1, &r_fogvol_static_out_ssbo);
+	}
+
+	r_fogvol_static_rgb_ssbo = 0;
+	r_fogvol_static_weight_ssbo = 0;
+	r_fogvol_static_out_ssbo = 0;
+	r_fogvol_static_capacity_cells = 0;
+}
+
+static qboolean R_FogVol_GPUStaticBuildEnsureBuffers (int total_cells)
+{
+	if (!R_FogVol_GPUStaticBuildAvailable () || total_cells <= 0)
+		return false;
+
+	if (!r_fogvol_static_rgb_ssbo)
+		GL_GenBuffersFunc (1, &r_fogvol_static_rgb_ssbo);
+	if (!r_fogvol_static_weight_ssbo)
+		GL_GenBuffersFunc (1, &r_fogvol_static_weight_ssbo);
+	if (!r_fogvol_static_out_ssbo)
+		GL_GenBuffersFunc (1, &r_fogvol_static_out_ssbo);
+	if (!r_fogvol_static_rgb_ssbo || !r_fogvol_static_weight_ssbo || !r_fogvol_static_out_ssbo)
+		return false;
+
+	if (r_fogvol_static_capacity_cells < total_cells)
+	{
+		r_fogvol_static_capacity_cells = total_cells;
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_static_rgb_ssbo);
+		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (float) * 3 * r_fogvol_static_capacity_cells, NULL, GL_DYNAMIC_DRAW);
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_static_weight_ssbo);
+		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (float) * r_fogvol_static_capacity_cells, NULL, GL_DYNAMIC_DRAW);
+	}
+
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_static_out_ssbo);
+	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (fog_light_gpu_t) * MAX_FOG_STATIC_LIGHTS, NULL, GL_DYNAMIC_DRAW);
+	return true;
+}
+
+static qboolean R_FogVol_SummarizeStaticLightsFromFieldGPU (int nx, int ny, int nz, int total, float sx, float sy, float sz, float radius, int stride)
+{
+	const int out_slots = q_min (MAX_FOG_STATIC_LIGHTS, (total + stride - 1) / stride);
+	const int groups = (out_slots + (FOGVOL_GPU_LOCAL_SIZE - 1)) / FOGVOL_GPU_LOCAL_SIZE;
+	fog_light_gpu_t gpu_out[MAX_FOG_STATIC_LIGHTS];
+	void *mapped;
+
+	if (out_slots <= 0)
+		return false;
+	if (!R_FogVol_GPUStaticBuildEnsureBuffers (total))
+		return false;
+
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_static_rgb_ssbo);
+	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (float) * 3 * total, r_fog_static_field.rgb);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_static_weight_ssbo);
+	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (float) * total, r_fog_static_field.weight);
+
+	GL_UseProgram (glprogs.fogvol_static_build);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, r_fogvol_static_rgb_ssbo, 0, sizeof (float) * 3 * q_max (1, total));
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, r_fogvol_static_weight_ssbo, 0, sizeof (float) * q_max (1, total));
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, r_fogvol_static_out_ssbo, 0, sizeof (fog_light_gpu_t) * MAX_FOG_STATIC_LIGHTS);
+	GL_Uniform4fFunc (0, (float)total, (float)stride, (float)out_slots, (float)nx);
+	GL_Uniform4fFunc (1, (float)ny, (float)nz, 0.f, 0.f);
+	GL_Uniform4fFunc (2, r_fog_static_field.mins[0], r_fog_static_field.mins[1], r_fog_static_field.mins[2], 0.f);
+	GL_Uniform4fFunc (3, sx, sy, sz, radius);
+	GL_Uniform4fFunc (4, 0.65f, 0.f, 0.f, 0.f);
+	GL_DispatchComputeFunc (groups, 1, 1);
+	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_static_out_ssbo);
+	mapped = GL_MapBufferRangeFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (fog_light_gpu_t) * out_slots, GL_MAP_READ_BIT);
+	if (!mapped)
+		return false;
+	memcpy (gpu_out, mapped, sizeof (fog_light_gpu_t) * out_slots);
+	if (!GL_UnmapBufferFunc (GL_SHADER_STORAGE_BUFFER))
+		return false;
+
+	r_num_fog_static_lights = 0;
+	for (int i = 0; i < out_slots && r_num_fog_static_lights < MAX_FOG_STATIC_LIGHTS; ++i)
+	{
+		const fog_light_gpu_t *src = &gpu_out[i];
+		fog_light_gpu_t *dst;
+
+		if (src->col_int[3] <= 0.f || src->pos_rad[3] <= 0.f)
+			continue;
+		dst = &r_fog_static_lights[r_num_fog_static_lights++];
+		*dst = *src;
+	}
+
+	return true;
 }
 
 static qboolean R_FogVol_WorldToStaticFieldCell (const vec3_t pos, int out_cell[3])
@@ -1758,6 +1910,12 @@ static void R_FogVol_SummarizeStaticLightsFromField (void)
 		return;
 
 	stride = q_max (1, total / MAX_FOG_STATIC_LIGHTS);
+	if (r_fogvol_gpu_static_build.value > 0.f)
+	{
+		if (R_FogVol_SummarizeStaticLightsFromFieldGPU (nx, ny, nz, total, sx, sy, sz, radius, stride))
+			return;
+	}
+
 	for (int i = 0; i < total && r_num_fog_static_lights < MAX_FOG_STATIC_LIGHTS; i += stride)
 	{
 		const float w = r_fog_static_field.weight[i];
@@ -2024,6 +2182,11 @@ void R_Froxel_ResetResources (void)
 	r_froxel.prev_mode_valid = false;
 	r_froxel.prev_valid = false;
 	r_froxel.valid = false;
+	R_FogVol_GPUSelectReset ();
+	r_fogvol_gpu_light_select_state.gpu_frames = 0;
+	r_fogvol_gpu_light_select_state.gpu_fallbacks = 0;
+	r_fogvol_gpu_light_select_state.last_candidates = 0;
+	r_fogvol_gpu_light_select_state.last_selected = 0;
 }
 
 static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)
@@ -2206,6 +2369,242 @@ static void R_Froxel_InjectStaticLights (void)
 	}
 }
 
+static int R_FogVol_NextPow2 (int value)
+{
+	int pow2 = 1;
+	while (pow2 < value && pow2 < (1 << 30))
+		pow2 <<= 1;
+	return q_max (1, pow2);
+}
+
+static qboolean R_FogVol_GPUSelectAvailable (void)
+{
+	return GL_DispatchComputeFunc
+		&& GL_MemoryBarrierFunc
+		&& GL_MapBufferRangeFunc
+		&& GL_UnmapBufferFunc
+		&& glprogs.fogvol_dlight_score
+		&& glprogs.gpu_bitonic_pairs;
+}
+
+static void R_FogVol_GPUSelectReset (void)
+{
+	if (GL_DeleteBuffersFunc)
+	{
+		if (r_fogvol_gpu_light_select_state.candidate_ssbo)
+			GL_DeleteBuffersFunc (1, &r_fogvol_gpu_light_select_state.candidate_ssbo);
+		if (r_fogvol_gpu_light_select_state.sort_ssbo)
+			GL_DeleteBuffersFunc (1, &r_fogvol_gpu_light_select_state.sort_ssbo);
+	}
+	r_fogvol_gpu_light_select_state.candidate_ssbo = 0;
+	r_fogvol_gpu_light_select_state.sort_ssbo = 0;
+	r_fogvol_gpu_light_select_state.sort_capacity = 0;
+}
+
+static qboolean R_FogVol_GPUSelectEnsureBuffers (int candidate_count)
+{
+	const int sort_count = R_FogVol_NextPow2 (candidate_count);
+
+	if (!R_FogVol_GPUSelectAvailable ())
+		return false;
+
+	if (!r_fogvol_gpu_light_select_state.candidate_ssbo)
+	{
+		GL_GenBuffersFunc (1, &r_fogvol_gpu_light_select_state.candidate_ssbo);
+		if (!r_fogvol_gpu_light_select_state.candidate_ssbo)
+			return false;
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_gpu_light_select_state.candidate_ssbo);
+		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER,
+			sizeof (fogvol_dlight_score_gpu_t) * FOGVOL_GPU_DLIGHT_MAX_CANDIDATES, NULL, GL_DYNAMIC_DRAW);
+	}
+
+	if (!r_fogvol_gpu_light_select_state.sort_ssbo
+		|| r_fogvol_gpu_light_select_state.sort_capacity < sort_count)
+	{
+		if (!r_fogvol_gpu_light_select_state.sort_ssbo)
+			GL_GenBuffersFunc (1, &r_fogvol_gpu_light_select_state.sort_ssbo);
+		if (!r_fogvol_gpu_light_select_state.sort_ssbo)
+			return false;
+
+		r_fogvol_gpu_light_select_state.sort_capacity = sort_count;
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_gpu_light_select_state.sort_ssbo);
+		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER,
+			sizeof (fogvol_sort_entry_gpu_t) * r_fogvol_gpu_light_select_state.sort_capacity, NULL, GL_DYNAMIC_DRAW);
+	}
+
+	return true;
+}
+
+static void R_FogVol_GPUBitonicSort (GLuint sort_buffer, int count)
+{
+	const int groups = (count + (FOGVOL_GPU_LOCAL_SIZE - 1)) / FOGVOL_GPU_LOCAL_SIZE;
+	int k;
+
+	GL_UseProgram (glprogs.gpu_bitonic_pairs);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, sort_buffer, 0, sizeof (fogvol_sort_entry_gpu_t) * count);
+
+	for (k = 2; k <= count; k <<= 1)
+	{
+		int j;
+		for (j = k >> 1; j > 0; j >>= 1)
+		{
+			GL_Uniform4fFunc (0, (float)count, (float)j, (float)k, 0.f);
+			GL_DispatchComputeFunc (groups, 1, 1);
+			GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+		}
+	}
+}
+
+static qboolean R_FogVol_GPUReadBuffer (GLuint buffer, size_t size, void *dst)
+{
+	void *mapped;
+
+	if (!buffer || !dst || !size)
+		return false;
+
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, buffer);
+	mapped = GL_MapBufferRangeFunc (GL_SHADER_STORAGE_BUFFER, 0, (GLsizeiptr)size, GL_MAP_READ_BIT);
+	if (!mapped)
+		return false;
+	memcpy (dst, mapped, size);
+	if (!GL_UnmapBufferFunc (GL_SHADER_STORAGE_BUFFER))
+		return false;
+	return true;
+}
+
+static qboolean R_Froxel_InjectDlights_GPU (float dlight_scale, int selected_cap)
+{
+	const dlight_t *const *active;
+	const dlight_t *candidate_ptrs[FOGVOL_GPU_DLIGHT_MAX_CANDIDATES];
+	int active_count = 0;
+	int candidate_count = 0;
+	int sort_count;
+	int groups;
+	int selected_count = 0;
+
+	active = DLightPool_GetActiveList (&active_count);
+	if (active)
+	{
+		for (int i = 0; i < active_count && candidate_count < FOGVOL_GPU_DLIGHT_MAX_CANDIDATES; ++i)
+		{
+			const dlight_t *dl = active[i];
+			float intensity;
+			fogvol_dlight_score_gpu_t *gpu;
+
+			if (!R_FogVol_DlightIsInjectable (dl))
+				continue;
+			intensity = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
+			if (intensity <= 0.f || dl->radius <= 0.f)
+				continue;
+
+			candidate_ptrs[candidate_count] = dl;
+			gpu = &r_fogvol_gpu_light_select_state.staging_candidates[candidate_count];
+			gpu->pos_rad[0] = dl->origin[0];
+			gpu->pos_rad[1] = dl->origin[1];
+			gpu->pos_rad[2] = dl->origin[2];
+			gpu->pos_rad[3] = dl->radius;
+			gpu->color_bias[0] = dl->color[0];
+			gpu->color_bias[1] = dl->color[1];
+			gpu->color_bias[2] = dl->color[2];
+			gpu->color_bias[3] = R_FogVol_DlightScoreBias (dl);
+			gpu->meta[0] = 1u;
+			gpu->meta[1] = (uint32_t)((dl->id > 0) ? dl->id : (i + 1));
+			gpu->meta[2] = 0u;
+			gpu->meta[3] = 0u;
+			candidate_count++;
+		}
+	}
+
+	for (int i = 0; i < r_num_fog_dlights && candidate_count < FOGVOL_GPU_DLIGHT_MAX_CANDIDATES; ++i)
+	{
+		const dlight_t *dl = &r_fog_dlights[i];
+		float intensity;
+		fogvol_dlight_score_gpu_t *gpu;
+
+		if (!R_FogVol_DlightIsInjectable (dl))
+			continue;
+		intensity = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
+		if (intensity <= 0.f || dl->radius <= 0.f)
+			continue;
+
+		candidate_ptrs[candidate_count] = dl;
+		gpu = &r_fogvol_gpu_light_select_state.staging_candidates[candidate_count];
+		gpu->pos_rad[0] = dl->origin[0];
+		gpu->pos_rad[1] = dl->origin[1];
+		gpu->pos_rad[2] = dl->origin[2];
+		gpu->pos_rad[3] = dl->radius;
+		gpu->color_bias[0] = dl->color[0];
+		gpu->color_bias[1] = dl->color[1];
+		gpu->color_bias[2] = dl->color[2];
+		gpu->color_bias[3] = R_FogVol_DlightScoreBias (dl);
+		gpu->meta[0] = 1u;
+		gpu->meta[1] = 0x80000000u | (uint32_t)i;
+		gpu->meta[2] = 0u;
+		gpu->meta[3] = 0u;
+		candidate_count++;
+	}
+
+	r_fogvol_gpu_light_select_state.last_candidates = candidate_count;
+	r_fogvol_gpu_light_select_state.last_selected = 0;
+
+	if (candidate_count <= 0)
+		return true;
+	if (!R_FogVol_GPUSelectEnsureBuffers (candidate_count))
+		return false;
+
+	sort_count = R_FogVol_NextPow2 (candidate_count);
+	groups = (sort_count + (FOGVOL_GPU_LOCAL_SIZE - 1)) / FOGVOL_GPU_LOCAL_SIZE;
+
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_gpu_light_select_state.candidate_ssbo);
+	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0,
+		sizeof (fogvol_dlight_score_gpu_t) * candidate_count,
+		r_fogvol_gpu_light_select_state.staging_candidates);
+
+	GL_UseProgram (glprogs.fogvol_dlight_score);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, r_fogvol_gpu_light_select_state.candidate_ssbo, 0,
+		sizeof (fogvol_dlight_score_gpu_t) * q_max (1, candidate_count));
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, r_fogvol_gpu_light_select_state.sort_ssbo, 0,
+		sizeof (fogvol_sort_entry_gpu_t) * q_max (1, sort_count));
+	GL_Uniform4fFunc (0, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2], (float)candidate_count);
+	GL_DispatchComputeFunc (groups, 1, 1);
+	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+
+	R_FogVol_GPUBitonicSort (r_fogvol_gpu_light_select_state.sort_ssbo, sort_count);
+
+	if (!R_FogVol_GPUReadBuffer (r_fogvol_gpu_light_select_state.sort_ssbo,
+		sizeof (fogvol_sort_entry_gpu_t) * q_min (selected_cap, FOGVOL_GPU_DLIGHT_MAX_CANDIDATES),
+		r_fogvol_gpu_light_select_state.staging_sorted))
+		return false;
+
+	for (int i = 0; i < selected_cap; ++i)
+	{
+		const fogvol_sort_entry_gpu_t *entry = &r_fogvol_gpu_light_select_state.staging_sorted[i];
+		int candidate_index = (int)entry->index;
+		const dlight_t *dl;
+		float lum;
+		float energy;
+
+		if (entry->key0 == 0xffffffffu)
+			break;
+		if (candidate_index < 0 || candidate_index >= candidate_count)
+			continue;
+		dl = candidate_ptrs[candidate_index];
+		if (!dl)
+			continue;
+
+		lum = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
+		energy = dlight_scale * (0.5f + lum) * R_FogVol_DlightScoreBias (dl);
+		if (dl->type == DLIGHT_ROCKET || dl->type == DLIGHT_EXPLOSION)
+			energy *= 1.35f;
+		R_Froxel_AddLight (dl->origin, dl->radius, dl->color, energy, (uint32_t)dl->type);
+		selected_count++;
+	}
+
+	r_fogvol_gpu_light_select_state.gpu_frames++;
+	r_fogvol_gpu_light_select_state.last_selected = selected_count;
+	return true;
+}
+
 void R_Froxel_InjectDlights (void)
 {
 	const dlight_t *const *active;
@@ -2221,6 +2620,13 @@ void R_Froxel_InjectDlights (void)
 
 	selected_cap = CLAMP (1, (int)Q_rint (r_fogvol_light_max.value), froxel_dlight_cap);
 	selected_cap = CLAMP (1, selected_cap, (int)countof (selected));
+
+	if (r_fogvol_gpu_light_select.value > 0.f)
+	{
+		if (R_Froxel_InjectDlights_GPU (dlight_scale, selected_cap))
+			return;
+		r_fogvol_gpu_light_select_state.gpu_fallbacks++;
+	}
 
 	active = DLightPool_GetActiveList (&active_count);
 	if (active)
@@ -2319,6 +2725,12 @@ void R_Froxel_InjectDlights (void)
 		if (selected[i].dl->type == DLIGHT_ROCKET || selected[i].dl->type == DLIGHT_EXPLOSION)
 			energy *= 1.35f;
 		R_Froxel_AddLight (selected[i].dl->origin, selected[i].dl->radius, selected[i].dl->color, energy, (uint32_t)selected[i].dl->type);
+	}
+
+	if (r_fogvol_gpu_light_select.value > 0.f)
+	{
+		r_fogvol_gpu_light_select_state.last_candidates = active_count + r_num_fog_dlights;
+		r_fogvol_gpu_light_select_state.last_selected = selected_count;
 	}
 }
 
@@ -3612,7 +4024,7 @@ void R_FogVol_Render (void)
 	}
 	if (light_stats_enabled)
 	{
-		Con_DPrintf ("fogvol_light_stats: broadphase_candidates=%d narrowphase_candidates=%d accepted=%d broadphase_ms=%.3f narrowphase_ms=%.3f lightgrid_probe_ms=%.3f lightgrid_upload_ms=%.3f probes=%d\n",
+		Con_DPrintf ("fogvol_light_stats: broadphase_candidates=%d narrowphase_candidates=%d accepted=%d broadphase_ms=%.3f narrowphase_ms=%.3f lightgrid_probe_ms=%.3f lightgrid_upload_ms=%.3f probes=%d gpu_dlight_sel_frames=%d gpu_dlight_sel_fallbacks=%d gpu_dlight_candidates=%d gpu_dlight_selected=%d\n",
 			light_stats.broadphase_candidates,
 			light_stats.narrowphase_candidates,
 			light_stats.narrowphase_accepted,
@@ -3620,7 +4032,11 @@ void R_FogVol_Render (void)
 			light_stats.narrowphase_seconds * 1000.0,
 			light_stats.lightgrid_seconds * 1000.0,
 			light_stats.lightgrid_upload_seconds * 1000.0,
-			light_stats.lightgrid_probes);
+			light_stats.lightgrid_probes,
+			r_fogvol_gpu_light_select_state.gpu_frames,
+			r_fogvol_gpu_light_select_state.gpu_fallbacks,
+			r_fogvol_gpu_light_select_state.last_candidates,
+			r_fogvol_gpu_light_select_state.last_selected);
 	}
 
 	GL_BeginGroup ("Fog volumes");

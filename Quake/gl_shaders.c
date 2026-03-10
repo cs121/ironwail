@@ -860,8 +860,9 @@ void GL_CreateShaders (void)
                 glprogs.skylayers[dither] = GL_CreateProgram (GLSL_PATH("sky_layers.vert"), GLSL_PATH("sky_layers.frag"), "sky layers|DITHER %d", dither);
                 glprogs.skyboxside[dither] = GL_CreateProgram (GLSL_PATH("sky_boxside.vert"), GLSL_PATH("sky_boxside.frag"), "skybox side|DITHER %d", dither);
                 glprogs.sprites[dither] = GL_CreateProgram (GLSL_PATH("sprites.vert"), GLSL_PATH("sprites.frag"), "sprites|DITHER %d", dither);
-        glprogs.decal = GL_CreateProgram (GLSL_PATH("decal.vert"), GLSL_PATH("decal.frag"), "decal");
         }
+	glprogs.decal = GL_CreateProgram (GLSL_PATH("decal.vert"), GLSL_PATH("decal.frag"), "decal");
+	glprogs.decal_instanced = GL_CreateProgram (GLSL_PATH("decal_instanced.vert"), GLSL_PATH("decal.frag"), "decal instanced");
         glprogs.skystencil = GL_CreateProgram (GLSL_PATH("skystencil.vert"), NULL, "sky stencil");
 
         for (oit = 0; oit < 2; oit++)
@@ -878,6 +879,11 @@ void GL_CreateShaders (void)
         glprogs.clear_indirect = GL_CreateComputeProgram (GLSL_PATH("clear_indirect.comp"), "clear indirect draw params");
         glprogs.gather_indirect = GL_CreateComputeProgram (GLSL_PATH("gather_indirect.comp"), "indirect draw gather");
         glprogs.cull_mark = GL_CreateComputeProgram (GLSL_PATH("cull_mark.comp"), "cull/mark");
+        glprogs.q3p_sim = GL_CreateComputeProgram (GLSL_PATH("q3p_sim.comp"), "q3p simulate");
+        glprogs.q3p_cull_key = GL_CreateComputeProgram (GLSL_PATH("q3p_cull_key.comp"), "q3p cull/key");
+        glprogs.gpu_bitonic_pairs = GL_CreateComputeProgram (GLSL_PATH("gpu_bitonic_pairs.comp"), "gpu bitonic pairs");
+        glprogs.fogvol_dlight_score = GL_CreateComputeProgram (GLSL_PATH("fogvol_dlight_score.comp"), "fogvol dlight score");
+        glprogs.fogvol_static_build = GL_CreateComputeProgram (GLSL_PATH("fogvol_static_build.comp"), "fogvol static build");
         for (mode = 0; mode < 3; mode++)
                 glprogs.palette_init[mode] = GL_CreateComputeProgram (GLSL_PATH("palette_init.comp"), "palette init|MODE %d", mode);
         glprogs.palette_postprocess = GL_CreateComputeProgram (GLSL_PATH("palette_postprocess.comp"), "palette postprocess");

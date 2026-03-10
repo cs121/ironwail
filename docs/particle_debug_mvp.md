@@ -57,3 +57,17 @@ Das Overlay zeigt pro Frame:
 - Bounds beziehen sich aktuell auf Legacy-Partikel; q3p-Bounds werden nicht separat visualisiert.
 - Overdraw ist ein heuristischer Score, kein GPU-Per-Pixel-Counter.
 - Hash-Diff vergleicht Rohbilder binär; geringe nichtdeterministische Renderabweichungen führen zu "diff".
+
+## GPU Compute Flags (neu)
+
+- `r_particles_gpu_sim 0|1`
+  - `0`: CPU-Simulation.
+  - `1`: Q3P-Simulationsschritt via Compute (`q3p_sim.comp`).
+- `r_particles_gpu_cullsort 0|1`
+  - `0`: CPU-Culling plus CPU-`qsort`.
+  - `1`: GPU-Culling plus GPU-Sort-Key plus GPU-Bitonic-Sort (`q3p_cull_key.comp`, `gpu_bitonic_pairs.comp`).
+
+Fallback:
+- Beide Flags sind optional und standardmaessig aus.
+- Wenn Compute/SSBO/Shader-Pfade nicht bereit sind, faellt die Engine automatisch auf den bisherigen CPU-Pfad zurueck.
+- Bei `r_particles_collision 1` bleibt Weltkollision CPU-seitig; `r_particles_gpu_sim 1` nutzt dann automatisch den CPU-Simulationspfad.

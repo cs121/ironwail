@@ -1,0 +1,123 @@
+// ============================================================
+// Ironwail - Blood Decals
+// Improved blood set: impact / streak / pool
+// Uses existing textures only:
+//   particles/blood_splat01
+//   particles/blood_splat02
+//   particles/blood_splat03
+// ============================================================
+
+
+
+// ------------------------------------------------------------
+// BLOOD IMPACT
+// Small / medium hit splats
+// Most common type
+// ------------------------------------------------------------
+
+decal blood_impact_a {
+  texture "particles/blood_splat01"
+  size 5 9
+  alpha 0.68 0.95
+  color 1 1 1
+  lifetime 36
+  fade 10
+  blend alpha
+  random_rotation 1
+  priority 5
+  category blood
+}
+
+decal blood_impact_b {
+  texture "particles/blood_splat02"
+  size 6 10
+  alpha 0.66 0.93
+  color 1 1 1
+  lifetime 38
+  fade 10
+  blend alpha
+  random_rotation 1
+  priority 5
+  category blood
+}
+
+decal blood_impact_c {
+  texture "particles/blood_splat03"
+  size 6 11
+  alpha 0.64 0.92
+  color 1 1 1
+  lifetime 40
+  fade 12
+  blend alpha
+  random_rotation 1
+  priority 5
+  category blood
+}
+
+
+
+// ------------------------------------------------------------
+// BLOOD STREAK
+// Directional / elongated looking hits
+// Use these later with runtime directional alignment if available
+// ------------------------------------------------------------
+
+decal blood_streak_a {
+  texture "particles/blood_splat01"
+  size 7 12
+  alpha 0.58 0.88
+  color 1 1 1
+  lifetime 44
+  fade 12
+  blend alpha
+  random_rotation 1
+  priority 6
+  category blood
+}
+
+decal blood_streak_b {
+  texture "particles/blood_splat02"
+  size 8 13
+  alpha 0.56 0.86
+  color 1 1 1
+  lifetime 46
+  fade 12
+  blend alpha
+  random_rotation 1
+  priority 6
+  category blood
+}
+
+
+
+// ------------------------------------------------------------
+// BLOOD POOL
+// Larger / darker / longer-lived residual marks
+// Use more sparingly in runtime selection
+// ------------------------------------------------------------
+
+decal blood_pool_a {
+  texture "particles/blood_splat03"
+  size 11 18
+  alpha 0.42 0.68
+  color 1 1 1
+  lifetime 70
+  fade 18
+  blend mul
+  random_rotation 1
+  priority 7
+  category blood
+}
+
+decal blood_pool_b {
+  texture "particles/blood_splat02"
+  size 10 16
+  alpha 0.45 0.70
+  color 1 1 1
+  lifetime 64
+  fade 18
+  blend mul
+  random_rotation 1
+  priority 7
+  category blood
+}

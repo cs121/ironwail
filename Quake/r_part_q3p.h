@@ -49,6 +49,11 @@ typedef struct q3p_debug_stats_s {
 	int spawned;
 	int dropped;
 	int culled;
+	int gpu_sim_frames;
+	int gpu_sim_fallbacks;
+	int gpu_cullsort_frames;
+	int gpu_visible;
+	int gpu_culled;
 } q3p_debug_stats_t;
 
 typedef struct q3p_effectdef_s {
