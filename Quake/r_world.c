@@ -274,7 +274,7 @@ typedef struct bmodel_gpu_instance_s {
 	float		world[12];	// world matrix (transposed mat4x3)
 	float		prev_world[12];	// previous world matrix (transposed mat4x3)
 	float		alpha;
-	float		padding[3];
+	vec3_t		relight;
 } bmodel_gpu_instance_t;
 
 typedef struct bmodel_bindless_gpu_call_s {
@@ -343,6 +343,37 @@ static void R_GetPolygonOffsetValues (const shader_material_t *material, qboolea
 	*units = 1.f;
 }
 
+static void R_SampleBModelStaticLighting (const vec3_t pos, vec3_t out_color)
+{
+	float ao = 1.f;
+
+	VectorClear (out_color);
+
+	if (!cl.worldmodel)
+		return;
+
+	if (r_model_lightgrid.value > 0.f && R_LightgridEnabled ())
+	{
+		R_LightgridLighting (pos, out_color, &ao);
+		VectorScale (out_color, ao, out_color);
+	}
+	else
+	{
+		R_SampleLightmapAtPoint (pos, out_color);
+	}
+
+	for (int i = 0; i < 3; i++)
+	{
+#if defined(_MSC_VER)
+		if (_finite (out_color[i]) == 0)
+#else
+		if (!isfinite (out_color[i]))
+#endif
+			out_color[i] = 0.f;
+		out_color[i] = CLAMP (-1.f, out_color[i], 1.f);
+	}
+}
+
 /*
 =============
 R_InitBModelInstance
@@ -394,8 +425,29 @@ static void R_InitBModelInstance (bmodel_gpu_instance_t *inst, entity_t *ent)
         ent->motion_blur_prev_frame = r_framecount;
         ent->motion_blur_prev_valid = true;
 
-        inst->alpha = ent->alpha == ENTALPHA_DEFAULT ? -1.f : ENTALPHA_DECODE (ent->alpha);
-        memset (&inst->padding, 0, sizeof(inst->padding));
+	inst->alpha = ent->alpha == ENTALPHA_DEFAULT ? -1.f : ENTALPHA_DECODE (ent->alpha);
+	VectorClear (inst->relight);
+
+	if (ent != &cl_entities[0] && ent->model && !ent->model->lightdata)
+	{
+		/* External bmodel pickups (e.g. maps/b_bh*.bsp) may not carry baked
+		 * lightmap samples. Provide a static world-sample fallback so they
+		 * do not render as black cubes. */
+		R_SampleBModelStaticLighting (curr_origin, inst->relight);
+		for (int i = 0; i < 3; i++)
+			inst->relight[i] = CLAMP (0.f, inst->relight[i], 1.f);
+	}
+	else if (r_bmodel_relight.value > 0.f && ent != &cl_entities[0] && cl.worldmodel)
+	{
+		vec3_t current_static;
+		vec3_t baseline_static;
+
+		R_SampleBModelStaticLighting (curr_origin, current_static);
+		R_SampleBModelStaticLighting (ent->baseline.origin, baseline_static);
+		VectorSubtract (current_static, baseline_static, inst->relight);
+		for (int i = 0; i < 3; i++)
+			inst->relight[i] = CLAMP (-1.f, inst->relight[i], 1.f);
+	}
 }
 
 /*
@@ -1161,7 +1213,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 				}
 
 				uses_lightmap = R_StageUsesLightmap (stage, stage_index);
-				if (!uses_lightmap)
+				if (!uses_lightmap || !model->lightdata)
 					extra_flags |= CALLFLAG_NOLIGHTMAP;
 				if (t->type == TEXTYPE_CUTOUT)
 					extra_flags |= CALLFLAG_ALPHA_TEST;
@@ -1606,6 +1658,8 @@ else if (pass == BP_SKYCUBEMAP)
 				zfix = true;
 
 			extra_flags |= mat_call_flags;
+			if (!model->lightdata)
+				extra_flags |= CALLFLAG_NOLIGHTMAP;
 			{
 				float polygon_offset_factor;
 				float polygon_offset_units;

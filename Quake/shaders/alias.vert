@@ -2,8 +2,10 @@ struct InstanceData
 {
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
+	vec4	NormalMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
+	vec4	DLightDir;   // xyz=dominant dlight direction
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -21,6 +23,8 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	Overbright;
 	float	ModelHalfLambert;
 	float	DLightDebugModels;
+	float	DLightDirectionalMix;
+	float	_Pad1[3];
 	InstanceData instances[];
 } AliasFrameBuffer;
 
@@ -71,14 +75,13 @@ struct PoseVertex
 
 #endif // MD5
 
-float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir) // from MH, blended with half-lambert
+float r_avertexnormal_dot(vec3 vertexnormal, vec3 dir)
 {
-        float d = dot(vertexnormal, dir);
-        float halfLambert = max(d, 0.0) * 0.5 + 0.5;
-        // wtf - this reproduces anorm_dots within as reasonable a degree of tolerance as the >= 0 case
-        float quakeShade = d < 0.0 ? 1.0 + d * (13.0 / 44.0) : 1.0 + d;
-        float halfLambertMix = clamp(AliasFrameBuffer.ModelHalfLambert, 0.0, 1.0);
-        return mix(quakeShade, halfLambert, halfLambertMix);
+	float d = dot(vertexnormal, dir);
+	float halfLambert = max(d, 0.0) * 0.5 + 0.5;
+	float quakeShade = d < 0.0 ? 1.0 + d * (13.0 / 44.0) : 1.0 + d;
+	float halfLambertMix = clamp(AliasFrameBuffer.ModelHalfLambert, 0.0, 1.0);
+	return mix(quakeShade, halfLambert, halfLambertMix);
 }
 
 #if MODE == 2
@@ -115,58 +118,38 @@ void main()
 	out_prev_clip = prev_clip;
 	out_flags = inst.Flags;
 	out_pos = world_vert - AliasFrameBuffer.EyePos;
-	// transform world X and Z axes to local space
-        mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
-        orientation = transpose(orientation);
-        // BUG FIX #2: shadevector sollte die Weltkoordinaten-Beleuchtungsrichtung
-        // (typisch leicht von oben, Quake-Standard ~(0, 0.5, 1) normalisiert) in
-        // den Modell-Lokalraum transformieren. Die alte Formel (orientation[0]+orientation[2])
-        // war eine Diagonale aus X+Z, die bei rotierten Modellen willkürlich falsch zeigt.
-        // Korrekt: einen festen Weltvektor per Inverse-Transpose (= transpose(orientation))
-        // in Lokalraum bringen. orientation ist bereits transponiert, also direkt multiplizieren.
-        vec3 world_shade_dir = normalize(vec3(0.0, 0.5, 1.0));
-        vec3 shadevector = normalize(orientation * world_shade_dir);
-        float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
-        float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
-        float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
-        vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
-        // BP FIX #8: Normalentransformation erfordert die inverse-transpose der
-        // Weltmatrix. worldmatrix[i].xyz sind die Spaltenvektoren der 4x3-Matrix,
-        // die bei nicht-uniform-Skalierung die Normalen verzerren. Korrekt:
-        // normalize() auf den einzelnen Basisvektoren vor mat3-Konstruktion
-        // entspricht der inversen-transponierten für orthogonale Matrizen.
-        // Für korrekte Unterstützung nicht-uniformer Skalierung wäre die echte
-        // Inverse-Transpose nötig (CPU-seitig berechnen und übergeben).
-        mat3 world_orientation = mat3(
-                normalize(worldmatrix[0].xyz),
-                normalize(worldmatrix[1].xyz),
-                normalize(worldmatrix[2].xyz));
-        vec3 world_normal = normalize(world_orientation * blended_normal);
-        vec3 view_dir = normalize(-out_pos);
-        float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
 
-        // BUG FIX #1a: DLightColor aus dem InstanceBuffer ist bereits der
-        // CPU-integrierte Gesamtbeitrag aller DLights an diesem Modell-Ursprung
-        // (Radius/Abstand schon eingerechnet). Den Wert NOCHMALS mit `lighting`
-        // (Vertex-NdotL) zu multiplizieren doppelt die Abschwächung → zu dunkle
-        // oder bei fast-tangentialen Normalen grau-helle Fragmente.
-        // Korrektur: DLightColor direkt übernehmen, NdotL gilt nur für ambient.
-        //
-        // BUG FIX #1b: max(LightColor - DLightColor, 0) subtrahiert per-Kanal.
-        // Wenn ein DLight-Kanal > LightColor-Kanal ist (z.B. reines Blau-DLight
-        // über weißem Ambient), wird der Ambient-Kanal auf 0 geclampt, aber die
-        // anderen Kanäle bleiben unverändert, was Farbverschiebungen erzeugt.
-        // Besser: den vollen LightColor-Wert als Ambient-Basis verwenden und
-        // DLight additiv dazurechnen statt subtraktiv zu trennen.
-        vec3 ambient_src = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
-        vec3 litAmbient = ambient_src * (mix(0.35, 1.0, lighting) * AliasFrameBuffer.Overbright);
-        // DLightColor direkt (kein weiteres lighting-Weighting) – CPU hat bereits
-        // Distanz/Radius berücksichtigt. NdotL-Faktor hier wäre Doppelmodulation.
-        vec3 litDlight = inst.DLightColor.rgb;
-        vec3 base_color = litAmbient;
-        bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
-        vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
-        out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, AliasFrameBuffer.Overbright);
+	mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
+	orientation = transpose(orientation);
+	vec3 world_shade_dir = normalize(vec3(0.0, 0.5, 1.0));
+	vec3 shadevector = normalize(orientation * world_shade_dir);
+	float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
+	float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
+	float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
+
+	vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
+	mat3 normalmatrix = mat3(inst.NormalMatrix[0].xyz, inst.NormalMatrix[1].xyz, inst.NormalMatrix[2].xyz);
+	vec3 world_normal = normalize(normalmatrix * blended_normal);
+	vec3 view_dir = normalize(-out_pos);
+	float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
+
+	vec3 ambient_src = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
+	vec3 litAmbient = ambient_src * (mix(0.35, 1.0, lighting) * AliasFrameBuffer.Overbright);
+	vec3 litDlight = inst.DLightColor.rgb;
+	float dlight_dir_len_sq = dot(inst.DLightDir.xyz, inst.DLightDir.xyz);
+	if (dlight_dir_len_sq > 1e-6)
+	{
+		vec3 dlight_dir = inst.DLightDir.xyz * inversesqrt(dlight_dir_len_sq);
+		float ndotl = max(dot(world_normal, dlight_dir), 0.0);
+		float soft_ndotl = mix(0.35, 1.0, ndotl);
+		float directional_mix = clamp(AliasFrameBuffer.DLightDirectionalMix, 0.0, 1.0);
+		litDlight *= mix(1.0, soft_ndotl, directional_mix);
+	}
+
+	vec3 base_color = litAmbient;
+	bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
+	vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
+	out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, AliasFrameBuffer.Overbright);
 	out_dlight_vis = clamp(dot(litDlight, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
 	out_dlight_color = litDlight;
 	out_normal = world_normal;

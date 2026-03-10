@@ -2,8 +2,10 @@ struct InstanceData
 {
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
+	vec4	NormalMatrix[3];
 	vec4	LightColor;
 	vec4	DLightColor;
+	vec4	DLightDir;
 	int		Pose1;
 	int		Pose2;
 	float	Blend;

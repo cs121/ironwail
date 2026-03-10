@@ -43,13 +43,29 @@ typedef struct lightcache_s {
 	short				dt;
 	vec3_t				ambientcolor;
 	vec3_t				dlightcolor;
+	vec3_t				dlightdir;
 	vec3_t				lightgrid_color;
 	float				lightgrid_ao;
 	qboolean		lightgrid_has_sample;
+	vec3_t				static_color_smoothed;
+	int					static_color_smoothed_frame;
+	qboolean			static_color_smoothed_valid;
+	qboolean			static_color_smooth_reset;
 } lightcache_t;
+
+typedef enum entity_static_light_source_e {
+	ENTITY_STATIC_LIGHT_NONE = 0,
+	ENTITY_STATIC_LIGHT_GRID,
+	ENTITY_STATIC_LIGHT_POINT,
+	ENTITY_STATIC_LIGHT_MINLIGHT,
+	ENTITY_STATIC_LIGHT_MIXED
+} entity_static_light_source_t;
 
 typedef struct entity_lightinfo_s {
 	vec3_t				static_color;
+	vec3_t				static_target_color;
+	vec3_t				dynamic_color;
+	vec3_t				final_color;
 	float				intensity;
 	qboolean			used_lightgrid;
 	qboolean			lightgrid_valid;
@@ -60,6 +76,9 @@ typedef struct entity_lightinfo_s {
 	qboolean			used_lightpoint;
 	vec3_t				lightpoint_color;
 	qboolean			used_minlight;
+	qboolean			used_multisample;
+	int					sample_count;
+	entity_static_light_source_t	static_source;
 } entity_lightinfo_t;
 
 //johnfitz -- for lerping

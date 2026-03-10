@@ -2,8 +2,10 @@ struct InstanceData
 {
 	vec4	WorldMatrix[3];
 	vec4	PrevWorldMatrix[3];
+	vec4	NormalMatrix[3];
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
+	vec4	DLightDir;   // xyz=dominant dlight direction
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -21,6 +23,8 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	Overbright;
 	float	ModelHalfLambert;
 	float	DLightDebugModels;
+	float	DLightDirectionalMix;
+	float	_Pad1[3];
 	InstanceData instances[];
 } AliasFrameBuffer;
 
@@ -403,21 +407,11 @@ void main()
 
 	result.a = lit_color.a;
 	vec3 albedo = result.rgb;
-	dlight_contrib = ComputeAliasDLightContribution(world_pos, world_nor);
-	if (ShadowNumLights < 0.5)
-	{
-		// Legacy path: per-light shadow already absent from in_dlight_color;
-		// apply the aggregated shadow term here.
-		// BUG FIX: was missing dlight_shadow multiplication entirely.
-		dlight_shadow = ComputeAliasDLightShadow(world_pos);
-		dlight_contrib = in_dlight_color * dlight_shadow;
-	}
-	else
-	{
-		// Per-light shadow already integrated inside ComputeAliasDLightContribution().
-		// Still compute aggregate for debug visualiser.
-		dlight_shadow = ComputeAliasDLightShadow(world_pos);
-	}
+	// Use CPU-accumulated model dlight contribution (full active pool).
+	// Keep aggregate shadow only for debug visualization; applying it to the
+	// summed color can incorrectly dim unrelated, non-shadow-selected dlights.
+	dlight_shadow = ComputeAliasDLightShadow(world_pos);
+	dlight_contrib = in_dlight_color;
 	result.rgb += albedo * dlight_contrib;
 
 	if (ShadowEnableDebug.x > 0.5 && ShadowSunDirEnabled.w > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
@@ -525,4 +519,3 @@ void main()
 	OUT_COLOR.rgb += SUPPRESS_BANDING() * AliasFrameBuffer.ScreenDither;
 #endif
 }
-

@@ -283,6 +283,10 @@ OBJS = strlcat.o \
 	cfgfile.o \
 	host.o \
 	host_cmd.o \
+	bot_main.o \
+	bot_ai.o \
+	bot_combat.o \
+	bot_nav2.o \
 	mathlib.o \
 	pr_cmds.o \
 	pr_edict.o \

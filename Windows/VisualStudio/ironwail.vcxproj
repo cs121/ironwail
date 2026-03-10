@@ -271,6 +271,10 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\common\lightgrid.c" />
     <ClCompile Include="..\..\Quake\host.c" />
     <ClCompile Include="..\..\Quake\host_cmd.c" />
+    <ClCompile Include="..\..\Quake\bot_main.c" />
+    <ClCompile Include="..\..\Quake\bot_ai.c" />
+    <ClCompile Include="..\..\Quake\bot_combat.c" />
+    <ClCompile Include="..\..\Quake\bot_nav2.c" />
     <ClCompile Include="..\..\Quake\image.c" />
     <ClCompile Include="..\..\Quake\in_sdl.c" />
     <ClCompile Include="..\..\Quake\json.c" />
@@ -451,6 +455,10 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\vid.h" />
     <ClInclude Include="..\..\Quake\view.h" />
     <ClInclude Include="..\..\Quake\wad.h" />
+    <ClInclude Include="..\..\Quake\bot_main.h" />
+    <ClInclude Include="..\..\Quake\bot_ai.h" />
+    <ClInclude Include="..\..\Quake\bot_combat.h" />
+    <ClInclude Include="..\..\Quake\bot_nav2.h" />
     <ClInclude Include="..\..\Quake\world.h" />
     <ClInclude Include="..\..\Quake\wsaerror.h" />
     <ClInclude Include="..\..\Quake\zone.h" />

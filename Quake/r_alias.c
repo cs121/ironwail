@@ -45,6 +45,15 @@ extern vec3_t	lightcolor; //johnfitz -- replaces "float shadelight" for lit supp
 
 static float	entalpha; //johnfitz
 
+static qboolean R_AliasIsFinite (float v)
+{
+#if defined(_MSC_VER)
+	return _finite (v) != 0;
+#else
+	return isfinite (v);
+#endif
+}
+
 //johnfitz -- struct for passing lerp information to drawing functions
 typedef struct {
 	short pose1;
@@ -60,10 +69,13 @@ typedef struct {
 typedef struct aliasinstance_s {
 	float		worldmatrix[12];
 	float		prev_worldmatrix[12];
+	float		normalmatrix[12];
 	vec3_t		lightcolor;
 	float		alpha;
 	vec3_t		dlightcolor;
 	float		_pad0;
+	vec3_t		dlightdir;
+	float		_pad1;
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
@@ -89,16 +101,19 @@ struct ibuf_s {
 		float	overbright;
 		float	half_lambert;
 		float	dlight_debug_models;
+		float	dlight_directional_mix;
+		float	_pad1[3];
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
 
 COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16 == 0);
-COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 144);
+COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 208);
 
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
 static qboolean r_alias_shadow_batch_dlight = false;
+static int r_itemlight_last_frame[MAX_EDICTS];
 
 static float R_LightgridLuminance (const vec3_t color)
 {
@@ -130,6 +145,85 @@ static void R_ScaleAliasLighting (vec3_t light, vec3_t ambient, vec3_t dlight, f
 		light[i] *= scale;
 		ambient[i] *= scale;
 		dlight[i] *= scale;
+	}
+}
+
+static const char *R_StaticSourceName (entity_static_light_source_t source)
+{
+	switch (source)
+	{
+	case ENTITY_STATIC_LIGHT_GRID:
+		return "grid";
+	case ENTITY_STATIC_LIGHT_POINT:
+		return "point";
+	case ENTITY_STATIC_LIGHT_MINLIGHT:
+		return "minlight";
+	case ENTITY_STATIC_LIGHT_MIXED:
+		return "mixed";
+	default:
+		return "none";
+	}
+}
+
+static void R_BuildAliasNormalMatrix (const float model_matrix[16], float out_normalmatrix[12])
+{
+	const float m00 = model_matrix[0],  m01 = model_matrix[4],  m02 = model_matrix[8];
+	const float m10 = model_matrix[1],  m11 = model_matrix[5],  m12 = model_matrix[9];
+	const float m20 = model_matrix[2],  m21 = model_matrix[6],  m22 = model_matrix[10];
+	const float c00 =  (m11 * m22 - m12 * m21);
+	const float c01 = -(m10 * m22 - m12 * m20);
+	const float c02 =  (m10 * m21 - m11 * m20);
+	const float c10 = -(m01 * m22 - m02 * m21);
+	const float c11 =  (m00 * m22 - m02 * m20);
+	const float c12 = -(m00 * m21 - m01 * m20);
+	const float c20 =  (m01 * m12 - m02 * m11);
+	const float c21 = -(m00 * m12 - m02 * m10);
+	const float c22 =  (m00 * m11 - m01 * m10);
+	const float det = m00 * c00 + m01 * c01 + m02 * c02;
+
+	if (fabsf (det) > 1e-8f && R_AliasIsFinite (det))
+	{
+		const float invdet = 1.f / det;
+
+		out_normalmatrix[0] = c00 * invdet;
+		out_normalmatrix[1] = c10 * invdet;
+		out_normalmatrix[2] = c20 * invdet;
+		out_normalmatrix[3] = 0.f;
+		out_normalmatrix[4] = c01 * invdet;
+		out_normalmatrix[5] = c11 * invdet;
+		out_normalmatrix[6] = c21 * invdet;
+		out_normalmatrix[7] = 0.f;
+		out_normalmatrix[8] = c02 * invdet;
+		out_normalmatrix[9] = c12 * invdet;
+		out_normalmatrix[10] = c22 * invdet;
+		out_normalmatrix[11] = 0.f;
+		return;
+	}
+
+	{
+		vec3_t axis_x = { m00, m10, m20 };
+		vec3_t axis_y = { m01, m11, m21 };
+		vec3_t axis_z = { m02, m12, m22 };
+
+		if (VectorNormalize (axis_x) < 1e-6f)
+			VectorSet (axis_x, 1.f, 0.f, 0.f);
+		if (VectorNormalize (axis_y) < 1e-6f)
+			VectorSet (axis_y, 0.f, 1.f, 0.f);
+		if (VectorNormalize (axis_z) < 1e-6f)
+			VectorSet (axis_z, 0.f, 0.f, 1.f);
+
+		out_normalmatrix[0] = axis_x[0];
+		out_normalmatrix[1] = axis_x[1];
+		out_normalmatrix[2] = axis_x[2];
+		out_normalmatrix[3] = 0.f;
+		out_normalmatrix[4] = axis_y[0];
+		out_normalmatrix[5] = axis_y[1];
+		out_normalmatrix[6] = axis_y[2];
+		out_normalmatrix[7] = 0.f;
+		out_normalmatrix[8] = axis_z[0];
+		out_normalmatrix[9] = axis_z[1];
+		out_normalmatrix[10] = axis_z[2];
+		out_normalmatrix[11] = 0.f;
 	}
 }
 
@@ -254,31 +348,40 @@ static qboolean R_DebugItemLightEnabled (const entity_t *e)
 
 static void R_LogItemLight (const entity_t *e, const entity_lightinfo_t *info)
 {
+        int entnum = -1;
+
         if (!e || !e->model || !info)
                 return;
 
-        const char *cell = info->lightgrid_cell_valid ? va ("%d,%d,%d",
-                info->lightgrid_cell[0], info->lightgrid_cell[1], info->lightgrid_cell[2]) : "n/a";
-        const qboolean fullbright_hack = (!gl_overbright_models.value
-                && (e->model->flags & MOD_FBRIGHTHACK) && gl_fullbrights.value);
+        if (e >= cl_entities && e < cl_entities + cl.num_entities)
+                entnum = (int)(e - cl_entities);
 
-        Con_Printf ("r_debug_itemlight: model=%s type=%s origin=(%.1f %.1f %.1f) angles=(%.1f %.1f %.1f)\n",
-                e->model->name, R_ModelTypeName (e->model),
-                e->origin[0], e->origin[1], e->origin[2],
-                e->angles[0], e->angles[1], e->angles[2]);
-        Con_Printf ("  effects=0x%X model_flags=0x%X fullbright_cvar=%.0f fullbright_hack=%s\n",
-                e->effects, e->model->flags, gl_fullbrights.value,
-                fullbright_hack ? "yes" : "no");
-        Con_Printf ("  static_rgb=(%.3f %.3f %.3f) intensity=%.3f minlight=%s\n",
+        if (entnum >= 0 && r_debug_itemlight.value <= 1.f)
+        {
+                if (r_itemlight_last_frame[entnum] == r_framecount)
+                        return;
+                r_itemlight_last_frame[entnum] = r_framecount;
+        }
+
+        Con_Printf ("light_debug entity=%d model=%s type=%s source=%s samples=%d multisample=%s\n",
+                entnum,
+                e->model->name,
+                R_ModelTypeName (e->model),
+                R_StaticSourceName (info->static_source),
+                info->sample_count,
+                info->used_multisample ? "yes" : "no");
+        Con_Printf ("  static_target=(%.3f %.3f %.3f) static_final=(%.3f %.3f %.3f) minlight=%s\n",
+                info->static_target_color[0], info->static_target_color[1], info->static_target_color[2],
                 info->static_color[0], info->static_color[1], info->static_color[2],
-                info->intensity, info->used_minlight ? "yes" : "no");
-        Con_Printf ("  lightgrid=%s valid=%s cell=%s rgb=(%.3f %.3f %.3f) ao=%.2f\n",
+                info->used_minlight ? "yes" : "no");
+        Con_Printf ("  dynamic=(%.3f %.3f %.3f) final=(%.3f %.3f %.3f)\n",
+                info->dynamic_color[0], info->dynamic_color[1], info->dynamic_color[2],
+                info->final_color[0], info->final_color[1], info->final_color[2]);
+        Con_Printf ("  grid_used=%s grid_valid=%s grid_rgb=(%.3f %.3f %.3f) grid_ao=%.2f point_used=%s point_rgb=(%.3f %.3f %.3f)\n",
                 info->used_lightgrid ? "yes" : "no",
                 info->lightgrid_valid ? "yes" : "no",
-                cell,
                 info->lightgrid_color[0], info->lightgrid_color[1], info->lightgrid_color[2],
-                info->lightgrid_ao);
-        Con_Printf ("  lightpoint=%s rgb=(%.3f %.3f %.3f)\n",
+                info->lightgrid_ao,
                 info->used_lightpoint ? "yes" : "no",
                 info->lightpoint_color[0], info->lightpoint_color[1], info->lightpoint_color[2]);
 }
@@ -391,6 +494,7 @@ void R_SetupEntityTransform (entity_t *e, lerpdata_t *lerpdata)
 	// if LERP_RESETMOVE, kill any lerps in progress
 	if (e->lerpflags & LERP_RESETMOVE)
 	{
+		e->lightcache.static_color_smooth_reset = true;
 		e->movelerpstart = 0;
 		VectorCopy (e->origin, e->previousorigin);
 		VectorCopy (e->origin, e->currentorigin);
@@ -451,10 +555,10 @@ R_SetupAliasLighting -- johnfitz -- broken out from R_DrawAliasModel and rewritt
 */
 void R_SetupAliasLighting (entity_t     *e)
 {
-        vec3_t          dist;
         float           add;
         unsigned int    i;
         vec3_t          dlightcolor = {0.f, 0.f, 0.f};
+        vec3_t          dlightdir = {0.f, 0.f, 0.f};
         vec3_t          ambientcolor;
         vec3_t          static_color;
         entity_lightinfo_t lightinfo;
@@ -464,30 +568,16 @@ void R_SetupAliasLighting (entity_t     *e)
         VectorCopy (static_color, lightcolor);
         VectorCopy (static_color, ambientcolor);
 
-        if (lightinfo_ptr && R_DebugItemLightEnabled (e))
-                R_LogItemLight (e, lightinfo_ptr);
-
-        if (lightinfo_ptr ? lightinfo_ptr->used_lightgrid : e->lightcache.lightgrid_has_sample)
-        {
-                R_AddDynamicLights_Lightgrid (e->origin, lightcolor);
-                VectorSubtract (lightcolor, ambientcolor, dlightcolor);
-        }
+        // Use the full active dlight pool for model lighting so short-lived/small lights
+        // (muzzle flash, rockets, lava balls) are not dropped by render budgeting/culling.
+        if (r_dlight_models_directional.value > 0.f)
+                R_AccumulateEntityDLights (e->origin, dlightcolor, dlightdir);
         else
         {
-                //add dlights
-                for (i=0; i<r_framedata.numlights; i++)
-                {
-                        gpulight_t *l = &r_lightbuffer.lights[i];
-                        VectorSubtract (e->origin, l->pos, dist);
-                        add = DotProduct (dist, dist);
-                        if (l->radius * l->radius > add)
-                        {
-                                const float intensity = l->radius - sqrtf (add);
-                                VectorMA (lightcolor, intensity, l->color, lightcolor);
-                                VectorMA (dlightcolor, intensity, l->color, dlightcolor);
-                        }
-                }
+                R_AccumulateEntityDLights (e->origin, dlightcolor, NULL);
+                VectorClear (dlightdir);
         }
+        VectorAdd (lightcolor, dlightcolor, lightcolor);
 
         R_ApplyLightgridLighting (e, ambientcolor);
 
@@ -539,6 +629,7 @@ void R_SetupAliasLighting (entity_t     *e)
 		lightcolor[2] = 256.0f;
 		VectorCopy (lightcolor, ambientcolor);
 		VectorClear (dlightcolor);
+		VectorClear (dlightdir);
 	}
 
 	{
@@ -565,8 +656,18 @@ void R_SetupAliasLighting (entity_t     *e)
 		}
 	}
 
+	if (lightinfo_ptr)
+	{
+		VectorCopy (dlightcolor, lightinfo_ptr->dynamic_color);
+		VectorCopy (lightcolor, lightinfo_ptr->final_color);
+	}
+
+	if (lightinfo_ptr && R_DebugItemLightEnabled (e))
+		R_LogItemLight (e, lightinfo_ptr);
+
 	VectorCopy (ambientcolor, e->lightcache.ambientcolor);
 	VectorCopy (dlightcolor, e->lightcache.dlightcolor);
+	VectorCopy (dlightdir, e->lightcache.dlightdir);
 }
 
 /*
@@ -646,6 +747,8 @@ ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 ibuf.global.dlight_debug_models = 0.f;
+ibuf.global.dlight_directional_mix = CLAMP (0.f, r_dlight_models_directional.value, 1.f);
+ibuf.global._pad1[0] = ibuf.global._pad1[1] = ibuf.global._pad1[2] = 0.f;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
@@ -883,6 +986,7 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 	memset (instance, 0, sizeof (*instance));
 	MatrixTranspose4x3 (model_matrix, instance->worldmatrix);
 	MatrixTranspose4x3 (model_matrix, instance->prev_worldmatrix);
+	R_BuildAliasNormalMatrix (model_matrix, instance->normalmatrix);
 	instance->alpha = 1.f;
 	instance->pose1 = lerpdata.pose1;
 	instance->pose2 = lerpdata.pose2;
@@ -978,6 +1082,7 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
                 lightcolor[0] = lightcolor[1] = lightcolor[2] = 0.5f;
                 VectorCopy (lightcolor, e->lightcache.ambientcolor);
                 VectorClear (e->lightcache.dlightcolor);
+                VectorClear (e->lightcache.dlightdir);
                 e->lightcache.lightgrid_has_sample = false;
                 e->lightcache.lightgrid_ao = 0.f;
                 VectorClear (e->lightcache.lightgrid_color);
@@ -1027,6 +1132,7 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 
 		MatrixTranspose4x3 (model_matrix, instance->worldmatrix);
 		MatrixTranspose4x3 (prev_model_matrix, instance->prev_worldmatrix);
+		R_BuildAliasNormalMatrix (model_matrix, instance->normalmatrix);
 	}
 
 	VectorCopy (lerpdata.origin, e->motion_blur_prev_origin);
@@ -1036,6 +1142,9 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 
         VectorCopy (lightcolor, instance->lightcolor);
         VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
+        VectorCopy (e->lightcache.dlightdir, instance->dlightdir);
+        instance->_pad0 = 0.f;
+        instance->_pad1 = 0.f;
         instance->alpha = entalpha;
         if (e == &cl.viewent)
                 instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;

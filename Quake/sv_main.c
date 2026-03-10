@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
+#include "bot_main.h"
 
 server_t	sv;
 server_static_t	svs;
@@ -179,6 +180,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_autosave_interval);
 
 	Cmd_AddCommand ("sv_protocol", &SV_Protocol_f); //johnfitz
+	Bot_Init ();
 
 	for (i=0 ; i<MAX_MODELS ; i++)
 		sprintf (localmodels[i], "*%i", i);
@@ -389,6 +391,8 @@ CLIENT SPAWNING
 
 static qboolean SV_IsLocalClient (client_t *client)
 {
+	if (!client || !client->netconnection || client->isbot)
+		return true;
 	return Q_strcmp (NET_QSocketGetAddressString (client->netconnection), "LOCAL") == 0;
 }
 
@@ -1183,12 +1187,15 @@ qboolean SV_SendClientDatagram (client_t *client)
 	byte		buf[MAX_DATAGRAM];
 	sizebuf_t	msg;
 
+	if (!client->netconnection || client->isbot)
+		return false;
+
 	msg.data = buf;
 	msg.maxsize = sizeof(buf);
 	msg.cursize = 0;
 
 	//johnfitz -- if client is nonlocal, use smaller max size so packets aren't fragmented
-	if (Q_strcmp(NET_QSocketGetAddressString(client->netconnection), "LOCAL") != 0)
+	if (!SV_IsLocalClient (client))
 		msg.maxsize = DATAGRAM_MTU;
 	//johnfitz
 
@@ -1314,7 +1321,7 @@ void SV_UpdateToReliableMessages (void)
 		{
 			for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
 			{
-				if (!client->active)
+				if (!client->active || client->isbot)
 					continue;
 				MSG_WriteByte (&client->message, svc_updatefrags);
 				MSG_WriteByte (&client->message, i);
@@ -1327,7 +1334,7 @@ void SV_UpdateToReliableMessages (void)
 
 	for (j=0, client = svs.clients ; j<svs.maxclients ; j++, client++)
 	{
-		if (!client->active)
+		if (!client->active || client->isbot)
 			continue;
 		SV_WriteStats (client);
 		SV_WriteUnderwaterOverride (client);
@@ -1350,6 +1357,9 @@ void SV_SendNop (client_t *client)
 {
 	sizebuf_t	msg;
 	byte		buf[4];
+
+	if (!client->netconnection || client->isbot)
+		return;
 
 	msg.data = buf;
 	msg.maxsize = sizeof(buf);
@@ -1379,6 +1389,11 @@ void SV_SendClientMessages (void)
 	{
 		if (!host_client->active)
 			continue;
+		if (host_client->isbot)
+		{
+			SZ_Clear (&host_client->message);
+			continue;
+		}
 
 		if (host_client->spawned)
 		{
@@ -2070,13 +2085,18 @@ void SV_SpawnServer (const char *server)
 	//johnfitz
 
 // send serverinfo to all connected clients
+	Bot_OnServerSpawnedMap ();
+
 	for (i=0,host_client = svs.clients ; i<svs.maxclients ; i++, host_client++)
 		if (host_client->active)
+		{
+			if (host_client->isbot)
+				continue;
 			SV_SendServerinfo (host_client);
+		}
 
 	Con_DPrintf ("Server spawned.\n");
 
 	if (sv.mapchecks.active)
 		SV_PrintMapChecklist ();
 }
-

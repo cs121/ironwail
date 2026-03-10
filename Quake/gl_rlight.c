@@ -39,10 +39,33 @@ extern cvar_t r_rgblighting_enable;
 cvar_t r_debug_itemlight = { "r_debug_itemlight", "0", CVAR_NONE };
 cvar_t r_minlight_models = { "r_minlight_models", "0.02", CVAR_ARCHIVE };
 cvar_t r_model_lightgrid = { "r_model_lightgrid", "1", CVAR_ARCHIVE };
+cvar_t r_model_light_multisample = { "r_model_light_multisample", "0", CVAR_ARCHIVE };
+cvar_t r_model_light_smooth = { "r_model_light_smooth", "0", CVAR_ARCHIVE };
+cvar_t r_dlight_models_directional = { "r_dlight_models_directional", "0", CVAR_ARCHIVE };
+cvar_t r_model_lightgrid_assist = { "r_model_lightgrid_assist", "0", CVAR_ARCHIVE };
+cvar_t r_model_lightgrid_assist_threshold = { "r_model_lightgrid_assist_threshold", "0.03", CVAR_ARCHIVE };
+cvar_t r_bmodel_relight = { "r_bmodel_relight", "0", CVAR_ARCHIVE };
+cvar_t r_model_light_stats = { "r_model_light_stats", "0", CVAR_NONE };
+cvar_t r_model_light_samples_max = { "r_model_light_samples_max", "1024", CVAR_ARCHIVE };
 
 gpulightbuffer_t r_lightbuffer;
 float r_lightstyle_framefrac;
 dlight_t *r_dlight_sources[DLIGHT_GPU_MAX];
+
+typedef struct model_light_stats_s {
+	int frame;
+	int entities;
+	int multisample_entities;
+	int budget_fallback_entities;
+	int total_samples;
+	double total_ms;
+} model_light_stats_t;
+
+static model_light_stats_t r_model_light_frame_stats = {
+	-1, 0, 0, 0, 0, 0.0
+};
+
+const vec3_t *R_GetDynamicLightTemperature (int type);
 
 static qboolean R_IsFinite (float v)
 {
@@ -51,6 +74,209 @@ static qboolean R_IsFinite (float v)
 #else
         return isfinite(v);
 #endif
+}
+
+static float R_ModelLightLuma (const vec3_t color)
+{
+	return color[0] * 0.2126f + color[1] * 0.7152f + color[2] * 0.0722f;
+}
+
+static void R_EvaluateDLightForRender (const dlight_t *l, float *out_radius, vec3_t out_color)
+{
+	float radius;
+	float radius_scale = 1.f;
+	float energy_scale = 1.f;
+	const vec3_t *temp;
+
+	if (!l)
+	{
+		if (out_radius)
+			*out_radius = 0.f;
+		VectorClear (out_color);
+		return;
+	}
+
+	if (CL_DlightShouldFlickerRadius (l))
+		radius = l->baseradius * (1.f + 0.1f * (float)sin (cl.time * 9.0 + l->flicker_seed));
+	else
+		radius = l->baseradius;
+
+	switch (l->type)
+	{
+	case DLIGHT_DEFAULT:
+		radius_scale = 1.55f;
+		energy_scale = 1.70f;
+		break;
+	case DLIGHT_LAVA:
+		radius_scale = 1.45f;
+		energy_scale = 1.45f;
+		break;
+	case DLIGHT_TORCH:
+		radius_scale = 1.25f;
+		energy_scale = 1.20f;
+		break;
+	case DLIGHT_TELEPORT:
+		radius_scale = 1.30f;
+		energy_scale = 1.25f;
+		break;
+	case DLIGHT_LIGHTNING:
+		radius_scale = 1.20f;
+		energy_scale = 1.15f;
+		break;
+	default:
+		break;
+	}
+
+	radius = q_max (radius * radius_scale, 0.f);
+	temp = R_GetDynamicLightTemperature (l->type);
+	out_color[0] = l->color[0] * (*temp)[0] * energy_scale;
+	out_color[1] = l->color[1] * (*temp)[1] * energy_scale;
+	out_color[2] = l->color[2] * (*temp)[2] * energy_scale;
+
+	if (CL_DlightShouldFlickerColor (l))
+	{
+		float flicker = 1.f + (float)sin (cl.time * 15.0 + l->key) * 0.1f;
+		out_color[0] *= flicker;
+		out_color[1] *= flicker;
+		out_color[2] *= flicker;
+	}
+	if (l->type == DLIGHT_TORCH)
+	{
+		float colorshift = (float)sin (cl.time * 11.0 + l->key) * 0.1f;
+		out_color[0] *= 1.0f + colorshift;
+		out_color[1] *= 1.0f - colorshift;
+	}
+
+	if (out_radius)
+		*out_radius = radius;
+}
+
+static void R_ModelLightStats_NewFrame (void)
+{
+	const int frame = r_framecount;
+
+	if (r_model_light_frame_stats.frame == frame)
+		return;
+
+	if (r_model_light_frame_stats.frame >= 0 && r_model_light_stats.value > 0.f)
+	{
+		const int interval = r_model_light_stats.value >= 2.f ? 1 : 30;
+		if ((r_model_light_frame_stats.frame % interval) == 0)
+		{
+			Con_Printf ("r_model_light_stats: frame=%d entities=%d multisample=%d budget_fallback=%d samples=%d cpu_ms=%.3f\n",
+				r_model_light_frame_stats.frame,
+				r_model_light_frame_stats.entities,
+				r_model_light_frame_stats.multisample_entities,
+				r_model_light_frame_stats.budget_fallback_entities,
+				r_model_light_frame_stats.total_samples,
+				r_model_light_frame_stats.total_ms);
+		}
+	}
+
+	r_model_light_frame_stats.frame = frame;
+	r_model_light_frame_stats.entities = 0;
+	r_model_light_frame_stats.multisample_entities = 0;
+	r_model_light_frame_stats.budget_fallback_entities = 0;
+	r_model_light_frame_stats.total_samples = 0;
+	r_model_light_frame_stats.total_ms = 0.0;
+}
+
+static qboolean R_ModelLightWouldExceedBudget (int requested_samples)
+{
+	const int max_samples = (int)r_model_light_samples_max.value;
+
+	if (requested_samples <= 0 || max_samples <= 0)
+		return false;
+
+	return (r_model_light_frame_stats.total_samples + requested_samples) > max_samples;
+}
+
+static void R_ModelLightStats_AddCall (int sample_count, qboolean used_multisample, qboolean budget_fallback, double elapsed_ms)
+{
+	R_ModelLightStats_NewFrame ();
+	r_model_light_frame_stats.entities++;
+	if (used_multisample)
+		r_model_light_frame_stats.multisample_entities++;
+	if (budget_fallback)
+		r_model_light_frame_stats.budget_fallback_entities++;
+	if (sample_count > 0)
+		r_model_light_frame_stats.total_samples += sample_count;
+	if (elapsed_ms > 0.0)
+		r_model_light_frame_stats.total_ms += elapsed_ms;
+}
+
+static void R_AccumulateEntityDLightsArray (const dlight_t *const *lights, int count, const vec3_t pos, vec3_t lightcolor, vec3_t out_dir)
+{
+	vec3_t dir_accum = {0.f, 0.f, 0.f};
+	float dir_weight_sum = 0.f;
+
+	for (int i = 0; i < count; i++)
+	{
+		const dlight_t *l = lights[i];
+		vec3_t dist;
+		float add;
+		float dist_len;
+		vec3_t contrib;
+		float radius;
+		vec3_t eval_color;
+
+		if (l->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
+			continue;
+
+		if (!CL_DlightIsActive (l))
+			continue;
+
+		R_EvaluateDLightForRender (l, &radius, eval_color);
+		if (radius <= 0.f)
+			continue;
+
+		VectorSubtract (pos, l->origin, dist);
+		dist_len = VectorLength (dist);
+		add = radius - dist_len;
+
+		if (add <= l->minlight)
+			continue;
+
+		add -= l->minlight;
+		VectorScale (eval_color, add, contrib);
+		VectorAdd (lightcolor, contrib, lightcolor);
+
+		if (out_dir && dist_len > 1e-4f)
+		{
+			vec3_t ldir;
+			const float weight = q_max (R_ModelLightLuma (contrib), 0.f);
+			VectorScale (dist, -1.f / dist_len, ldir);
+			VectorMA (dir_accum, weight, ldir, dir_accum);
+			dir_weight_sum += weight;
+		}
+	}
+
+	if (out_dir)
+	{
+		if (dir_weight_sum > 1e-6f && VectorNormalize (dir_accum) > 1e-6f)
+			VectorCopy (dir_accum, out_dir);
+		else
+			VectorClear (out_dir);
+	}
+}
+
+void R_AccumulateEntityDLights (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
+{
+	int count = 0;
+	const dlight_t *const *active;
+
+	VectorClear (out_color);
+	if (out_dir)
+		VectorClear (out_dir);
+
+	if (!r_dynamic.value)
+		return;
+
+	active = DLightPool_GetActiveList (&count);
+	if (!active || count <= 0)
+		return;
+
+	R_AccumulateEntityDLightsArray (active, count, pos, out_color, out_dir);
 }
 
 
@@ -326,6 +552,7 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 		gpulight_t *out;
 		qboolean cull = false;
 		float radius;
+		vec3_t finalcolor;
 
 		if (!CL_DlightTransientIsLiveAtTime (l, cl.time, NULL))
 			continue;
@@ -333,11 +560,7 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 		if (!CL_DlightIsActive (l))
 			continue;
 
-		if (CL_DlightShouldFlickerRadius (l))
-			radius = l->baseradius * (1.f + 0.1f * (float) sin (cl.time * 9.0 + l->flicker_seed));
-		else
-			radius = l->baseradius;
-		radius = q_max (radius, 0.f);
+		R_EvaluateDLightForRender (l, &radius, finalcolor);
 		l->radius = radius;
 
 		for (j = 0; j < 4; j++)
@@ -354,25 +577,6 @@ static void R_PushDlightArray (dlight_t *const *lights, int count)
 
 		out = &r_lightbuffer.lights[r_framedata.numlights++];
 		r_dlight_sources[r_framedata.numlights - 1] = l;
-		const vec3_t *temp = R_GetDynamicLightTemperature (l->type);
-		float radiusFactor = q_min (1.f, q_max (radius / 350.f, 0.2f));
-		vec3_t finalcolor;
-		finalcolor[0] = l->color[0] * (*temp)[0] * radiusFactor;
-		finalcolor[1] = l->color[1] * (*temp)[1] * radiusFactor;
-		finalcolor[2] = l->color[2] * (*temp)[2] * radiusFactor;
-		if (CL_DlightShouldFlickerColor (l))
-		{
-			float flicker = 1.f + (float)sin (cl.time * 15.0 + l->key) * 0.1f;
-			finalcolor[0] *= flicker;
-			finalcolor[1] *= flicker;
-			finalcolor[2] *= flicker;
-		}
-		if (l->type == DLIGHT_TORCH)
-		{
-			float colorshift = (float)sin (cl.time * 11.0 + l->key) * 0.1f;
-			finalcolor[0] *= 1.0f + colorshift;
-			finalcolor[1] *= 1.0f - colorshift;
-		}
 		out->pos[0]   = l->origin[0];
 		out->pos[1]   = l->origin[1];
 		out->pos[2]   = l->origin[2];
@@ -460,31 +664,6 @@ void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao)
 R_AddDynamicLights_Lightgrid
 ==================
 */
-static void R_AddDynamicLights_LightgridArray (const dlight_t *const *lights, int count, const vec3_t pos, vec3_t lightcolor)
-{
-	for (int i = 0; i < count; i++)
-	{
-		const dlight_t *l = lights[i];
-		vec3_t dist;
-		float add;
-
-		if (l->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
-			continue;
-
-		if (!CL_DlightIsActive (l))
-			continue;
-
-		VectorSubtract (pos, l->origin, dist);
-		add = l->radius - VectorLength (dist);
-
-		if (add <= l->minlight)
-			continue;
-
-		add -= l->minlight;
-		VectorMA (lightcolor, add, l->color, lightcolor);
-	}
-}
-
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
 {
 	if (!r_dynamic.value)
@@ -493,7 +672,7 @@ void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
 	int count = 0;
 	const dlight_t *const *active = DLightPool_GetActiveList (&count);
 	if (active && count > 0)
-		R_AddDynamicLights_LightgridArray (active, count, pos, lightcolor);
+		R_AccumulateEntityDLightsArray (active, count, pos, lightcolor, NULL);
 }
 
 
@@ -832,7 +1011,121 @@ static qboolean R_LightPointNoGrid (qmodel_t *model, vec3_t p, float ofs, lightc
 
         R_ClampSampleColor (out_color);
 
-        return VectorLength (out_color) > 0.f;
+	return VectorLength (out_color) > 0.f;
+}
+
+typedef struct entity_static_sample_s {
+	vec3_t color255;
+	vec3_t lightgrid_effective;
+	qboolean valid;
+	qboolean used_lightgrid;
+	qboolean lightgrid_valid;
+	qboolean used_lightpoint;
+} entity_static_sample_t;
+
+static float R_SampleIntensity255 (const vec3_t color255)
+{
+	return (color255[0] + color255[1] + color255[2]) * (1.f / (3.f * 255.f));
+}
+
+static qboolean R_ModelLightTryGridSample (entity_t *e, qmodel_t *lightmodel, const vec3_t pos, entity_static_sample_t *sample)
+{
+	const lightgrid_probe_t *probe;
+	vec3_t effective;
+	float threshold;
+	(void)e;
+
+	if (r_model_lightgrid.value <= 0.f || !R_LightgridEnabled ())
+		return false;
+
+	probe = R_GetLightgridSample (pos);
+	if (!probe)
+		return false;
+
+	sample->lightgrid_valid = probe->intensity > 0.f || probe->ao > 0.f;
+	if (!sample->lightgrid_valid)
+		return false;
+
+	VectorScale (probe->rgb, CLAMP (0.f, probe->ao, 1.f), effective);
+
+	threshold = CLAMP (0.f, r_model_lightgrid_assist_threshold.value, 1.f);
+	if (r_model_lightgrid_assist.value > 0.f && threshold > 0.f && R_ModelLightLuma (effective) < threshold)
+	{
+		static const vec3_t neighbor_offsets[] = {
+			{ 8.f, 0.f, 0.f }, { -8.f, 0.f, 0.f }, { 0.f, 8.f, 0.f }, { 0.f, -8.f, 0.f }, { 0.f, 0.f, 8.f }, { 0.f, 0.f, -8.f }
+		};
+		vec3_t accum;
+		float weight = 1.f;
+
+		VectorCopy (effective, accum);
+
+		for (int i = 0; i < (int)countof (neighbor_offsets); i++)
+		{
+			vec3_t test_pos;
+			const lightgrid_probe_t *neighbor;
+			float neighbor_ao;
+			vec3_t neighbor_effective;
+
+			VectorAdd (pos, neighbor_offsets[i], test_pos);
+			neighbor = R_GetLightgridSample (test_pos);
+			if (!neighbor)
+				continue;
+
+			neighbor_ao = CLAMP (0.f, neighbor->ao, 1.f);
+			if (neighbor->intensity <= 0.f && neighbor_ao <= 0.f)
+				continue;
+
+			VectorScale (neighbor->rgb, neighbor_ao, neighbor_effective);
+			VectorAdd (accum, neighbor_effective, accum);
+			weight += 1.f;
+		}
+
+		VectorScale (accum, 1.f / weight, effective);
+
+		if (R_ModelLightLuma (effective) < threshold && lightmodel)
+		{
+			vec3_t point255;
+			lightcache_t temp_cache = {0};
+			vec3_t point_pos;
+			VectorCopy (pos, point_pos);
+			if (R_LightPointNoGrid (lightmodel, point_pos, 0.f, &temp_cache, point255))
+			{
+				const float assist = CLAMP (0.f, (threshold - R_ModelLightLuma (effective)) / q_max (threshold, 0.001f), 1.f) * 0.5f;
+				vec3_t grid255;
+				VectorScale (effective, 255.f, grid255);
+				VectorLerp (grid255, point255, assist, sample->color255);
+				VectorScale (sample->color255, 1.f / 255.f, effective);
+			}
+		}
+	}
+
+	if (!sample->color255[0] && !sample->color255[1] && !sample->color255[2])
+		VectorScale (effective, 255.f, sample->color255);
+	VectorCopy (effective, sample->lightgrid_effective);
+	sample->used_lightgrid = true;
+	sample->valid = VectorLength (sample->color255) > 0.f;
+	return sample->valid;
+}
+
+static void R_EntityStaticLightSampleAtPoint (entity_t *e, qmodel_t *lightmodel, const vec3_t pos, float ofs, lightcache_t *cache, entity_static_sample_t *sample)
+{
+	memset (sample, 0, sizeof (*sample));
+	VectorClear (sample->color255);
+	VectorClear (sample->lightgrid_effective);
+
+	if (R_ModelLightTryGridSample (e, lightmodel, pos, sample))
+		return;
+
+	if (lightmodel)
+	{
+		vec3_t point_pos;
+		VectorCopy (pos, point_pos);
+		if (R_LightPointNoGrid (lightmodel, point_pos, ofs, cache, sample->color255))
+		{
+			sample->used_lightpoint = true;
+			sample->valid = true;
+		}
+	}
 }
 
 static qboolean R_SampleLightmapAtPointInternal(const vec3_t pos, vec3_t out_rgb, vec3_t out_dir, qboolean want_dir)
@@ -1168,96 +1461,267 @@ int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache)
 
 qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo_t *info)
 {
-        vec3_t lightgrid_color = {0.f, 0.f, 0.f};
-        vec3_t lightpoint_color = {0.f, 0.f, 0.f};
-        float lightgrid_ao = 1.f;
-        qboolean lightgrid_valid = false;
-        qboolean used_lightgrid = false;
-        qboolean used_lightpoint = false;
-        qboolean used_minlight = false;
+	vec3_t lightgrid_effective = {0.f, 0.f, 0.f};
+	vec3_t lightpoint_color = {0.f, 0.f, 0.f};
+	vec3_t target_color255 = {0.f, 0.f, 0.f};
+	qboolean lightgrid_valid = false;
+	qboolean used_lightgrid = false;
+	qboolean used_lightpoint = false;
+	qboolean used_minlight = false;
+	qboolean used_multisample = false;
+	qboolean budget_fallback = false;
+	int sample_count = 0;
+	double start_time = Sys_DoubleTime ();
+	const qboolean legacy_compatible = (r_model_light_multisample.value <= 0.f && r_model_lightgrid_assist.value <= 0.f);
+	qmodel_t *lightmodel = cl.worldmodel ? cl.worldmodel : e->model;
+	entity_static_light_source_t static_source = ENTITY_STATIC_LIGHT_NONE;
+	float intensity;
 
-        VectorClear (out_color255);
+	R_ModelLightStats_NewFrame ();
+	VectorClear (out_color255);
 
-        if (r_model_lightgrid.value > 0.f && R_LightgridEnabled ())
-        {
-                vec3_t sample_pos;
-                VectorCopy (e->origin, sample_pos);
+	if (legacy_compatible)
+	{
+		float lightgrid_ao = 1.f;
+		vec3_t lightgrid_color = {0.f, 0.f, 0.f};
 
-                for (int attempt = 0; attempt < 2; attempt++)
-                {
-                        const lightgrid_probe_t *probe = R_GetLightgridSample (sample_pos);
-                        if (!probe)
-                                break;
+		sample_count = 1;
 
-                        VectorCopy (probe->rgb, lightgrid_color);
-                        lightgrid_ao = CLAMP (0.f, probe->ao, 1.f);
-                        lightgrid_valid = probe->intensity > 0.f || lightgrid_ao > 0.f;
-                        if (lightgrid_valid || attempt == 1 || !e->model)
-                                break;
+		if (r_model_lightgrid.value > 0.f && R_LightgridEnabled ())
+		{
+			vec3_t sample_pos;
+			VectorCopy (e->origin, sample_pos);
 
-                        float ofs = e->model->maxs[2] * 0.5f;
-                        if (ofs <= 0.f)
-                                break;
-                        sample_pos[2] += ofs;
-                }
+			for (int attempt = 0; attempt < 2; attempt++)
+			{
+				const lightgrid_probe_t *probe = R_GetLightgridSample (sample_pos);
+				if (!probe)
+					break;
 
-                if (lightgrid_valid)
-                {
-                        VectorScale (lightgrid_color, lightgrid_ao * 255.f, out_color255);
-                        used_lightgrid = true;
-                }
-        }
+				VectorCopy (probe->rgb, lightgrid_color);
+				lightgrid_ao = CLAMP (0.f, probe->ao, 1.f);
+				lightgrid_valid = probe->intensity > 0.f || lightgrid_ao > 0.f;
+				if (lightgrid_valid || attempt == 1 || !e->model)
+					break;
 
-        if (!used_lightgrid)
-        {
-                qmodel_t *lightmodel = cl.worldmodel ? cl.worldmodel : e->model;
-                if (lightmodel)
-                {
-                        if (!R_LightPointNoGrid (lightmodel, e->origin, 0.f, &e->lightcache, lightpoint_color))
-                        {
-                                float ofs = e->model ? e->model->maxs[2] * 0.5f : 0.f;
-                                R_LightPointNoGrid (lightmodel, e->origin, ofs, &e->lightcache, lightpoint_color);
-                        }
-                        VectorCopy (lightpoint_color, out_color255);
-                        used_lightpoint = VectorLength (lightpoint_color) > 0.f;
-                }
-        }
+				{
+					float ofs = e->model ? (e->model->maxs[2] - e->model->mins[2]) * 0.5f : 0.f;
+					if (ofs <= 0.f)
+						break;
+					sample_pos[2] += ofs;
+				}
+			}
 
-        float intensity = (out_color255[0] + out_color255[1] + out_color255[2]) * (1.f / (3.f * 255.f));
-        if (intensity <= 0.f && r_minlight_models.value > 0.f && e != &cl.viewent)
-        {
-                const float minlight = CLAMP (0.f, r_minlight_models.value, 1.f);
-                VectorSet (out_color255, minlight * 255.f, minlight * 255.f, minlight * 255.f);
-                intensity = minlight;
-                used_minlight = true;
-        }
+			if (lightgrid_valid)
+			{
+				VectorScale (lightgrid_color, lightgrid_ao * 255.f, out_color255);
+				VectorScale (lightgrid_color, lightgrid_ao, lightgrid_effective);
+				used_lightgrid = true;
+			}
+		}
 
-        e->lightcache.lightgrid_has_sample = lightgrid_valid;
-        e->lightcache.lightgrid_ao = lightgrid_ao;
-        VectorCopy (lightgrid_color, e->lightcache.lightgrid_color);
+		if (!used_lightgrid && lightmodel)
+		{
+			if (!R_LightPointNoGrid (lightmodel, e->origin, 0.f, &e->lightcache, lightpoint_color))
+			{
+				float ofs = e->model ? (e->model->maxs[2] - e->model->mins[2]) * 0.5f : 0.f;
+				R_LightPointNoGrid (lightmodel, e->origin, ofs, &e->lightcache, lightpoint_color);
+			}
+			VectorCopy (lightpoint_color, out_color255);
+			used_lightpoint = VectorLength (lightpoint_color) > 0.f;
+		}
+	}
+	else
+	{
+		vec3_t sample_pos[8];
+		float sample_weight[8];
+		int num_samples = 1;
+		float total_weight = 0.f;
+		vec3_t weighted_color = {0.f, 0.f, 0.f};
+		float grid_weight = 0.f;
+		float point_weight = 0.f;
 
-        if (info)
-        {
-                for (int i = 0; i < 3; i++)
-                {
-                        float L = out_color255[i] * (1.0f / 256.0f);
-                        L = fminf (L, 1.0f);
-                        // Keep entity static_color in linear space. Alias/world
-                        // paths are display-encoded once in postprocess.frag.
-                        info->static_color[i] = L;
-                }
-                info->intensity = intensity;
-                info->used_lightgrid = used_lightgrid;
-                info->lightgrid_valid = lightgrid_valid;
-                info->lightgrid_cell_valid = R_LightgridCellForPoint (e->origin, info->lightgrid_cell);
-                VectorCopy (lightgrid_color, info->lightgrid_color);
-                info->lightgrid_ao = lightgrid_ao;
-                info->used_lightpoint = used_lightpoint;
-                VectorScale (lightpoint_color, 1.f / 255.f, info->lightpoint_color);
-                info->used_minlight = used_minlight;
-        }
+		VectorCopy (e->origin, sample_pos[0]);
+		sample_weight[0] = 1.f;
 
-        return used_lightgrid || used_lightpoint || used_minlight;
+		if (r_model_light_multisample.value > 0.f && e->model)
+		{
+			const float height = q_max (e->model->maxs[2] - e->model->mins[2], 0.f);
+			const float half_extent_x = q_max (fabsf (e->model->mins[0]), fabsf (e->model->maxs[0]));
+			const float half_extent_y = q_max (fabsf (e->model->mins[1]), fabsf (e->model->maxs[1]));
+
+			num_samples = 0;
+			VectorCopy (e->origin, sample_pos[num_samples]);
+			sample_weight[num_samples++] = 0.5f;
+
+			if (height > 1.f)
+			{
+				VectorCopy (e->origin, sample_pos[num_samples]);
+				sample_pos[num_samples][2] += height * 0.25f;
+				sample_weight[num_samples++] = 0.3f;
+
+				VectorCopy (e->origin, sample_pos[num_samples]);
+				sample_pos[num_samples][2] += height * 0.5f;
+				sample_weight[num_samples++] = 0.2f;
+			}
+
+			if ((half_extent_x + half_extent_y) > 48.f)
+			{
+				const float xofs = CLAMP (8.f, half_extent_x * 0.35f, 32.f);
+				const float yofs = CLAMP (8.f, half_extent_y * 0.35f, 32.f);
+
+				VectorCopy (e->origin, sample_pos[num_samples]);
+				sample_pos[num_samples][0] += xofs;
+				sample_weight[num_samples++] = 0.15f;
+
+				VectorCopy (e->origin, sample_pos[num_samples]);
+				sample_pos[num_samples][0] -= xofs;
+				sample_weight[num_samples++] = 0.15f;
+
+				VectorCopy (e->origin, sample_pos[num_samples]);
+				sample_pos[num_samples][1] += yofs;
+				sample_weight[num_samples++] = 0.15f;
+
+				VectorCopy (e->origin, sample_pos[num_samples]);
+				sample_pos[num_samples][1] -= yofs;
+				sample_weight[num_samples++] = 0.15f;
+			}
+
+			used_multisample = num_samples > 1;
+		}
+
+		if (R_ModelLightWouldExceedBudget (num_samples))
+		{
+			num_samples = 1;
+			VectorCopy (e->origin, sample_pos[0]);
+			sample_weight[0] = 1.f;
+			used_multisample = false;
+			budget_fallback = true;
+		}
+
+		for (int i = 0; i < num_samples; i++)
+		{
+			entity_static_sample_t sample;
+			lightcache_t temp_cache = {0};
+			lightcache_t *cache = (i == 0) ? &e->lightcache : &temp_cache;
+			const float ofs = (e->model && i > 0) ? (e->model->maxs[2] - e->model->mins[2]) * 0.5f : 0.f;
+			const float w = sample_weight[i];
+
+			R_EntityStaticLightSampleAtPoint (e, lightmodel, sample_pos[i], ofs, cache, &sample);
+			sample_count++;
+
+			if (!sample.valid)
+				continue;
+
+			VectorMA (weighted_color, w, sample.color255, weighted_color);
+			total_weight += w;
+
+			if (sample.used_lightgrid)
+			{
+				VectorMA (lightgrid_effective, w, sample.lightgrid_effective, lightgrid_effective);
+				grid_weight += w;
+				lightgrid_valid = lightgrid_valid || sample.lightgrid_valid;
+				used_lightgrid = true;
+			}
+
+			if (sample.used_lightpoint)
+			{
+				VectorMA (lightpoint_color, w, sample.color255, lightpoint_color);
+				point_weight += w;
+				used_lightpoint = true;
+			}
+		}
+
+		if (total_weight > 0.f)
+			VectorScale (weighted_color, 1.f / total_weight, out_color255);
+
+		if (grid_weight > 0.f)
+			VectorScale (lightgrid_effective, 1.f / grid_weight, lightgrid_effective);
+
+		if (point_weight > 0.f)
+			VectorScale (lightpoint_color, 1.f / point_weight, lightpoint_color);
+	}
+
+	intensity = R_SampleIntensity255 (out_color255);
+	if (intensity <= 0.f && r_minlight_models.value > 0.f && e != &cl.viewent)
+	{
+		const float minlight = CLAMP (0.f, r_minlight_models.value, 1.f);
+		VectorSet (out_color255, minlight * 255.f, minlight * 255.f, minlight * 255.f);
+		intensity = minlight;
+		used_minlight = true;
+	}
+
+	R_ClampSampleColor (out_color255);
+	VectorCopy (out_color255, target_color255);
+	{
+		const float smooth_alpha = CLAMP (0.f, r_model_light_smooth.value, 1.f);
+		const qboolean hard_reset = e->forcelink || e->lightcache.static_color_smooth_reset;
+
+		if (smooth_alpha > 0.f && !hard_reset && e->lightcache.static_color_smoothed_valid)
+		{
+			if (e->lightcache.static_color_smoothed_frame != r_framecount)
+			{
+				for (int i = 0; i < 3; i++)
+					e->lightcache.static_color_smoothed[i] += (target_color255[i] - e->lightcache.static_color_smoothed[i]) * smooth_alpha;
+			}
+		}
+		else
+		{
+			VectorCopy (target_color255, e->lightcache.static_color_smoothed);
+		}
+
+		e->lightcache.static_color_smoothed_valid = true;
+		e->lightcache.static_color_smoothed_frame = r_framecount;
+		e->lightcache.static_color_smooth_reset = false;
+		R_ClampSampleColor (e->lightcache.static_color_smoothed);
+		VectorCopy (e->lightcache.static_color_smoothed, out_color255);
+	}
+
+	e->lightcache.lightgrid_has_sample = used_lightgrid && lightgrid_valid;
+	e->lightcache.lightgrid_ao = e->lightcache.lightgrid_has_sample ? 1.f : 0.f;
+	if (e->lightcache.lightgrid_has_sample)
+		VectorCopy (lightgrid_effective, e->lightcache.lightgrid_color);
+	else
+		VectorClear (e->lightcache.lightgrid_color);
+
+	if (used_lightgrid && used_lightpoint)
+		static_source = ENTITY_STATIC_LIGHT_MIXED;
+	else if (used_lightgrid)
+		static_source = ENTITY_STATIC_LIGHT_GRID;
+	else if (used_lightpoint)
+		static_source = ENTITY_STATIC_LIGHT_POINT;
+	else if (used_minlight)
+		static_source = ENTITY_STATIC_LIGHT_MINLIGHT;
+
+	if (info)
+	{
+		for (int i = 0; i < 3; i++)
+		{
+			float smoothed = out_color255[i] * (1.0f / 256.0f);
+			float target = target_color255[i] * (1.0f / 256.0f);
+			smoothed = fminf (smoothed, 1.0f);
+			target = fminf (target, 1.0f);
+			info->static_color[i] = smoothed;
+			info->static_target_color[i] = target;
+		}
+		info->intensity = intensity;
+		info->used_lightgrid = used_lightgrid;
+		info->lightgrid_valid = lightgrid_valid;
+		info->lightgrid_cell_valid = R_LightgridCellForPoint (e->origin, info->lightgrid_cell);
+		VectorCopy (e->lightcache.lightgrid_color, info->lightgrid_color);
+		info->lightgrid_ao = e->lightcache.lightgrid_ao;
+		info->used_lightpoint = used_lightpoint;
+		VectorScale (lightpoint_color, 1.f / 255.f, info->lightpoint_color);
+		info->used_minlight = used_minlight;
+		info->used_multisample = used_multisample;
+		info->sample_count = sample_count;
+		info->static_source = static_source;
+		VectorClear (info->dynamic_color);
+		VectorCopy (info->static_color, info->final_color);
+	}
+
+	R_ModelLightStats_AddCall (sample_count > 0 ? sample_count : 1, used_multisample, budget_fallback, (Sys_DoubleTime () - start_time) * 1000.0);
+	return used_lightgrid || used_lightpoint || used_minlight;
 }
 
 const lightgrid_probe_t *R_GetLightgridSample (const vec3_t pos)

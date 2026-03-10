@@ -146,23 +146,25 @@ static float DLightPool_ScoreLight (dlight_t *dl, double time, const vec3_t view
 	influence = radius / q_max (dist, 1.f);
 	lum = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
 
+	/* Under budget pressure, prioritize transient gameplay lights over persistent
+	 * map/entity dlights so muzzle/projectile effects do not disappear. */
 	if (dl->kind == DL_TRANSIENT)
 	{
 		float age = (float)(time - dl->spawn_time);
-		float boost = 1.f - age * 0.5f;
-		boost = CLAMP (0.5f, boost, 1.f);
-		bias *= boost;
+		float freshness = 1.f - age * 0.35f;
+		freshness = CLAMP (0.65f, freshness, 1.0f);
+		bias *= 1.45f * freshness;
 	}
 	else
 	{
-		bias *= 1.05f;
+		bias *= 0.75f;
 	}
 
-	/* Keep gameplay-critical transient lights (rocket/plasma/explosion) visible
-	 * under budget pressure. Without this, torch/entity lights can crowd out
-	 * projectile lights, causing intermittent "missing rocket light". */
 	switch (dl->type)
 	{
+	case DLIGHT_DEFAULT:
+		bias *= 1.30f;
+		break;
 	case DLIGHT_ROCKET:
 		bias *= 1.9f;
 		break;
@@ -172,8 +174,14 @@ static float DLightPool_ScoreLight (dlight_t *dl, double time, const vec3_t view
 	case DLIGHT_PLASMA:
 		bias *= 1.5f;
 		break;
+	case DLIGHT_LIGHTNING:
+		bias *= 1.35f;
+		break;
+	case DLIGHT_LAVA:
+		bias *= 1.45f;
+		break;
 	case DLIGHT_TORCH:
-		bias *= 0.9f;
+		bias *= 0.85f;
 		break;
 	default:
 		break;
@@ -195,6 +203,29 @@ static qboolean DLightPool_IsBetterScore (const dlight_t *candidate, const dligh
 	if (candidate->id < current->id)
 		return true;
 	return false;
+}
+
+static void DLightPool_InsertScored (dlight_t **dst, int *count, int max_count, dlight_t *dl)
+{
+	int insert_at;
+
+	if (!dst || !count || max_count <= 0 || !dl)
+		return;
+
+	if (*count < max_count)
+	{
+		insert_at = *count;
+		while (insert_at > 0 && DLightPool_IsBetterScore (dl, dst[insert_at - 1]))
+		{
+			dst[insert_at] = dst[insert_at - 1];
+			insert_at--;
+		}
+		dst[insert_at] = dl;
+		(*count)++;
+		return;
+	}
+
+	/* Caller decides replacement policy when full. */
 }
 
 static dlight_t *DLightPool_EvictWorstTransient (double time)
@@ -452,58 +483,62 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 	}
 
 	int selected = 0;
-	for (int i = 0; i < dlight_pool.capacity; i++)
+	for (int pass = 0; pass < 2; pass++)
 	{
-		if (selected >= max_scratch)
-			break;
-
-		dlight_t *dl = &dlight_pool.items[i];
-		if (!dl->active)
-			continue;
-
-		if (dl->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
-			continue;
-
-		qboolean expired = false;
-		if (!CL_DlightTransientIsLiveAtTime (dl, time, &expired))
+		for (int i = 0; i < dlight_pool.capacity; i++)
 		{
-			if (expired)
+			dlight_t *dl;
+			qboolean expired = false;
+
+			if (selected >= max_scratch && pass != 0)
+				break;
+
+			dl = &dlight_pool.items[i];
+			if (!dl->active)
+				continue;
+
+			/* Pass 0: reserve budget for transient/gameplay lights first.
+			 * Pass 1: fill leftover budget with persistent lights. */
+			if (pass == 0 && dl->kind != DL_TRANSIENT)
+				continue;
+			if (pass == 1 && dl->kind == DL_TRANSIENT)
+				continue;
+
+			if (dl->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
+				continue;
+
+			if (!CL_DlightTransientIsLiveAtTime (dl, time, &expired))
 			{
-				dlight_pool.stats.expired++;
-				dl->active = false;
+				if (expired)
+				{
+					dlight_pool.stats.expired++;
+					dl->active = false;
+				}
+				continue;
 			}
-			continue;
-		}
 
-		if (!dl->baseradius)
-			continue;
+			if (!dl->baseradius)
+				continue;
 
-		if (dl->color[0] <= 0.f && dl->color[1] <= 0.f && dl->color[2] <= 0.f)
-			continue;
+			if (dl->color[0] <= 0.f && dl->color[1] <= 0.f && dl->color[2] <= 0.f)
+				continue;
 
-		dl->last_score = DLightPool_ScoreLight (dl, time, vieworg);
+			dl->last_score = DLightPool_ScoreLight (dl, time, vieworg);
 
-		if (selected < selection_max)
-		{
-			/* Keep the top-N lights in-place via insertion ordering; this avoids full-array sort work. */
-			int insert_at = selected;
-			while (insert_at > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[insert_at - 1]))
+			if (selected < selection_max)
 			{
-				dlight_pool.scratch[insert_at] = dlight_pool.scratch[insert_at - 1];
-				insert_at--;
+				DLightPool_InsertScored (dlight_pool.scratch, &selected, selection_max, dl);
 			}
-			dlight_pool.scratch[insert_at] = dl;
-			selected++;
-		}
-		else if (selected > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[selected - 1]))
-		{
-			int insert_at = selected - 1;
-			while (insert_at > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[insert_at - 1]))
+			else if (pass == 0 && selected > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[selected - 1]))
 			{
-				dlight_pool.scratch[insert_at] = dlight_pool.scratch[insert_at - 1];
-				insert_at--;
+				int insert_at = selected - 1;
+				while (insert_at > 0 && DLightPool_IsBetterScore (dl, dlight_pool.scratch[insert_at - 1]))
+				{
+					dlight_pool.scratch[insert_at] = dlight_pool.scratch[insert_at - 1];
+					insert_at--;
+				}
+				dlight_pool.scratch[insert_at] = dl;
 			}
-			dlight_pool.scratch[insert_at] = dl;
 		}
 	}
 

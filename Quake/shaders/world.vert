@@ -157,6 +157,7 @@ layout(location=13) out vec3 out_normal;
 layout(location=14) out vec3 out_lightgrid;
 layout(location=15) flat out vec4 out_stage_color;
 layout(location=16) flat out uint out_tcgen;
+layout(location=17) flat out vec3 out_bmodel_relight;
 
 vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 {
@@ -211,6 +212,7 @@ void main()
 	// consistent results. normalize() still required — non-uniform scale possible.
 	out_normal    = normalize(world_normal);
 	out_lightgrid = in_lightgrid;
+	out_bmodel_relight = vec3(instance.pad0, instance.pad1, instance.pad2);
 
 	// UV selection
 	vec2 uv = in_uv.xy;

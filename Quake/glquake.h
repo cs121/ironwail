@@ -623,12 +623,21 @@ qboolean R_SampleLightmapAndDeluxemapAtPoint(const vec3_t pos, vec3_t out_rgb, v
 qboolean R_LightgridEnabled (void);
 void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao);
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
+void R_AccumulateEntityDLights (const vec3_t pos, vec3_t out_color, vec3_t out_dir);
 
 extern cvar_t r_debug_itemlight;
 extern cvar_t r_minlight_models;
 extern cvar_t r_viewmodel_light_boost;
 extern cvar_t r_viewmodel_minlight;
 extern cvar_t r_model_lightgrid;
+extern cvar_t r_model_light_multisample;
+extern cvar_t r_model_light_smooth;
+extern cvar_t r_dlight_models_directional;
+extern cvar_t r_model_lightgrid_assist;
+extern cvar_t r_model_lightgrid_assist_threshold;
+extern cvar_t r_bmodel_relight;
+extern cvar_t r_model_light_stats;
+extern cvar_t r_model_light_samples_max;
 
 #define WORLDSHADER_SOLID		0
 #define WORLDSHADER_ALPHATEST	1

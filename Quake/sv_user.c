@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_user.c -- server code for moving users
 
 #include "quakedef.h"
+#include "bot_main.h"
 
 edict_t	*sv_player;
 
@@ -626,7 +627,11 @@ void SV_RunClients (void)
 
 		sv_player = host_client->edict;
 
-		if (!SV_ReadClientMessage ())
+		if (host_client->isbot)
+		{
+			Bot_RunFrameForClient (host_client);
+		}
+		else if (!SV_ReadClientMessage ())
 		{
 			SV_DropClient (false);	// client misbehaved...
 			continue;
@@ -644,4 +649,3 @@ void SV_RunClients (void)
 			SV_ClientThink ();
 	}
 }
-

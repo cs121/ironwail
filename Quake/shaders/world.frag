@@ -151,6 +151,7 @@ layout(location=13) in vec3 in_normal;
 layout(location=14) in vec3 in_lightgrid;
 layout(location=15) flat in vec4 in_stage_color;
 layout(location=16) flat in uint in_tcgen;
+layout(location=17) flat in vec3 in_bmodel_relight;
 
 // Utility: ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -619,7 +620,7 @@ void main()
 		}
 
 		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
-		vec3 total_light    = clamped_static * lightgrid;
+		vec3 total_light    = clamped_static * lightgrid + in_bmodel_relight;
 
 		// Dynamic lights
 		if (!additive_dlights && NumLights > 0u)
@@ -722,8 +723,14 @@ void main()
 
 	// Apply lightmap to albedo
 #if MODE != 1
+	// Fallback for bmodels without baked lightmaps: CPU fills in_bmodel_relight with
+	// sampled static world lighting (0..1). This avoids black pickup boxes.
+	if ((in_flags & CF_NOLIGHTMAP) != 0u && dot(in_bmodel_relight, in_bmodel_relight) > 1e-6)
+		total_lightmap = clamp(in_bmodel_relight * Overbright, 0.0, Overbright);
 	result.rgb = mix(result.rgb, result.rgb * total_lightmap, result.a);
 #else
+	if ((in_flags & CF_NOLIGHTMAP) != 0u && dot(in_bmodel_relight, in_bmodel_relight) > 1e-6)
+		total_lightmap = clamp(in_bmodel_relight * Overbright, 0.0, Overbright);
 	result.rgb *= total_lightmap;
 #endif
 

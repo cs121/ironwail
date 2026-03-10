@@ -129,6 +129,7 @@ enum sendsignon_e
 typedef struct client_s
 {
 	qboolean		active;				// false = client is free
+	qboolean		isbot;				// synthetic local bot client
 	qboolean		spawned;			// false = don't send datagrams
 	qboolean		dropasap;			// has been told to go to another level
 	enum sendsignon_e	sendsignon;			// only valid before spawned

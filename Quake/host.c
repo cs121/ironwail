@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // host.c -- coordinates spawning and killing of local servers
 
 #include "quakedef.h"
+#include "bot_main.h"
 #include "bgmusic.h"
 #include "steam.h"
 #include <setjmp.h>
@@ -573,7 +574,7 @@ void SV_DropClient (qboolean crash)
 	if (!crash)
 	{
 		// send any final messages (don't check for errors)
-		if (NET_CanSendMessage (host_client->netconnection))
+		if (!host_client->isbot && NET_CanSendMessage (host_client->netconnection))
 		{
 			MSG_WriteByte (&host_client->message, svc_disconnect);
 			NET_SendMessage (host_client->netconnection, &host_client->message);
@@ -600,12 +601,13 @@ void SV_DropClient (qboolean crash)
 // break the net connection
 	NET_Close (host_client->netconnection);
 	host_client->netconnection = NULL;
+	Bot_OnClientDropped (host_client);
 
 // free the client (the body stays around)
 	host_client->active = false;
 	host_client->name[0] = 0;
 	host_client->old_frags = -999999;
-	net_activeconnections--;
+	net_activeconnections = q_max (0, net_activeconnections - 1);
 
 // send notification to all clients
 	for (i = 0, client = svs.clients; i < svs.maxclients; i++, client++)
@@ -657,6 +659,12 @@ void Host_ShutdownServer(qboolean crash)
 		{
 			if (host_client->active && host_client->message.cursize)
 			{
+				if (host_client->isbot || !host_client->netconnection)
+				{
+					SZ_Clear (&host_client->message);
+					continue;
+				}
+
 				if (NET_CanSendMessage (host_client->netconnection))
 				{
 					NET_SendMessage(host_client->netconnection, &host_client->message);
@@ -689,6 +697,7 @@ void Host_ShutdownServer(qboolean crash)
 			SV_DropClient(crash);
 
 	PR_SwitchQCVM(NULL);
+	Bot_Shutdown ();
 
 //
 // clear structures
