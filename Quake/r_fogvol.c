@@ -202,10 +202,6 @@ cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
  * raymarch local lights to avoid double-lighting. */
 cvar_t r_fogvol_lighting_mode = { "r_fogvol_lighting_mode", "2", CVAR_ARCHIVE };
 cvar_t r_fogvol_lightgrid = { "r_fogvol_lightgrid", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_autotint = { "r_fogvol_autotint", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_autotint_strength = { "r_fogvol_autotint_strength", "0.35", CVAR_ARCHIVE };
-cvar_t r_fogvol_autotint_min_luma = { "r_fogvol_autotint_min_luma", "0.05", CVAR_ARCHIVE };
-cvar_t r_fogvol_autotint_screenprobe = { "r_fogvol_autotint_screenprobe", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
 cvar_t r_fogvol_dlightscale = { "r_fogvol_dlightscale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_stats = { "r_fogvol_light_stats", "0", CVAR_NONE };
@@ -306,10 +302,6 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_light, "lighting", "0"},
 	{&r_fogvol_lighting_mode, "lighting", "2"},
 	{&r_fogvol_lightgrid, "lighting", "1"},
-	{&r_fogvol_autotint, "lighting", "1"},
-	{&r_fogvol_autotint_strength, "lighting", "0.35"},
-	{&r_fogvol_autotint_min_luma, "lighting", "0.05"},
-	{&r_fogvol_autotint_screenprobe, "lighting", "1"},
 	{&r_fogvol_light_max, "lighting", "16"},
 	{&r_fogvol_dlightscale, "lighting", "1"},
 	{&r_fogvol_light_stats, "debug", "0"},
@@ -497,8 +489,6 @@ static int r_fogvol_history_height = 0;
 static qboolean r_fogvol_composite_valid = false;
 static int r_fogvol_alpha_extreme_streak = 0;
 static int r_fogvol_alpha_extreme_last_frame = -1;
-static vec3_t r_fogvol_screen_probe_rgb = {1.f, 1.f, 1.f};
-static qboolean r_fogvol_screen_probe_valid = false;
 
 static const vec3_t r_fogvol_corner_lut[8] = {
 	{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f, 0.f},
@@ -516,8 +506,6 @@ void R_FogVol_ClearHistory (void)
 	r_fogvol_godray_mask_tex = 0;
 	r_fogvol_godray_source_tex = 0;
 	r_fogvol_godray_ready = false;
-	r_fogvol_screen_probe_valid = false;
-	VectorSet (r_fogvol_screen_probe_rgb, 1.f, 1.f, 1.f);
 	R_Froxel_ResetResources ();
 
 	if (!framebufs.fogvol.history_fbo[0] || !framebufs.fogvol.history_fbo[1])
@@ -737,7 +725,8 @@ static void R_FogVol_DebugCheckCompositeAlphaDynamics (int fog_width, int fog_he
 	GLint prev_read_fbo = 0;
 	GLint prev_read_buf = 0;
 
-	if (r_fogvol_debug.value <= 0.f && developer.value <= 0.f)
+	/* PERF: This readback is only for explicit fogvol debugging. */
+	if (r_fogvol_debug.value <= 0.f)
 		return;
 
 	if (!r_fogvol_composite_valid || fog_width <= 0 || fog_height <= 0)
@@ -1431,238 +1420,6 @@ static float R_FogVol_SRGBToLinear (float c)
 	if (c <= 0.04045f)
 		return c / 12.92f;
 	return powf ((c + 0.055f) / 1.055f, 2.4f);
-}
-
-static float R_FogVol_Luminance (const vec3_t color)
-{
-	return color[0] * 0.2126f + color[1] * 0.7152f + color[2] * 0.0722f;
-}
-
-static void R_FogVol_ToChroma (const vec3_t color, float min_luma, vec3_t out_chroma)
-{
-	float denom = q_max (min_luma, R_FogVol_Luminance (color));
-	if (denom <= 1e-6f)
-	{
-		VectorSet (out_chroma, 1.f, 1.f, 1.f);
-		return;
-	}
-
-	out_chroma[0] = CLAMP (0.f, color[0] / denom, 4.f);
-	out_chroma[1] = CLAMP (0.f, color[1] / denom, 4.f);
-	out_chroma[2] = CLAMP (0.f, color[2] / denom, 4.f);
-}
-
-static qboolean R_FogVol_SampleScreenProbeRaw (vec3_t out_rgb)
-{
-	float pixels[3 * 3 * 4];
-	int width;
-	int height;
-	int cx;
-	int cy;
-	int x0, x1, y0, y1;
-	int rw, rh;
-	int pixel_count;
-	float accum[3] = {0.f, 0.f, 0.f};
-	GLint prev_read_fbo = 0;
-	GLint prev_read_buf = 0;
-	GLint prev_pack_alignment = 4;
-
-	if (!out_rgb)
-		return false;
-	if (framebufs.composite.fbo == 0 || framebufs.composite.color_tex == 0)
-		return false;
-
-	width = glwidth;
-	height = glheight;
-	if (width <= 0 || height <= 0)
-		return false;
-
-	cx = CLAMP (0, width / 2, width - 1);
-	cy = CLAMP (0, height / 2, height - 1);
-	x0 = CLAMP (0, cx - 1, width - 1);
-	x1 = CLAMP (0, cx + 1, width - 1);
-	y0 = CLAMP (0, cy - 1, height - 1);
-	y1 = CLAMP (0, cy + 1, height - 1);
-	rw = x1 - x0 + 1;
-	rh = y1 - y0 + 1;
-	pixel_count = rw * rh;
-	if (rw <= 0 || rh <= 0 || pixel_count <= 0 || pixel_count > 9)
-		return false;
-
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &prev_read_fbo);
-	glGetIntegerv (GL_READ_BUFFER, &prev_read_buf);
-	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment);
-
-	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
-	glReadBuffer (GL_COLOR_ATTACHMENT0);
-	glPixelStorei (GL_PACK_ALIGNMENT, 1);
-	glReadPixels (x0, y0, rw, rh, GL_RGBA, GL_FLOAT, pixels);
-
-	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, (GLuint)prev_read_fbo);
-	glReadBuffer ((GLenum)prev_read_buf);
-	glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
-
-	for (int i = 0; i < pixel_count; ++i)
-	{
-		accum[0] += q_max (0.f, pixels[i * 4 + 0]);
-		accum[1] += q_max (0.f, pixels[i * 4 + 1]);
-		accum[2] += q_max (0.f, pixels[i * 4 + 2]);
-	}
-
-	out_rgb[0] = accum[0] / (float)pixel_count;
-	out_rgb[1] = accum[1] / (float)pixel_count;
-	out_rgb[2] = accum[2] / (float)pixel_count;
-	return R_FogVol_Luminance (out_rgb) > 1e-5f;
-}
-
-static qboolean R_FogVol_UpdateScreenProbe (vec3_t out_rgb)
-{
-	vec3_t sampled;
-
-	if (!out_rgb)
-		return false;
-
-	if (r_fogvol_autotint_screenprobe.value <= 0.f)
-	{
-		r_fogvol_screen_probe_valid = false;
-		VectorSet (r_fogvol_screen_probe_rgb, 1.f, 1.f, 1.f);
-		return false;
-	}
-
-	if (R_FogVol_SampleScreenProbeRaw (sampled))
-	{
-		const float alpha = 0.2f;
-		if (!r_fogvol_screen_probe_valid)
-			VectorCopy (sampled, r_fogvol_screen_probe_rgb);
-		else
-		{
-			r_fogvol_screen_probe_rgb[0] = (1.f - alpha) * r_fogvol_screen_probe_rgb[0] + alpha * sampled[0];
-			r_fogvol_screen_probe_rgb[1] = (1.f - alpha) * r_fogvol_screen_probe_rgb[1] + alpha * sampled[1];
-			r_fogvol_screen_probe_rgb[2] = (1.f - alpha) * r_fogvol_screen_probe_rgb[2] + alpha * sampled[2];
-		}
-		r_fogvol_screen_probe_valid = true;
-	}
-
-	if (!r_fogvol_screen_probe_valid)
-		return false;
-
-	VectorCopy (r_fogvol_screen_probe_rgb, out_rgb);
-	return true;
-}
-
-static qboolean R_FogVol_TrySampleVolumeLightgridTint (const fog_volume_t *volume, vec3_t out_rgb)
-{
-	vec3_t bmins;
-	vec3_t bmaxs;
-	vec3_t accum = {0.f, 0.f, 0.f};
-	int valid_samples = 0;
-
-	if (!volume || !out_rgb)
-		return false;
-
-	R_FogVol_GetVolumeBounds (volume, bmins, bmaxs);
-	for (int c = 0; c < 8; ++c)
-	{
-		vec3_t probe_pos;
-		const lightgrid_probe_t *probe;
-		probe_pos[0] = bmins[0] + (bmaxs[0] - bmins[0]) * r_fogvol_corner_lut[c][0];
-		probe_pos[1] = bmins[1] + (bmaxs[1] - bmins[1]) * r_fogvol_corner_lut[c][1];
-		probe_pos[2] = bmins[2] + (bmaxs[2] - bmins[2]) * r_fogvol_corner_lut[c][2];
-		probe = R_GetLightgridSample (probe_pos);
-		if (!probe)
-			continue;
-
-		if (probe->rgb[0] * probe->ao <= 1e-5f &&
-			probe->rgb[1] * probe->ao <= 1e-5f &&
-			probe->rgb[2] * probe->ao <= 1e-5f)
-			continue;
-
-		accum[0] += q_max (0.f, probe->rgb[0] * probe->ao);
-		accum[1] += q_max (0.f, probe->rgb[1] * probe->ao);
-		accum[2] += q_max (0.f, probe->rgb[2] * probe->ao);
-		valid_samples++;
-	}
-
-	{
-		vec3_t probe_pos;
-		const lightgrid_probe_t *probe;
-		probe_pos[0] = 0.5f * (bmins[0] + bmaxs[0]);
-		probe_pos[1] = 0.5f * (bmins[1] + bmaxs[1]);
-		probe_pos[2] = 0.5f * (bmins[2] + bmaxs[2]);
-		probe = R_GetLightgridSample (probe_pos);
-		if (probe &&
-			(probe->rgb[0] * probe->ao > 1e-5f ||
-			 probe->rgb[1] * probe->ao > 1e-5f ||
-			 probe->rgb[2] * probe->ao > 1e-5f))
-		{
-			accum[0] += q_max (0.f, probe->rgb[0] * probe->ao);
-			accum[1] += q_max (0.f, probe->rgb[1] * probe->ao);
-			accum[2] += q_max (0.f, probe->rgb[2] * probe->ao);
-			valid_samples++;
-		}
-	}
-
-	if (valid_samples < 2)
-		return false;
-
-	out_rgb[0] = accum[0] / (float)valid_samples;
-	out_rgb[1] = accum[1] / (float)valid_samples;
-	out_rgb[2] = accum[2] / (float)valid_samples;
-	return R_FogVol_Luminance (out_rgb) > 1e-5f;
-}
-
-static void R_FogVol_GetAutoTintColor (const fog_volume_t *volume, qboolean fog_lightgrid_enabled,
-	const vec3_t screen_probe_rgb, qboolean screen_probe_valid, vec3_t out_tint)
-{
-	float *fog_color = Fog_GetColor ();
-
-	if (fog_lightgrid_enabled && R_FogVol_TrySampleVolumeLightgridTint (volume, out_tint))
-		return;
-
-	if (screen_probe_valid)
-	{
-		VectorCopy (screen_probe_rgb, out_tint);
-		return;
-	}
-
-	out_tint[0] = q_max (0.f, skyflatcolor[0]);
-	out_tint[1] = q_max (0.f, skyflatcolor[1]);
-	out_tint[2] = q_max (0.f, skyflatcolor[2]);
-	if (R_FogVol_Luminance (out_tint) > 1e-5f)
-		return;
-
-	out_tint[0] = q_max (0.f, fog_color[0]);
-	out_tint[1] = q_max (0.f, fog_color[1]);
-	out_tint[2] = q_max (0.f, fog_color[2]);
-	if (R_FogVol_Luminance (out_tint) > 1e-5f)
-		return;
-
-	VectorSet (out_tint, 1.f, 1.f, 1.f);
-}
-
-static void R_FogVol_BuildEffectiveVolumeColor (const fog_volume_t *volume, qboolean fog_lightgrid_enabled,
-	const vec3_t screen_probe_rgb, qboolean screen_probe_valid, vec3_t out_color)
-{
-	float strength = CLAMP (0.f, r_fogvol_autotint_strength.value, 1.f);
-	float min_luma = q_max (0.001f, r_fogvol_autotint_min_luma.value);
-	vec3_t tint;
-	vec3_t tint_chroma;
-	float tint_mix;
-
-	if (!volume || !out_color)
-		return;
-
-	VectorCopy (volume->color, out_color);
-	if (r_fogvol_autotint.value <= 0.f || strength <= 0.f)
-		return;
-
-	R_FogVol_GetAutoTintColor (volume, fog_lightgrid_enabled, screen_probe_rgb, screen_probe_valid, tint);
-	R_FogVol_ToChroma (tint, min_luma, tint_chroma);
-	tint_mix = 1.f - strength;
-
-	out_color[0] = q_max (0.f, volume->color[0] * (tint_mix + tint_chroma[0] * strength));
-	out_color[1] = q_max (0.f, volume->color[1] * (tint_mix + tint_chroma[1] * strength));
-	out_color[2] = q_max (0.f, volume->color[2] * (tint_mix + tint_chroma[2] * strength));
 }
 
 static qboolean R_FogVol_TryGetSurfaceLightSampleAtTexel (const qmodel_t *model, const msurface_t *surf, int sample_s, int sample_t, vec3_t out_rgb)
@@ -3796,20 +3553,24 @@ void R_FogVol_Render (void)
 	fogvol_light_stats_t light_stats;
 	vec3_t fog_bounds_mins;
 	vec3_t fog_bounds_maxs;
-	vec3_t screen_probe_rgb = {1.f, 1.f, 1.f};
-	vec3_t effective_color;
+	int scissor_x0[MAX_FOGVOLUMES];
+	int scissor_y0[MAX_FOGVOLUMES];
+	int scissor_x1[MAX_FOGVOLUMES];
+	int scissor_y1[MAX_FOGVOLUMES];
+	qboolean scissor_valid[MAX_FOGVOLUMES];
 	int visible_count = 0;
 	int frame_candidate_count = 0;
 	qboolean has_fog_bounds = false;
 	const qboolean light_stats_enabled = r_fogvol_light_stats.value > 0.f;
 	const fogvol_lighting_mode_t lighting_mode = R_FogVol_LightingMode ();
+	const qboolean raymarch_lighting_enabled = (r_fogvol_light.value > 0.f)
+		&& (R_FogVol_UseRaymarchLights (lighting_mode) || R_FogVol_UseRaymarchDetail (lighting_mode));
 	const qboolean froxel_lighting_mode = R_FogVol_UseFroxelLights (lighting_mode);
 	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f) && froxel_lighting_mode;
 	const qboolean want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
 	const qboolean want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
 	const qboolean want_froxel_dlights = froxel_injection_enabled && (r_fogvol_dlightscale.value > 0.f);
-	const qboolean run_froxel_injection = froxel_injection_enabled;
-	qboolean screen_probe_valid = false;
+	const qboolean run_froxel_injection = froxel_injection_enabled && (want_froxel_dlights || want_froxel_sun || want_froxel_static);
 
 	R_FogVol_WarnFroxelLightingConfig ();
 	if (r_fogvol_static_probe_mode.value > 0.f && r_fog_static_field.valid && !r_fog_static_field.build_complete)
@@ -3898,15 +3659,16 @@ void R_FogVol_Render (void)
 		r_froxel.prev_valid = false;
 	}
 
-	memset (&fog_lights, 0, sizeof (fog_lights));
+	if (raymarch_lighting_enabled)
+		memset (&fog_lights, 0, sizeof (fog_lights));
 	memset (&light_stats, 0, sizeof (light_stats));
 	lightgrid = Lightgrid_Get ();
 	fog_lightgrid_has_data = (lightgrid && lightgrid->octree && r_lightgrid.value > 0.f);
 	fog_lightgrid_enabled = fog_lightgrid_has_data && (r_fogvol_lightgrid.value > 0.f);
-	if (r_fogvol_autotint.value > 0.f)
-		screen_probe_valid = R_FogVol_UpdateScreenProbe (screen_probe_rgb);
+	if (r_fogvol_lightgrid_scale.value <= 0.f)
+		fog_lightgrid_enabled = false;
 
-	if (r_fogvol_light.value > 0.f && (R_FogVol_UseRaymarchLights (lighting_mode) || R_FogVol_UseRaymarchDetail (lighting_mode)))
+	if (raymarch_lighting_enabled)
 	{
 		const double broadphase_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
 		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), MAX_FOGLIGHTS);
@@ -3942,10 +3704,10 @@ void R_FogVol_Render (void)
 
 	}
 
-	memset (&fog_lightgrid, 0, sizeof (fog_lightgrid));
 	if (fog_lightgrid_enabled)
 	{
 		const double lightgrid_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
+		memset (&fog_lightgrid, 0, sizeof (fog_lightgrid));
 
 		for (int i = 0; i < r_fogvolume_count; ++i)
 		{
@@ -3995,10 +3757,9 @@ void R_FogVol_Render (void)
 		gpu->sphere[2] = v->sphereCenter[2];
 		gpu->sphere[3] = q_max (0.f, v->sphereRadius);
 
-		R_FogVol_BuildEffectiveVolumeColor (v, fog_lightgrid_enabled, screen_probe_rgb, screen_probe_valid, effective_color);
-		gpu->color_density[0] = effective_color[0];
-		gpu->color_density[1] = effective_color[1];
-		gpu->color_density[2] = effective_color[2];
+		gpu->color_density[0] = q_max (0.f, v->color[0]);
+		gpu->color_density[1] = q_max (0.f, v->color[1]);
+		gpu->color_density[2] = q_max (0.f, v->color[2]);
 		gpu->color_density[3] = v->density;
 
 		gpu->noise_params[0] = CLAMP (0.005f, v->noiseScale, 0.5f);
@@ -4046,17 +3807,22 @@ void R_FogVol_Render (void)
 	 * operations — a stale error would silently disable all fog lights. */
 	while (glGetError () != GL_NO_ERROR) {}
 #endif
-	GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
-	GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
-#if !defined(NDEBUG)
-	if (glGetError () != GL_NO_ERROR)
+	if (raymarch_lighting_enabled)
 	{
-		fog_light_enabled = false;
-		memset (&fog_lights, 0, sizeof (fog_lights));
 		GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
 		GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
-	}
+#if !defined(NDEBUG)
+		if (glGetError () != GL_NO_ERROR)
+		{
+			fog_light_enabled = false;
+			memset (&fog_lights, 0, sizeof (fog_lights));
+			GL_Upload (GL_UNIFORM_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
+			GL_BindBufferRange (GL_UNIFORM_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
+		}
 #endif
+	}
+
+	if (fog_lightgrid_enabled)
 	{
 		const double lightgrid_upload_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
 
@@ -4134,8 +3900,7 @@ void R_FogVol_Render (void)
 	{
 		fog_volume_t *v = &r_fogvolumes[i];
 		int x0, y0, x1, y1;
-		GLuint src_fbo;
-
+		scissor_valid[i] = false;
 		if (!v->enabled)
 			continue;
 		if (!R_FogVol_ProjectAABBToScreenRect (v, &x0, &y0, &x1, &y1, true))
@@ -4155,6 +3920,25 @@ void R_FogVol_Render (void)
 			if (x1 <= x0 || y1 <= y0)
 				continue;
 		}
+		scissor_x0[i] = x0;
+		scissor_y0[i] = y0;
+		scissor_x1[i] = x1;
+		scissor_y1[i] = y1;
+		scissor_valid[i] = true;
+	}
+
+	for (int i = 0; i < r_fogvolume_count; ++i)
+	{
+		fog_volume_t *v = &r_fogvolumes[i];
+		int x0, y0, x1, y1;
+		GLuint src_fbo;
+
+		if (!scissor_valid[i])
+			continue;
+		x0 = scissor_x0[i];
+		y0 = scissor_y0[i];
+		x1 = scissor_x1[i];
+		y1 = scissor_y1[i];
 
 		if (mode == 1)
 		{
@@ -4171,31 +3955,24 @@ void R_FogVol_Render (void)
 		{
 			src_tex = framebufs.composite.color_tex;
 			src_fbo = framebufs.composite.fbo;
-			GL_SetScissorEnabled (false);
-			R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, src_fbo);
-			R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.finalcopy_fbo);
-			R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY read=COLOR_ATTACHMENT0");
-			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY draw=COLOR_ATTACHMENT0");
-			R_FogVol_LogHazardPass ("FINAL_COPY", src_tex, 0, 0);
-			R_FogVol_AssertNoFeedbackHazard ("FINAL_COPY", framebufs.fogvol.finalcopy_tex, src_tex);
 			if (use_halfres)
 			{
+				/* Half-res path needs one downsample copy of the scene color. */
+				GL_SetScissorEnabled (false);
+				R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, src_fbo);
+				R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.finalcopy_fbo);
+				R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY read=COLOR_ATTACHMENT0");
+				R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY draw=COLOR_ATTACHMENT0");
+				R_FogVol_LogHazardPass ("FINAL_COPY", src_tex, 0, 0);
+				R_FogVol_AssertNoFeedbackHazard ("FINAL_COPY", framebufs.fogvol.finalcopy_tex, src_tex);
 				GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
 					0, 0, fog_width, fog_height,
 					GL_COLOR_BUFFER_BIT, GL_LINEAR);
+				/* Update source to the downsampled texture after copy. */
+				src_tex = framebufs.fogvol.finalcopy_tex;
+				src_fbo = framebufs.fogvol.finalcopy_fbo;
 			}
-			else
-			{
-				GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
-					0, 0, fog_width, fog_height,
-					GL_COLOR_BUFFER_BIT, GL_NEAREST);
-			}
-			/* BUG FIX: Update src_fbo to match src_tex after the copy.
-			 * Previously src_fbo stayed as composite.fbo while src_tex
-			 * became finalcopy_tex, making the subsequent READ_FRAMEBUFFER
-			 * bind incorrect and hazard checks misleading. */
-			src_tex = framebufs.fogvol.finalcopy_tex;
-			src_fbo = framebufs.fogvol.finalcopy_fbo;
+			/* Full-res path can sample composite directly; avoid extra full-screen blit. */
 		}
 		else
 		{

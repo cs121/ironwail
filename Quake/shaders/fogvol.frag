@@ -861,6 +861,7 @@ void main()
 		shaftEnergyPre = max(shafts.r, max(shafts.g, shafts.b)) * max(FogGodrayShaftsParams.w, 0.0);
 	}
 	float sigmaEvenPrev = 0.0;
+	float shadowVisibilityPrev = 1.0;
 	vec3 lightScatterPrev = vec3(0.0);
 	vec3 godrayAccum = vec3(0.0);
 	for (int i = 0; i < FogSteps; ++i)
@@ -896,45 +897,56 @@ void main()
 			opticalDepth = min(opticalDepth, FogDensityParams.y);
 		}
 		float att        = exp(-opticalDepth);
+		float mediumWeight = 1.0 - att;
+		bool canAccumulateStep = (mediumWeight > 1e-4);
 
 		// PERF: Pass rawSigma as firstSigma  shadow reuses it, saves 1 EvaluateFogSigma.
 		// Note: rawSigma was computed at noiseLod which may be 0 (full quality near) or 1 (coarse far).
 		// Shadow internally uses lod=1 for all its samples anyway, so this approximation is fine.
 		// sunDir is pre-normalized; shadowJitter is pre-computed; phaseSun is pre-computed.
-		float shadowVisibility = doShadow
-			? EstimateShadowVisibility(p, volume, density, falloff, noiseScalePre, flowPre, macroDensityMul,
-				stepLen, sunDir, shadowJitter, rawSigma)
-			: 1.0;
+		float shadowVisibility = 1.0;
+		if (doShadow && canAccumulateStep)
+		{
+			// PERF: shadow on every second step is visually stable after temporal accumulation.
+			if ((FogShadowSamples > 1) && ((i & 1) != 0))
+				shadowVisibility = shadowVisibilityPrev;
+			else
+			{
+				shadowVisibility = EstimateShadowVisibility(p, volume, density, falloff, noiseScalePre, flowPre, macroDensityMul,
+					stepLen, sunDir, shadowJitter, rawSigma);
+				shadowVisibilityPrev = shadowVisibility;
+			}
+		}
 
 		// phaseSun is already precomputed per-ray (constant for all steps on same ray).
-		vec3  stepScatter = (1.0 - att) * (scatterColor * phaseSun + sunRadiance); // BUG-F-01 FIX: removed inner *transmittance (caused transmittance^2 weighting for sun term)
+		vec3  stepScatter = mediumWeight * (scatterColor * phaseSun + sunRadiance); // BUG-F-01 FIX: removed inner *transmittance (caused transmittance^2 weighting for sun term)
 		vec3 godrayStepScatter = vec3(0.0);
 		float godrayInject = 0.0;
-		if (doGodrayCoupling)
+		if (doGodrayCoupling && canAccumulateStep)
 		{
 			float depthGate = clamp(1.0 - (t / max(FogDepthParams.y, 1e-3)), 0.0, 1.0);
 			godrayInject = shaftEnergyPre * depthGate * max(FogGodrayShaftsParams.z, 0.0);
-			godrayStepScatter = FogSunColor * FogSunScatter * (1.0 - att) * godrayInject * (1.0 + 0.4 * atmosphereBoost);
+			godrayStepScatter = FogSunColor * FogSunScatter * mediumWeight * godrayInject * (1.0 + 0.4 * atmosphereBoost);
 			stepScatter += godrayStepScatter;
 		}
 		{
-			float apertureGlow = atmosphereBoost * smoothstep(0.35, 1.0, sceneLuma) * (1.0 - rayT) * (1.0 - att);
+			float apertureGlow = atmosphereBoost * smoothstep(0.35, 1.0, sceneLuma) * (1.0 - rayT) * mediumWeight;
 			if (apertureGlow > 1e-4)
 				stepScatter += sunScatterColor * (0.22 * apertureGlow);
 		}
-		if (doLightgrid)
+		if (doLightgrid && canAccumulateStep)
 		{
 			// Static/emissive world contribution comes from the baked lightgrid
 			// probe data; explicit fog volume emissive remains handled separately
 			// by FogEmissiveEnabled/volume.extra.z below.
 			vec3 staticScatter = SampleFogLightgrid(p, volume);
-			stepScatter += staticScatter * (FogDLightScale * FogLightSourceScales.z * (1.0 - att));
+			stepScatter += staticScatter * (FogDLightScale * FogLightSourceScales.z * mediumWeight);
 		}
 
 // Froxel local-light contribution can run as a fast path; debug outputs remain
 // independent below via FogFroxelDebug visualization modes.
 
-		if (doLights)
+		if (doLights && canAccumulateStep)
 		{
 			vec3 lightScatter = lightScatterPrev;
 			bool forceHalfRateLighting = (fogLightingMode == 2 || fogLightingMode == 3);
@@ -952,29 +964,46 @@ void main()
 				if (doListLightsFull || doListLightsDetail)
 				{
 					int detailCap = doListLightsDetail ? min(lightCount, 4) : lightCount;
+					if (doListLightsFull)
+					{
+						// PERF: deep segments contribute less; cap expensive local-light loop there.
+						if (transmittance < 0.35)
+							detailCap = min(detailCap, 8);
+						if (transmittance < 0.15)
+							detailCap = min(detailCap, 4);
+					}
 					for (int l = 0; l < MAX_FOGLIGHTS; ++l)
 					{
 						if (l >= detailCap) break;
 						int lightIndex = lightOffset + l;
 						if (lightIndex >= MAX_FOGVOLUMES * MAX_FOGLIGHTS) break;
 						vec3 lightVec = FogLights[lightIndex].pos_rad.xyz - p;
-						float lightDist = length(lightVec);
 						float radius = max(FogLights[lightIndex].pos_rad.w, 1e-3);
-						float normDist2 = (lightDist * lightDist) / max(radius * radius, 1e-6);
+						float radius2 = radius * radius;
+						float dist2 = dot(lightVec, lightVec);
+						if (dist2 >= radius2)
+							continue;
+						float normDist2 = dist2 / max(radius2, 1e-6);
 						float window = smoothstep(1.0, 0.0, normDist2);
 						float invSq = 1.0 / (1.0 + normDist2 * 6.0);
 						float atten = window * invSq;
 						if (atten < 1e-5) continue;
+						float lightDist = sqrt(max(dist2, 1e-8));
 						vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
-						float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
-						float localOcclusion = EstimateLocalLightOcclusion(p, FogLights[lightIndex].pos_rad.xyz, lightDist);
+						float viewDot = clamp(dot(viewDir, lightDir), -1.0, 1.0);
+						float phaseLocal = AnisotropicPhase(viewDot, ANISO_G_LOCAL);
+						float localOcclusion = 1.0;
+						if (FogLocalOcclusionMode > 0)
+							localOcclusion = EstimateLocalLightOcclusion(p, FogLights[lightIndex].pos_rad.xyz, lightDist);
 						localScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal * localOcclusion);
 						{
-							float viewScatter = pow(max(dot(viewDir, lightDir), 0.0), 6.0);
+							float forward = max(viewDot, 0.0);
+							float forward2 = forward * forward;
+							float viewScatter = forward2 * forward2 * forward2;
 							localScatter += FogLights[lightIndex].col_int.rgb * (viewScatter * atten * (0.62 + 0.33 * atmosphereBoost) * localOcclusion);
 						}
 						{
-							float halo = pow(clamp(dot(viewDir, lightDir) * 0.5 + 0.5, 0.0, 1.0), 3.5);
+							float halo = pow(clamp(viewDot * 0.5 + 0.5, 0.0, 1.0), 3.5);
 							float haloAtten = smoothstep(0.1, 0.8, atten);
 							localScatter += FogLights[lightIndex].col_int.rgb * (halo * haloAtten * 0.3 * atmosphereBoost * localOcclusion);
 						}
@@ -996,8 +1025,9 @@ void main()
 					lightScatter = localScatter;
 				lightScatterPrev = lightScatter;
 			}
-			stepScatter += lightScatter * (1.0 - att);
+			stepScatter += lightScatter * mediumWeight;
 		}
+		if (canAccumulateStep)
 		{
 			float luma = dot(stepScatter, LUMA_WEIGHTS);
 			if (luma > 1e-5)
