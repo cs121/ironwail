@@ -57,6 +57,7 @@ extern cvar_t bot_think_debug;
 extern cvar_t bot_aim_debug;
 extern cvar_t bot_skill;
 extern cvar_t bot_use_nav2;
+extern cvar_t bot_call_clientconnect;
 extern cvar_t bot_count;
 
 void Bot_Init (void);

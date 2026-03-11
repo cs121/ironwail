@@ -451,6 +451,7 @@ void BotNav_Shutdown (void)
 void BotNav_LoadForMap (const char *mapname)
 {
 	byte *data;
+	char *text_copy;
 	size_t len;
 	char path[MAX_QPATH];
 	qboolean parsed;
@@ -471,15 +472,27 @@ void BotNav_LoadForMap (const char *mapname)
 
 	len = (size_t) com_filesize;
 	parsed = false;
+	text_copy = NULL;
 
 	if (!BotNav_ProbablyText (data, len))
 		parsed = BotNav_ParseBinary (data, len);
 
 	if (!parsed)
 	{
-		parsed = BotNav_ParseText ((char *) data);
-		if (parsed)
-			g_bot_nav.version = 1;
+		text_copy = (char *) malloc (len + 1);
+		if (text_copy)
+		{
+			if (len > 0)
+				Q_memcpy (text_copy, data, len);
+			text_copy[len] = '\0';
+			parsed = BotNav_ParseText (text_copy);
+			if (parsed)
+				g_bot_nav.version = 1;
+		}
+		else if (bot_nav_debug.value)
+		{
+			Con_Printf ("BotNav: out of memory while parsing %s\n", path);
+		}
 	}
 
 	if (parsed && BotNav_FinalizeLoad (mapname))
@@ -502,6 +515,8 @@ void BotNav_LoadForMap (const char *mapname)
 		BotNav_ResetGraph ();
 	}
 
+	if (text_copy)
+		free (text_copy);
 	free (data);
 }
 

@@ -9,6 +9,7 @@ cvar_t bot_think_debug = {"bot_think_debug", "0", CVAR_NONE};
 cvar_t bot_aim_debug = {"bot_aim_debug", "0", CVAR_NONE};
 cvar_t bot_skill = {"bot_skill", "0.55", CVAR_ARCHIVE};
 cvar_t bot_use_nav2 = {"bot_use_nav2", "1", CVAR_ARCHIVE};
+cvar_t bot_call_clientconnect = {"bot_call_clientconnect", "0", CVAR_ARCHIVE};
 cvar_t bot_count = {"bot_count", "0", CVAR_NONE};
 
 static bot_state_t g_bot_states[MAX_SCOREBOARD];
@@ -160,6 +161,10 @@ static qboolean Bot_PerformClientSpawn (client_t *client, qboolean announce)
 
 	if (!client || !client->active || !client->edict)
 		return false;
+	if (!sv.active || sv.state != ss_active)
+		return false;
+	if (!sv.qcvm.progs || !sv.qcvm.edicts)
+		return false;
 
 	ent = client->edict;
 	saved_host_client = host_client;
@@ -185,8 +190,15 @@ static qboolean Bot_PerformClientSpawn (client_t *client, qboolean announce)
 
 		pr_global_struct->time = qcvm->time;
 		pr_global_struct->self = EDICT_TO_PROG (ent);
-		PR_ExecuteProgram (pr_global_struct->ClientConnect);
-		PR_ExecuteProgram (pr_global_struct->PutClientInServer);
+		/*
+		 * Bot-Spawn ist nicht an ein echtes Net-Client-Handshake gebunden.
+		 * Einige Mods nehmen in ClientConnect implizit eine gültige netconnection
+		 * an und können bei Bots hart abstürzen. Deshalb standardmäßig aus.
+		 */
+		if (bot_call_clientconnect.value != 0.f && pr_global_struct->ClientConnect)
+			PR_ExecuteProgram (pr_global_struct->ClientConnect);
+		if (pr_global_struct->PutClientInServer)
+			PR_ExecuteProgram (pr_global_struct->PutClientInServer);
 	}
 
 	client->spawned = true;
@@ -281,7 +293,6 @@ static qboolean Bot_AddClient (int requested_team)
 		return false;
 	}
 
-	net_activeconnections++;
 	Bot_BroadcastClientInfo (clientnum);
 	Bot_UpdateCountCvar ();
 
@@ -476,6 +487,7 @@ void Bot_Init (void)
 	Cvar_RegisterVariable (&bot_aim_debug);
 	Cvar_RegisterVariable (&bot_skill);
 	Cvar_RegisterVariable (&bot_use_nav2);
+	Cvar_RegisterVariable (&bot_call_clientconnect);
 	Cvar_RegisterVariable (&bot_count);
 
 	Cmd_AddCommand ("bot_add", Bot_Add_f);
