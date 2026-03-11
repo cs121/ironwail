@@ -177,7 +177,11 @@ float ValueNoise(vec3 p)
 {
 	vec3 i = floor(p);
 	vec3 f = fract(p);
-	vec3 w = f * f * (3.0 - 2.0 * f);
+	// Quintic interpolation (6f^5 - 15f^4 + 10f^3) instead of Hermite (3f^2 - 2f^3).
+	// Produces C2-continuous noise with zero first AND second derivatives at lattice
+	// points, eliminating the subtle grid-aligned banding visible in the Hermite variant
+	// when density is low and the camera is close.
+	vec3 w = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 
 	ivec3 i0 = WrapIndex(ivec3(i), NOISE_PERIOD);
 	ivec3 i1 = WrapIndex(i0 + ivec3(1), NOISE_PERIOD);
@@ -647,33 +651,22 @@ void main()
 
 	float len       = tExit - tEnter;
 
-	// PERF: Adaptive step count  clamp stepLen to a maximum world-space size.
-	// Without this, a global fog volume (16384^3) with farclip=4096 gives
-	// stepLen = 4096/16 = 256 units, which is very coarse and wastes steps on
-	// short rays (near wall = len of 32 units  stepLen 256  only 1 effective step).
-	//
-	// Strategy: use a target stepLen based on a fraction of the fog near-distance,
-	// but never more than len/4 (always at least 4 samples per ray) and never
-	// fewer steps than 4. This makes short rays cheap and long rays still sampled.
-	//
-	// FogDepthParams.x = near plane (~0.5 units), not useful here.
-	// Use a fixed world-space target: 32 units (tunable via density).
-	// For global fog, density is very low so large steps are fine visually.
-	const float MAX_STEP_LEN = 64.0; // world units  coarser = faster, less detail
+	// PERF: Distance-adaptive step sizing.
+	// Near fog (< 256 units) gets fine steps for detail; far fog gets coarser
+	// steps since it contributes less to the final image. Very short rays
+	// (e.g. near a wall) get proportionally fewer steps to avoid wasting ALU.
+	const float MAX_STEP_LEN = 64.0;
+	const float NEAR_DETAIL_DIST = 256.0;
 	float stepCount = max(float(FogSteps), 1.0);
 	float idealStepLen = len / stepCount;
-	// If stepLen would exceed MAX_STEP_LEN, reduce step count proportionally.
-	// This avoids wasting FogSteps iterations on a short ray.
 	float stepLen;
 	if (idealStepLen > MAX_STEP_LEN)
 	{
-		// Long ray: use fixed step size (fewer steps than FogSteps, but each at good spacing).
 		stepLen   = MAX_STEP_LEN;
 		stepCount = max(ceil(len / stepLen), 4.0);
 	}
 	else if (idealStepLen < 1.0 && len < float(FogSteps))
 	{
-		// Very short ray (e.g. 8 units to wall): use fewer steps to save ALU.
 		stepCount = max(ceil(len), 2.0);
 		stepLen   = len / stepCount;
 	}
@@ -681,8 +674,16 @@ void main()
 	{
 		stepLen = idealStepLen;
 	}
-	// Safety: cap at FogSteps so we never exceed the uniform limit.
 	stepCount = min(stepCount, float(FogSteps));
+
+	// PERF: For rays that start far from the camera, reduce step count.
+	// Far fog is blurred by temporal + distance anyway; fewer steps suffice.
+	if (tEnter > NEAR_DETAIL_DIST)
+	{
+		float distScale = clamp(NEAR_DETAIL_DIST / tEnter, 0.25, 1.0);
+		stepCount = max(ceil(stepCount * distScale), 4.0);
+		stepLen = len / stepCount;
+	}
 
 	// FIX #2: Restructured jitter selection for clarity.
 	// When noise is enabled we always apply a jitter; which generator to use
@@ -878,8 +879,13 @@ if (doGodrayCoupling)
 						vec3 lightVec = FogLights[lightIndex].pos_rad.xyz - p;
 						float lightDist = length(lightVec);
 						float radius = max(FogLights[lightIndex].pos_rad.w, 1e-3);
-						float atten = clamp(1.0 - lightDist / radius, 0.0, 1.0);
-						atten *= atten;
+						// Smooth windowed inverse-square: physically-based 1/d^2
+						// core with a smooth window to zero at the radius.
+						// Produces softer, more natural light pools in fog.
+						float ratio = clamp(lightDist / radius, 0.0, 1.0);
+						float window = 1.0 - ratio * ratio;
+						window *= window;
+						float atten = window / (1.0 + lightDist * lightDist * (4.0 / (radius * radius)));
 						if (atten < 1e-5) continue;
 						vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
 						float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
@@ -996,15 +1002,7 @@ if (doGodrayCoupling)
 		return;
 	}
 
-	if (FogDebugMode == 9)
-	{
-		vec3 shafts = (FogGodrayCoupling != 0) ? texture(FogGodrayShaftsTex, clamp(screenUv, vec2(0.0), vec2(1.0))).rgb : vec3(0.0);
-		float shaftEnergy = max(shafts.r, max(shafts.g, shafts.b));
-		FragColor = vec4(shaftEnergy, shaftEnergy * 0.5, 0.0, 1.0);
-		return;
-	}
-
-	//  composite 
+	//  composite
 	// BUG FIX (G-04): Use the 'scene' value cached at the top of main() 
 	// no need to sample SceneColor a second time here.
 	vec3 outColor;

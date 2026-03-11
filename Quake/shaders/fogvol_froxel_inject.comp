@@ -49,11 +49,18 @@ void main()
 
 	for (int i = 0; i < lightCount; ++i)
 	{
+		// PERF: cheap squared-distance reject before the expensive length() call.
 		vec3 delta = lights[i].pos_rad.xyz - p;
-		float dist = length(delta);
 		float radius = max(lights[i].pos_rad.w, 1e-3);
-		float atten = clamp(1.0 - dist / radius, 0.0, 1.0);
-		atten *= atten;
+		float distSq = dot(delta, delta);
+		if (distSq > radius * radius)
+			continue;
+		float dist = sqrt(distSq);
+		// Smooth windowed inverse-square matching fogvol.frag
+		float ratio = clamp(dist / radius, 0.0, 1.0);
+		float window = 1.0 - ratio * ratio;
+		window *= window;
+		float atten = window / (1.0 + dist * dist * (4.0 / (radius * radius)));
 		if (atten <= 1e-5)
 			continue;
 		accum += max(lights[i].color_intensity.rgb, vec3(0.0)) * (max(lights[i].color_intensity.w, 0.0) * atten);
