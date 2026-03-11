@@ -92,27 +92,27 @@ bool Reproject(vec2 viewUv, float depthNdc, out vec2 prevViewUv, out float prevD
 	return true;
 }
 
-vec3 ComputeHistoryClamp(vec2 uv, vec3 centerColor)
+vec4 ComputeHistoryClamp(vec2 uv, vec4 centerColor)
 {
 	vec2 texel = 1.0 / max(vec2(textureSize(FogCurrent, 0)), vec2(1.0));
-	vec3 mean = vec3(0.0);
-	vec3 meanSq = vec3(0.0);
+	vec4 mean = vec4(0.0);
+	vec4 meanSq = vec4(0.0);
 	for (int j = -1; j <= 1; ++j)
 	{
 		for (int i = -1; i <= 1; ++i)
 		{
-			vec3 tap = texture(FogCurrent, uv + vec2(i, j) * texel).rgb;
+			vec4 tap = texture(FogCurrent, uv + vec2(i, j) * texel);
 			mean += tap;
 			meanSq += tap * tap;
 		}
 	}
 	mean *= (1.0 / 9.0);
 	meanSq *= (1.0 / 9.0);
-	vec3 variance = max(meanSq - mean * mean, vec3(0.0));
-	vec3 sigma = sqrt(variance);
+	vec4 variance = max(meanSq - mean * mean, vec4(0.0));
+	vec4 sigma = sqrt(variance);
 	float clampStrength = max(FogTemporalConfidenceParams.z, 0.1);
-	vec3 lo = mean - sigma * clampStrength;
-	vec3 hi = mean + sigma * clampStrength;
+	vec4 lo = mean - sigma * clampStrength;
+	vec4 hi = mean + sigma * clampStrength;
 	return clamp(centerColor, lo, hi);
 }
 
@@ -207,7 +207,7 @@ void main()
 		// does its own wrapping; explicitly clamping prevents edge bleed.
 		vec2 clampedPrevUv = clamp(prevScreenUv, vec2(0.0), vec2(1.0));
 		history = texture(FogHistory, clampedPrevUv);
-		history.rgb = ComputeHistoryClamp(screenUv, history.rgb);
+		history = ComputeHistoryClamp(screenUv, history);
 	}
 
 	// FIX #1 + #2: Compute motionFactor first; if invalid, skip the multiply.

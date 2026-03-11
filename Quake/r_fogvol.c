@@ -179,20 +179,20 @@ cvar_t r_fogvol_global = { "r_fogvol_global", "1", CVAR_ARCHIVE };
  * A map fog density of 0.1 means GL_EXP gives 37% transmittance at z=10 units,
  * which is far too dense for the raymarcher (sigma=0.1, stepLen~64 → opaque).
  * Scale down by ~0.01–0.1 to get visually comparable results.
- * Default changed from 1 to 0.05 so global fog is not white-out by default. */
-cvar_t r_fogvol_global_density_scale = { "r_fogvol_global_density_scale", "0.05", CVAR_ARCHIVE };
+ * Default changed from 1 to 0.06 so global fog is not white-out by default. */
+cvar_t r_fogvol_global_density_scale = { "r_fogvol_global_density_scale", "0.06", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_falloff = { "r_fogvol_global_falloff", "64", CVAR_ARCHIVE };
-cvar_t r_fogvol_global_noise_scale = { "r_fogvol_global_noise_scale", "0.018", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_noise_scale = { "r_fogvol_global_noise_scale", "0.014", CVAR_ARCHIVE };
 /* r_fogvol_global_noise_amount: 0=uniform fog, 1=fully noise-modulated.
  * Was 0 (disabled) by default, making global fog always uniform regardless of
- * other noise settings. Default 0.62 gives clearly visible cloud breakup. */
-cvar_t r_fogvol_global_noise_amount = { "r_fogvol_global_noise_amount", "0.62", CVAR_ARCHIVE };
+ * other noise settings. Default 0.78 gives stronger cloud breakup. */
+cvar_t r_fogvol_global_noise_amount = { "r_fogvol_global_noise_amount", "0.78", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_noise_bias = { "r_fogvol_global_noise_bias", "0.0", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_velocity_x = { "r_fogvol_global_velocity_x", "1.25", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_velocity_y = { "r_fogvol_global_velocity_y", "0.65", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_velocity_z = { "r_fogvol_global_velocity_z", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_global_height = { "r_fogvol_global_height", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_global_height_scale = { "r_fogvol_global_height_scale", "0.0012", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_height = { "r_fogvol_global_height", "56", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_height_scale = { "r_fogvol_global_height_scale", "0.0020", CVAR_ARCHIVE };
 cvar_t r_fogvol_height_mist_strength = { "r_fogvol_height_mist_strength", "0.3", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_priority = { "r_fogvol_global_priority", "-1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
@@ -291,16 +291,16 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_density_scale, "core", "1"},
 	{&r_fogvol_sigma_max, "core", "4"},
 	{&r_fogvol_global, "global", "1"},
-	{&r_fogvol_global_density_scale, "global", "0.05"},
+	{&r_fogvol_global_density_scale, "global", "0.06"},
 	{&r_fogvol_global_falloff, "global", "64"},
-	{&r_fogvol_global_noise_scale, "global", "0.018"},
-	{&r_fogvol_global_noise_amount, "global", "0.62"},
+	{&r_fogvol_global_noise_scale, "global", "0.014"},
+	{&r_fogvol_global_noise_amount, "global", "0.78"},
 	{&r_fogvol_global_noise_bias, "global", "0.0"},
 	{&r_fogvol_global_velocity_x, "global", "1.25"},
 	{&r_fogvol_global_velocity_y, "global", "0.65"},
 	{&r_fogvol_global_velocity_z, "global", "0"},
-	{&r_fogvol_global_height, "global", "0"},
-	{&r_fogvol_global_height_scale, "global", "0.0012"},
+	{&r_fogvol_global_height, "global", "56"},
+	{&r_fogvol_global_height_scale, "global", "0.0020"},
 	{&r_fogvol_height_mist_strength, "global", "0.3"},
 	{&r_fogvol_global_priority, "global", "-1"},
 	{&r_fogvol_light, "lighting", "0"},

@@ -181,7 +181,8 @@ float ValueNoise(vec3 p)
 {
 	vec3 i = floor(p);
 	vec3 f = fract(p);
-	vec3 w = f * f * (3.0 - 2.0 * f);
+	// Quintic smoothstep (C2-continuous) reduces grid-like banding in low-density fog.
+	vec3 w = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 
 	ivec3 i0 = WrapIndex(ivec3(i), NOISE_PERIOD);
 	ivec3 i1 = WrapIndex(i0 + ivec3(1), NOISE_PERIOD);
@@ -238,24 +239,30 @@ float FogNoise(vec3 p)
 	return FBM(p);
 }
 
+float Fake3DNoiseFromPlanes(vec3 p, float seed, int lod)
+{
+	float nXY = FogNoise(vec3(p.xy, seed + 3.17), lod);
+	float nYZ = FogNoise(vec3(p.yz, seed + 11.71), lod);
+	float nZX = FogNoise(vec3(p.zx, seed + 19.37), lod);
+	return (nXY + nYZ + nZX) * (1.0 / 3.0);
+}
+
 float MultiScaleFogNoise(vec3 noisePos, int lod, float detailStrength)
 {
-	float large = FogNoise(noisePos * 0.35 + vec3(11.2, 3.7, 17.9), 1);
-	float largeB = FogNoise(noisePos.zxy * 0.29 + vec3(5.7, 13.1, 2.9), 1);
-	float medium = FogNoise(noisePos * 1.17, lod);
-	float mediumB = FogNoise(noisePos.yzx * 1.31 + vec3(7.3, 19.1, 5.6), lod);
-	float macroCloud = mix(large, largeB, 0.45);
-	float structure = mix(macroCloud, 0.55 * medium + 0.45 * mediumB, 0.66);
-	float valley = 1.0 - abs(2.0 * macroCloud - 1.0);
-	structure = mix(structure, structure * (0.65 + 0.55 * valley), 0.35);
-	if (detailStrength > 1e-3 && lod == 0)
-	{
-		float fine = FogNoise(noisePos * 3.73 + vec3(17.13, 9.70, 5.31), 1);
-		float fineRidged = 1.0 - abs(2.0 * fine - 1.0);
-		fineRidged *= fineRidged;
-		structure = mix(structure, mix(fine, fineRidged, 0.35), detailStrength);
-	}
-	return clamp(structure, 0.0, 1.0);
+	// World-space fake-3D noise from axis planes avoids planar/curtain artifacts.
+	float large = Fake3DNoiseFromPlanes(noisePos * 0.15 + vec3(11.2, 3.7, 17.9), 4.0, 1);
+	float medium = Fake3DNoiseFromPlanes(noisePos * 0.60 + vec3(5.7, 13.1, 2.9), 9.0, lod);
+	float fine = Fake3DNoiseFromPlanes(noisePos * 2.45 + vec3(17.13, 9.70, 5.31), 15.0, 1);
+	float baseShape = large * 0.6 + medium * 0.3 + fine * 0.1;
+
+	// Shape into cloud-like clumps while keeping broad-scale volume breakup.
+	float billow = abs(2.0 * baseShape - 1.0);
+	float ridge = 1.0 - billow;
+	ridge *= ridge;
+	float structure = mix(baseShape, ridge, 0.32 + 0.28 * detailStrength);
+	float valleys = smoothstep(0.10, 0.65, 1.0 - baseShape);
+	structure = clamp(structure * (0.68 + 0.52 * valleys), 0.0, 1.0);
+	return structure;
 }
 
 float DepthToNdcZ(float depth)
@@ -438,9 +445,15 @@ float HeightFactor(vec3 p, FogVolume volume)
 	float dh = p.z - baseH;
 	float k = abs(hScale);
 	float directional = (hScale >= 0.0) ? exp(-k * dh) : exp(k * dh);
-	float layer = exp(-abs(dh) * (k * 0.35 + 0.0025));
-	float layered = directional * mix(1.0, 1.0 + 0.55 * layer, clamp(FogHeightMistStrength, 0.0, 1.0));
-	return clamp(layered, 0.12, 2.8);
+	float above = max(dh, 0.0);
+	float below = max(-dh, 0.0);
+	float groundBand = exp(-above * (k * 1.45 + 0.0065));
+	float underBand = 1.0 + (1.0 - exp(-below * (k * 0.55 + 0.0025))) * 0.28;
+	float mist = exp(-abs(dh) * (k * 0.55 + 0.0045));
+	float mistStrength = clamp(FogHeightMistStrength, 0.0, 1.0);
+	float layered = mix(directional, groundBand * underBand, 0.58);
+	layered *= mix(1.0, 1.0 + 0.95 * mist, mistStrength);
+	return clamp(layered, 0.07, 3.6);
 }
 
 float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
@@ -832,6 +845,12 @@ void main()
 		adaptiveSteps = clamp(adaptiveSteps, 8, 16);
 	else if (fogLightingMode == 3)
 		adaptiveSteps = clamp(adaptiveSteps, 8, 20);
+	{
+		// Distance-adaptive march budget: rays that start far away get up to 75% fewer steps.
+		float farStartNorm = clamp(tEnter / max(FogDepthParams.y, 1e-3), 0.0, 1.0);
+		float farStepScale = mix(1.0, 0.25, smoothstep(0.4, 0.95, farStartNorm));
+		adaptiveSteps = max(2, int(floor(float(adaptiveSteps) * farStepScale + 0.5)));
+	}
 	bool doGodrayCoupling = (FogGodrayCoupling != 0);
 	float shaftEnergyPre = 0.0;
 	if (doGodrayCoupling)
@@ -941,13 +960,19 @@ void main()
 						vec3 lightVec = FogLights[lightIndex].pos_rad.xyz - p;
 						float lightDist = length(lightVec);
 						float radius = max(FogLights[lightIndex].pos_rad.w, 1e-3);
-						float atten = clamp(1.0 - lightDist / radius, 0.0, 1.0);
-						atten *= atten;
+						float normDist2 = (lightDist * lightDist) / max(radius * radius, 1e-6);
+						float window = smoothstep(1.0, 0.0, normDist2);
+						float invSq = 1.0 / (1.0 + normDist2 * 6.0);
+						float atten = window * invSq;
 						if (atten < 1e-5) continue;
 						vec3 lightDir = (lightDist > 1e-5) ? (lightVec / lightDist) : vec3(0.0);
 						float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
 						float localOcclusion = EstimateLocalLightOcclusion(p, FogLights[lightIndex].pos_rad.xyz, lightDist);
 						localScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal * localOcclusion);
+						{
+							float viewScatter = pow(max(dot(viewDir, lightDir), 0.0), 6.0);
+							localScatter += FogLights[lightIndex].col_int.rgb * (viewScatter * atten * (0.62 + 0.33 * atmosphereBoost) * localOcclusion);
+						}
 						{
 							float halo = pow(clamp(dot(viewDir, lightDir) * 0.5 + 0.5, 0.0, 1.0), 3.5);
 							float haloAtten = smoothstep(0.1, 0.8, atten);
@@ -1093,9 +1118,11 @@ void main()
 		outColor += scatterColor * volume.extra.z * (1.0 - transmittance);
 	{
 		float fogAlpha = 1.0 - transmittance;
-		vec3 scenePreserve = scene * (0.55 + 0.45 * transmittance);
-		outColor = mix(outColor, scenePreserve + (outColor - scene) * (1.0 + 0.25 * atmosphereBoost), fogAlpha * 0.5);
-		outColor = outColor / (1.0 + outColor * (0.18 + 0.22 * atmosphereBoost));
+		float hazeLimiter = 1.0 / (1.0 + fogAlpha * (0.42 + 0.38 * (1.0 - sceneLuma)));
+		vec3 scenePreserve = scene * (0.62 + 0.38 * transmittance);
+		vec3 shaped = scenePreserve + (outColor - scene) * (1.12 + 0.35 * atmosphereBoost);
+		outColor = mix(outColor * hazeLimiter, shaped, fogAlpha * 0.58);
+		outColor = outColor / (1.0 + outColor * (0.12 + 0.14 * atmosphereBoost));
 	}
 	// Alpha = fog density (1.0 - transmittance) for SSAO suppression:
 	//   alpha=0.0  transparent/no fog  SSAO unchanged
