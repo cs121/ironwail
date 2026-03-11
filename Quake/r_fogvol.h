@@ -86,7 +86,7 @@ extern cvar_t r_fogvol_testvolumes;
 /* BUG FIX (C-06): r_fogvol_testvolumes_dumpstate was defined in r_fogvol.c
  * but not exported — violates BEST PRACTICE #11. */
 extern cvar_t r_fogvol_testvolumes_dumpstate;
-extern cvar_t r_fogvol_globalfog;
+extern cvar_t r_fogvol_global;
 extern cvar_t r_fogvol_globalfog_density_scale;
 extern cvar_t r_fogvol_globalfog_falloff;
 extern cvar_t r_fogvol_globalfog_noise_scale;
@@ -151,7 +151,7 @@ qboolean R_FogVol_IsEnabledForFrame (void);
 qboolean R_FogVol_HasValidComposite (void);
 /* PostFX gate: volumetric output may be produced this frame (not tied to global fog density). */
 qboolean R_FogVol_ShouldAffectPostFX (void);
-/* Global-replacement gate: volumetric global fog is eligible this frame (includes classic fog density + r_fogvol_globalfog). */
+/* Global-replacement gate: volumetric global fog is eligible this frame (r_fogvol_global is enabled and fogvol resources are ready). */
 qboolean R_FogVol_CanRenderGlobal (void);
 /*
  * FogVol Composite Contract (for CPU + shader users):

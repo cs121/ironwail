@@ -166,15 +166,13 @@ cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
  * saturated instantly at any stepLen > ~1 unit.  Now treated as an optical
  * depth cap (sigma*stepLen), making the value scale-independent. */
 cvar_t r_fogvol_sigma_max = { "r_fogvol_sigma_max", "4", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog = { "r_fogvol_globalfog", "1", CVAR_ARCHIVE };
-/* r_fogvol_globalfog_density_scale: scales the density taken from the map's
- * classic Quake fog command before passing it to the volumetric raymarcher.
- * Quake fog density is dimensionless (used in GL_EXP as exp(-density*z));
- * the raymarcher treats density as an extinction coefficient in quake-units^-1.
- * A map fog density of 0.1 means GL_EXP gives 37% transmittance at z=10 units,
- * which is far too dense for the raymarcher (sigma=0.1, stepLen~64 → opaque).
- * Scale down by ~0.01–0.1 to get visually comparable results.
- * Default changed from 1 to 0.05 so global fog is not white-out by default. */
+cvar_t r_fogvol_global = { "r_fogvol_global", "1", CVAR_ARCHIVE };
+/* r_fogvol_globalfog_density_scale: base density for the volumetric global fog
+ * raymarcher (in quake-units^-1 extinction coefficient).  When the current map
+ * supplies a classic worldspawn fog density > 0, that value is multiplied by
+ * this scale so map authors retain relative control.  When the map defines no
+ * classic fog the scale is used directly as the raw volumetric density, so
+ * r_fogvol_global keeps working across all maps regardless of worldspawn fog. */
 cvar_t r_fogvol_globalfog_density_scale = { "r_fogvol_globalfog_density_scale", "0.05", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_falloff = { "r_fogvol_globalfog_falloff", "64", CVAR_ARCHIVE };
 cvar_t r_fogvol_globalfog_noise_scale = { "r_fogvol_globalfog_noise_scale", "0.02", CVAR_ARCHIVE };
@@ -279,7 +277,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_inject_debug, "debug", "0"},
 	{&r_fogvol_density_scale, "core", "1"},
 	{&r_fogvol_sigma_max, "core", "4"},
-	{&r_fogvol_globalfog, "global", "1"},
+	{&r_fogvol_global, "global", "1"},
 	{&r_fogvol_globalfog_density_scale, "global", "0.05"},
 	{&r_fogvol_globalfog_falloff, "global", "64"},
 	{&r_fogvol_globalfog_noise_scale, "global", "0.02"},
@@ -2725,12 +2723,12 @@ static void R_FogVol_AddGlobalFog (void)
 {
 	fog_volume_t volume;
 	float *color = Fog_GetColor ();
+	float map_density = Fog_GetDensity ();
+	float density_scale = q_max (0.f, r_fogvol_globalfog_density_scale.value);
 
-	if (r_fogvol_globalfog.value <= 0.f)
+	if (r_fogvol_global.value <= 0.f)
 		return;
 	if (r_fogvol.value <= 0.f)
-		return;
-	if (Fog_GetDensity () <= 0.f)
 		return;
 
 	memset (&volume, 0, sizeof (volume));
@@ -2740,7 +2738,10 @@ static void R_FogVol_AddGlobalFog (void)
 
 	VectorCopy (color, volume.color);
 
-	volume.density = Fog_GetDensity () * q_max (0.f, r_fogvol_globalfog_density_scale.value);
+	/* Use map fog density scaled by density_scale when the map defines fog;
+	 * otherwise use density_scale directly as the raw extinction coefficient
+	 * so r_fogvol_global works on maps without worldspawn fog. */
+	volume.density = (map_density > 0.f) ? map_density * density_scale : density_scale;
 	volume.falloff = q_max (0.f, r_fogvol_globalfog_falloff.value);
 	volume.mode = 0;
 	volume.noiseScale = q_max (0.f, r_fogvol_globalfog_noise_scale.value);
@@ -2795,9 +2796,7 @@ qboolean R_FogVol_CanRenderGlobal (void)
 {
 	if (!R_FogVol_IsEnabledForFrame ())
 		return false;
-	if (r_fogvol_globalfog.value <= 0.f)
-		return false;
-	if (Fog_GetDensity () <= 0.f)
+	if (r_fogvol_global.value <= 0.f)
 		return false;
 
 	return true;
