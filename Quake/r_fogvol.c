@@ -2730,8 +2730,6 @@ static void R_FogVol_AddGlobalFog (void)
 		return;
 	if (r_fogvol.value <= 0.f)
 		return;
-	if (Fog_GetDensity () <= 0.f)
-		return;
 
 	memset (&volume, 0, sizeof (volume));
 
@@ -2740,7 +2738,13 @@ static void R_FogVol_AddGlobalFog (void)
 
 	VectorCopy (color, volume.color);
 
-	volume.density = Fog_GetDensity () * q_max (0.f, r_fogvol_globalfog_density_scale.value);
+	{
+		/* When the map defines a classic fog density, scale it for the volumetric
+		 * raymarcher. Otherwise fall back to 1.0 so r_fogvol_globalfog_density_scale
+		 * acts as the standalone density knob. */
+		float map_density = Fog_GetDensity ();
+		volume.density = (map_density > 0.f ? map_density : 1.0f) * q_max (0.f, r_fogvol_globalfog_density_scale.value);
+	}
 	volume.falloff = q_max (0.f, r_fogvol_globalfog_falloff.value);
 	volume.mode = 0;
 	volume.noiseScale = q_max (0.f, r_fogvol_globalfog_noise_scale.value);
@@ -2796,8 +2800,6 @@ qboolean R_FogVol_CanRenderGlobal (void)
 	if (!R_FogVol_IsEnabledForFrame ())
 		return false;
 	if (r_fogvol_globalfog.value <= 0.f)
-		return false;
-	if (Fog_GetDensity () <= 0.f)
 		return false;
 
 	return true;
