@@ -131,6 +131,9 @@ layout(location=42) uniform vec4  FogGodrayShaftsParams; // xy: shafts texture s
 layout(location=43) uniform vec4  FogFroxelTemporalParams; // x: alpha, y: reject threshold, z: camera delta, w: prev valid
 layout(location=44) uniform int   FogLocalOcclusionMode; // 0=off, 1=cheap signed depth test, 2=multi-tap depth cone trace
 layout(location=45) uniform vec4  FogLocalOcclusionParams; // x depth thickness, y cone scale, z max dist scale, w reserved
+layout(location=46) uniform float FogNoiseDetailStrength;
+layout(location=47) uniform float FogHeightMistStrength;
+layout(location=48) uniform float FogAtmosphereBoost;
 
 layout(location=0) out vec4 FragColor;
 
@@ -143,6 +146,7 @@ const float ANISO_G_LOCAL    = 0.5;
 const float FOG_RIDGED_STRENGTH = 0.22;
 const float FOG_MACRO_SCALE_MUL = 0.22;
 const float FOG_MACRO_STRENGTH  = 0.20;
+const vec3  LUMA_WEIGHTS        = vec3(0.2126, 0.7152, 0.0722);
 
 const int FOGVOL_SHAPE_BOX = 0;
 const int FOGVOL_SHAPE_SPHERE = 1;
@@ -232,6 +236,26 @@ float FogNoise(vec3 p)
 	if (FogNoiseMode == 1)
 		return texture(FogNoiseTex, fract(p / LUT_PERIOD)).r;
 	return FBM(p);
+}
+
+float MultiScaleFogNoise(vec3 noisePos, int lod, float detailStrength)
+{
+	float large = FogNoise(noisePos * 0.35 + vec3(11.2, 3.7, 17.9), 1);
+	float largeB = FogNoise(noisePos.zxy * 0.29 + vec3(5.7, 13.1, 2.9), 1);
+	float medium = FogNoise(noisePos * 1.17, lod);
+	float mediumB = FogNoise(noisePos.yzx * 1.31 + vec3(7.3, 19.1, 5.6), lod);
+	float macroCloud = mix(large, largeB, 0.45);
+	float structure = mix(macroCloud, 0.55 * medium + 0.45 * mediumB, 0.66);
+	float valley = 1.0 - abs(2.0 * macroCloud - 1.0);
+	structure = mix(structure, structure * (0.65 + 0.55 * valley), 0.35);
+	if (detailStrength > 1e-3 && lod == 0)
+	{
+		float fine = FogNoise(noisePos * 3.73 + vec3(17.13, 9.70, 5.31), 1);
+		float fineRidged = 1.0 - abs(2.0 * fine - 1.0);
+		fineRidged *= fineRidged;
+		structure = mix(structure, mix(fine, fineRidged, 0.35), detailStrength);
+	}
+	return clamp(structure, 0.0, 1.0);
 }
 
 float DepthToNdcZ(float depth)
@@ -412,7 +436,11 @@ float HeightFactor(vec3 p, FogVolume volume)
 		return 1.0;
 	float baseH = volume.misc.w;
 	float dh = p.z - baseH;
-	return exp(-abs(hScale) * dh);
+	float k = abs(hScale);
+	float directional = (hScale >= 0.0) ? exp(-k * dh) : exp(k * dh);
+	float layer = exp(-abs(dh) * (k * 0.35 + 0.0025));
+	float layered = directional * mix(1.0, 1.0 + 0.55 * layer, clamp(FogHeightMistStrength, 0.0, 1.0));
+	return clamp(layered, 0.12, 2.8);
 }
 
 float FogEdgeFade(vec3 p, vec3 bmin, vec3 bmax, float falloff)
@@ -517,20 +545,32 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, f
 		// (near samples). Far samples (lod=1) skip warp  imperceptible at distance.
 		if (volume.wind_turbulence.w > 1e-4 && lod == 0 && marchDist < FogDomainWarpMaxDist)
 			noisePos += vec3(FBM(p * noiseScalePre * 2.03), FBM(p.yzx * noiseScalePre * 2.71), FBM(p.zxy * noiseScalePre * 1.91)) * volume.wind_turbulence.w * 0.35;
-		float baseN = FogNoise(noisePos, lod);
+		float detailStrength = clamp(FogNoiseDetailStrength, 0.0, 1.0);
+		float baseN = MultiScaleFogNoise(noisePos, lod, detailStrength);
 		// ALU-only ridge shaping from the already fetched base noise (no extra texture/noise fetch).
 		float ridged = 1.0 - abs(2.0 * baseN - 1.0);
 		ridged *= ridged;
+		float billow = abs(2.0 * baseN - 1.0);
 		float n = mix(baseN, ridged, FOG_RIDGED_STRENGTH);
+		n = mix(n, 1.0 - billow * 0.7, 0.25 + 0.25 * detailStrength);
 		float noiseBias = clamp(volume.noise_params.z, 0.0, 1.0);
 		if (noiseBias > 0.0)
 			n = smoothstep(noiseBias, 1.0, n);
 		float amt = clamp(volume.noise_params.y, 0.0, 1.0);
-		noiseFactor = mix(1.0, clamp(2.0 * n, 0.0, 2.0), amt);
+		float clump = smoothstep(0.28, 0.9, n);
+		float valley = smoothstep(0.55, 1.0, 1.0 - n);
+		float shaped = clamp(0.5 + clump * 1.35 - valley * 0.25, 0.12, 2.35);
+		noiseFactor = mix(1.0, shaped, amt);
 	}
 
 	// Macro billow density modulation is reused per-ray (computed once in main), so no per-step macro fetch.
 	float sigma = (density * macroDensityMul) * noiseFactor * edgeFade * HeightFactor(p, volume);
+	{
+		float baseSigma = max(density * macroDensityMul, 1e-4);
+		float localShape = clamp(sigma / baseSigma, 0.0, 2.0);
+		float clumpBoost = mix(0.75, 1.4, smoothstep(0.35, 1.05, localShape));
+		sigma *= clumpBoost;
+	}
 	return IsFiniteFloat(sigma) ? max(sigma, 0.0) : 0.0;
 }
 
@@ -702,6 +742,8 @@ void main()
 	vec3  scatterColor = volume.color_density.rgb;
 	float density      = max(volume.color_density.a * FogDensityParams.x, 0.0);
 	float falloff      = volume.misc.z;
+	float atmosphereBoost = clamp(FogAtmosphereBoost, 0.0, 1.5);
+	float sceneLuma = dot(scene, LUMA_WEIGHTS);
 
 	vec3  accum        = vec3(0.0);
 	float transmittance = 1.0;
@@ -726,10 +768,13 @@ void main()
 	float phaseSun      = (sunDirLenSq > 1e-6)
 		? AnisotropicPhase(clamp(dot(viewDir, sunDir), -1.0, 1.0), clamp(FogSunAnisotropy, -0.99, 0.99))
 		: 1.0;
+	float forwardScatterBoost = (sunDirLenSq > 1e-6)
+		? (1.0 + atmosphereBoost * 0.95 * pow(clamp(dot(viewDir, sunDir) * 0.5 + 0.5, 0.0, 1.0), 4.0))
+		: 1.0;
 	float sunScatterStrength = max(FogSunScatter, 0.0);
 	vec3 sunScatterColor = max(FogSunColor, vec3(0.0));
 	vec3 sunRadiance = (sunDirLenSq > 1e-6 && sunScatterStrength > 0.0)
-		? (sunScatterColor * (sunScatterStrength * phaseSun))
+		? (sunScatterColor * (sunScatterStrength * phaseSun * forwardScatterBoost))
 		: vec3(0.0);
 	// PERF: Cache active light count and enabled flag to avoid UBO re-fetch in loop.
 	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
@@ -762,19 +807,24 @@ void main()
 		flowPre = volume.velocity_windspeed.xyz + flowDir * volume.velocity_windspeed.w;
 	}
 
-	float macroDensityMul = 1.0;
+	float macroDensityMulNear = 1.0;
+	float macroDensityMulFar = 1.0;
 	if (FogNoiseEnabled != 0)
 	{
-		// PERF: Evaluate macro billow once per ray and reuse for all march/shadow samples.
+		// Ray-endpoint macro sampling breaks up "curtain" artifacts from per-ray constant density.
 		float macroScale = clamp(noiseScalePre * FOG_MACRO_SCALE_MUL, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
-		vec3 macroPos = (ro + rd * tEnter) * macroScale + flowPre * Time * macroScale;
-		float macroRaw = FogNoise(macroPos, 1);
-		float billow = abs(2.0 * macroRaw - 1.0);
-		billow *= billow;
-		float macroStrength = FOG_MACRO_STRENGTH;
+		vec3 macroFlow = flowPre * Time * macroScale;
+		float macroRawNear = FogNoise((ro + rd * tEnter) * macroScale + macroFlow, 1);
+		float macroRawFar = FogNoise((ro + rd * tExit) * (macroScale * 1.17) + macroFlow + vec3(19.7, 11.3, 7.1), 1);
+		float billowNear = abs(2.0 * macroRawNear - 1.0);
+		float billowFar = abs(2.0 * macroRawFar - 1.0);
+		billowNear *= billowNear;
+		billowFar *= billowFar;
+		float macroStrength = FOG_MACRO_STRENGTH + 0.12 * clamp(FogNoiseDetailStrength, 0.0, 1.0);
 		if (FogHalfRes != 0)
 			macroStrength *= 0.85;
-		macroDensityMul = mix(1.0, billow, macroStrength);
+		macroDensityMulNear = mix(1.0, billowNear, macroStrength);
+		macroDensityMulFar = mix(1.0, billowFar, macroStrength);
 	}
 
 	int adaptiveSteps = int(stepCount); // adaptive, already capped at FogSteps
@@ -802,6 +852,8 @@ void main()
 			break;
 
 		vec3  p        = ro + rd * t;
+		float rayT = clamp((t - tEnter) / max(len, 1e-3), 0.0, 1.0);
+		float macroDensityMul = mix(macroDensityMulNear, macroDensityMulFar, rayT);
 		// Heuristic: use coarse noise LOD for distant/faded segments.
 		// transmittance < 0.25 means contributions are already low, so 1-octave is safe.
 		int noiseLod = (t > FogNoiseLodSwitchDist || transmittance < 0.25) ? 1 : 0;
@@ -818,6 +870,12 @@ void main()
 				sigmaEvenPrev = rawSigma;
 		}
 		float opticalDepth = min(rawSigma * stepLen, FogDensityParams.y);
+		{
+			float fogAlphaPreview = 1.0 - exp(-opticalDepth);
+			float contrastGate = smoothstep(0.04, 0.75, fogAlphaPreview);
+			opticalDepth *= mix(0.82, 1.18, contrastGate);
+			opticalDepth = min(opticalDepth, FogDensityParams.y);
+		}
 		float att        = exp(-opticalDepth);
 
 		// PERF: Pass rawSigma as firstSigma  shadow reuses it, saves 1 EvaluateFogSigma.
@@ -831,15 +889,20 @@ void main()
 
 		// phaseSun is already precomputed per-ray (constant for all steps on same ray).
 		vec3  stepScatter = (1.0 - att) * (scatterColor * phaseSun + sunRadiance); // BUG-F-01 FIX: removed inner *transmittance (caused transmittance^2 weighting for sun term)
-vec3 godrayStepScatter = vec3(0.0);
-float godrayInject = 0.0;
-if (doGodrayCoupling)
-{
-	float depthGate = clamp(1.0 - (t / max(FogDepthParams.y, 1e-3)), 0.0, 1.0);
-	godrayInject = shaftEnergyPre * depthGate * max(FogGodrayShaftsParams.z, 0.0);
-	godrayStepScatter = FogSunColor * FogSunScatter * (1.0 - att) * godrayInject;
-	stepScatter += godrayStepScatter;
-}
+		vec3 godrayStepScatter = vec3(0.0);
+		float godrayInject = 0.0;
+		if (doGodrayCoupling)
+		{
+			float depthGate = clamp(1.0 - (t / max(FogDepthParams.y, 1e-3)), 0.0, 1.0);
+			godrayInject = shaftEnergyPre * depthGate * max(FogGodrayShaftsParams.z, 0.0);
+			godrayStepScatter = FogSunColor * FogSunScatter * (1.0 - att) * godrayInject * (1.0 + 0.4 * atmosphereBoost);
+			stepScatter += godrayStepScatter;
+		}
+		{
+			float apertureGlow = atmosphereBoost * smoothstep(0.35, 1.0, sceneLuma) * (1.0 - rayT) * (1.0 - att);
+			if (apertureGlow > 1e-4)
+				stepScatter += sunScatterColor * (0.22 * apertureGlow);
+		}
 		if (doLightgrid)
 		{
 			// Static/emissive world contribution comes from the baked lightgrid
@@ -885,6 +948,11 @@ if (doGodrayCoupling)
 						float phaseLocal = AnisotropicPhase(clamp(dot(viewDir, lightDir), -1.0, 1.0), ANISO_G_LOCAL);
 						float localOcclusion = EstimateLocalLightOcclusion(p, FogLights[lightIndex].pos_rad.xyz, lightDist);
 						localScatter += FogLights[lightIndex].col_int.rgb * (atten * 0.75 * FogDLightScale * phaseLocal * localOcclusion);
+						{
+							float halo = pow(clamp(dot(viewDir, lightDir) * 0.5 + 0.5, 0.0, 1.0), 3.5);
+							float haloAtten = smoothstep(0.1, 0.8, atten);
+							localScatter += FogLights[lightIndex].col_int.rgb * (halo * haloAtten * 0.3 * atmosphereBoost * localOcclusion);
+						}
 					}
 					localScatter *= FogLightSourceScales.y;
 					if (doListLightsDetail)
@@ -904,6 +972,15 @@ if (doGodrayCoupling)
 				lightScatterPrev = lightScatter;
 			}
 			stepScatter += lightScatter * (1.0 - att);
+		}
+		{
+			float luma = dot(stepScatter, LUMA_WEIGHTS);
+			if (luma > 1e-5)
+			{
+				vec3 chroma = stepScatter / luma;
+				chroma = mix(vec3(1.0), chroma, 0.78 + 0.15 * atmosphereBoost);
+				stepScatter = chroma * luma;
+			}
 		}
 		stepScatter *= shadowVisibility;
 		godrayAccum += transmittance * (godrayStepScatter * shadowVisibility);
@@ -996,14 +1073,6 @@ if (doGodrayCoupling)
 		return;
 	}
 
-	if (FogDebugMode == 9)
-	{
-		vec3 shafts = (FogGodrayCoupling != 0) ? texture(FogGodrayShaftsTex, clamp(screenUv, vec2(0.0), vec2(1.0))).rgb : vec3(0.0);
-		float shaftEnergy = max(shafts.r, max(shafts.g, shafts.b));
-		FragColor = vec4(shaftEnergy, shaftEnergy * 0.5, 0.0, 1.0);
-		return;
-	}
-
 	//  composite 
 	// BUG FIX (G-04): Use the 'scene' value cached at the top of main() 
 	// no need to sample SceneColor a second time here.
@@ -1018,10 +1087,16 @@ if (doGodrayCoupling)
 	else if (FogPhysBlend != 0)
 		outColor = scene * transmittance + accum;
 	else
-		outColor = mix(scene, scatterColor, clamp(tau, 0.0, 1.0));
+		outColor = mix(scene, scatterColor, 1.0 - exp(-clamp(tau, 0.0, 32.0)));
 
 	if (FogEmissiveEnabled != 0 && volume.extra.z > 0.0)
 		outColor += scatterColor * volume.extra.z * (1.0 - transmittance);
+	{
+		float fogAlpha = 1.0 - transmittance;
+		vec3 scenePreserve = scene * (0.55 + 0.45 * transmittance);
+		outColor = mix(outColor, scenePreserve + (outColor - scene) * (1.0 + 0.25 * atmosphereBoost), fogAlpha * 0.5);
+		outColor = outColor / (1.0 + outColor * (0.18 + 0.22 * atmosphereBoost));
+	}
 	// Alpha = fog density (1.0 - transmittance) for SSAO suppression:
 	//   alpha=0.0  transparent/no fog  SSAO unchanged
 	//   alpha=1.0  fully opaque fog  SSAO suppressed

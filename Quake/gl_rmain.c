@@ -2703,6 +2703,27 @@ static void GL_PostProcess_SetMediumScatterUniforms (void)
 	GL_Uniform4fFunc (28, medium.valid, 0.f, 0.f, 0.f);
 }
 
+static float GL_ComputeEffectiveBloomIntensity (float bloom_base, float bloom_boost)
+{
+	float base = q_max (0.f, bloom_base);
+	float boost = q_max (0.f, bloom_boost);
+
+	if (r_postfx_bloom_mode.value > 0.f)
+		return q_max (base, boost);
+	return base + boost;
+}
+
+static qboolean GL_PostFXBloomBoostActive (void)
+{
+	postfx_state_t state;
+
+	if (r_postfx.value <= 0.f)
+		return false;
+
+	R_PostFX_GetState (&state);
+	return state.bloom_boost > 0.f;
+}
+
 void GL_PostProcess (void)
 {
 	int palidx, variant;
@@ -2808,7 +2829,7 @@ void GL_PostProcess (void)
 	postfx_damage_trauma = CLAMP (0.f, postfx_state.damage_trauma, 1.f);
 
 	float bloom_intensity = q_max (0.f, r_bloom.value);
-	float bloom_intensity_effective = bloom_intensity;
+	float bloom_intensity_effective = GL_ComputeEffectiveBloomIntensity (bloom_intensity, postfx_bloom_boost);
 	float exposure = q_max (0.f, r_tonemap_exposure.value);
 	float tonemap_mode = q_max (0.f, r_tonemap.value);
 	teleport_fade = 0.f;
@@ -2838,19 +2859,7 @@ void GL_PostProcess (void)
 			exposure *= auto_exposure;
 	}
 	r_autoexposure_debug_exposure = exposure;
-	if (bloom_intensity > 0.f)
-	{
-		if (r_postfx_bloom_mode.value > 0.f)
-			bloom_intensity_effective = q_max (bloom_intensity, postfx_bloom_boost);
-		else
-			bloom_intensity_effective = bloom_intensity + postfx_bloom_boost;
-	}
-	else
-	{
-		bloom_intensity_effective = 0.f;
-		postfx_bloom_boost = 0.f;
-	}
-	bloom_intensity_effective = q_max (0.f, bloom_intensity_effective);
+	bloom_intensity_effective = GL_ComputeEffectiveBloomIntensity (bloom_intensity, postfx_bloom_boost);
 
 	if (r_postfx_lut_debug_id.value > 0.f)
 	{
@@ -3699,7 +3708,7 @@ qboolean GL_NeedsSceneEffects (void)
 		return true;
 
 	/* Bloom enabled: keep scene-effects path active for a full-frame bloom extract/composite pass. */
-	if (r_bloom.value > 0.f)
+	if (r_bloom.value > 0.f || GL_PostFXBloomBoostActive ())
 		return true;
 
 	if (r_dynamic.value > 0.f && framebufs.dlight.fbo)
@@ -3726,9 +3735,6 @@ qboolean GL_NeedsPostprocess (void)
 {
 	float saturation;
 	qboolean godrays_medium;
-
-	if (r_postfx.value <= 0.f)
-		return false;
 
 	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())

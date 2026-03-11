@@ -32,7 +32,14 @@ The dominant issue was **A + C combined**:
 - `r_fogvol_shadow_samples` (default `2`, clamp `1..8`): shadow raymarch taps per fog step; higher values improve directional shadow stability at higher GPU cost.
 - `r_fogvol_shadow_strength` (default `0.8`): scales shadow optical depth influence; `0` disables darkening, `1` is physical-ish, values `>1` exaggerate shadows.
 - `r_fogvol_shadow_jitter` (default `1`): stochastic offset for shadow taps to reduce banding; may introduce light temporal noise.
-- `r_fogvol_sun_scatter` (default `0`): adds directional sun radiance to volumetric scattering using the existing anisotropic phase; independent from `r_fogvol_shadow` visibility so it can be tuned separately.
+- `r_fogvol_sun_scatter` (default `1`): scales directional sun radiance in volumetric scattering; independent from `r_fogvol_shadow` visibility so it can be tuned separately.
+- `r_fogvol_quality` (default `1`): coarse quality tier for visual/perf tradeoff.
+  - `0` low: fewer effective march steps, stronger noise subsampling.
+  - `1` medium: balanced default.
+  - `2` high: more effective steps and fuller noise detail.
+- `r_fogvol_noise_detail_strength` (default `0.35`): controls medium/fine noise contribution for visible fog clumps.
+- `r_fogvol_height_mist_strength` (default `0.3`): boosts near-ground layering from height fog.
+- `r_fogvol_atmosphere` (default `0.8`): master boost for forward scattering and anti-milky compositing.
 - `r_fogvol_sun_color` (default `0 0 0`): optional override for directional fog light color. When left at `0 0 0`, fog sun color defaults to `R_GetSun` worldspawn color/intensity, and falls back to sky average tint when no sun is defined.
 - `r_fogvol_local_occlusion` (default `0`): optional per-local-light fog occlusion term for light-list shading (`FogLights` loop in `fogvol.frag`).
   - `0`: disabled (legacy behavior, fastest).

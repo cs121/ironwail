@@ -143,6 +143,9 @@ cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise_subsample = { "r_fogvol_noise_subsample", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise_lod_switch_dist = { "r_fogvol_noise_lod_switch_dist", "64", CVAR_ARCHIVE };
 cvar_t r_fogvol_domainwarp_dist = { "r_fogvol_domainwarp_dist", "128", CVAR_ARCHIVE };
+cvar_t r_fogvol_noise_detail_strength = { "r_fogvol_noise_detail_strength", "0.35", CVAR_ARCHIVE };
+cvar_t r_fogvol_quality = { "r_fogvol_quality", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_atmosphere = { "r_fogvol_atmosphere", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_testvolumes_dumpstate = { "r_fogvol_testvolumes_dumpstate", "0", CVAR_NONE };
@@ -179,17 +182,18 @@ cvar_t r_fogvol_global = { "r_fogvol_global", "1", CVAR_ARCHIVE };
  * Default changed from 1 to 0.05 so global fog is not white-out by default. */
 cvar_t r_fogvol_global_density_scale = { "r_fogvol_global_density_scale", "0.05", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_falloff = { "r_fogvol_global_falloff", "64", CVAR_ARCHIVE };
-cvar_t r_fogvol_global_noise_scale = { "r_fogvol_global_noise_scale", "0.02", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_noise_scale = { "r_fogvol_global_noise_scale", "0.018", CVAR_ARCHIVE };
 /* r_fogvol_global_noise_amount: 0=uniform fog, 1=fully noise-modulated.
  * Was 0 (disabled) by default, making global fog always uniform regardless of
- * other noise settings. Changed to 0.4 for visible clumping out of the box. */
-cvar_t r_fogvol_global_noise_amount = { "r_fogvol_global_noise_amount", "0.4", CVAR_ARCHIVE };
+ * other noise settings. Default 0.62 gives clearly visible cloud breakup. */
+cvar_t r_fogvol_global_noise_amount = { "r_fogvol_global_noise_amount", "0.62", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_noise_bias = { "r_fogvol_global_noise_bias", "0.0", CVAR_ARCHIVE };
-cvar_t r_fogvol_global_velocity_x = { "r_fogvol_global_velocity_x", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_global_velocity_y = { "r_fogvol_global_velocity_y", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_velocity_x = { "r_fogvol_global_velocity_x", "1.25", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_velocity_y = { "r_fogvol_global_velocity_y", "0.65", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_velocity_z = { "r_fogvol_global_velocity_z", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_height = { "r_fogvol_global_height", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_global_height_scale = { "r_fogvol_global_height_scale", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_height_scale = { "r_fogvol_global_height_scale", "0.0012", CVAR_ARCHIVE };
+cvar_t r_fogvol_height_mist_strength = { "r_fogvol_height_mist_strength", "0.3", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_priority = { "r_fogvol_global_priority", "-1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
 /* Central volumetric lighting path selector:
@@ -217,7 +221,7 @@ cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
  * because there is no additional shadow context to justify the extra taps. */
 cvar_t r_fogvol_local_occlusion = { "r_fogvol_local_occlusion", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_dir = { "r_fogvol_sun_dir", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_sun_color = { "r_fogvol_sun_color", "0 0 0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel = { "r_fogvol_froxel", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_parity = { "r_fogvol_froxel_parity", "0", CVAR_ARCHIVE };
@@ -265,6 +269,9 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_noise_subsample, "noise", "1"},
 	{&r_fogvol_noise_lod_switch_dist, "noise", "64"},
 	{&r_fogvol_domainwarp_dist, "noise", "128"},
+	{&r_fogvol_noise_detail_strength, "noise", "0.35"},
+	{&r_fogvol_quality, "quality", "1"},
+	{&r_fogvol_atmosphere, "quality", "0.8"},
 	{&r_fogvol_noisemode, "noise", "0"},
 	{&r_fogvol_testvolumes, "debug", "0"},
 	{&r_fogvol_testvolumes_dumpstate, "debug", "0"},
@@ -286,14 +293,15 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_global, "global", "1"},
 	{&r_fogvol_global_density_scale, "global", "0.05"},
 	{&r_fogvol_global_falloff, "global", "64"},
-	{&r_fogvol_global_noise_scale, "global", "0.02"},
-	{&r_fogvol_global_noise_amount, "global", "0.4"},
+	{&r_fogvol_global_noise_scale, "global", "0.018"},
+	{&r_fogvol_global_noise_amount, "global", "0.62"},
 	{&r_fogvol_global_noise_bias, "global", "0.0"},
-	{&r_fogvol_global_velocity_x, "global", "0"},
-	{&r_fogvol_global_velocity_y, "global", "0"},
+	{&r_fogvol_global_velocity_x, "global", "1.25"},
+	{&r_fogvol_global_velocity_y, "global", "0.65"},
 	{&r_fogvol_global_velocity_z, "global", "0"},
 	{&r_fogvol_global_height, "global", "0"},
-	{&r_fogvol_global_height_scale, "global", "0"},
+	{&r_fogvol_global_height_scale, "global", "0.0012"},
+	{&r_fogvol_height_mist_strength, "global", "0.3"},
 	{&r_fogvol_global_priority, "global", "-1"},
 	{&r_fogvol_light, "lighting", "0"},
 	{&r_fogvol_lighting_mode, "lighting", "2"},
@@ -313,7 +321,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_shadow_jitter, "lighting", "1"},
 	{&r_fogvol_local_occlusion, "lighting", "0"},
 	{&r_fogvol_sun_dir, "lighting", "1"},
-	{&r_fogvol_sun_scatter, "lighting", "0"},
+	{&r_fogvol_sun_scatter, "lighting", "1"},
 	{&r_fogvol_sun_color, "lighting", "0 0 0"},
 	{&r_fogvol_froxel, "lighting", "0"},
 	{&r_fogvol_froxel_parity, "lighting", "0"},
@@ -384,10 +392,13 @@ enum
 	FOGVOL_U_FROXEL_TEMPORAL_PARAMS = 43,
 	FOGVOL_U_LOCAL_OCCLUSION_MODE = 44,
 	FOGVOL_U_LOCAL_OCCLUSION_PARAMS = 45,
-	FOGVOL_U_COUNT = 46
+	FOGVOL_U_NOISE_DETAIL_STRENGTH = 46,
+	FOGVOL_U_HEIGHT_MIST_STRENGTH = 47,
+	FOGVOL_U_ATMOSPHERE_BOOST = 48,
+	FOGVOL_U_COUNT = 49
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_LOCAL_OCCLUSION_PARAMS == 45);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_ATMOSPHERE_BOOST == 48);
 
 typedef struct froxel_state_s
 {
@@ -3586,24 +3597,50 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	vec3_t sun_color;
 	float sun_intensity;
 	float sun_scatter;
+	float noise_detail_strength;
+	float height_mist_strength;
+	float atmosphere_boost;
+	float quality_fx_scale;
+	float quality_step_scale;
+	int quality_mode;
+	int effective_steps;
+	int noise_subsample;
 	const sun_t *sun = R_GetSun ();
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 46);
+	assert (FOGVOL_U_COUNT == 49);
 	assert (glwidth > 0);
 	assert (glheight > 0);
 	assert (view_w > 0.f);
 	assert (view_h > 0.f);
 #endif
-	GL_Uniform1iFunc (FOGVOL_U_STEPS, steps);
+	quality_mode = CLAMP (0, (int)Q_rint (r_fogvol_quality.value), 2);
+	quality_step_scale = 1.f;
+	quality_fx_scale = 1.f;
+	if (quality_mode == 0)
+	{
+		quality_step_scale = 0.8f;
+		quality_fx_scale = 0.7f;
+	}
+	else if (quality_mode == 2)
+	{
+		quality_step_scale = 1.15f;
+		quality_fx_scale = 1.15f;
+	}
+	effective_steps = (int)Q_rint ((float)steps * quality_step_scale);
+	effective_steps = CLAMP (8, effective_steps, CLAMP (8, (int)Q_rint (r_fogvol_maxsteps.value), 256));
+	GL_Uniform1iFunc (FOGVOL_U_STEPS, effective_steps);
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_DEBUG_MODE, mode);
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_MODE, (int)Q_rint (r_fogvol_noisemode.value));
 	GL_Uniform1iFunc (FOGVOL_U_PHYS_BLEND, r_fogvol_physblend.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_JITTER_ENABLED, r_fogvol_jitter.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_FRAME_INDEX, r_framecount);
-	GL_Uniform1iFunc (FOGVOL_U_NOISE_SUBSAMPLE, r_fogvol_noise_subsample.value > 0.f ? 1 : 0);
+	noise_subsample = r_fogvol_noise_subsample.value > 0.f ? 1 : 0;
+	if (quality_mode == 0)
+		noise_subsample = 1;
+	GL_Uniform1iFunc (FOGVOL_U_NOISE_SUBSAMPLE, noise_subsample);
 	GL_Uniform1fFunc (FOGVOL_U_NOISE_LOD_SWITCH_DIST, q_max (1.f, r_fogvol_noise_lod_switch_dist.value));
 	GL_Uniform1fFunc (FOGVOL_U_DOMAIN_WARP_MAX_DIST, q_max (0.f, r_fogvol_domainwarp_dist.value));
 	GL_Uniform1iFunc (FOGVOL_U_CHECKERBOARD, r_fogvol_checkerboard.value > 0.f ? 1 : 0);
@@ -3644,7 +3681,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1fFunc (FOGVOL_U_SHADOW_JITTER, r_fogvol_shadow_jitter.value > 0.f ? 1.f : 0.f);
 	GL_Uniform3fFunc (FOGVOL_U_SHADOW_DIR, shadow_dir[0], shadow_dir[1], shadow_dir[2]);
 	GL_Uniform1iFunc (FOGVOL_U_LIGHTGRID_ENABLED, fog_lightgrid_enabled ? 1 : 0);
-	sun_scatter = sun->volumetric_intensity;
+	sun_scatter = sun->volumetric_intensity * q_max (0.f, r_fogvol_sun_scatter.value);
 	if (R_WorldHasSun ())
 	{
 		VectorCopy (sun->color, sun_color);
@@ -3695,6 +3732,14 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		r_froxel.prev_valid ? 1.f : 0.f);
 	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, CLAMP (0, (int)Q_rint (r_fogvol_local_occlusion.value), 2));
 	GL_Uniform4fFunc (FOGVOL_U_LOCAL_OCCLUSION_PARAMS, 4.f, 0.02f, 1.f, 0.f);
+	noise_detail_strength = CLAMP (0.f, r_fogvol_noise_detail_strength.value, 1.f);
+	noise_detail_strength *= quality_mode == 1 ? 0.75f : quality_fx_scale;
+	height_mist_strength = CLAMP (0.f, r_fogvol_height_mist_strength.value, 1.f);
+	height_mist_strength = CLAMP (0.f, height_mist_strength * quality_fx_scale, 1.f);
+	atmosphere_boost = CLAMP (0.f, r_fogvol_atmosphere.value * quality_fx_scale, 1.5f);
+	GL_Uniform1fFunc (FOGVOL_U_NOISE_DETAIL_STRENGTH, noise_detail_strength);
+	GL_Uniform1fFunc (FOGVOL_U_HEIGHT_MIST_STRENGTH, height_mist_strength);
+	GL_Uniform1fFunc (FOGVOL_U_ATMOSPHERE_BOOST, atmosphere_boost);
 }
 
 void R_FogVol_Render (void)
