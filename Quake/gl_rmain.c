@@ -3711,7 +3711,9 @@ qboolean GL_NeedsSceneEffects (void)
 	if (r_bloom.value > 0.f || GL_PostFXBloomBoostActive ())
 		return true;
 
-	if (r_dynamic.value > 0.f && framebufs.dlight.fbo)
+	/* Only force scene-effects for buffered dlights if postprocess is active.
+	 * This avoids expensive offscreen copies/compositing in pure forward path. */
+	if (r_dynamic.value > 0.f && framebufs.dlight.fbo && GL_NeedsPostprocess ())
 		return true;
 
         if (GL_ShouldApplyMotionBlur ())
@@ -5396,7 +5398,10 @@ static void R_DrawDLightPass (void)
         if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
                 return;
 
-	use_buffer = (framebufs.dlight.fbo && framebufs.scene.samples == 1);
+	/* PERF: Buffered dlight compositing should only run when we are already
+	 * in the postprocess/composite path. Otherwise AA=off (samples==1) forces
+	 * an unnecessary scene-effects framegraph and tanks FPS. */
+	use_buffer = (framebufs.dlight.fbo && framebufs.scene.samples == 1 && GL_NeedsPostprocess ());
 
         ents = R_GetVisEntities (mod_brush, false, &count);
         if (count <= 0)
