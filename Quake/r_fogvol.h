@@ -86,18 +86,18 @@ extern cvar_t r_fogvol_testvolumes;
 /* BUG FIX (C-06): r_fogvol_testvolumes_dumpstate was defined in r_fogvol.c
  * but not exported — violates BEST PRACTICE #11. */
 extern cvar_t r_fogvol_testvolumes_dumpstate;
-extern cvar_t r_fogvol_globalfog;
-extern cvar_t r_fogvol_globalfog_density_scale;
-extern cvar_t r_fogvol_globalfog_falloff;
-extern cvar_t r_fogvol_globalfog_noise_scale;
-extern cvar_t r_fogvol_globalfog_noise_amount;
-extern cvar_t r_fogvol_globalfog_noise_bias;
-extern cvar_t r_fogvol_globalfog_velocity_x;
-extern cvar_t r_fogvol_globalfog_velocity_y;
-extern cvar_t r_fogvol_globalfog_velocity_z;
-extern cvar_t r_fogvol_globalfog_height;
-extern cvar_t r_fogvol_globalfog_height_scale;
-extern cvar_t r_fogvol_globalfog_priority;
+extern cvar_t r_fogvol_global;
+extern cvar_t r_fogvol_global_density_scale;
+extern cvar_t r_fogvol_global_falloff;
+extern cvar_t r_fogvol_global_noise_scale;
+extern cvar_t r_fogvol_global_noise_amount;
+extern cvar_t r_fogvol_global_noise_bias;
+extern cvar_t r_fogvol_global_velocity_x;
+extern cvar_t r_fogvol_global_velocity_y;
+extern cvar_t r_fogvol_global_velocity_z;
+extern cvar_t r_fogvol_global_height;
+extern cvar_t r_fogvol_global_height_scale;
+extern cvar_t r_fogvol_global_priority;
 extern cvar_t r_fogvol_light;
 extern cvar_t r_fogvol_lighting_mode;
 extern cvar_t r_fogvol_lightgrid;
@@ -151,7 +151,7 @@ qboolean R_FogVol_IsEnabledForFrame (void);
 qboolean R_FogVol_HasValidComposite (void);
 /* PostFX gate: volumetric output may be produced this frame (not tied to global fog density). */
 qboolean R_FogVol_ShouldAffectPostFX (void);
-/* Global-replacement gate: volumetric global fog is eligible this frame (includes classic fog density + r_fogvol_globalfog). */
+/* Global-replacement gate: volumetric global fog is eligible this frame (includes classic fog density + r_fogvol_global). */
 qboolean R_FogVol_CanRenderGlobal (void);
 /*
  * FogVol Composite Contract (for CPU + shader users):

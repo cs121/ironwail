@@ -166,29 +166,31 @@ cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
  * saturated instantly at any stepLen > ~1 unit.  Now treated as an optical
  * depth cap (sigma*stepLen), making the value scale-independent. */
 cvar_t r_fogvol_sigma_max = { "r_fogvol_sigma_max", "4", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog = { "r_fogvol_globalfog", "1", CVAR_ARCHIVE };
-/* r_fogvol_globalfog_density_scale: scales the density taken from the map's
- * classic Quake fog command before passing it to the volumetric raymarcher.
+cvar_t r_fogvol_global = { "r_fogvol_global", "1", CVAR_ARCHIVE };
+/* r_fogvol_global_density_scale: scales the global volumetric density.
+ * If the map has classic fog density > 0, that value is used as the base.
+ * If the map fog density is 0, a base density of 1 is used so r_fogvol_global
+ * still produces visible fog on maps without a fog key.
  * Quake fog density is dimensionless (used in GL_EXP as exp(-density*z));
  * the raymarcher treats density as an extinction coefficient in quake-units^-1.
  * A map fog density of 0.1 means GL_EXP gives 37% transmittance at z=10 units,
  * which is far too dense for the raymarcher (sigma=0.1, stepLen~64 → opaque).
  * Scale down by ~0.01–0.1 to get visually comparable results.
  * Default changed from 1 to 0.05 so global fog is not white-out by default. */
-cvar_t r_fogvol_globalfog_density_scale = { "r_fogvol_globalfog_density_scale", "0.05", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_falloff = { "r_fogvol_globalfog_falloff", "64", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_noise_scale = { "r_fogvol_globalfog_noise_scale", "0.02", CVAR_ARCHIVE };
-/* r_fogvol_globalfog_noise_amount: 0=uniform fog, 1=fully noise-modulated.
+cvar_t r_fogvol_global_density_scale = { "r_fogvol_global_density_scale", "0.05", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_falloff = { "r_fogvol_global_falloff", "64", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_noise_scale = { "r_fogvol_global_noise_scale", "0.02", CVAR_ARCHIVE };
+/* r_fogvol_global_noise_amount: 0=uniform fog, 1=fully noise-modulated.
  * Was 0 (disabled) by default, making global fog always uniform regardless of
  * other noise settings. Changed to 0.4 for visible clumping out of the box. */
-cvar_t r_fogvol_globalfog_noise_amount = { "r_fogvol_globalfog_noise_amount", "0.4", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_noise_bias = { "r_fogvol_globalfog_noise_bias", "0.0", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_velocity_x = { "r_fogvol_globalfog_velocity_x", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_velocity_y = { "r_fogvol_globalfog_velocity_y", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_velocity_z = { "r_fogvol_globalfog_velocity_z", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_height = { "r_fogvol_globalfog_height", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_height_scale = { "r_fogvol_globalfog_height_scale", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_globalfog_priority = { "r_fogvol_globalfog_priority", "-1", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_noise_amount = { "r_fogvol_global_noise_amount", "0.4", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_noise_bias = { "r_fogvol_global_noise_bias", "0.0", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_velocity_x = { "r_fogvol_global_velocity_x", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_velocity_y = { "r_fogvol_global_velocity_y", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_velocity_z = { "r_fogvol_global_velocity_z", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_height = { "r_fogvol_global_height", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_height_scale = { "r_fogvol_global_height_scale", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_global_priority = { "r_fogvol_global_priority", "-1", CVAR_ARCHIVE };
 cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
 /* Central volumetric lighting path selector:
  * 0=off, 1=raymarch lights, 2=froxel lights, 3=froxel base + raymarch detail.
@@ -279,18 +281,18 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_inject_debug, "debug", "0"},
 	{&r_fogvol_density_scale, "core", "1"},
 	{&r_fogvol_sigma_max, "core", "4"},
-	{&r_fogvol_globalfog, "global", "1"},
-	{&r_fogvol_globalfog_density_scale, "global", "0.05"},
-	{&r_fogvol_globalfog_falloff, "global", "64"},
-	{&r_fogvol_globalfog_noise_scale, "global", "0.02"},
-	{&r_fogvol_globalfog_noise_amount, "global", "0.4"},
-	{&r_fogvol_globalfog_noise_bias, "global", "0.0"},
-	{&r_fogvol_globalfog_velocity_x, "global", "0"},
-	{&r_fogvol_globalfog_velocity_y, "global", "0"},
-	{&r_fogvol_globalfog_velocity_z, "global", "0"},
-	{&r_fogvol_globalfog_height, "global", "0"},
-	{&r_fogvol_globalfog_height_scale, "global", "0"},
-	{&r_fogvol_globalfog_priority, "global", "-1"},
+	{&r_fogvol_global, "global", "1"},
+	{&r_fogvol_global_density_scale, "global", "0.05"},
+	{&r_fogvol_global_falloff, "global", "64"},
+	{&r_fogvol_global_noise_scale, "global", "0.02"},
+	{&r_fogvol_global_noise_amount, "global", "0.4"},
+	{&r_fogvol_global_noise_bias, "global", "0.0"},
+	{&r_fogvol_global_velocity_x, "global", "0"},
+	{&r_fogvol_global_velocity_y, "global", "0"},
+	{&r_fogvol_global_velocity_z, "global", "0"},
+	{&r_fogvol_global_height, "global", "0"},
+	{&r_fogvol_global_height_scale, "global", "0"},
+	{&r_fogvol_global_priority, "global", "-1"},
 	{&r_fogvol_light, "lighting", "0"},
 	{&r_fogvol_lighting_mode, "lighting", "2"},
 	{&r_fogvol_lightgrid, "lighting", "1"},
@@ -2724,13 +2726,12 @@ static float R_FogVol_PointDistance (const vec3_t point, const fog_volume_t *vol
 static void R_FogVol_AddGlobalFog (void)
 {
 	fog_volume_t volume;
+	float base_density;
 	float *color = Fog_GetColor ();
 
-	if (r_fogvol_globalfog.value <= 0.f)
+	if (r_fogvol_global.value <= 0.f)
 		return;
 	if (r_fogvol.value <= 0.f)
-		return;
-	if (Fog_GetDensity () <= 0.f)
 		return;
 
 	memset (&volume, 0, sizeof (volume));
@@ -2740,20 +2741,24 @@ static void R_FogVol_AddGlobalFog (void)
 
 	VectorCopy (color, volume.color);
 
-	volume.density = Fog_GetDensity () * q_max (0.f, r_fogvol_globalfog_density_scale.value);
-	volume.falloff = q_max (0.f, r_fogvol_globalfog_falloff.value);
+	base_density = Fog_GetDensity ();
+	if (base_density <= 0.f)
+		base_density = 1.f;
+
+	volume.density = base_density * q_max (0.f, r_fogvol_global_density_scale.value);
+	volume.falloff = q_max (0.f, r_fogvol_global_falloff.value);
 	volume.mode = 0;
-	volume.noiseScale = q_max (0.f, r_fogvol_globalfog_noise_scale.value);
-	volume.noiseAmount = CLAMP (0.f, r_fogvol_globalfog_noise_amount.value, 1.f);
-	volume.noiseBias = r_fogvol_globalfog_noise_bias.value;
-	volume.velocity[0] = r_fogvol_globalfog_velocity_x.value;
-	volume.velocity[1] = r_fogvol_globalfog_velocity_y.value;
-	volume.velocity[2] = r_fogvol_globalfog_velocity_z.value;
+	volume.noiseScale = q_max (0.f, r_fogvol_global_noise_scale.value);
+	volume.noiseAmount = CLAMP (0.f, r_fogvol_global_noise_amount.value, 1.f);
+	volume.noiseBias = r_fogvol_global_noise_bias.value;
+	volume.velocity[0] = r_fogvol_global_velocity_x.value;
+	volume.velocity[1] = r_fogvol_global_velocity_y.value;
+	volume.velocity[2] = r_fogvol_global_velocity_z.value;
 	volume.maxDistance = 0.f;
-	volume.priority = (int)Q_rint (r_fogvol_globalfog_priority.value);
+	volume.priority = (int)Q_rint (r_fogvol_global_priority.value);
 	volume.enabled = 1;
-	volume.height = r_fogvol_globalfog_height.value;
-	volume.heightScale = r_fogvol_globalfog_height_scale.value;
+	volume.height = r_fogvol_global_height.value;
+	volume.heightScale = r_fogvol_global_height_scale.value;
 	volume.edgeSoftness = 0.f;
 
 	R_FogVol_AddVolume (&volume);
@@ -2795,9 +2800,7 @@ qboolean R_FogVol_CanRenderGlobal (void)
 {
 	if (!R_FogVol_IsEnabledForFrame ())
 		return false;
-	if (r_fogvol_globalfog.value <= 0.f)
-		return false;
-	if (Fog_GetDensity () <= 0.f)
+	if (r_fogvol_global.value <= 0.f)
 		return false;
 
 	return true;
