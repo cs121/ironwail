@@ -2312,7 +2312,7 @@ static void R_PrepareFogVolInputs (void)
 {
 	const qboolean need_godray_inputs = (r_fogvol_godray_coupling.value > 0.f || r_fogvol_froxel_godrays.value > 0.f);
 
-	if (r_fogvol.value <= 0.f || !need_godray_inputs)
+	if (!need_godray_inputs || !R_FogVol_IsEnabledForFrame () || !R_FogVol_HasRenderableContent ())
 	{
 		R_FogVol_SetGodrayCouplingTextures (0, 0, 0, false);
 		return;
@@ -3702,6 +3702,35 @@ GL_NeedsSceneEffects
 =============
 */
 
+static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
+{
+	float saturation;
+	qboolean godrays_medium;
+
+	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
+	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
+		return true;
+	if (r_debug_colorspace.value > 0.f)
+		return true;
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_color_contrast.value != 1.f || saturation != 1.f || r_color_midtone.value != 1.f || GL_ShouldApplyMotionBlur ())
+		return true;
+	if (r_srgb_framebuffer.value <= 0.f)
+		return true;
+	if (r_ssao.value > 0.f)
+		return true;
+	godrays_medium = R_GodraysMediumEnabled ();
+	if (r_godrays.value > 0.f && godrays_medium)
+		return true;
+	if (include_fogvol && R_FogVol_ShouldAffectPostFX ())
+		return true;
+	return false;
+}
+
+static qboolean GL_NeedsPostprocessWithoutFogVol (void)
+{
+	return GL_NeedsPostprocess_Internal (false);
+}
+
 qboolean GL_NeedsSceneEffects (void)
 {
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
@@ -3712,8 +3741,9 @@ qboolean GL_NeedsSceneEffects (void)
 		return true;
 
 	/* Only force scene-effects for buffered dlights if postprocess is active.
-	 * This avoids expensive offscreen copies/compositing in pure forward path. */
-	if (r_dynamic.value > 0.f && framebufs.dlight.fbo && GL_NeedsPostprocess ())
+	 * Ignore fogvol-only postprocess demand here, otherwise AA=off can trigger
+	 * expensive buffered dlight rendering just because fogvol is enabled. */
+	if (r_dynamic.value > 0.f && framebufs.dlight.fbo && GL_NeedsPostprocessWithoutFogVol ())
 		return true;
 
         if (GL_ShouldApplyMotionBlur ())
@@ -3735,26 +3765,7 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-	float saturation;
-	qboolean godrays_medium;
-
-	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
-	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
-		return true;
-	if (r_debug_colorspace.value > 0.f)
-		return true;
-	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_color_contrast.value != 1.f || saturation != 1.f || r_color_midtone.value != 1.f || GL_ShouldApplyMotionBlur ())
-		return true;
-	if (r_srgb_framebuffer.value <= 0.f)
-		return true;
-	if (r_ssao.value > 0.f)
-		return true;
-	godrays_medium = R_GodraysMediumEnabled ();
-	if (r_godrays.value > 0.f && godrays_medium)
-		return true;
-	if (R_FogVol_ShouldAffectPostFX ())
-		return true;
-	return false;
+	return GL_NeedsPostprocess_Internal (true);
 }
 
 /*
@@ -5324,6 +5335,8 @@ void R_RenderShadowMaps (void)
 	GLint old_read_fbo = 0;
 	GLint old_depth_func = GL_LEQUAL;
 	GLdouble old_clear_depth = 1.0;
+	qboolean want_sun_shadow = false;
+	qboolean want_dlight_shadows = false;
 
 	R_Shadow_ResetRuntime ();
 	R_Shadow_ClearDrawContext ();
@@ -5340,10 +5353,14 @@ void R_RenderShadowMaps (void)
 		return;
 
 	R_Shadow_SelectDlights ();
-	if (R_Shadow_SunEnabled ())
+	want_sun_shadow = (R_Shadow_SunEnabled () && framebufs.shadow.sun_fbo && framebufs.shadow.sun_depth_tex);
+	want_dlight_shadows = (r_shadow_state.num_dlights > 0 && R_Shadow_DlightEnabled () && framebufs.shadow.dlight_fbo && framebufs.shadow.dlight_depth_tex);
+	if (want_sun_shadow)
 		R_Shadow_UpdateSunMatrix ();
-	if (r_shadow_state.num_dlights > 0)
+	if (want_dlight_shadows)
 		R_Shadow_UpdateDlightMatrices ();
+	if (!want_sun_shadow && !want_dlight_shadows)
+		return;
 
 	glGetIntegerv (GL_VIEWPORT, old_viewport);
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &old_draw_fbo);
@@ -5370,8 +5387,7 @@ void R_RenderShadowMaps (void)
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 	r_shadow_state.valid =
-		((R_Shadow_SunEnabled () && framebufs.shadow.sun_depth_tex != 0)
-		 || (r_shadow_state.num_dlights > 0 && R_Shadow_DlightEnabled () && framebufs.shadow.dlight_depth_tex != 0));
+		(want_sun_shadow || want_dlight_shadows);
 }
 
 // Quake3-style dynamic light pass rationale: render only additive dlight
@@ -5398,10 +5414,9 @@ static void R_DrawDLightPass (void)
         if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
                 return;
 
-	/* PERF: Buffered dlight compositing should only run when we are already
-	 * in the postprocess/composite path. Otherwise AA=off (samples==1) forces
-	 * an unnecessary scene-effects framegraph and tanks FPS. */
-	use_buffer = (framebufs.dlight.fbo && framebufs.scene.samples == 1 && GL_NeedsPostprocess ());
+	/* PERF: Do not trigger buffered dlight path for fogvol-only postprocess.
+	 * This avoids the AA=off + fogvol performance cliff. */
+	use_buffer = (framebufs.dlight.fbo && framebufs.scene.samples == 1 && GL_NeedsPostprocessWithoutFogVol ());
 
         ents = R_GetVisEntities (mod_brush, false, &count);
         if (count <= 0)
@@ -5586,9 +5601,17 @@ void R_WarpScaleView (void)
 			glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		else
 			glDrawBuffer (GL_BACK);
-		GL_BlitFramebufferFunc (0, 0, srcw, srch,
-			srcx, srcy, srcx + srcw, srcy + srch,
-			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		{
+			GLbitfield mask = GL_COLOR_BUFFER_BIT;
+			if (need_depth_resolve)
+			{
+				mask |= GL_DEPTH_BUFFER_BIT;
+				need_depth_resolve = false;
+			}
+			GL_BlitFramebufferFunc (0, 0, srcw, srch,
+				srcx, srcy, srcx + srcw, srcy + srch,
+				mask, GL_NEAREST);
+		}
 	}
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);

@@ -29,21 +29,27 @@ void R_WarpScaleView (void);
  */
 void R_FrameGraph_RenderView (const r_framegraph_state_t *state)
 {
+	qboolean run_fogvol_pass;
+
 	R_SetupView ();
 	R_RenderShadowMaps ();
 	R_UpdateDecals ();
 	Fog_EnableGFog ();
 	R_RenderScene ();
 	R_WarpScaleView ();
+	run_fogvol_pass = R_FogVol_IsEnabledForFrame () && R_FogVol_HasRenderableContent ();
 	if (state && state->prepare_fogvol_inputs)
-		state->prepare_fogvol_inputs();
+		state->prepare_fogvol_inputs ();
 
-	if (state && state->fogvol_update_called)
-		(*state->fogvol_update_called)++;
-	R_FogVol_BuildList ();
-	if (state && state->fogvol_draw_called)
-		(*state->fogvol_draw_called)++;
-	R_FogVol_Render ();
+	if (run_fogvol_pass)
+	{
+		if (state && state->fogvol_update_called)
+			(*state->fogvol_update_called)++;
+		R_FogVol_BuildList ();
+		if (state && state->fogvol_draw_called)
+			(*state->fogvol_draw_called)++;
+		R_FogVol_Render ();
+	}
 
 	if (state && state->ssao_fog_state)
 		R_SSAO_CaptureFogState (&r_framedata, state->ssao_fog_state);

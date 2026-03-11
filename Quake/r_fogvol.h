@@ -152,6 +152,9 @@ void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres);
 /* FogVol rendering-availability gate: volumetric resources/programs + r_fogvol are ready this frame. */
 qboolean R_FogVol_IsEnabledForFrame (void);
+/* Content gate: at least one fog source could contribute this frame
+ * (global fog, entity fog volumes, or debug test volumes). */
+qboolean R_FogVol_HasRenderableContent (void);
 /* Output-level gate: fogvol produced a valid composite texture this frame (safe to sample now). */
 qboolean R_FogVol_HasValidComposite (void);
 /* PostFX gate: volumetric output may be produced this frame (not tied to global fog density). */

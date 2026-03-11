@@ -134,10 +134,10 @@ typedef struct fogvol_static_field_s
 static fogvol_static_field_t r_fog_static_field;
 
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
+cvar_t r_fogvol_steps = { "r_fogvol_steps", "24", CVAR_ARCHIVE };
 cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
 cvar_t r_fogvol_stepsize = { "r_fogvol_stepsize", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps_scale_halfres = { "r_fogvol_steps_scale_halfres", "0.5", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise_subsample = { "r_fogvol_noise_subsample", "1", CVAR_ARCHIVE };
@@ -208,7 +208,7 @@ cvar_t r_fogvol_light_stats = { "r_fogvol_light_stats", "0", CVAR_NONE };
 cvar_t r_fogvol_gpu_light_select = { "r_fogvol_gpu_light_select", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_gpu_static_build = { "r_fogvol_gpu_static_build", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "2", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
 /* Per-local-light occlusion term in fogvol.frag:
@@ -256,10 +256,10 @@ typedef struct fogvol_cvar_reg_s
 
 static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol, "core", "0"},
-	{&r_fogvol_steps, "quality", "32"},
+	{&r_fogvol_steps, "quality", "24"},
 	{&r_fogvol_maxsteps, "quality", "128"},
 	{&r_fogvol_stepsize, "quality", "0"},
-	{&r_fogvol_halfres, "quality", "0"},
+	{&r_fogvol_halfres, "quality", "1"},
 	{&r_fogvol_steps_scale_halfres, "quality", "0.5"},
 	{&r_fogvol_noise, "noise", "1"},
 	{&r_fogvol_noise_subsample, "noise", "1"},
@@ -308,7 +308,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_gpu_light_select, "lighting", "0"},
 	{&r_fogvol_gpu_static_build, "lighting", "0"},
 	{&r_fogvol_shadow, "lighting", "1"},
-	{&r_fogvol_shadow_samples, "lighting", "2"},
+	{&r_fogvol_shadow_samples, "lighting", "1"},
 	{&r_fogvol_shadow_strength, "lighting", "0.8"},
 	{&r_fogvol_shadow_jitter, "lighting", "1"},
 	{&r_fogvol_local_occlusion, "lighting", "0"},
@@ -2957,6 +2957,17 @@ qboolean R_FogVol_IsEnabledForFrame (void)
 	return true;
 }
 
+qboolean R_FogVol_HasRenderableContent (void)
+{
+	if (r_fogvol_testvolumes.value > 0.f)
+		return true;
+	if (r_fogvol.value <= 0.f)
+		return false;
+	if (r_fogvol_global.value > 0.f)
+		return true;
+	return (r_fogvolume_entity_count > 0);
+}
+
 qboolean R_FogVol_HasValidComposite (void)
 {
 	if (!R_FogVol_IsEnabledForFrame ())
@@ -2973,7 +2984,7 @@ qboolean R_FogVol_ShouldAffectPostFX (void)
 	/* PostFX should reserve volumetric integration/composite paths whenever
 	 * fogvol rendering is available this frame, even if classic global fog
 	 * density is currently zero. */
-	return R_FogVol_IsEnabledForFrame ();
+	return R_FogVol_IsEnabledForFrame () && R_FogVol_HasRenderableContent ();
 }
 
 qboolean R_FogVol_CanRenderGlobal (void)
@@ -3377,12 +3388,18 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	quality_fx_scale = 1.f;
 	if (quality_mode == 0)
 	{
-		quality_step_scale = 0.8f;
-		quality_fx_scale = 0.7f;
+		quality_step_scale = 0.62f;
+		quality_fx_scale = 0.68f;
+	}
+	else if (quality_mode == 1)
+	{
+		/* Keep default quality visually rich but cheaper than legacy baseline. */
+		quality_step_scale = 0.82f;
+		quality_fx_scale = 0.9f;
 	}
 	else if (quality_mode == 2)
 	{
-		quality_step_scale = 1.15f;
+		quality_step_scale = 1.12f;
 		quality_fx_scale = 1.15f;
 	}
 	effective_steps = (int)Q_rint ((float)steps * quality_step_scale);
@@ -3417,6 +3434,8 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1iFunc (FOGVOL_U_BLEND_MODE_DEFAULT, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
 	GL_Uniform1iFunc (FOGVOL_U_LIGHT_ENABLED, fog_light_enabled ? 1 : 0);
 	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
+	if (quality_mode <= 1)
+		shadow_samples = q_min (shadow_samples, 1);
 	if (r_fogvol_sun_dir.value > 0.f && R_WorldHasSun ())
 	{
 		/* Convention: sun->dir points from scene toward the sun (light source).
@@ -3572,10 +3591,6 @@ void R_FogVol_Render (void)
 	const qboolean want_froxel_dlights = froxel_injection_enabled && (r_fogvol_dlightscale.value > 0.f);
 	const qboolean run_froxel_injection = froxel_injection_enabled && (want_froxel_dlights || want_froxel_sun || want_froxel_static);
 
-	R_FogVol_WarnFroxelLightingConfig ();
-	if (r_fogvol_static_probe_mode.value > 0.f && r_fog_static_field.valid && !r_fog_static_field.build_complete)
-		R_FogVol_ContinueStaticFieldBuild (q_max (1, (int)Q_rint (r_fogvol_static_probe_budget_frame.value)));
-
 	/* Per-frame validity: only expose a fogvol composite texture after this
 	 * frame actually produced one. */
 	r_fogvol_composite_valid = false;
@@ -3590,6 +3605,10 @@ void R_FogVol_Render (void)
 		return;
 	if (!Mat4_Inverse (r_matviewproj, inv_viewproj))
 		return;
+
+	R_FogVol_WarnFroxelLightingConfig ();
+	if (r_fogvol_static_probe_mode.value > 0.f && r_fog_static_field.valid && !r_fog_static_field.build_complete)
+		R_FogVol_ContinueStaticFieldBuild (q_max (1, (int)Q_rint (r_fogvol_static_probe_budget_frame.value)));
 
 	dumpstate_always = (r_fogvol_testvolumes_dumpstate.value > 0.f);
 	if (last_dumpstate != (int)Q_rint (r_fogvol_testvolumes_dumpstate.value))
@@ -4164,7 +4183,7 @@ void R_FogVol_Render (void)
 
 done:
 	R_FogVol_LogStateSnapshot ("after-pass");
-	if (use_halfres)
+	if (use_halfres && (r_gl_state_validate.value > 0.f || R_FogVol_TestDebugEnabled ()))
 	{
 		GLint viewport[4] = {0};
 		GLint scissor_box[4] = {0};

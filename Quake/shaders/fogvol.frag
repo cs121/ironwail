@@ -712,7 +712,7 @@ void main()
 	// FogDepthParams.x = near plane (~0.5 units), not useful here.
 	// Use a fixed world-space target: 32 units (tunable via density).
 	// For global fog, density is very low so large steps are fine visually.
-	const float MAX_STEP_LEN = 64.0; // world units  coarser = faster, less detail
+	const float MAX_STEP_LEN = 80.0; // world units, tuned for lower baseline cost
 	float stepCount = max(float(FogSteps), 1.0);
 	float idealStepLen = len / stepCount;
 	// If stepLen would exceed MAX_STEP_LEN, reduce step count proportionally.
@@ -842,9 +842,9 @@ void main()
 
 	int adaptiveSteps = int(stepCount); // adaptive, already capped at FogSteps
 	if (fogLightingMode == 2)
-		adaptiveSteps = clamp(adaptiveSteps, 8, 16);
+		adaptiveSteps = clamp(adaptiveSteps, 6, 12);
 	else if (fogLightingMode == 3)
-		adaptiveSteps = clamp(adaptiveSteps, 8, 20);
+		adaptiveSteps = clamp(adaptiveSteps, 6, 16);
 	{
 		// Distance-adaptive march budget: rays that start far away get up to 75% fewer steps.
 		float farStartNorm = clamp(tEnter / max(FogDepthParams.y, 1e-3), 0.0, 1.0);
