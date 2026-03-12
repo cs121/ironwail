@@ -60,6 +60,8 @@ layout(location=41) uniform float ShadowNumLights;
 layout(location=42) uniform vec4 ShadowDLightConfig0; // x: scale, y: radius scale, z: falloff mode, w: exp
 layout(location=43) uniform vec4 ShadowDLightConfig1; // x: core boost, y: core exp, z: soft knee, w: ndotl mix
 layout(location=44) uniform vec4 ShadowDLightConfig2; // x: saturation chop
+layout(location=45) uniform vec4 RimLightParams0; // x=enable, y=intensity, z=power, w=shadowed
+layout(location=46) uniform vec4 RimLightParams1; // x=world_enable, y=model_enable, z=sun_scale, w=dlight_scale
 
 float bayer01(ivec2 coord)
 {
@@ -425,6 +427,45 @@ void main()
 			sun_shadow = SampleSunShadow(world_pos);
 			result.rgb += albedo * ShadowSunColorIntensity.rgb * ShadowSunColorIntensity.a
 				* ndotl * max(ShadowSunVisibility, 0.0) * sun_shadow;
+		}
+	}
+
+	if (RimLightParams0.x > 0.5 && RimLightParams1.y > 0.5)
+	{
+		vec3 to_eye = AliasFrameBuffer.EyePos - world_pos;
+		float to_eye_len_sq = dot(to_eye, to_eye);
+		if (to_eye_len_sq > 1e-8)
+		{
+			vec3 view_dir = to_eye * inversesqrt(to_eye_len_sq);
+			float rim_ndotv = 1.0 - clamp(dot(world_nor, view_dir), 0.0, 1.0);
+			float rim_factor = pow(max(rim_ndotv, 0.0), max(RimLightParams0.z, 0.5)) * max(RimLightParams0.y, 0.0);
+			if (rim_factor > 1e-5)
+			{
+				/* Base rim from model lighting so the effect remains visible even
+				 * in scenes without explicit sun/dlight contributions. */
+				vec3 rim_light = max(lit_color.rgb, vec3(0.0)) * 0.28;
+				float use_rim_shadows = (RimLightParams0.w > 0.5) ? 1.0 : 0.0;
+
+				if (RimLightParams1.z > 0.0 && ShadowSunDirEnabled.w > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
+				{
+					vec3 sun_to_surface = -ShadowSunDirEnabled.xyz;
+					float sun_back = max(dot(-world_nor, sun_to_surface), 0.0);
+					float rim_sun_shadow = (use_rim_shadows > 0.5) ? SampleSunShadow(world_pos) : 1.0;
+					float sun_vis = max(ShadowSunVisibility, 0.0);
+					rim_light += ShadowSunColorIntensity.rgb * ShadowSunColorIntensity.a
+						* sun_vis * rim_sun_shadow * mix(0.35, 1.0, sun_back) * RimLightParams1.z;
+				}
+
+				if (RimLightParams1.w > 0.0)
+				{
+					vec3 rim_dlight = max(in_dlight_color, vec3(0.0));
+					if (use_rim_shadows > 0.5 && ShadowNumLights > 0.5)
+						rim_dlight = ComputeAliasDLightContribution(world_pos, world_nor);
+					rim_light += rim_dlight * RimLightParams1.w;
+				}
+
+				result.rgb += albedo * rim_light * rim_factor;
+			}
 		}
 	}
 

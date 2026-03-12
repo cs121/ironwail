@@ -68,11 +68,8 @@ void main()
 	mat4x3 world = transpose(mat3x4(instance.mat[0], instance.mat[1], instance.mat[2]));
 	vec3 world_pos = (world * vec4(in_pos, 1.0)).xyz;
 	vec4 clip = ShadowViewProj * vec4(world_pos, 1.0);
-#if REVERSED_Z
-	const float ZBIAS = -1.0 / 1024.0;
-#else
+	/* Shadow-map depth is rendered in classic non-reversed space. */
 	const float ZBIAS = 1.0 / 1024.0;
-#endif
 	if ((call.flags & CF_USE_POLYGON_OFFSET) != 0u)
 	{
 		float zoffset = (call.polygon_offset.x + call.polygon_offset.y) * ZBIAS;

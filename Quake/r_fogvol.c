@@ -132,6 +132,17 @@ typedef struct fogvol_static_field_s
 } fogvol_static_field_t;
 
 static fogvol_static_field_t r_fog_static_field;
+typedef struct fogvol_static_build_config_s
+{
+	const qmodel_t *worldmodel;
+	int probe_mode;
+	int probe_grid;
+	float probe_density;
+	float lava_emissive;
+	int emissive_enabled;
+	int lightmap_srgb;
+	int gpu_static_build;
+} fogvol_static_build_config_t;
 
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "24", CVAR_ARCHIVE };
@@ -244,6 +255,7 @@ cvar_t r_fogvol_godray_coupling = { "r_fogvol_godray_coupling", "1", CVAR_ARCHIV
 cvar_t r_fogvol_froxel_scale = { "r_fogvol_froxel_scale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_lightlist_scale = { "r_fogvol_lightlist_scale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_lightgrid_scale = { "r_fogvol_lightgrid_scale", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_lava_emissive = { "r_fogvol_lava_emissive", "2.0", CVAR_ARCHIVE };
 /* r_froxel_debug: 0=off, 1=froxel rgb at first hit, 2=max-energy heat, 3=temporal history weight, 4=directional sun intensity */
 cvar_t r_froxel_debug = { "r_froxel_debug", "0", CVAR_ARCHIVE };
 
@@ -332,6 +344,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_froxel_scale, "lighting", "1"},
 	{&r_fogvol_lightlist_scale, "lighting", "1"},
 	{&r_fogvol_lightgrid_scale, "lighting", "1"},
+	{&r_fogvol_lava_emissive, "lighting", "2.0"},
 	{&r_froxel_debug, "debug", "0"},
 };
 
@@ -489,11 +502,68 @@ static int r_fogvol_history_height = 0;
 static qboolean r_fogvol_composite_valid = false;
 static int r_fogvol_alpha_extreme_streak = 0;
 static int r_fogvol_alpha_extreme_last_frame = -1;
+static qboolean r_fogvol_resource_warned = false;
+static fogvol_static_build_config_t r_fogvol_static_build_cached;
+static qboolean r_fogvol_static_build_cached_valid = false;
 
 static const vec3_t r_fogvol_corner_lut[8] = {
 	{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f, 0.f},
 	{0.f, 0.f, 1.f}, {1.f, 0.f, 1.f}, {0.f, 1.f, 1.f}, {1.f, 1.f, 1.f}
 };
+
+static void R_FogVol_CaptureStaticBuildConfig (fogvol_static_build_config_t *cfg)
+{
+	if (!cfg)
+		return;
+
+	cfg->worldmodel = cl.worldmodel;
+	cfg->probe_mode = (int)Q_rint (r_fogvol_static_probe_mode.value);
+	cfg->probe_grid = CLAMP (8, (int)Q_rint (r_fogvol_static_probe_grid.value), 64);
+	cfg->probe_density = q_max (0.25f, r_fogvol_static_probe_density.value);
+	cfg->lava_emissive = CLAMP (0.f, r_fogvol_lava_emissive.value, 8.f);
+	cfg->emissive_enabled = (r_fogvol_emissive.value > 0.f) ? 1 : 0;
+	cfg->lightmap_srgb = !q_strcasecmp (r_lightmap_colorspace.string, "srgb") ? 1 : 0;
+	cfg->gpu_static_build = (r_fogvol_gpu_static_build.value > 0.f) ? 1 : 0;
+}
+
+static qboolean R_FogVol_StaticBuildConfigEqual (const fogvol_static_build_config_t *a, const fogvol_static_build_config_t *b)
+{
+	if (!a || !b)
+		return false;
+	if (a->worldmodel != b->worldmodel)
+		return false;
+	if (a->probe_mode != b->probe_mode)
+		return false;
+	if (a->probe_grid != b->probe_grid)
+		return false;
+	if (a->emissive_enabled != b->emissive_enabled)
+		return false;
+	if (a->lightmap_srgb != b->lightmap_srgb)
+		return false;
+	if (a->gpu_static_build != b->gpu_static_build)
+		return false;
+	if (fabsf (a->probe_density - b->probe_density) > 1e-6f)
+		return false;
+	if (fabsf (a->lava_emissive - b->lava_emissive) > 1e-6f)
+		return false;
+	return true;
+}
+
+static void R_FogVol_CommitStaticBuildConfig (void)
+{
+	R_FogVol_CaptureStaticBuildConfig (&r_fogvol_static_build_cached);
+	r_fogvol_static_build_cached_valid = true;
+}
+
+static qboolean R_FogVol_StaticBuildNeedsRebuild (void)
+{
+	fogvol_static_build_config_t current;
+
+	R_FogVol_CaptureStaticBuildConfig (&current);
+	if (!r_fogvol_static_build_cached_valid)
+		return true;
+	return !R_FogVol_StaticBuildConfigEqual (&current, &r_fogvol_static_build_cached);
+}
 
 
 void R_FogVol_ClearHistory (void)
@@ -517,15 +587,18 @@ void R_FogVol_ClearHistory (void)
 	 * composite.fbo bound corrupts the GL state for the caller. */
 	{
 		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
-		GLint prev_fbo = 0;
-		glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &prev_fbo);
+		GLint prev_draw_fbo = 0;
+		GLint prev_read_fbo = 0;
+		glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw_fbo);
+		glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &prev_read_fbo);
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[0]);
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[1]);
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, (GLuint)prev_fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw_fbo);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, (GLuint)prev_read_fbo);
 	}
 }
 
@@ -1422,6 +1495,24 @@ static float R_FogVol_SRGBToLinear (float c)
 	return powf ((c + 0.055f) / 1.055f, 2.4f);
 }
 
+static qboolean R_FogVol_SurfaceIsLava (const qmodel_t *model, const msurface_t *surf)
+{
+	texture_t *tex;
+	int texnum;
+
+	if (!surf)
+		return false;
+	if (surf->flags & SURF_DRAWLAVA)
+		return true;
+	if (!model || !surf->texinfo)
+		return false;
+	texnum = surf->texinfo->texnum;
+	if (texnum < 0 || texnum >= model->numtextures)
+		return false;
+	tex = model->textures[texnum];
+	return tex && tex->type == TEXTYPE_LAVA;
+}
+
 static qboolean R_FogVol_TryGetSurfaceLightSampleAtTexel (const qmodel_t *model, const msurface_t *surf, int sample_s, int sample_t, vec3_t out_rgb)
 {
 	const byte *samples;
@@ -1431,59 +1522,80 @@ static qboolean R_FogVol_TryGetSurfaceLightSampleAtTexel (const qmodel_t *model,
 	int facesize;
 	float accum[3] = {0.f, 0.f, 0.f};
 	float accum_weight = 0.f;
+	const qboolean is_lava = R_FogVol_SurfaceIsLava (model, surf);
 	const qboolean use_rgb = (model && model->has_lightdata_rgb && model->lightdata && model->lightdata_rgb);
 
-	if (!model || !surf || !surf->samples)
+	if (!model || !surf)
+		return false;
+	if (!surf->samples && !is_lava)
 		return false;
 
-	samples = surf->samples;
-	bytes_per_pixel = (model->flags & MOD_HDRLIGHTING) ? 4 : 3;
-	if (use_rgb)
+	VectorClear (out_rgb);
+
+	if (surf->samples)
 	{
-		const ptrdiff_t offset = samples - model->lightdata;
-		if (offset >= 0 && bytes_per_pixel > 0 && (offset % bytes_per_pixel) == 0)
+		samples = surf->samples;
+		bytes_per_pixel = (model->flags & MOD_HDRLIGHTING) ? 4 : 3;
+		if (use_rgb)
 		{
-			const size_t sample_offset = (size_t)offset / (size_t)bytes_per_pixel;
-			const size_t rgb_offset = sample_offset * 3;
-			if (rgb_offset + 3 <= (size_t)model->lightdata_rgb_size)
+			const ptrdiff_t offset = samples - model->lightdata;
+			if (offset >= 0 && bytes_per_pixel > 0 && (offset % bytes_per_pixel) == 0)
 			{
-				samples = model->lightdata_rgb + rgb_offset;
-				bytes_per_pixel = 3;
+				const size_t sample_offset = (size_t)offset / (size_t)bytes_per_pixel;
+				const size_t rgb_offset = sample_offset * 3;
+				if (rgb_offset + 3 <= (size_t)model->lightdata_rgb_size)
+				{
+					samples = model->lightdata_rgb + rgb_offset;
+					bytes_per_pixel = 3;
+				}
+			}
+		}
+
+		smax = (surf->extents[0] >> 4) + 1;
+		tmax = (surf->extents[1] >> 4) + 1;
+		if (smax <= 0 || tmax <= 0)
+			return false;
+		facesize = smax * tmax * bytes_per_pixel;
+		sample_s = CLAMP (0, sample_s, smax - 1);
+		sample_t = CLAMP (0, sample_t, tmax - 1);
+
+		for (int map = 0; map < MAXLIGHTMAPS && surf->styles[map] != INVALID_LIGHTSTYLE; ++map)
+		{
+			const float style_scale = ((surf->styles[map] < 256) ? d_lightstylevalue[surf->styles[map]] : d_lightstylevalue[0]) * (1.f / 256.f);
+			const byte *lightmap = samples + facesize * map;
+			const byte *texel = lightmap + (sample_t * smax + sample_s) * bytes_per_pixel;
+			accum[0] += style_scale * texel[0];
+			accum[1] += style_scale * texel[1];
+			accum[2] += style_scale * texel[2];
+			accum_weight += style_scale;
+		}
+
+		if (accum_weight > 0.f)
+		{
+			out_rgb[0] = q_max (0.f, accum[0] * (1.f / 255.f));
+			out_rgb[1] = q_max (0.f, accum[1] * (1.f / 255.f));
+			out_rgb[2] = q_max (0.f, accum[2] * (1.f / 255.f));
+			if (!q_strcasecmp (r_lightmap_colorspace.string, "srgb"))
+			{
+				out_rgb[0] = R_FogVol_SRGBToLinear (out_rgb[0]);
+				out_rgb[1] = R_FogVol_SRGBToLinear (out_rgb[1]);
+				out_rgb[2] = R_FogVol_SRGBToLinear (out_rgb[2]);
 			}
 		}
 	}
 
-	smax = (surf->extents[0] >> 4) + 1;
-	tmax = (surf->extents[1] >> 4) + 1;
-	if (smax <= 0 || tmax <= 0)
-		return false;
-	facesize = smax * tmax * bytes_per_pixel;
-	sample_s = CLAMP (0, sample_s, smax - 1);
-	sample_t = CLAMP (0, sample_t, tmax - 1);
-
-	for (int map = 0; map < MAXLIGHTMAPS && surf->styles[map] != INVALID_LIGHTSTYLE; ++map)
+	if (is_lava && r_fogvol_emissive.value > 0.f)
 	{
-		const float style_scale = ((surf->styles[map] < 256) ? d_lightstylevalue[surf->styles[map]] : d_lightstylevalue[0]) * (1.f / 256.f);
-		const byte *lightmap = samples + facesize * map;
-		const byte *texel = lightmap + (sample_t * smax + sample_s) * bytes_per_pixel;
-		accum[0] += style_scale * texel[0];
-		accum[1] += style_scale * texel[1];
-		accum[2] += style_scale * texel[2];
-		accum_weight += style_scale;
+		const float lava = CLAMP (0.f, r_fogvol_lava_emissive.value, 8.f);
+		if (lava > 0.f)
+		{
+			/* Keep lava emissive visibly red and strong even when baked lightmaps are dark. */
+			out_rgb[0] = q_max (out_rgb[0], 1.00f * lava);
+			out_rgb[1] = q_max (out_rgb[1], 0.22f * lava);
+			out_rgb[2] = q_max (out_rgb[2], 0.06f * lava);
+		}
 	}
 
-	if (accum_weight <= 0.f)
-		return false;
-
-	out_rgb[0] = q_max (0.f, accum[0] * (1.f / 255.f));
-	out_rgb[1] = q_max (0.f, accum[1] * (1.f / 255.f));
-	out_rgb[2] = q_max (0.f, accum[2] * (1.f / 255.f));
-	if (!q_strcasecmp (r_lightmap_colorspace.string, "srgb"))
-	{
-		out_rgb[0] = R_FogVol_SRGBToLinear (out_rgb[0]);
-		out_rgb[1] = R_FogVol_SRGBToLinear (out_rgb[1]);
-		out_rgb[2] = R_FogVol_SRGBToLinear (out_rgb[2]);
-	}
 	return (out_rgb[0] > 0.f || out_rgb[1] > 0.f || out_rgb[2] > 0.f);
 }
 
@@ -1671,29 +1783,76 @@ static void R_FogVol_SummarizeStaticLightsFromField (void)
 	const float sy = (r_fog_static_field.maxs[1] - r_fog_static_field.mins[1]) / (float)q_max (1, ny);
 	const float sz = (r_fog_static_field.maxs[2] - r_fog_static_field.mins[2]) / (float)q_max (1, nz);
 	const float radius = CLAMP (32.f, 1.25f * q_max (sx, q_max (sy, sz)), 320.f);
-	int stride;
+	struct
+	{
+		int idx;
+		float score;
+	} best[MAX_FOG_STATIC_LIGHTS];
+	int best_count = 0;
+	int best_min_slot = 0;
+	float best_min_score = 0.f;
 
 	r_num_fog_static_lights = 0;
 	if (!r_fog_static_field.valid || total <= 0)
 		return;
-
-	stride = q_max (1, total / MAX_FOG_STATIC_LIGHTS);
 	if (r_fogvol_gpu_static_build.value > 0.f)
 	{
-		if (R_FogVol_SummarizeStaticLightsFromFieldGPU (nx, ny, nz, total, sx, sy, sz, radius, stride))
+		if (R_FogVol_SummarizeStaticLightsFromFieldGPU (nx, ny, nz, total, sx, sy, sz, radius, q_max (1, total / MAX_FOG_STATIC_LIGHTS)))
 			return;
 	}
 
-	for (int i = 0; i < total && r_num_fog_static_lights < MAX_FOG_STATIC_LIGHTS; i += stride)
+	/* Robust selection: keep the brightest occupied field cells instead of
+	 * fixed-stride sampling, which can miss small/high-energy emitters (e.g. lava). */
+	for (int i = 0; i < total; ++i)
 	{
 		const float w = r_fog_static_field.weight[i];
-		fog_light_gpu_t *dst;
-		int x, y, z;
+		const float e0 = q_max (0.f, r_fog_static_field.rgb[i * 3 + 0]);
+		const float e1 = q_max (0.f, r_fog_static_field.rgb[i * 3 + 1]);
+		const float e2 = q_max (0.f, r_fog_static_field.rgb[i * 3 + 2]);
+		const float score = e0 + e1 + e2;
 		if (w <= 0.f)
 			continue;
-		x = i % nx;
-		y = (i / nx) % ny;
-		z = i / (nx * ny);
+		if (score <= 0.f)
+			continue;
+
+		if (best_count < MAX_FOG_STATIC_LIGHTS)
+		{
+			best[best_count].idx = i;
+			best[best_count].score = score;
+			if (best_count == 0 || score < best_min_score)
+			{
+				best_min_score = score;
+				best_min_slot = best_count;
+			}
+			best_count++;
+		}
+		else if (score > best_min_score)
+		{
+			best[best_min_slot].idx = i;
+			best[best_min_slot].score = score;
+			best_min_score = best[0].score;
+			best_min_slot = 0;
+			for (int k = 1; k < best_count; ++k)
+			{
+				if (best[k].score < best_min_score)
+				{
+					best_min_score = best[k].score;
+					best_min_slot = k;
+				}
+			}
+		}
+	}
+
+	for (int n = 0; n < best_count; ++n)
+	{
+		const int i = best[n].idx;
+		const float w = r_fog_static_field.weight[i];
+		const int x = i % nx;
+		const int y = (i / nx) % ny;
+		const int z = i / (nx * ny);
+		fog_light_gpu_t *dst;
+		if (w <= 0.f)
+			continue;
 		dst = &r_fog_static_lights[r_num_fog_static_lights++];
 		dst->pos_rad[0] = r_fog_static_field.mins[0] + ((float)x + 0.5f) * sx;
 		dst->pos_rad[1] = r_fog_static_field.mins[1] + ((float)y + 0.5f) * sy;
@@ -1703,6 +1862,43 @@ static void R_FogVol_SummarizeStaticLightsFromField (void)
 		dst->col_int[1] = q_max (0.f, r_fog_static_field.rgb[i * 3 + 1] / w) * 0.65f;
 		dst->col_int[2] = q_max (0.f, r_fog_static_field.rgb[i * 3 + 2] / w) * 0.65f;
 		dst->col_int[3] = 1.f;
+	}
+}
+
+static void R_FogVol_AccumulateStaticLightsAtPoint (const vec3_t p, vec3_t out_rgb)
+{
+	const int light_count = q_min (r_num_fog_static_lights, MAX_FOG_STATIC_LIGHTS);
+	for (int i = 0; i < light_count; ++i)
+	{
+		const fog_light_gpu_t *sl = &r_fog_static_lights[i];
+		const float radius = q_max (sl->pos_rad[3], 1e-3f);
+		const float dx = sl->pos_rad[0] - p[0];
+		const float dy = sl->pos_rad[1] - p[1];
+		const float dz = sl->pos_rad[2] - p[2];
+		const float dist2 = dx * dx + dy * dy + dz * dz;
+		const float radius2 = radius * radius;
+		float normDist2;
+		float x;
+		float window;
+		float invSq;
+		float atten;
+		float energy;
+
+		if (dist2 >= radius2)
+			continue;
+
+		normDist2 = dist2 / q_max (radius2, 1e-6f);
+		x = CLAMP (0.f, 1.f, 1.f - normDist2);
+		window = x * x * (3.f - 2.f * x);
+		invSq = 1.f / (1.f + normDist2 * 6.f);
+		atten = window * invSq;
+		if (atten <= 1e-5f)
+			continue;
+
+		energy = q_max (0.f, sl->col_int[3]) * atten;
+		out_rgb[0] += q_max (0.f, sl->col_int[0]) * energy;
+		out_rgb[1] += q_max (0.f, sl->col_int[1]) * energy;
+		out_rgb[2] += q_max (0.f, sl->col_int[2]) * energy;
 	}
 }
 
@@ -1720,16 +1916,19 @@ static void R_FogVol_ContinueStaticFieldBuild (int sample_budget)
 	while (r_fog_static_field.next_surface < model->numsurfaces && sample_budget > 0)
 	{
 		msurface_t *surf = &model->surfaces[r_fog_static_field.next_surface++];
+		const qboolean is_lava = R_FogVol_SurfaceIsLava (model, surf);
 		vec3_t sample_rgb;
 		vec3_t sample_pos;
 		int smax;
 		int tmax;
 
-		if (!surf->samples)
+		if (!surf->samples && !is_lava)
 			continue;
 		if (!surf->texinfo || surf->texinfo->texnum < 0 || surf->texinfo->texnum >= model->numtextures)
 			continue;
-		if (!model->textures[surf->texinfo->texnum] || (surf->texinfo->flags & TEX_SPECIAL))
+		if (!model->textures[surf->texinfo->texnum])
+			continue;
+		if ((surf->texinfo->flags & TEX_SPECIAL) && !is_lava)
 			continue;
 
 		smax = (surf->extents[0] >> 4) + 1;
@@ -1785,9 +1984,10 @@ static void R_FogVol_BuildStaticLightInjection (void)
 	r_num_fog_static_lights = 0;
 	R_FogVol_FreeStaticField ();
 	if (!model || model->type != mod_brush || model->numsurfaces <= 0)
+	{
+		R_FogVol_CommitStaticBuildConfig ();
 		return;
-	if (!model->lightdata)
-		return;
+	}
 
 	dims = CLAMP (8, (int)Q_rint (r_fogvol_static_probe_grid.value), 64);
 	total_cells = (size_t)dims * (size_t)dims * (size_t)dims;
@@ -1796,6 +1996,7 @@ static void R_FogVol_BuildStaticLightInjection (void)
 	if (!r_fog_static_field.rgb || !r_fog_static_field.weight)
 	{
 		R_FogVol_FreeStaticField ();
+		R_FogVol_CommitStaticBuildConfig ();
 		return;
 	}
 
@@ -1821,15 +2022,18 @@ static void R_FogVol_BuildStaticLightInjection (void)
 			i < model->numsurfaces && r_num_fog_static_lights < MAX_FOG_STATIC_LIGHTS; i += stride)
 		{
 			msurface_t *surf = &model->surfaces[i];
+			const qboolean is_lava = R_FogVol_SurfaceIsLava (model, surf);
 			fog_light_gpu_t *dst;
 			vec3_t center;
 			vec3_t color;
 			float radius;
-			if (!surf->samples)
+			if (!surf->samples && !is_lava)
 				continue;
 			if (!surf->texinfo || surf->texinfo->texnum < 0 || surf->texinfo->texnum >= model->numtextures)
 				continue;
-			if (!model->textures[surf->texinfo->texnum] || (surf->texinfo->flags & TEX_SPECIAL))
+			if (!model->textures[surf->texinfo->texnum])
+				continue;
+			if ((surf->texinfo->flags & TEX_SPECIAL) && !is_lava)
 				continue;
 			if (!R_FogVol_TryGetSurfaceLightSample (model, surf, color))
 				continue;
@@ -1864,6 +2068,7 @@ static void R_FogVol_BuildStaticLightInjection (void)
 			(int)Q_rint (r_fogvol_static_probe_mode.value), r_num_fog_static_lights,
 			r_fog_static_field.total_samples, r_fog_static_field.build_complete ? 1 : 0);
 	}
+	R_FogVol_CommitStaticBuildConfig ();
 }
 
 static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, const fogvol_light_candidate_t *prefiltered, int prefiltered_count, fog_light_gpu_t *out, int max_count, fogvol_light_stats_t *stats)
@@ -2604,14 +2809,14 @@ void R_Froxel_EndFrame (void)
 void R_FogVol_Init (void)
 {
 	memset (&r_froxel, 0, sizeof (r_froxel));
+	r_fogvol_resource_warned = false;
+	r_fogvol_static_build_cached_valid = false;
 	R_FogVol_WarnFroxelLightingConfig ();
 }
 
 void R_FogVol_Clear (void)
 {
 	r_fogvolume_count = 0;
-	r_num_fog_static_lights = 0;
-	R_FogVol_FreeStaticField ();
 }
 
 static void R_FogVol_ClearEntities (void)
@@ -2946,14 +3151,45 @@ static void R_FogVol_AddGlobalFog (void)
 
 qboolean R_FogVol_IsEnabledForFrame (void)
 {
+	const qboolean has_program = (glprogs.fogvol != 0);
+	const qboolean has_scene = framebufs.composite.color_tex != 0
+		&& framebufs.composite.depth_stencil_tex != 0
+		&& framebufs.composite.fbo != 0;
+	const qboolean has_fog_pingpong = framebufs.fogvol.color_tex[0] != 0
+		&& framebufs.fogvol.color_tex[1] != 0
+		&& framebufs.fogvol.fbo[0] != 0
+		&& framebufs.fogvol.fbo[1] != 0;
+	const qboolean has_history = framebufs.fogvol.history_tex[0] != 0
+		&& framebufs.fogvol.history_tex[1] != 0
+		&& framebufs.fogvol.history_fbo[0] != 0
+		&& framebufs.fogvol.history_fbo[1] != 0;
+	const qboolean has_composite = framebufs.fogvol.composite_tex[0] != 0
+		&& framebufs.fogvol.composite_tex[1] != 0
+		&& framebufs.fogvol.composite_fbo[0] != 0
+		&& framebufs.fogvol.composite_fbo[1] != 0;
+	const qboolean has_finalcopy = framebufs.fogvol.finalcopy_tex != 0
+		&& framebufs.fogvol.finalcopy_fbo != 0;
+	const qboolean has_sizes = framebufs.fogvol.width > 0 && framebufs.fogvol.height > 0;
+
 	if (r_fogvol.value <= 0.f)
 		return false;
-	if (!glprogs.fogvol)
+	if (!has_program || !has_scene || !has_fog_pingpong || !has_history || !has_composite || !has_finalcopy || !has_sizes)
+	{
+		if (developer.value > 0.f && !r_fogvol_resource_warned)
+		{
+			Con_DPrintf ("FogVol disabled for frame: prog=%d scene=%d pingpong=%d history=%d composite=%d finalcopy=%d size=%dx%d\n",
+				has_program ? 1 : 0,
+				has_scene ? 1 : 0,
+				has_fog_pingpong ? 1 : 0,
+				has_history ? 1 : 0,
+				has_composite ? 1 : 0,
+				has_finalcopy ? 1 : 0,
+				framebufs.fogvol.width, framebufs.fogvol.height);
+			r_fogvol_resource_warned = true;
+		}
 		return false;
-	if (framebufs.composite.color_tex == 0 || framebufs.fogvol.color_tex[0] == 0)
-		return false;
-	if (framebufs.composite.depth_stencil_tex == 0)
-		return false;
+	}
+	r_fogvol_resource_warned = false;
 	return true;
 }
 
@@ -3019,7 +3255,10 @@ void R_FogVol_ParseEntities (void)
 	R_FogVol_FreeStaticField ();
 
 	if (!cl.worldmodel || !cl.worldmodel->entities)
+	{
+		R_FogVol_CommitStaticBuildConfig ();
 		return;
+	}
 
 	data = cl.worldmodel->entities;
 	data = COM_Parse (data);
@@ -3436,7 +3675,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
 	if (quality_mode <= 1)
 		shadow_samples = q_min (shadow_samples, 1);
-	if (r_fogvol_sun_dir.value > 0.f && R_WorldHasSun ())
+	if (r_fogvol_sun_dir.value > 0.f)
 	{
 		/* Convention: sun->dir points from scene toward the sun (light source).
 		 * Fog shadow marching moves from sample point toward the blocker, so use
@@ -3445,7 +3684,9 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	}
 	else
 	{
-		VectorScale (vpn, -1.f, shadow_dir);
+		/* Keep fog-shadow direction camera-orientation independent.
+		 * Using -vpn here causes angle-dependent shadow drift when only looking around. */
+		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
 	}
 	if (VectorLength (shadow_dir) < 0.001f)
 		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
@@ -3586,29 +3827,35 @@ void R_FogVol_Render (void)
 		&& (R_FogVol_UseRaymarchLights (lighting_mode) || R_FogVol_UseRaymarchDetail (lighting_mode));
 	const qboolean froxel_lighting_mode = R_FogVol_UseFroxelLights (lighting_mode);
 	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f) && froxel_lighting_mode;
-	const qboolean want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
-	const qboolean want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
-	const qboolean want_froxel_dlights = froxel_injection_enabled && (r_fogvol_dlightscale.value > 0.f);
-	const qboolean run_froxel_injection = froxel_injection_enabled && (want_froxel_dlights || want_froxel_sun || want_froxel_static);
+	qboolean want_froxel_sun = false;
+	qboolean want_froxel_static = false;
+	qboolean want_froxel_dlights = false;
+	qboolean run_froxel_injection = false;
 
 	/* Per-frame validity: only expose a fogvol composite texture after this
 	 * frame actually produced one. */
 	r_fogvol_composite_valid = false;
 
-	if (!glprogs.fogvol)
+	if (!R_FogVol_IsEnabledForFrame ())
 		return;
 	if (r_fogvolume_count <= 0)
-		return;
-	if (framebufs.composite.color_tex == 0 || framebufs.fogvol.color_tex[0] == 0)
-		return;
-	if (framebufs.composite.depth_stencil_tex == 0)
 		return;
 	if (!Mat4_Inverse (r_matviewproj, inv_viewproj))
 		return;
 
 	R_FogVol_WarnFroxelLightingConfig ();
+	if (R_FogVol_StaticBuildNeedsRebuild ())
+		R_FogVol_BuildStaticLightInjection ();
 	if (r_fogvol_static_probe_mode.value > 0.f && r_fog_static_field.valid && !r_fog_static_field.build_complete)
+	{
 		R_FogVol_ContinueStaticFieldBuild (q_max (1, (int)Q_rint (r_fogvol_static_probe_budget_frame.value)));
+		if (r_fog_static_field.total_samples > 0)
+			R_FogVol_SummarizeStaticLightsFromField ();
+	}
+	want_froxel_dlights = froxel_injection_enabled && (r_fogvol_dlightscale.value > 0.f);
+	want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
+	want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
+	run_froxel_injection = froxel_injection_enabled && (want_froxel_dlights || want_froxel_sun || want_froxel_static);
 
 	dumpstate_always = (r_fogvol_testvolumes_dumpstate.value > 0.f);
 	if (last_dumpstate != (int)Q_rint (r_fogvol_testvolumes_dumpstate.value))
@@ -3683,7 +3930,7 @@ void R_FogVol_Render (void)
 	memset (&light_stats, 0, sizeof (light_stats));
 	lightgrid = Lightgrid_Get ();
 	fog_lightgrid_has_data = (lightgrid && lightgrid->octree && r_lightgrid.value > 0.f);
-	fog_lightgrid_enabled = fog_lightgrid_has_data && (r_fogvol_lightgrid.value > 0.f);
+	fog_lightgrid_enabled = (r_fogvol_lightgrid.value > 0.f) && (fog_lightgrid_has_data || r_num_fog_static_lights > 0);
 	if (r_fogvol_lightgrid_scale.value <= 0.f)
 		fog_lightgrid_enabled = false;
 
@@ -3746,6 +3993,14 @@ void R_FogVol_Render (void)
 					fog_lightgrid[i].probe_rgb[c][0] = probe->rgb[0] * probe->ao;
 					fog_lightgrid[i].probe_rgb[c][1] = probe->rgb[1] * probe->ao;
 					fog_lightgrid[i].probe_rgb[c][2] = probe->rgb[2] * probe->ao;
+				}
+				else if (r_num_fog_static_lights > 0)
+				{
+					vec3_t static_rgb = {0.f, 0.f, 0.f};
+					R_FogVol_AccumulateStaticLightsAtPoint (probe_pos, static_rgb);
+					fog_lightgrid[i].probe_rgb[c][0] = static_rgb[0];
+					fog_lightgrid[i].probe_rgb[c][1] = static_rgb[1];
+					fog_lightgrid[i].probe_rgb[c][2] = static_rgb[2];
 				}
 				if (light_stats_enabled)
 					light_stats.lightgrid_probes++;

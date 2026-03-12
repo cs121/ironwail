@@ -139,6 +139,7 @@ extern cvar_t r_shadow_dlight_bias;
 extern cvar_t r_shadow_sun_pcf;
 extern cvar_t r_shadow_dlight_pcf;
 extern cvar_t r_shadow_debug;
+extern cvar_t r_shadow_log;
 extern cvar_t r_godrays_decay;
 extern cvar_t r_godrays_density;
 
@@ -473,6 +474,15 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_shadow_sun_pcf);
 	Cvar_RegisterVariable (&r_shadow_dlight_pcf);
 	Cvar_RegisterVariable (&r_shadow_debug);
+	Cvar_RegisterVariable (&r_shadow_log);
+	Cvar_RegisterVariable (&r_rimlight);
+	Cvar_RegisterVariable (&r_rimlight_world);
+	Cvar_RegisterVariable (&r_rimlight_models);
+	Cvar_RegisterVariable (&r_rimlight_intensity);
+	Cvar_RegisterVariable (&r_rimlight_power);
+	Cvar_RegisterVariable (&r_rimlight_sun);
+	Cvar_RegisterVariable (&r_rimlight_dlight);
+	Cvar_RegisterVariable (&r_rimlight_shadow);
         Cvar_RegisterVariable (&r_novis);
 #if defined(USE_SIMD)
         Cvar_RegisterVariable (&r_simd);

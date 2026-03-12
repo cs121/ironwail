@@ -36,6 +36,14 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #define NOISESCALE     (1.0f / 127.0f)
 
+#ifndef GL_NEGATIVE_ONE_TO_ONE
+#define GL_NEGATIVE_ONE_TO_ONE 0x935E
+#endif
+
+#ifndef GL_ZERO_TO_ONE
+#define GL_ZERO_TO_ONE 0x935F
+#endif
+
 extern gltexture_t *lightmap_dir_texture;
 extern cvar_t r_sun_light;
 extern cvar_t r_sun_visibility;
@@ -69,6 +77,11 @@ int			r_framecount;		// used for dlight push checking
 
 static entity_t* cl_sorted_visedicts[MAX_VISEDICTS + 1];
 static int cl_modtype_ofs[mod_numtypes * 2 + 1];
+static entity_t* cl_shadow_visedicts[MAX_VISEDICTS];
+static int cl_numshadowedicts = 0;
+static entity_t* r_shadow_brush_ents[MAX_VISEDICTS + 1];
+static entity_t* r_shadow_alias_ents[MAX_VISEDICTS];
+static int r_shadow_log_last_frame = -1024;
 
 static vec3_t	frustum_absnormal[4];
 mplane_t	frustum[4];
@@ -164,6 +177,8 @@ typedef struct shadow_receiver_uniforms_s
 	GLint	dlight_indices;
 	GLint	bias_counts;
 	GLint	pcf_texel;
+	GLint	rim_params0;
+	GLint	rim_params1;
 } shadow_receiver_uniforms_t;
 
 typedef struct shadow_caster_uniforms_s
@@ -205,6 +220,8 @@ static shadow_receiver_uniforms_t *R_Shadow_GetReceiverUniforms (GLuint program)
 		u->dlight_indices = GL_GetUniformLocationFunc (program, "ShadowDLightIndices");
 		u->bias_counts = GL_GetUniformLocationFunc (program, "ShadowBiasCounts");
 		u->pcf_texel = GL_GetUniformLocationFunc (program, "ShadowPCFTexel");
+		u->rim_params0 = GL_GetUniformLocationFunc (program, "RimLightParams0");
+		u->rim_params1 = GL_GetUniformLocationFunc (program, "RimLightParams1");
 		return u;
 	}
 }
@@ -419,7 +436,9 @@ static void R_Shadow_UpdateSunMatrix (void)
 	float center_ls[4];
 	float texel;
 
-	VectorMA (r_refdef.vieworg, sun_dist * 0.5f, vpn, center);
+	/* Keep sun-shadow coverage stable while looking around:
+	 * anchoring to view direction (vpn) causes projection drift on camera yaw/pitch. */
+	VectorCopy (r_refdef.vieworg, center);
 	VectorScale (sun->dir, -1.f, forward);
 	VectorMA (center, -sun_dist, forward, eye);
 	VectorSet (up, 0.f, 0.f, 1.f);
@@ -439,6 +458,14 @@ static void R_Shadow_UpdateSunMatrix (void)
 	view[12] -= center_ls[0] - (view[0] * center[0] + view[4] * center[1] + view[8] * center[2] + view[12]);
 	view[13] -= center_ls[1] - (view[1] * center[0] + view[5] * center[1] + view[9] * center[2] + view[13]);
 	R_Shadow_MatrixMultiply (r_shadow_state.sun_viewproj, proj, view);
+
+	if (r_shadow_log.value > 1.f && (r_framecount % 60) == 0)
+	{
+		Con_Printf ("Shadow sun: center=(%.1f %.1f %.1f) eye=(%.1f %.1f %.1f) dist=%.1f radius=%.1f z=[%.1f..%.1f]\n",
+			center[0], center[1], center[2],
+			eye[0], eye[1], eye[2],
+			sun_dist, radius, znear, zfar);
+	}
 }
 
 static void R_Shadow_UpdateDlightMatrices (void)
@@ -599,6 +626,15 @@ cvar_t  r_shadow_dlight_bias = { "r_shadow_dlight_bias", "0.02", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun_pcf = { "r_shadow_sun_pcf", "1.5", CVAR_ARCHIVE };
 cvar_t  r_shadow_dlight_pcf = { "r_shadow_dlight_pcf", "0.75", CVAR_ARCHIVE };
 cvar_t  r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
+cvar_t  r_shadow_log = { "r_shadow_log", "0", CVAR_ARCHIVE };
+cvar_t  r_rimlight = { "r_rimlight", "1", CVAR_ARCHIVE };
+cvar_t  r_rimlight_world = { "r_rimlight_world", "1", CVAR_ARCHIVE };
+cvar_t  r_rimlight_models = { "r_rimlight_models", "1", CVAR_ARCHIVE };
+cvar_t  r_rimlight_intensity = { "r_rimlight_intensity", "0.48", CVAR_ARCHIVE };
+cvar_t  r_rimlight_power = { "r_rimlight_power", "3.2", CVAR_ARCHIVE };
+cvar_t  r_rimlight_sun = { "r_rimlight_sun", "1.0", CVAR_ARCHIVE };
+cvar_t  r_rimlight_dlight = { "r_rimlight_dlight", "1.0", CVAR_ARCHIVE };
+cvar_t  r_rimlight_shadow = { "r_rimlight_shadow", "1", CVAR_ARCHIVE };
 cvar_t	r_novis = { "r_novis","0",CVAR_ARCHIVE };
 #if defined(USE_SIMD)
 cvar_t	r_simd = { "r_simd","1",CVAR_ARCHIVE };
@@ -1121,6 +1157,8 @@ static void GL_CreateShadowFrameBuffers (void)
 		framebufs.shadow.sun_depth_tex = 0;
 		return;
 	}
+	if (r_shadow_log.value > 0.f)
+		Con_Printf ("Shadow: sun depth map created (%dx%d)\n", sun_size, sun_size);
 
 	/* DLight shadow atlas (cube map array depth). */
 	if (!GL_TexStorage3DFunc || !GL_FramebufferTextureLayerFunc)
@@ -1158,6 +1196,9 @@ static void GL_CreateShadowFrameBuffers (void)
 		framebufs.shadow.available = true;
 		return;
 	}
+	if (r_shadow_log.value > 0.f)
+		Con_Printf ("Shadow: dlight cube-array atlas created (%dx%d, layers=%d)\n",
+			dlight_size, dlight_size, SHADOW_DLIGHT_MAX * SHADOW_DLIGHT_FACES);
 
 	framebufs.shadow.available = true;
 }
@@ -3418,6 +3459,7 @@ static void R_SortEntities (void)
 	int bins[1 << (MODSORT_BITS / 2)];
 	int typebins[mod_numtypes * 2];
 	alphamode_t alphamode = R_GetEffectiveAlphaMode ();
+	cl_numshadowedicts = 0;
 
 	if (!r_drawentities.value)
 		cl_numvisedicts = 0;
@@ -3431,6 +3473,8 @@ static void R_SortEntities (void)
 		// PERF OPT: Early-out conditions grouped together
 		if (!ent->model || ent->alpha == ENTALPHA_ZERO)
 			continue;
+		if (cl_numshadowedicts < MAX_VISEDICTS)
+			cl_shadow_visedicts[cl_numshadowedicts++] = ent;
 
 		// PERF OPT: Only cull brush models (most common case first)
 		if (ent->model->type == mod_brush)
@@ -3740,10 +3784,11 @@ qboolean GL_NeedsSceneEffects (void)
 	if (r_bloom.value > 0.f || GL_PostFXBloomBoostActive ())
 		return true;
 
-	/* Only force scene-effects for buffered dlights if postprocess is active.
-	 * Ignore fogvol-only postprocess demand here, otherwise AA=off can trigger
-	 * expensive buffered dlight rendering just because fogvol is enabled. */
-	if (r_dynamic.value > 0.f && framebufs.dlight.fbo && GL_NeedsPostprocessWithoutFogVol ())
+	/* Only force scene-effects for buffered dlights if postprocess is active,
+	 * and never when fogvol already owns the postfx path this frame. */
+	if (r_dynamic.value > 0.f && framebufs.dlight.fbo
+		&& GL_NeedsPostprocessWithoutFogVol ()
+		&& !R_FogVol_ShouldAffectPostFX ())
 		return true;
 
         if (GL_ShouldApplyMotionBlur ())
@@ -5190,6 +5235,8 @@ void R_Shadow_ApplyWorldReceiverUniforms (GLuint program)
 {
 	int idx[SHADOW_DLIGHT_MAX];
 	float enabled, sun_enabled, dlight_enabled;
+	float rim_master, rim_world, rim_models;
+	float rim_intensity, rim_power, rim_sun, rim_dlight, rim_shadow;
 	GLuint suntex = 0;
 	GLuint dlighttex = 0;
 	shadow_receiver_uniforms_t *u = R_Shadow_GetReceiverUniforms (program);
@@ -5226,6 +5273,18 @@ void R_Shadow_ApplyWorldReceiverUniforms (GLuint program)
 			q_max (0.f, r_shadow_dlight_pcf.value),
 			framebufs.shadow.sun_size > 0 ? 1.f / (float)framebufs.shadow.sun_size : 0.f,
 			framebufs.shadow.dlight_size > 0 ? 1.f / (float)framebufs.shadow.dlight_size : 0.f);
+	rim_master = (r_rimlight.value > 0.f) ? 1.f : 0.f;
+	rim_world = (r_rimlight_world.value > 0.f) ? 1.f : 0.f;
+	rim_models = (r_rimlight_models.value > 0.f) ? 1.f : 0.f;
+	rim_intensity = q_max (0.f, r_rimlight_intensity.value);
+	rim_power = q_max (0.5f, r_rimlight_power.value);
+	rim_sun = q_max (0.f, r_rimlight_sun.value);
+	rim_dlight = q_max (0.f, r_rimlight_dlight.value);
+	rim_shadow = (r_rimlight_shadow.value > 0.f) ? 1.f : 0.f;
+	if (u->rim_params0 >= 0)
+		GL_Uniform4fFunc (u->rim_params0, rim_master, rim_intensity, rim_power, rim_shadow);
+	if (u->rim_params1 >= 0)
+		GL_Uniform4fFunc (u->rim_params1, rim_world, rim_models, rim_sun, rim_dlight);
 }
 
 void R_Shadow_ApplyAliasReceiverUniforms (GLuint program)
@@ -5275,6 +5334,40 @@ void R_Shadow_ApplyAliasCasterUniforms (GLuint program)
 static void R_Shadow_ClearDrawContext (void)
 {
 	memset (&r_shadow_draw_ctx, 0, sizeof (r_shadow_draw_ctx));
+}
+
+static void R_Shadow_BuildDrawContext (void)
+{
+	int i;
+
+	r_shadow_draw_ctx.brush_ents = r_shadow_brush_ents;
+	r_shadow_draw_ctx.alias_ents = r_shadow_alias_ents;
+	r_shadow_draw_ctx.brush_count = 0;
+	r_shadow_draw_ctx.alias_count = 0;
+
+	if (r_drawworld.value && cl.worldmodel)
+		r_shadow_brush_ents[r_shadow_draw_ctx.brush_count++] = &cl_entities[0];
+
+	for (i = 0; i < cl_numshadowedicts; ++i)
+	{
+		entity_t *ent = cl_shadow_visedicts[i];
+
+		if (!ent || !ent->model || !ENTALPHA_OPAQUE (ent->alpha))
+			continue;
+		if (ent == &cl_entities[0] || ent == &cl.viewent)
+			continue;
+
+		if (ent->model->type == mod_brush)
+		{
+			if (r_shadow_draw_ctx.brush_count < (int)countof (r_shadow_brush_ents))
+				r_shadow_brush_ents[r_shadow_draw_ctx.brush_count++] = ent;
+		}
+		else if (ent->model->type == mod_alias)
+		{
+			if (r_shadow_draw_ctx.alias_count < (int)countof (r_shadow_alias_ents))
+				r_shadow_alias_ents[r_shadow_draw_ctx.alias_count++] = ent;
+		}
+	}
 }
 
 void R_RenderSunShadowMap (void)
@@ -5335,6 +5428,9 @@ void R_RenderShadowMaps (void)
 	GLint old_read_fbo = 0;
 	GLint old_depth_func = GL_LEQUAL;
 	GLdouble old_clear_depth = 1.0;
+	GLboolean old_color_mask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
+	GLboolean old_depth_mask = GL_TRUE;
+	qboolean clip_depth_mode_changed = false;
 	qboolean want_sun_shadow = false;
 	qboolean want_dlight_shadows = false;
 
@@ -5347,8 +5443,7 @@ void R_RenderShadowMaps (void)
 	if (!cl.worldmodel || !r_drawworld_cheatsafe)
 		return;
 
-	r_shadow_draw_ctx.brush_ents = R_GetVisEntities (mod_brush, false, &r_shadow_draw_ctx.brush_count);
-	r_shadow_draw_ctx.alias_ents = R_GetVisEntities (mod_alias, false, &r_shadow_draw_ctx.alias_count);
+	R_Shadow_BuildDrawContext ();
 	if (r_shadow_draw_ctx.brush_count <= 0 && r_shadow_draw_ctx.alias_count <= 0)
 		return;
 
@@ -5361,17 +5456,37 @@ void R_RenderShadowMaps (void)
 		R_Shadow_UpdateDlightMatrices ();
 	if (!want_sun_shadow && !want_dlight_shadows)
 		return;
+	if (r_shadow_log.value > 0.f && r_framecount >= r_shadow_log_last_frame + 60)
+	{
+		Con_Printf ("Shadow frame: sun=%d dlight=%d casters(brush=%d alias=%d) selected_dlights=%d\n",
+			want_sun_shadow ? 1 : 0,
+			want_dlight_shadows ? 1 : 0,
+			r_shadow_draw_ctx.brush_count,
+			r_shadow_draw_ctx.alias_count,
+			r_shadow_state.num_dlights);
+		r_shadow_log_last_frame = r_framecount;
+	}
 
 	glGetIntegerv (GL_VIEWPORT, old_viewport);
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &old_draw_fbo);
 	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &old_read_fbo);
 	glGetIntegerv (GL_DEPTH_FUNC, &old_depth_func);
 	glGetDoublev (GL_DEPTH_CLEAR_VALUE, &old_clear_depth);
+	glGetBooleanv (GL_COLOR_WRITEMASK, old_color_mask);
+	glGetBooleanv (GL_DEPTH_WRITEMASK, &old_depth_mask);
+	/* Shadow matrices/shaders are built for classic NDC depth [-1,1].
+	 * Temporarily disable zero-to-one clip-depth mode if clip control is active. */
+	if (gl_clipcontrol_able && GL_ClipControlFunc)
+	{
+		GL_ClipControlFunc (GL_LOWER_LEFT, GL_NEGATIVE_ONE_TO_ONE);
+		clip_depth_mode_changed = true;
+	}
 	/* Shadow maps store standard (non-reversed) depth.
 	 * Force LEQUAL + clear=1 so nearer occluders win deterministically,
 	 * even when the main scene uses clip-control reversed Z. */
 	glDepthFunc (GL_LEQUAL);
 	glClearDepth (1.0);
+	glDepthMask (GL_TRUE);
 	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
 	GL_BeginGroup ("Shadow maps");
@@ -5384,7 +5499,10 @@ void R_RenderShadowMaps (void)
 	glViewport (old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
 	glDepthFunc (old_depth_func);
 	glClearDepth (old_clear_depth);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glDepthMask (old_depth_mask);
+	glColorMask (old_color_mask[0], old_color_mask[1], old_color_mask[2], old_color_mask[3]);
+	if (clip_depth_mode_changed)
+		GL_ClipControlFunc (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
 
 	r_shadow_state.valid =
 		(want_sun_shadow || want_dlight_shadows);
@@ -5414,9 +5532,12 @@ static void R_DrawDLightPass (void)
         if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
                 return;
 
-	/* PERF: Do not trigger buffered dlight path for fogvol-only postprocess.
-	 * This avoids the AA=off + fogvol performance cliff. */
-	use_buffer = (framebufs.dlight.fbo && framebufs.scene.samples == 1 && GL_NeedsPostprocessWithoutFogVol ());
+	/* PERF: Never use buffered dlights when fogvol is active in postfx path.
+	 * This avoids the AA=off + fogvol performance cliff regression. */
+	use_buffer = (framebufs.dlight.fbo
+		&& framebufs.scene.samples == 1
+		&& GL_NeedsPostprocessWithoutFogVol ()
+		&& !R_FogVol_ShouldAffectPostFX ());
 
         ents = R_GetVisEntities (mod_brush, false, &count);
         if (count <= 0)

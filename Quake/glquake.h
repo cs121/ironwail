@@ -139,6 +139,15 @@ extern	cvar_t	r_shadow_dlight_bias;
 extern	cvar_t	r_shadow_sun_pcf;
 extern	cvar_t	r_shadow_dlight_pcf;
 extern	cvar_t	r_shadow_debug;
+extern	cvar_t	r_shadow_log;
+extern	cvar_t	r_rimlight;
+extern	cvar_t	r_rimlight_world;
+extern	cvar_t	r_rimlight_models;
+extern	cvar_t	r_rimlight_intensity;
+extern	cvar_t	r_rimlight_power;
+extern	cvar_t	r_rimlight_sun;
+extern	cvar_t	r_rimlight_dlight;
+extern	cvar_t	r_rimlight_shadow;
 
 extern	cvar_t	r_oit;
 extern	cvar_t	r_alphasort;

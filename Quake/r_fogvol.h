@@ -131,6 +131,7 @@ extern cvar_t r_fogvol_godray_coupling;
 extern cvar_t r_fogvol_froxel_scale;
 extern cvar_t r_fogvol_lightlist_scale;
 extern cvar_t r_fogvol_lightgrid_scale;
+extern cvar_t r_fogvol_lava_emissive;
 extern cvar_t r_froxel_debug;
 
 void R_FogVol_RegisterCvars (void);

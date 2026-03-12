@@ -15,6 +15,8 @@ layout(location=34) uniform vec4 ShadowEnableDebug;   // x=enabled, y=sun, z=dli
 layout(location=35) uniform vec4 ShadowDLightIndices; // selected light indices (float encoded ints)
 layout(location=36) uniform vec4 ShadowBiasCounts;    // x=num dlight slots, y=sun bias, z=dlight bias
 layout(location=37) uniform vec4 ShadowPCFTexel;      // x=sun pcf radius, y=dlight pcf radius, z=1/sun size, w=1/dlight size
+layout(location=45) uniform vec4 RimLightParams0; // x=enable, y=intensity, z=power, w=shadowed
+layout(location=46) uniform vec4 RimLightParams1; // x=world_enable, y=model_enable, z=sun_scale, w=dlight_scale
 #include "frame_uniforms.glsl"
 
 // Fog.w is treated as a signed-friendly density; use abs(Fog.w) so negative CPU values do not invert attenuation.
@@ -541,6 +543,14 @@ void main()
 	float view_len = length(to_eye);
 	// OPT: avoid normalize() call by inlining division guard
 	vec3 view_dir  = (view_len > 0.0) ? (to_eye / view_len) : vec3(0.0, 0.0, 1.0);
+	float rim_factor = 0.0;
+	if (RimLightParams0.x > 0.5 && RimLightParams1.x > 0.5)
+	{
+		float rim_ndotv = 1.0 - clamp(dot(surface_normal, view_dir), 0.0, 1.0);
+		rim_factor = pow(max(rim_ndotv, 0.0), max(RimLightParams0.z, 0.5)) * max(RimLightParams0.y, 0.0);
+	}
+	vec3 rim_dlight_accum = vec3(0.0);
+	vec3 rim_sun_accum = vec3(0.0);
 
 	if ((in_flags & CF_NOLIGHTMAP) == 0u)
 	{
@@ -660,13 +670,20 @@ void main()
 				// OPT: pow(x,1.5) = x*sqrt(x), avoids generic pow()
 				float nc            = clamp(1.0 - normalized_d, 0.0, 1.0);
 				float falloff       = nc * sqrt(nc);
-				float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, rad);
+				float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, l.radius);
 				vec3  light_contrib = attenuation * falloff * shadow * l.color * dynamic_light_noise;
 
 				// FIX: Shadow-Term fuer dieses DLight berechnen.
 				// War faelschlicherweise entfernt - keine DLight-Schatten in world.frag.
 
 				dynamic_light      += light_contrib;
+				if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
+				{
+					float rim_shadow = (RimLightParams0.w > 0.5) ? shadow : 1.0;
+					vec3 light_dir = light_vec * inv_surface_dist;
+					float backlight = mix(0.35, 1.0, max(dot(-surface_normal, light_dir), 0.0));
+					rim_dlight_accum += (attenuation * falloff) * rim_shadow * l.color * dynamic_light_noise * backlight;
+				}
 
 				// Specular
 				if (attenuation > 0.0 && falloff > 0.0)
@@ -709,6 +726,21 @@ void main()
 				float sun_shadow = SampleSunShadow(in_pos);
 				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl * sun_visibility * sun_shadow;
 				total_light += max(min(sun_contrib, 1.0 - total_light), 0.0);
+				if (rim_factor > 1e-5 && RimLightParams1.z > 0.0)
+				{
+					float rim_shadow = (RimLightParams0.w > 0.5) ? sun_shadow : 1.0;
+					float sun_back = max(dot(-surface_normal, sun_to_surface), 0.0);
+					rim_sun_accum += SunColorIntensity.rgb * SunColorIntensity.a
+						* sun_visibility * rim_shadow * mix(0.35, 1.0, sun_back);
+				}
+			}
+			else if (rim_factor > 1e-5 && RimLightParams1.z > 0.0)
+			{
+				float sun_visibility = ((in_flags & CF_MAT_SKY) != 0u) ? 1.0 : ShaderParams.z;
+				float rim_shadow = (RimLightParams0.w > 0.5) ? SampleSunShadow(in_pos) : 1.0;
+				float sun_back = max(dot(-surface_normal, sun_to_surface), 0.0);
+				rim_sun_accum += SunColorIntensity.rgb * SunColorIntensity.a
+					* sun_visibility * rim_shadow * mix(0.35, 1.0, sun_back);
 			}
 		}
 
@@ -738,6 +770,11 @@ void main()
 
 	// Add specular
 	result.rgb += clamp(specular_light, vec3(0.0), vec3(Overbright)) * clamp(result.a, 0.0, 1.0);
+	if (rim_factor > 1e-5)
+	{
+		vec3 rim_light = rim_sun_accum * RimLightParams1.z + rim_dlight_accum * RimLightParams1.w;
+		result.rgb += result.rgb * rim_light * rim_factor;
+	}
 
 	// Tone mapping
 	if (LightmapParams.y > 0.5)

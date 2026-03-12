@@ -645,7 +645,7 @@ void main()
 	FogVolume volume = FogVolumes[FogVolumeIndex];
 	if (volume.misc.y <= 0.0)
 	{
-		FragColor = vec4(scene, 1.0);
+		FragColor = vec4(scene, 0.0);
 		return;
 	}
 
@@ -660,7 +660,7 @@ void main()
 	vec4  world    = FogInvViewProj * clip;
 	if (abs(world.w) < 1e-6)
 	{
-		FragColor = vec4(scene, 1.0);
+		FragColor = vec4(scene, 0.0);
 		return;
 	}
 	vec3 worldPos = world.xyz / world.w;
@@ -677,13 +677,13 @@ void main()
 	{
 		if (!RaySphere(ro, rd, volume.sphere.xyz, volume.sphere.w, tEnter, tExit))
 		{
-			FragColor = vec4(scene, 1.0);
+			FragColor = vec4(scene, 0.0);
 			return;
 		}
 	}
 	else if (!RayAABB(ro, rd, volume.mins.xyz, volume.maxs.xyz, tEnter, tExit))
 	{
-		FragColor = vec4(scene, 1.0);
+		FragColor = vec4(scene, 0.0);
 		return;
 	}
 
@@ -694,7 +694,7 @@ void main()
 		tExit = min(tExit, maxDistance);
 	if (tExit <= tEnter)
 	{
-		FragColor = vec4(scene, 1.0);
+		FragColor = vec4(scene, 0.0);
 		return;
 	}
 

@@ -21,6 +21,8 @@ layout(location=34) uniform vec4 ShadowEnableDebug;   // x=enabled, y=sun, z=dli
 layout(location=35) uniform vec4 ShadowDLightIndices; // selected light indices (float encoded ints)
 layout(location=36) uniform vec4 ShadowBiasCounts;    // x=num dlight slots, y=sun bias, z=dlight bias
 layout(location=37) uniform vec4 ShadowPCFTexel;      // x=sun pcf radius, y=dlight pcf radius, z=1/sun size, w=1/dlight size
+layout(location=45) uniform vec4 RimLightParams0; // x=enable, y=intensity, z=power, w=shadowed
+layout(location=46) uniform vec4 RimLightParams1; // x=world_enable, y=model_enable, z=sun_scale, w=dlight_scale
 
 float FogAttenuation(vec3 p)
 {
@@ -155,9 +157,19 @@ void main()
 	vec3 surface_normal = normalize(in_normal);
 	if (!gl_FrontFacing)
 		surface_normal = -surface_normal;
+	vec3 to_eye = EyePos - in_pos;
+	float to_eye_len_sq = dot(to_eye, to_eye);
+	vec3 view_dir = (to_eye_len_sq > 1e-8) ? (to_eye * inversesqrt(to_eye_len_sq)) : vec3(0.0, 0.0, 1.0);
+	float rim_factor = 0.0;
+	if (RimLightParams0.x > 0.5 && RimLightParams1.x > 0.5)
+	{
+		float rim_ndotv = 1.0 - clamp(dot(surface_normal, view_dir), 0.0, 1.0);
+		rim_factor = pow(max(rim_ndotv, 0.0), max(RimLightParams0.z, 0.5)) * max(RimLightParams0.y, 0.0);
+	}
 	uvec3 _tile_coord = ComputeLightTileCoord(in_coord, max(in_depth, 1e-6));
 
 	vec3 dynamic_light = vec3(0.0);
+	vec3 rim_dlight_accum = vec3(0.0);
 	if (NumLights > 0u)
 	{
 		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
@@ -202,6 +214,13 @@ void main()
 			float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, rad);
 			vec3 light_contrib = shaped * ndotl * shadow * l.color * dynamic_light_noise;
 			dynamic_light += light_contrib;
+			if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
+			{
+				float rim_shadow = (RimLightParams0.w > 0.5) ? shadow : 1.0;
+				vec3 rim_light_dir = (surface_dist > 0.0) ? (to_light / surface_dist) : vec3(0.0, 0.0, 1.0);
+				float backlight = mix(0.35, 1.0, max(dot(-surface_normal, rim_light_dir), 0.0));
+				rim_dlight_accum += shaped * rim_shadow * l.color * dynamic_light_noise * backlight;
+			}
 		}
 
 		if (saturation_chop > 0.0)
@@ -213,6 +232,11 @@ void main()
 
 	vec3 contrib = clamp(dynamic_light * DLightScale * Overbright, 0.0, Overbright);
 	vec3 color = albedo * contrib;
+	if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
+	{
+		vec3 rim_light = rim_dlight_accum * RimLightParams1.w;
+		color += albedo * rim_light * rim_factor;
+	}
 
 	if (ShadowEnableDebug.w > 1.5)
 		color = vec3(clamp(length(dynamic_light), 0.0, 1.0));
@@ -222,4 +246,3 @@ void main()
 	out_fragcolor = vec4(color, alpha); // FIX: war "alpha * 0.0" → Fragment immer transparent
 	out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
 }
-

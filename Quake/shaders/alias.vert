@@ -130,8 +130,6 @@ void main()
 	vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
 	mat3 normalmatrix = mat3(inst.NormalMatrix[0].xyz, inst.NormalMatrix[1].xyz, inst.NormalMatrix[2].xyz);
 	vec3 world_normal = normalize(normalmatrix * blended_normal);
-	vec3 view_dir = normalize(-out_pos);
-	float rim = pow(max(1.0 - dot(world_normal, view_dir), 0.0), 3.0) * 0.3;
 
 	vec3 ambient_src = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
 	vec3 litAmbient = ambient_src * (mix(0.35, 1.0, lighting) * AliasFrameBuffer.Overbright);
@@ -147,8 +145,7 @@ void main()
 	}
 
 	vec3 base_color = litAmbient;
-	bool is_viewmodel = (inst.Flags & ALIAS_FLAG_VIEWMODEL) != 0;
-	vec3 final_color = is_viewmodel ? base_color + vec3(rim) : base_color;
+	vec3 final_color = base_color;
 	out_color = clamp(vec4(final_color, inst.LightColor.a), 0.0, AliasFrameBuffer.Overbright);
 	out_dlight_vis = clamp(dot(litDlight, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
 	out_dlight_color = litDlight;
