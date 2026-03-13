@@ -422,6 +422,12 @@ float InterleavedGradientNoise(vec2 p)
 	return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
 }
 
+float StableWorldJitter(vec3 worldPos, vec3 seed, float cellScale)
+{
+	vec3 scaled = worldPos * cellScale + seed;
+	return Hash31(ivec3(floor(scaled)));
+}
+
 // Henyey-Greenstein phase scaled so isotropic (g=0) evaluates to 1.0.
 // This lets us modulate existing scattering terms without changing their
 // baseline energy when anisotropy is disabled.
@@ -879,6 +885,7 @@ void main()
 	}
 	// Safety: cap at FogSteps so we never exceed the uniform limit.
 	stepCount = min(stepCount, float(FogSteps));
+	vec3 rayJitterAnchor = ro + rd * mix(tEnter, tExit, 0.5);
 
 	// FIX #2: Restructured jitter selection for clarity.
 	// When noise is enabled we always apply a jitter; which generator to use
@@ -887,11 +894,9 @@ void main()
 	{
 		float jitter;
 		if (FogJitterEnabled != 0)
-			// Temporally-stable IGN variant: shifts pattern each frame via Time.
-			jitter = InterleavedGradientNoise(gl_FragCoord.xy + vec2(Time * 12.3, Time * 4.7));
+			jitter = StableWorldJitter(rayJitterAnchor, vec3(11.0, 23.0, 37.0), 0.125);
 		else
-			// Simple animated dither (fixed #1 version above).
-			jitter = Dither(gl_FragCoord.xy);
+			jitter = StableWorldJitter(rayJitterAnchor, vec3(3.0, 5.0, 7.0), 0.0625);
 		tEnter += jitter * stepLen;
 	}
 
@@ -918,7 +923,7 @@ void main()
 	// Shadow jitter: compute once per ray (same screen pixel  same jitter value).
 	bool  doShadow      = (FogShadowEnabled != 0 && FogShadowSamples > 0 && sunDirLenSq > 1e-6);
 	float shadowJitter  = doShadow && (FogShadowJitter > 0.0)
-		? (InterleavedGradientNoise(gl_FragCoord.xy + Time * 13.37) - 0.5)
+		? (StableWorldJitter(rayJitterAnchor + sunDir * 31.0, vec3(17.0, 29.0, 43.0), 0.125) - 0.5)
 		: 0.0;
 	// PERF: Precompute sun phase once per ray (viewDir and sunDir are constant).
 	float phaseSun      = (sunDirLenSq > 1e-6)
