@@ -104,6 +104,7 @@ typedef struct fogvol_light_stats_s
 typedef struct fogvol_perf_stats_s
 {
 	int frame;
+	int preset;
 	int passes;
 	int blits;
 	int global_passes;
@@ -135,6 +136,23 @@ typedef struct fogvol_shader_setup_s
 	float depth_sky_cutoff;
 	qboolean use_halfres;
 } fogvol_shader_setup_t;
+
+typedef struct fogvol_runtime_config_s
+{
+	int preset;
+	int effective_steps;
+	int shadow_samples;
+	int lighting_mode;
+	int local_occlusion_mode;
+	qboolean shadow_enabled;
+	qboolean godray_coupling;
+	qboolean light_enabled;
+	qboolean lightgrid_enabled;
+	qboolean froxel_enabled;
+	float froxel_scale;
+	float lightlist_scale;
+	float lightgrid_scale;
+} fogvol_runtime_config_t;
 
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
 static int r_fogvolume_count = 0;
@@ -183,6 +201,7 @@ typedef struct fogvol_static_build_config_s
 } fogvol_static_build_config_t;
 
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_preset = { "r_fogvol_preset", "2", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "24", CVAR_ARCHIVE };
 cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
 cvar_t r_fogvol_stepsize = { "r_fogvol_stepsize", "0", CVAR_ARCHIVE };
@@ -308,6 +327,7 @@ typedef struct fogvol_cvar_reg_s
 
 static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol, "core", "0"},
+	{&r_fogvol_preset, "quality", "2"},
 	{&r_fogvol_steps, "quality", "24"},
 	{&r_fogvol_maxsteps, "quality", "128"},
 	{&r_fogvol_stepsize, "quality", "0"},
@@ -3796,11 +3816,144 @@ static void R_FogVol_UploadVolumeRange (const fog_volume_t *volumes, int count)
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 2, buf, (GLintptr)ofs, sizeof (fog_volume_gpu_t) * count);
 }
 
+static void R_FogVol_BuildRuntimeConfig (fogvol_runtime_config_t *cfg, int steps, qboolean global_simple, qboolean fog_light_enabled, qboolean fog_lightgrid_enabled)
+{
+	int preset;
+	int lighting_mode;
+	int shadow_samples;
+	int local_occlusion_mode;
+	float froxel_scale;
+	float lightlist_scale;
+	float lightgrid_scale;
+	qboolean shadow_enabled;
+	qboolean godray_coupling;
+	qboolean light_enabled;
+	qboolean froxel_enabled;
+
+	if (!cfg)
+		return;
+
+	memset (cfg, 0, sizeof (*cfg));
+	preset = CLAMP (0, (int)Q_rint (r_fogvol_preset.value), 3);
+	lighting_mode = CLAMP (0, (int)Q_rint (r_fogvol_lighting_mode.value), 3);
+	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
+	local_occlusion_mode = CLAMP (0, (int)Q_rint (r_fogvol_local_occlusion.value), 2);
+	froxel_scale = q_max (0.f, r_fogvol_froxel_scale.value);
+	lightlist_scale = q_max (0.f, r_fogvol_lightlist_scale.value);
+	lightgrid_scale = q_max (0.f, r_fogvol_lightgrid_scale.value);
+	shadow_enabled = global_simple ? (r_fogvol_global_shadow.value > 0.f) : (r_fogvol_shadow.value > 0.f);
+	godray_coupling = r_fogvol_godray_coupling.value > 0.f;
+	light_enabled = fog_light_enabled;
+	froxel_enabled = (r_fogvol_froxel.value > 0.f);
+
+	if (preset == 0)
+	{
+		steps = global_simple ? 8 : 12;
+		shadow_enabled = false;
+		shadow_samples = 0;
+		godray_coupling = false;
+		local_occlusion_mode = 0;
+		if (froxel_enabled && froxel_scale > 0.f)
+		{
+			lighting_mode = 2;
+			lightlist_scale = 0.f;
+		}
+		else if (light_enabled && lightlist_scale > 0.f)
+		{
+			lighting_mode = 1;
+			froxel_scale = 0.f;
+		}
+		else
+			lighting_mode = 0;
+	}
+	else if (preset == 1)
+	{
+		steps = global_simple ? 12 : 18;
+		if (shadow_enabled)
+			shadow_samples = CLAMP (1, shadow_samples, 2);
+		else
+			shadow_samples = 0;
+		local_occlusion_mode = q_min (local_occlusion_mode, 1);
+		if (lighting_mode == 3)
+		{
+			if (froxel_enabled && froxel_scale > 0.f)
+			{
+				lighting_mode = 2;
+				lightlist_scale = 0.f;
+			}
+			else if (light_enabled && lightlist_scale > 0.f)
+			{
+				lighting_mode = 1;
+				froxel_scale = 0.f;
+			}
+			else
+				lighting_mode = 0;
+		}
+	}
+	else if (preset == 2)
+	{
+		steps = global_simple ? q_max (steps, 16) : q_max (steps, 24);
+	}
+	else if (preset == 3)
+	{
+		steps = q_min (q_max (steps, global_simple ? 20 : 32), q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
+	}
+
+	if (global_simple)
+	{
+		lighting_mode = 0;
+		light_enabled = false;
+		froxel_enabled = false;
+		fog_lightgrid_enabled = false;
+		froxel_scale = 0.f;
+		lightlist_scale = 0.f;
+		lightgrid_scale = 0.f;
+		godray_coupling = false;
+		local_occlusion_mode = 0;
+		if (!shadow_enabled)
+			shadow_samples = 0;
+		else
+			shadow_samples = q_min (shadow_samples, 1);
+	}
+	else
+	{
+		if (lighting_mode == 0)
+		{
+			light_enabled = false;
+			froxel_enabled = false;
+		}
+		else if (lighting_mode == 1)
+		{
+			froxel_enabled = false;
+			froxel_scale = 0.f;
+		}
+		else if (lighting_mode == 2)
+		{
+			light_enabled = false;
+			lightlist_scale = 0.f;
+		}
+	}
+
+	cfg->preset = preset;
+	cfg->effective_steps = q_max (8, steps);
+	cfg->shadow_samples = shadow_samples;
+	cfg->lighting_mode = lighting_mode;
+	cfg->local_occlusion_mode = local_occlusion_mode;
+	cfg->shadow_enabled = shadow_enabled;
+	cfg->godray_coupling = godray_coupling;
+	cfg->light_enabled = light_enabled && (lighting_mode == 1 || lighting_mode == 3);
+	cfg->lightgrid_enabled = fog_lightgrid_enabled && lightgrid_scale > 0.f;
+	cfg->froxel_enabled = froxel_enabled && (lighting_mode == 2 || lighting_mode == 3) && froxel_scale > 0.f;
+	cfg->froxel_scale = froxel_scale;
+	cfg->lightlist_scale = lightlist_scale;
+	cfg->lightgrid_scale = lightgrid_scale;
+}
+
 static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfres,
 	int glwidth, int glheight, float depth_scale_x, float depth_scale_y,
 	const float *inv_viewproj, float view_x, float view_y, float view_w, float view_h,
 	float depth_near, float depth_far, float depth_sky_cutoff,
-	qboolean fog_light_enabled, qboolean fog_lightgrid_enabled, qboolean global_simple)
+	const fogvol_runtime_config_t *runtime, qboolean global_simple)
 {
 	vec3_t shadow_dir;
 	vec3_t sun_color;
@@ -3814,6 +3967,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int quality_mode;
 	int effective_steps;
 	int noise_subsample;
+	const fogvol_runtime_config_t *cfg = runtime;
 	const sun_t *sun = R_GetSun ();
 	int shadow_samples;
 
@@ -3843,7 +3997,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		quality_step_scale = 1.12f;
 		quality_fx_scale = 1.15f;
 	}
-	effective_steps = (int)Q_rint ((float)steps * quality_step_scale);
+	effective_steps = (int)Q_rint ((float)(cfg ? cfg->effective_steps : steps) * quality_step_scale);
 	effective_steps = CLAMP (8, effective_steps, CLAMP (8, (int)Q_rint (r_fogvol_maxsteps.value), 256));
 	GL_Uniform1iFunc (FOGVOL_U_STEPS, effective_steps);
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
@@ -3873,10 +4027,8 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform2fFunc (FOGVOL_U_DENSITY_PARAMS, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
 	GL_Uniform1iFunc (FOGVOL_U_EMISSIVE_ENABLED, r_fogvol_emissive.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_BLEND_MODE_DEFAULT, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
-	GL_Uniform1iFunc (FOGVOL_U_LIGHT_ENABLED, fog_light_enabled ? 1 : 0);
-	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
-	if (global_simple)
-		shadow_samples = q_min (shadow_samples, 1);
+	GL_Uniform1iFunc (FOGVOL_U_LIGHT_ENABLED, (cfg && cfg->light_enabled) ? 1 : 0);
+	shadow_samples = cfg ? cfg->shadow_samples : CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
 	if (quality_mode <= 1)
 		shadow_samples = q_min (shadow_samples, 1);
 	if (r_fogvol_sun_dir.value > 0.f)
@@ -3896,12 +4048,12 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
 	else
 		VectorNormalize (shadow_dir);
-	GL_Uniform1iFunc (FOGVOL_U_SHADOW_ENABLED, global_simple ? (r_fogvol_global_shadow.value > 0.f ? 1 : 0) : (r_fogvol_shadow.value > 0.f ? 1 : 0));
+	GL_Uniform1iFunc (FOGVOL_U_SHADOW_ENABLED, (cfg && cfg->shadow_enabled) ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_SHADOW_SAMPLES, shadow_samples);
 	GL_Uniform1fFunc (FOGVOL_U_SHADOW_STRENGTH, sun->shadow_strength);
 	GL_Uniform1fFunc (FOGVOL_U_SHADOW_JITTER, r_fogvol_shadow_jitter.value > 0.f ? 1.f : 0.f);
 	GL_Uniform3fFunc (FOGVOL_U_SHADOW_DIR, shadow_dir[0], shadow_dir[1], shadow_dir[2]);
-	GL_Uniform1iFunc (FOGVOL_U_LIGHTGRID_ENABLED, (!global_simple && fog_lightgrid_enabled) ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_LIGHTGRID_ENABLED, (cfg && !global_simple && cfg->lightgrid_enabled) ? 1 : 0);
 	sun_scatter = sun->volumetric_intensity * q_max (0.f, r_fogvol_sun_scatter.value);
 	if (R_WorldHasSun ())
 	{
@@ -3926,22 +4078,22 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform3fFunc (FOGVOL_U_SUN_COLOR, q_max (0.f, sun_color[0]), q_max (0.f, sun_color[1]), q_max (0.f, sun_color[2]));
 	GL_Uniform1fFunc (FOGVOL_U_SUN_ANISOTROPY, sun->anisotropy);
 	GL_Uniform1fFunc (FOGVOL_U_DLIGHT_SCALE, q_max (0.f, r_fogvol_dlightscale.value));
-	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, global_simple ? 0 : ((r_froxel.valid && r_froxel.light_tex && r_froxel.light_count > 0) ? 1 : 0));
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (cfg && !global_simple && cfg->froxel_enabled && r_froxel.valid && r_froxel.light_tex && r_froxel.light_count > 0) ? 1 : 0);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, r_froxel.near_clip, r_froxel.far_clip, r_froxel.tan_half_fov_x, r_froxel.tan_half_fov_y);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, r_froxel.log_far_near,
 		(float)q_max (1, r_froxel.dims[0]), (float)q_max (1, r_froxel.dims[1]), (float)q_max (1, r_froxel.dims[2]));
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, global_simple ? 0 : CLAMP (0, (int)Q_rint (r_froxel_debug.value), 4));
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, global_simple ? 0 : CLAMP (0, (int)Q_rint (r_fogvol_froxel_parity.value), 1));
 	GL_Uniform3fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES,
-		global_simple ? 0.f : q_max (0.f, r_fogvol_froxel_scale.value),
-		global_simple ? 0.f : q_max (0.f, r_fogvol_lightlist_scale.value),
-		global_simple ? 0.f : q_max (0.f, r_fogvol_lightgrid_scale.value));
-	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, global_simple ? 0 : CLAMP (0, (int)Q_rint (r_fogvol_lighting_mode.value), 3));
-	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, global_simple ? 0 : (r_fogvol_godray_coupling.value > 0.f ? 1 : 0));
+		(global_simple || !cfg) ? 0.f : cfg->froxel_scale,
+		(global_simple || !cfg) ? 0.f : cfg->lightlist_scale,
+		(global_simple || !cfg) ? 0.f : cfg->lightgrid_scale);
+	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, (global_simple || !cfg) ? 0 : cfg->lighting_mode);
+	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, (cfg && !global_simple && cfg->godray_coupling) ? 1 : 0);
 	GL_Uniform4fFunc (FOGVOL_U_GODRAY_SHAFTS_PARAMS,
 		(float)q_max (1, framebufs.godrays.width),
 		(float)q_max (1, framebufs.godrays.height),
-		global_simple ? 0.f : q_max (0.f, r_fogvol_godray_coupling.value),
+		(cfg && !global_simple && cfg->godray_coupling) ? q_max (0.f, r_fogvol_godray_coupling.value) : 0.f,
 		q_max (0.f, r_fogvol_froxel_godrays.value));
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_TEMPORAL_PARAMS,
 		CLAMP (0.f, r_fogvol_froxel_temporal_alpha.value, 1.f),
@@ -3951,7 +4103,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 			(r_refdef.vieworg[1] - r_froxel.prev_vieworg[1]) * (r_refdef.vieworg[1] - r_froxel.prev_vieworg[1]) +
 			(r_refdef.vieworg[2] - r_froxel.prev_vieworg[2]) * (r_refdef.vieworg[2] - r_froxel.prev_vieworg[2])) : 0.f),
 		r_froxel.prev_valid ? 1.f : 0.f);
-	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, global_simple ? 0 : CLAMP (0, (int)Q_rint (r_fogvol_local_occlusion.value), 2));
+	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, (cfg && !global_simple) ? cfg->local_occlusion_mode : 0);
 	GL_Uniform4fFunc (FOGVOL_U_LOCAL_OCCLUSION_PARAMS, 4.f, 0.02f, 1.f, 0.f);
 	noise_detail_strength = CLAMP (0.f, r_fogvol_noise_detail_strength.value, 1.f);
 	noise_detail_strength *= quality_mode == 1 ? 0.75f : quality_fx_scale;
@@ -3981,8 +4133,9 @@ static void R_FogVol_LogPerfStats (const fogvol_perf_stats_t *stats)
 	if ((stats->frame % interval) != 0)
 		return;
 
-	Con_Printf ("fogvol_stats: frame=%d gpu_ms=%.3f passes=%d blits=%d global_passes=%d local_passes=%d global=%d locals=%d steps=%d shadow_samples=%d\n",
+	Con_Printf ("fogvol_stats: frame=%d preset=%d gpu_ms=%.3f passes=%d blits=%d global_passes=%d local_passes=%d global=%d locals=%d steps=%d shadow_samples=%d\n",
 		stats->frame,
+		stats->preset,
 		stats->gpu_ms,
 		stats->passes,
 		stats->blits,
@@ -4033,6 +4186,7 @@ static qboolean R_FogVol_RenderGlobalSimple (const fogvol_shader_setup_t *setup,
 	int x0, y0, x1, y1;
 	GLuint dst_tex;
 	GLuint dst_fbo;
+	fogvol_runtime_config_t runtime;
 
 	if (!setup || !fog_tex || !fog_fbo || !fog_src || !final_tex || !has_drawn)
 		return false;
@@ -4060,6 +4214,7 @@ static qboolean R_FogVol_RenderGlobalSimple (const fogvol_shader_setup_t *setup,
 		return false;
 
 	R_FogVol_UploadVolumeRange (&r_fogvol_global_volume, 1);
+	R_FogVol_BuildRuntimeConfig (&runtime, setup->steps, true, false, false);
 	R_FogVol_UseProgram (glprogs.fogvol_global ? glprogs.fogvol_global : glprogs.fogvol);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, 0);
@@ -4070,7 +4225,7 @@ static qboolean R_FogVol_RenderGlobalSimple (const fogvol_shader_setup_t *setup,
 		setup->glwidth, setup->glheight, setup->depth_scale_x, setup->depth_scale_y,
 		setup->inv_viewproj, setup->view_x, setup->view_y, setup->view_w, setup->view_h,
 		setup->depth_near, setup->depth_far, setup->depth_sky_cutoff,
-		false, false, true);
+		&runtime, true);
 
 	if (setup->use_halfres)
 		glViewport (0, 0, setup->fog_width, setup->fog_height);
@@ -4167,18 +4322,17 @@ void R_FogVol_Render (void)
 	int frame_candidate_count = 0;
 	qboolean has_fog_bounds = false;
 	const qboolean light_stats_enabled = r_fogvol_light_stats.value > 0.f;
-	const fogvol_lighting_mode_t lighting_mode = R_FogVol_LightingMode ();
-	const qboolean raymarch_lighting_requested = (r_fogvol_light.value > 0.f)
-		&& (R_FogVol_UseRaymarchLights (lighting_mode) || R_FogVol_UseRaymarchDetail (lighting_mode));
-	qboolean raymarch_lighting_enabled = raymarch_lighting_requested;
-	const qboolean froxel_lighting_mode = R_FogVol_UseFroxelLights (lighting_mode);
-	const qboolean froxel_injection_enabled = (r_fogvol_froxel.value > 0.f) && froxel_lighting_mode;
+	qboolean raymarch_lighting_requested = false;
+	qboolean raymarch_lighting_enabled = false;
+	qboolean froxel_lighting_mode = false;
+	qboolean froxel_injection_enabled = false;
 	qboolean raymarch_fallback_active = false;
 	qboolean want_froxel_sun = false;
 	qboolean want_froxel_static = false;
 	qboolean want_froxel_dlights = false;
 	qboolean run_froxel_injection = false;
 	fogvol_shader_setup_t shader_setup;
+	fogvol_runtime_config_t runtime_cfg;
 	fogvol_perf_stats_t perf_stats;
 	GLuint query_id = 0;
 	GLuint64 gpu_time_ns = 0;
@@ -4210,11 +4364,6 @@ void R_FogVol_Render (void)
 		if (r_fog_static_field.total_samples > 0)
 			R_FogVol_SummarizeStaticLightsFromField ();
 	}
-	want_froxel_dlights = froxel_injection_enabled && (r_fogvol_dlightscale.value > 0.f);
-	want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
-	want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
-	run_froxel_injection = froxel_injection_enabled && (want_froxel_dlights || want_froxel_sun || want_froxel_static);
-
 	dumpstate_always = (r_fogvol_testvolumes_dumpstate.value > 0.f);
 	if (last_dumpstate != (int)Q_rint (r_fogvol_testvolumes_dumpstate.value))
 	{
@@ -4284,6 +4433,20 @@ void R_FogVol_Render (void)
 	shader_setup.depth_far = depth_far;
 	shader_setup.depth_sky_cutoff = depth_sky_cutoff;
 	shader_setup.use_halfres = use_halfres;
+	R_FogVol_BuildRuntimeConfig (&runtime_cfg, steps, false, r_fogvol_light.value > 0.f, r_fogvol_lightgrid.value > 0.f);
+	steps = runtime_cfg.effective_steps;
+	shader_setup.steps = steps;
+	perf_stats.preset = runtime_cfg.preset;
+	perf_stats.steps = steps;
+	perf_stats.shadow_samples = runtime_cfg.shadow_samples;
+	raymarch_lighting_requested = runtime_cfg.light_enabled;
+	raymarch_lighting_enabled = runtime_cfg.light_enabled;
+	froxel_lighting_mode = runtime_cfg.froxel_enabled;
+	froxel_injection_enabled = runtime_cfg.froxel_enabled;
+	want_froxel_dlights = froxel_injection_enabled && (r_fogvol_dlightscale.value > 0.f);
+	want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
+	want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
+	run_froxel_injection = froxel_injection_enabled && (want_froxel_dlights || want_froxel_sun || want_froxel_static);
 
 	if (run_froxel_injection)
 	{
@@ -4307,7 +4470,7 @@ void R_FogVol_Render (void)
 	 * If the selected lighting mode expects froxel contribution but no froxel
 	 * lights are actually available this frame, fall back to the raymarch light
 	 * list path so global/local fog still receives injected lighting. */
-	if (!raymarch_lighting_enabled && froxel_lighting_mode)
+	if (!raymarch_lighting_enabled && froxel_lighting_mode && r_fogvol_light.value > 0.f && runtime_cfg.lightlist_scale > 0.f)
 	{
 		const qboolean froxel_ready = (r_froxel.valid && r_froxel.light_tex && r_froxel.light_count > 0);
 		if (!froxel_ready)
@@ -4322,9 +4485,7 @@ void R_FogVol_Render (void)
 	memset (&light_stats, 0, sizeof (light_stats));
 	lightgrid = Lightgrid_Get ();
 	fog_lightgrid_has_data = (lightgrid && lightgrid->octree && r_lightgrid.value > 0.f);
-	fog_lightgrid_enabled = (r_fogvol_lightgrid.value > 0.f) && (fog_lightgrid_has_data || r_num_fog_static_lights > 0);
-	if (r_fogvol_lightgrid_scale.value <= 0.f)
-		fog_lightgrid_enabled = false;
+	fog_lightgrid_enabled = runtime_cfg.lightgrid_enabled && (fog_lightgrid_has_data || r_num_fog_static_lights > 0);
 
 	if (raymarch_lighting_enabled)
 	{
@@ -4478,7 +4639,7 @@ void R_FogVol_Render (void)
 		glwidth, glheight, depth_scale_x, depth_scale_y,
 		inv_viewproj, view_x, view_y, view_w, view_h,
 		depth_near, depth_far, depth_sky_cutoff,
-		fog_light_enabled, fog_lightgrid_enabled, false);
+		&runtime_cfg, false);
 
 	if (use_halfres)
 		glViewport (0, 0, fog_width, fog_height);

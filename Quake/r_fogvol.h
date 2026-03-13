@@ -54,6 +54,7 @@ typedef struct froxel_grid_s
 
 extern cvar_t r_fogvol;
 extern cvar_t r_fogvol_halfres;
+extern cvar_t r_fogvol_preset;
 /* BEST PRACTICE #11: Expose all cvars that may be referenced from other
  * translation units (e.g. menu, console completion, test harnesses). */
 extern cvar_t r_fogvol_steps;
