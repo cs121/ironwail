@@ -92,6 +92,59 @@ bool Reproject(vec2 viewUv, float depthNdc, out vec2 prevViewUv, out float prevD
 	return true;
 }
 
+bool ReconstructWorldPos(vec2 viewUv, float depthNdc, out vec3 worldPos)
+{
+	vec4 clip = vec4(viewUv * 2.0 - 1.0, depthNdc, 1.0);
+	vec4 world = FogInvViewProj * clip;
+	if (abs(world.w) < 1e-6)
+		return false;
+	worldPos = world.xyz / world.w;
+	return true;
+}
+
+float EstimateFogCentroidFactor(float fogAlpha)
+{
+	float fogWeight = smoothstep(0.02, 0.20, fogAlpha);
+	float transmittance = clamp(1.0 - fogAlpha, 1e-4, 1.0);
+	float tau = -log(transmittance);
+	float centroidFactor = 0.5;
+
+	if (tau > 1e-4)
+	{
+		float denom = tau * (1.0 - exp(-tau));
+		if (denom > 1e-5)
+			centroidFactor = clamp((1.0 - exp(-tau) * (1.0 + tau)) / denom, 0.05, 1.0);
+	}
+
+	/* Reprojection against the opaque surface behind the medium causes fog to
+	 * parallax too aggressively when the player moves through it. Blend from
+	 * surface-depth reprojection toward a fog-centroid reprojection once the
+	 * accumulated fog coverage becomes noticeable. */
+	return mix(1.0, centroidFactor, fogWeight);
+}
+
+bool ReprojectFogMedium(vec2 viewUv, float depthNdc, float fogAlpha, out vec2 prevViewUv, out float prevDepthNdc)
+{
+	vec3 sceneWorldPos;
+	if (!ReconstructWorldPos(viewUv, depthNdc, sceneWorldPos))
+		return false;
+
+	vec3 ray = sceneWorldPos - EyePos;
+	float rayLen = length(ray);
+	if (rayLen <= 1e-4)
+		return false;
+
+	vec3 fogWorldPos = EyePos + ray * EstimateFogCentroidFactor(fogAlpha);
+	vec4 prevClip = PrevViewProj * vec4(fogWorldPos, 1.0);
+	if (abs(prevClip.w) < 1e-6)
+		return false;
+
+	vec3 prevNdc = prevClip.xyz / prevClip.w;
+	prevViewUv = prevNdc.xy * 0.5 + 0.5;
+	prevDepthNdc = prevNdc.z;
+	return true;
+}
+
 vec4 ComputeHistoryClamp(vec2 uv, vec4 centerColor)
 {
 	vec2 texel = 1.0 / max(vec2(textureSize(FogCurrent, 0)), vec2(1.0));
@@ -148,15 +201,21 @@ void main()
 	vec2  prevViewUv = vec2(0.0);
 	float prevDepthNdc = depthNdc;
 	bool  valid = false;
+	bool  usedVelocityPath = false;
+	bool  usedFogMediumPath = false;
 	float depthAgreement = 0.0;
 	float motionConfidence = 0.0;
 	float varianceConfidence = 0.0;
+	float fogReprojectWeight = smoothstep(0.02, 0.20, current.a);
 
-	if (FogHasVelocity != 0)
+	if (FogHasVelocity != 0 && fogReprojectWeight < 0.25)
 	{
 		vec2 velocityUv = clamp(screenUv, vec2(0.0), vec2(1.0));
 		vec2 velocity = texture(SceneVelocity, velocityUv).xy;
-		vec2 prevScreenUvFromVel = screenUv - velocity;
+		float velocityPx = length(velocity * FogViewportParams.xy);
+		if (velocityPx > 0.05)
+		{
+			vec2 prevScreenUvFromVel = screenUv - velocity;
 		/* BUG FIX (G-06): Original formula was:
 		 *   prevViewUv = (prevScreenUvFromVel * FogViewportParams.xy - FogViewParams.xy) * FogViewParams.zw
 		 * prevScreenUvFromVel is already a UV [0,1].  Multiplying by FogViewportParams.xy
@@ -171,13 +230,16 @@ void main()
 		 *   prevViewUv   = (prevScreenPx - FogViewParams.xy) * FogViewParams.zw  (pixels → view UV)
 		 * This is identical to what Reproject() computes, just using velocity instead of
 		 * the matrix reprojection path. */
-		vec2 prevScreenPx = prevScreenUvFromVel * FogViewportParams.xy;
-		prevViewUv = (prevScreenPx - FogViewParams.xy) * FogViewParams.zw;
-		valid = all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
+			vec2 prevScreenPx = prevScreenUvFromVel * FogViewportParams.xy;
+			prevViewUv = (prevScreenPx - FogViewParams.xy) * FogViewParams.zw;
+			valid = all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
+			usedVelocityPath = valid;
+		}
 	}
-	else
+	if (!usedVelocityPath)
 	{
-		valid = Reproject(viewUv, depthNdc, prevViewUv, prevDepthNdc);
+		valid = ReprojectFogMedium(viewUv, depthNdc, current.a, prevViewUv, prevDepthNdc);
+		usedFogMediumPath = valid && (fogReprojectWeight > 0.0);
 		valid = valid && all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
 	}
 
@@ -194,9 +256,12 @@ void main()
 		float depthPrevNdc = DepthToNdcZ(depthPrev);
 		float depthReject  = max(FogTemporalDepthReject, 1e-5);
 		float disocclusionBias = max(FogTemporalConfidenceParams.y, 0.0);
-		float depthDelta = abs(depthPrevNdc - (FogHasVelocity != 0 ? depthNdc : prevDepthNdc));
-		depthAgreement = 1.0 - smoothstep(depthReject, depthReject * (1.0 + disocclusionBias), depthDelta);
-		if (depthDelta > depthReject * (1.0 + disocclusionBias))
+		float depthReferenceNdc = (usedVelocityPath || usedFogMediumPath) ? depthNdc : prevDepthNdc;
+		float depthSlack = mix(1.0, 1.75, fogReprojectWeight);
+		float depthDelta = abs(depthPrevNdc - depthReferenceNdc);
+		float depthRejectScaled = depthReject * depthSlack;
+		depthAgreement = 1.0 - smoothstep(depthRejectScaled, depthRejectScaled * (1.0 + disocclusionBias), depthDelta);
+		if (depthDelta > depthRejectScaled * (1.0 + disocclusionBias))
 			valid = false;
 	}
 
@@ -242,7 +307,8 @@ void main()
 
 	if (checkerboardMissing && valid)
 	{
-		OutColor = history;
+		float checkerAlpha = clamp(confidence, 0.0, 1.0);
+		OutColor = mix(current, history, checkerAlpha);
 		return;
 	}
 
