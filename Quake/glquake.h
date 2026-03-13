@@ -138,6 +138,8 @@ extern	cvar_t	r_shadow_sun_bias;
 extern	cvar_t	r_shadow_dlight_bias;
 extern	cvar_t	r_shadow_sun_pcf;
 extern	cvar_t	r_shadow_dlight_pcf;
+extern	cvar_t	r_shadow_sun_snap;
+extern	cvar_t	r_shadow_mark_mode;
 extern	cvar_t	r_shadow_debug;
 extern	cvar_t	r_shadow_log;
 extern	cvar_t	r_rimlight;
@@ -541,6 +543,8 @@ void R_Sun_UpdateFromWorld (void);
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);
+void R_MarkSurfaces_Shadow (void);
+void R_RestoreMarkedSurfaces (void);
 qboolean R_CullBox (vec3_t emins, vec3_t emaxs);
 qboolean R_CullModelForEntity (entity_t *e);
 void R_GetEntityBounds (const entity_t *e, vec3_t mins, vec3_t maxs);
@@ -671,6 +675,7 @@ typedef struct glprogs_s {
 	GLuint		godrays_source;
 	GLuint		godrays_source_sky;
 	GLuint		fogvol;
+	GLuint		fogvol_global;
 	GLuint		fogvol_temporal;
 	GLuint		fogvol_froxel_inject;
 	GLuint		oit_resolve[2];		// [msaa]

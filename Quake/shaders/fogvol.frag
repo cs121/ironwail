@@ -35,6 +35,10 @@
 
 #include "frame_uniforms.glsl"
 
+#ifndef FOGVOL_GLOBAL_SIMPLE
+#define FOGVOL_GLOBAL_SIMPLE 0
+#endif
+
 #define MAX_FOGVOLUMES 64
 #define MAX_FOGLIGHTS 31 // keep FogLightsUBO under 64KB std140 limit on some drivers
 
@@ -790,21 +794,42 @@ void main()
 		? (sunScatterColor * (sunScatterStrength * phaseSun * forwardScatterBoost))
 		: vec3(0.0);
 	// PERF: Cache active light count and enabled flag to avoid UBO re-fetch in loop.
-	FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
-	int lightOffset     = max(lightList.offset_count.x, 0);
-	int lightCount      = clamp(lightList.offset_count.y, 0, MAX_FOGLIGHTS);
-	int fogLightingMode = clamp(FogLightingMode, 0, 3);
-	bool useFroxelLighting = (fogLightingMode == 2 || fogLightingMode == 3);
-	bool doRaymarchLighting = (fogLightingMode == 1);
-	bool doRaymarchDetail = (fogLightingMode == 3);
-	// Froxel lighting must not depend on FogLightEnabled (that flag tracks the
-	// raymarch light-list path only). Otherwise froxel dlight injection can run
-	// on CPU but be completely invisible in shader.
-	bool doFroxelLights = useFroxelLighting && (FogFroxelEnabled != 0) && (FogLightSourceScales.x > 0.0);
-	bool doListLightsFull = (FogLightEnabled != 0) && doRaymarchLighting && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
-	bool doListLightsDetail = (FogLightEnabled != 0) && doRaymarchDetail && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
-	bool doLights = doFroxelLights || doListLightsFull || doListLightsDetail;
-	bool doLightgrid = (FogLightgridEnabled != 0) && (FogLightSourceScales.z > 0.0);
+	int lightOffset = 0;
+	int lightCount = 0;
+	int fogLightingMode = 0;
+	bool doFroxelLights = false;
+	bool doListLightsFull = false;
+	bool doListLightsDetail = false;
+	bool doLights = false;
+	bool doLightgrid = false;
+#if FOGVOL_GLOBAL_SIMPLE
+	doShadow = (FogShadowEnabled != 0 && FogShadowSamples > 0 && sunDirLenSq > 1e-6);
+#else
+	{
+		FogLightList lightList = FogLightLists[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
+		bool useFroxelLighting;
+		bool doRaymarchLighting;
+		bool doRaymarchDetail;
+
+		lightOffset = max(lightList.offset_count.x, 0);
+		lightCount = clamp(lightList.offset_count.y, 0, MAX_FOGLIGHTS);
+		fogLightingMode = clamp(FogLightingMode, 0, 3);
+		useFroxelLighting = (fogLightingMode == 2 || fogLightingMode == 3);
+		doRaymarchLighting = (fogLightingMode == 1);
+		doRaymarchDetail = (fogLightingMode == 3);
+		// Froxel lighting must not depend on FogLightEnabled (that flag tracks the
+		// raymarch light-list path only). Otherwise froxel dlight injection can run
+		// on CPU but be completely invisible in shader.
+		doFroxelLights = useFroxelLighting && (FogFroxelEnabled != 0) && (FogLightSourceScales.x > 0.0);
+		/* Mode 2 fallback: if froxel is selected but no froxel light volume is
+		 * available this frame, allow full raymarch light-list shading instead. */
+		doListLightsFull = (FogLightEnabled != 0) && (lightCount > 0) && (FogLightSourceScales.y > 0.0)
+			&& (doRaymarchLighting || (fogLightingMode == 2 && !doFroxelLights));
+		doListLightsDetail = (FogLightEnabled != 0) && doRaymarchDetail && (lightCount > 0) && (FogLightSourceScales.y > 0.0);
+		doLights = doFroxelLights || doListLightsFull || doListLightsDetail;
+		doLightgrid = (FogLightgridEnabled != 0) && (FogLightSourceScales.z > 0.0);
+	}
+#endif
 
 	// FIX #8: Removed stepsTaken / edgeFadeSum / earlyTerminated  they were
 	// accumulated but never consumed, silently wasting ALU every iteration.
@@ -841,10 +866,14 @@ void main()
 	}
 
 	int adaptiveSteps = int(stepCount); // adaptive, already capped at FogSteps
+#if FOGVOL_GLOBAL_SIMPLE
+	adaptiveSteps = clamp(adaptiveSteps, 6, min(FogSteps, 14));
+#else
 	if (fogLightingMode == 2)
 		adaptiveSteps = clamp(adaptiveSteps, 6, 12);
 	else if (fogLightingMode == 3)
 		adaptiveSteps = clamp(adaptiveSteps, 6, 16);
+#endif
 	{
 		// Distance-adaptive march budget: rays that start far away get up to 75% fewer steps.
 		float farStartNorm = clamp(tEnter / max(FogDepthParams.y, 1e-3), 0.0, 1.0);
@@ -852,6 +881,9 @@ void main()
 		adaptiveSteps = max(2, int(floor(float(adaptiveSteps) * farStepScale + 0.5)));
 	}
 	bool doGodrayCoupling = (FogGodrayCoupling != 0);
+#if FOGVOL_GLOBAL_SIMPLE
+	doGodrayCoupling = false;
+#endif
 	float shaftEnergyPre = 0.0;
 	if (doGodrayCoupling)
 	{

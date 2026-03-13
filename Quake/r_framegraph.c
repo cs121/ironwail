@@ -8,6 +8,7 @@ void R_SetupView (void);
 void R_RenderShadowMaps (void);
 void R_RenderScene (void);
 void R_WarpScaleView (void);
+void R_DrawViewModel (void);
 
 /*
  * Framegraph pass order and data dependencies
@@ -19,8 +20,8 @@ void R_WarpScaleView (void);
  *    - Fog_EnableGFog + R_RenderScene render solid geometry and scene buffers.
  *    - R_WarpScaleView resolves/warps the scene into composite targets.
  * 3) Transparency/volumetrics:
- *    - R_FogVol_BuildList gathers fog-volume primitives from the current view.
- *    - R_FogVol_Render composites volumetric contribution over scene color.
+ *    - R_FogVol_BuildList gathers local/entity fog volumes and prepares global fog state.
+ *    - R_FogVol_Render composites a global baseline first, then local/entity fog volumes.
  * 4) PostFX handoff:
  *    - Capture fog parameters for SSAO (postprocess runs after fog disable).
  *    - Fog_DisableGFog keeps 2D overlays fog-free.
@@ -50,6 +51,10 @@ void R_FrameGraph_RenderView (const r_framegraph_state_t *state)
 			(*state->fogvol_draw_called)++;
 		R_FogVol_Render ();
 	}
+
+	/* Draw the weapon after volumetric fog so viewmodel depth cannot punch holes
+	 * into fog/froxel reconstruction and temporal history. */
+	R_DrawViewModel ();
 
 	if (state && state->ssao_fog_state)
 		R_SSAO_CaptureFogState (&r_framedata, state->ssao_fog_state);
