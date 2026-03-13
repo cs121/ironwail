@@ -39,6 +39,10 @@
 #define FOGVOL_GLOBAL_SIMPLE 0
 #endif
 
+#ifndef FOGVOL_CLUSTERED_LOCAL
+#define FOGVOL_CLUSTERED_LOCAL 0
+#endif
+
 #define MAX_FOGVOLUMES 64
 #define MAX_FOGLIGHTS 31 // keep FogLightsUBO under 64KB std140 limit on some drivers
 
@@ -87,6 +91,21 @@ layout(std140, binding=4) uniform FogLightsUBO
 layout(std140, binding=5) uniform FogLightgridUBO
 {
 	vec4 FogLightgridProbeRGB[MAX_FOGVOLUMES * 8];
+};
+
+struct FogClusterHeader
+{
+	ivec4 offset_count;
+};
+
+layout(std430, binding=8) readonly buffer FogClusterHeadersSSBO
+{
+	FogClusterHeader FogClusterHeaders[];
+};
+
+layout(std430, binding=9) readonly buffer FogClusterIndicesSSBO
+{
+	int FogClusterIndices[];
 };
 
 layout(location=0)  uniform int   FogSteps;
@@ -138,6 +157,7 @@ layout(location=45) uniform vec4  FogLocalOcclusionParams; // x depth thickness,
 layout(location=46) uniform float FogNoiseDetailStrength;
 layout(location=47) uniform float FogHeightMistStrength;
 layout(location=48) uniform float FogAtmosphereBoost;
+layout(location=49) uniform vec4  FogClusterParams; // x: tile size, y: tiles x, z: tiles y, w: clustered enabled
 
 layout(location=0) out vec4 FragColor;
 
@@ -647,11 +667,13 @@ void main()
 	}
 
 	FogVolume volume = FogVolumes[FogVolumeIndex];
+#if !FOGVOL_CLUSTERED_LOCAL
 	if (volume.misc.y <= 0.0)
 	{
 		FragColor = vec4(scene, 0.0);
 		return;
 	}
+#endif
 
 	ivec2 depthCoord = ivec2(screenPos);
 	float depth      = texelFetch(SceneDepth, depthCoord, 0).r;
@@ -676,6 +698,123 @@ void main()
 		tScene = 2048.0; // BUG-F-02 FIX: cap sky path length — far_clip causes open areas to look/
 		                 // disproportionately foggier than enclosed rooms when sky is visible
 
+	#if FOGVOL_CLUSTERED_LOCAL
+	{
+		int tileSize = max(int(FogClusterParams.x + 0.5), 1);
+		int tilesX = max(int(FogClusterParams.y + 0.5), 1);
+		int tilesY = max(int(FogClusterParams.z + 0.5), 1);
+		ivec2 tileCoord = clamp(ivec2(gl_FragCoord.xy) / tileSize, ivec2(0), ivec2(tilesX - 1, tilesY - 1));
+		int tileIndex = tileCoord.y * tilesX + tileCoord.x;
+		FogClusterHeader clusterHeader = FogClusterHeaders[tileIndex];
+		int clusterOffset = max(clusterHeader.offset_count.x, 0);
+		int clusterCount = clamp(clusterHeader.offset_count.y, 0, MAX_FOGVOLUMES);
+		float tEnterCluster = 0.0;
+		float tExitCluster = tScene;
+		float lenCluster = max(tExitCluster - tEnterCluster, 0.0);
+		const float MAX_CLUSTER_STEP_LEN = 80.0;
+		float stepCountCluster = max(float(FogSteps), 1.0);
+		float idealStepLenCluster = lenCluster / stepCountCluster;
+		float stepLenCluster = (idealStepLenCluster > MAX_CLUSTER_STEP_LEN) ? MAX_CLUSTER_STEP_LEN : max(idealStepLenCluster, 1.0);
+		vec3 accumCluster = vec3(0.0);
+		float transmittanceCluster = 1.0;
+		vec3 viewDirCluster = -rd;
+		float sunDirLenSqCluster = dot(FogShadowDir, FogShadowDir);
+		vec3 sunDirCluster = (sunDirLenSqCluster > 1e-6) ? (FogShadowDir * inversesqrt(sunDirLenSqCluster)) : vec3(0.0);
+		float phaseSunCluster = (dot(sunDirCluster, sunDirCluster) > 1e-6)
+			? AnisotropicPhase(clamp(dot(viewDirCluster, sunDirCluster), -1.0, 1.0), clamp(FogSunAnisotropy, -0.99, 0.99))
+			: 1.0;
+
+		if (clusterCount <= 0 || lenCluster <= 1e-4)
+		{
+			FragColor = vec4(scene, 0.0);
+			return;
+		}
+
+		if (idealStepLenCluster > MAX_CLUSTER_STEP_LEN)
+			stepCountCluster = max(ceil(lenCluster / stepLenCluster), 4.0);
+
+		for (int i = 0; i < FogSteps; ++i)
+		{
+			float sigmaAccum = 0.0;
+			vec3 colorAccum = vec3(0.0);
+			float t;
+			int noiseLod;
+
+			if (i >= int(stepCountCluster))
+				break;
+			t = tEnterCluster + (float(i) + 0.5) * stepLenCluster;
+			if (t >= tExitCluster)
+				break;
+
+			noiseLod = (t > FogNoiseLodSwitchDist || transmittanceCluster < 0.25) ? 1 : 0;
+			for (int v = 0; v < MAX_FOGVOLUMES; ++v)
+			{
+				int volumeIndex;
+				FogVolume volumeLocal;
+				vec3 samplePos;
+				float densityLocal;
+				float falloffLocal;
+				float noiseScaleLocal;
+				vec3 flowLocal;
+				float windDirLenLocal;
+				float rawSigmaLocal;
+
+				if (v >= clusterCount)
+					break;
+				volumeIndex = FogClusterIndices[clusterOffset + v];
+				if (volumeIndex < 0 || volumeIndex >= MAX_FOGVOLUMES)
+					continue;
+				volumeLocal = FogVolumes[volumeIndex];
+				if (volumeLocal.misc.y <= 0.0)
+					continue;
+				samplePos = ro + rd * t;
+				if (!PointInsideVolume(samplePos, volumeLocal))
+					continue;
+
+				densityLocal = max(volumeLocal.color_density.a * FogDensityParams.x, 0.0);
+				if (densityLocal <= 0.0)
+					continue;
+				falloffLocal = volumeLocal.misc.z;
+				noiseScaleLocal = clamp(volumeLocal.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
+				windDirLenLocal = length(volumeLocal.wind_turbulence.xyz);
+				flowLocal = volumeLocal.velocity_windspeed.xyz;
+				if (windDirLenLocal > 1e-6)
+					flowLocal += (volumeLocal.wind_turbulence.xyz / windDirLenLocal) * volumeLocal.velocity_windspeed.w;
+				rawSigmaLocal = EvaluateFogSigma(samplePos, volumeLocal, densityLocal, falloffLocal, noiseScaleLocal, flowLocal, 1.0, noiseLod, t);
+				if (rawSigmaLocal <= 0.0)
+					continue;
+				sigmaAccum += rawSigmaLocal;
+				colorAccum += volumeLocal.color_density.rgb * rawSigmaLocal;
+			}
+
+			if (sigmaAccum <= 1e-5)
+				continue;
+
+			{
+				float opticalDepth = min(sigmaAccum * stepLenCluster, FogDensityParams.y);
+				float att = exp(-opticalDepth);
+				float mediumWeight = 1.0 - att;
+				vec3 scatterColor = colorAccum / max(sigmaAccum, 1e-5);
+				vec3 stepScatter = mediumWeight * scatterColor * phaseSunCluster;
+				accumCluster += transmittanceCluster * stepScatter;
+				transmittanceCluster *= att;
+				if (transmittanceCluster < 0.01)
+					break;
+			}
+		}
+
+		{
+			float fogAlphaCluster = clamp(1.0 - transmittanceCluster, 0.0, 1.0);
+			vec3 outColorCluster;
+			if (FogPhysBlend != 0)
+				outColorCluster = scene * transmittanceCluster + accumCluster;
+			else
+				outColorCluster = mix(scene, accumCluster + scene, fogAlphaCluster);
+			FragColor = vec4(outColorCluster, fogAlphaCluster);
+			return;
+		}
+	}
+	#endif
 	float tEnter, tExit;
 	if (int (volume.extra.x + 0.5) == FOGVOL_SHAPE_SPHERE)
 	{

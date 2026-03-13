@@ -55,6 +55,8 @@ typedef struct froxel_grid_s
 extern cvar_t r_fogvol;
 extern cvar_t r_fogvol_halfres;
 extern cvar_t r_fogvol_preset;
+extern cvar_t r_fogvol_clustered;
+extern cvar_t r_fogvol_cluster_tile_size;
 /* BEST PRACTICE #11: Expose all cvars that may be referenced from other
  * translation units (e.g. menu, console completion, test harnesses). */
 extern cvar_t r_fogvol_steps;

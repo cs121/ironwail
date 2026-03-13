@@ -676,6 +676,7 @@ typedef struct glprogs_s {
 	GLuint		godrays_source_sky;
 	GLuint		fogvol;
 	GLuint		fogvol_global;
+	GLuint		fogvol_clustered;
 	GLuint		fogvol_temporal;
 	GLuint		fogvol_froxel_inject;
 	GLuint		oit_resolve[2];		// [msaa]

@@ -28,6 +28,17 @@ The dominant issue was **A + C combined**:
 - `r_fogvol_debug`
 - `r_fogvol_density_scale`
 - `r_fogvol_sigma_max`
+- `r_fogvol_global_shadow` (default `0`): optional shadow march for the simplified global-fog pass. Keep this off for gameplay unless you specifically need sun occlusion in world fog.
+- `r_fogvol_stats` (default `0`): per-frame/per-sample FogVol perf logging.
+  - `0`: off
+  - `1`: print every 30th frame
+  - `2`: print every frame
+  - Current log fields: `gpu_ms`, `passes`, `blits`, `global_passes`, `local_passes`, `clustered_passes`, `clustered_tiles`, `clustered_indices`, `steps`, `shadow_samples`
+- `r_fogvol_preset` (default `2`): hard quality gate for FogVol feature combinations.
+  - `0` low: local lighting detail off, shadows off, local occlusion off, lowest step budget
+  - `1` medium: moderate steps, shadows capped to `1..2`, local occlusion capped to mode `1`
+  - `2` high: current gameplay-quality default
+  - `3` cinematic: highest controlled step budget, legacy full-feature path
 - `r_fogvol_shadow` (default `1`): enables per-step shadow visibility term for volumetric scattering.
 - `r_fogvol_shadow_samples` (default `2`, clamp `1..8`): shadow raymarch taps per fog step; higher values improve directional shadow stability at higher GPU cost.
 - `r_fogvol_shadow_strength` (default `0.8`): scales shadow optical depth influence; `0` disables darkening, `1` is physical-ish, values `>1` exaggerate shadows.
@@ -52,7 +63,45 @@ The dominant issue was **A + C combined**:
 - `r_fogvol_godray_coupling` (default `1`): enables fogvol/godray coupling path.
   - Preferred path: inject previous-frame godray shafts into froxel lighting when `r_fogvol_froxel 1` and `r_fogvol_froxel_godrays > 0`.
   - Alternate path: sample godray shafts directly in `fogvol.frag` during march (depth-gated) when froxel path is unavailable.
+- `r_fogvol_clustered` (default `0`): experimental tile-bucketed local-volume path.
+  - `0`: legacy per-volume ping-pong path
+  - `1`: allow clustered local rendering for supported low/medium local-volume scenes
+  - Current rollout guardrails: local-only, no emissive volumes, no non-default blend modes, low/medium presets only. Unsupported cases fall back to the legacy path automatically.
+- `r_fogvol_cluster_tile_size` (default `16`): screen-space tile size in pixels for clustered local-volume bucketing. Larger tiles reduce list-build overhead but increase overdraw inside each tile.
 - Existing diagnostics retained: `r_fogvol_testvolumes`, `r_fogvol_testvolumes_dumpstate`
+
+## Preset matrix
+
+| Preset | Steps | Shadows | Local occlusion | Godray coupling | Local lighting path |
+| --- | --- | --- | --- | --- | --- |
+| `0` low | low (`8` global / `12` local) | forced off | forced off | forced off | at most one path (`froxel` or `light-list`) |
+| `1` medium | medium (`12` global / `18` local) | on if enabled, capped to `1..2` samples | capped to mode `1` | allowed | never `froxel + light-list` together |
+| `2` high | high (`>=16` global / `>=24` local) | normal | current behavior | current behavior | controlled full path |
+| `3` cinematic | highest controlled budget | normal | current behavior | current behavior | controlled full path |
+
+Notes:
+- Global fog now renders on its own simplified baseline pass before local/entity fog volumes.
+- The clustered local path is intentionally excluded from `high`/`cinematic` until lighting/lightgrid/occlusion parity is validated.
+
+## Recommended settings
+
+- Gameplay:
+  - `r_fogvol_preset 1`
+  - `r_fogvol_global_shadow 0`
+  - `r_fogvol_shadow 0` or `1` with `r_fogvol_shadow_samples 1`
+  - `r_fogvol_clustered 1` for local-volume-heavy scenes that do not rely on emissive/additive fog materials
+- Cinematic / capture:
+  - `r_fogvol_preset 3`
+  - `r_fogvol_global_shadow 1` if the scene needs shadowed world fog
+  - `r_fogvol_shadow 1`
+  - `r_fogvol_shadow_samples 2..4`
+  - `r_fogvol_clustered 0` until the experimental path reaches feature parity
+
+## Known trade-offs
+
+- Global fog is now decoupled from the local-volume loop and uses a simpler shader variant by default. The result is intentionally close rather than bit-identical; the biggest default change is that global-fog shadow marching is now opt-in via `r_fogvol_global_shadow`.
+- Presets are hard gates, not hints. Some cvar combinations are intentionally clamped or disabled to avoid the old "everything at once" cost explosion.
+- `r_fogvol_clustered 1` currently targets draw/blit reduction for many overlapping local volumes. It does not yet replace the legacy path for emissive fog, non-default blend modes, or high/cinematic lighting paths.
 
 ## Performance implications of fog shadows
 - Cost scales roughly with `r_fogvol_steps * r_fogvol_shadow_samples` because each fog integration step performs an additional short visibility march.

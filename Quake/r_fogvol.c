@@ -109,6 +109,9 @@ typedef struct fogvol_perf_stats_s
 	int blits;
 	int global_passes;
 	int local_passes;
+	int clustered_passes;
+	int clustered_tiles;
+	int clustered_indices;
 	int local_volumes;
 	int steps;
 	int shadow_samples;
@@ -154,6 +157,14 @@ typedef struct fogvol_runtime_config_s
 	float lightgrid_scale;
 } fogvol_runtime_config_t;
 
+typedef struct fogvol_cluster_header_gpu_s
+{
+	int offset_count[4];
+} fogvol_cluster_header_gpu_t;
+
+#define FOGVOL_CLUSTER_MAX_TILES 8192
+#define FOGVOL_CLUSTER_MAX_INDICES (FOGVOL_CLUSTER_MAX_TILES * MAX_FOGVOLUMES)
+
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
 static int r_fogvolume_count = 0;
 static fog_volume_t r_fogvolume_entities[MAX_FOGVOLUMES];
@@ -161,6 +172,9 @@ static int r_fogvolume_entity_count = 0;
 static fog_volume_t r_fogvol_global_volume;
 static qboolean r_fogvol_global_active = false;
 static fogvol_perf_stats_t r_fogvol_perf_stats;
+static fogvol_cluster_header_gpu_t r_fogvol_cluster_headers[FOGVOL_CLUSTER_MAX_TILES];
+static int r_fogvol_cluster_tile_lists[FOGVOL_CLUSTER_MAX_TILES][MAX_FOGVOLUMES];
+static int r_fogvol_cluster_indices[FOGVOL_CLUSTER_MAX_INDICES];
 
 #define MAX_FOG_DLIGHTS 64
 
@@ -202,6 +216,8 @@ typedef struct fogvol_static_build_config_s
 
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_preset = { "r_fogvol_preset", "2", CVAR_ARCHIVE };
+cvar_t r_fogvol_clustered = { "r_fogvol_clustered", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_cluster_tile_size = { "r_fogvol_cluster_tile_size", "16", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "24", CVAR_ARCHIVE };
 cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
 cvar_t r_fogvol_stepsize = { "r_fogvol_stepsize", "0", CVAR_ARCHIVE };
@@ -328,6 +344,8 @@ typedef struct fogvol_cvar_reg_s
 static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol, "core", "0"},
 	{&r_fogvol_preset, "quality", "2"},
+	{&r_fogvol_clustered, "quality", "0"},
+	{&r_fogvol_cluster_tile_size, "quality", "16"},
 	{&r_fogvol_steps, "quality", "24"},
 	{&r_fogvol_maxsteps, "quality", "128"},
 	{&r_fogvol_stepsize, "quality", "0"},
@@ -462,10 +480,11 @@ enum
 	FOGVOL_U_NOISE_DETAIL_STRENGTH = 46,
 	FOGVOL_U_HEIGHT_MIST_STRENGTH = 47,
 	FOGVOL_U_ATMOSPHERE_BOOST = 48,
-	FOGVOL_U_COUNT = 49
+	FOGVOL_U_CLUSTER_PARAMS = 49,
+	FOGVOL_U_COUNT = 50
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_ATMOSPHERE_BOOST == 48);
+COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_CLUSTER_PARAMS == 49);
 
 typedef struct froxel_state_s
 {
@@ -3507,6 +3526,7 @@ void R_FogVol_AddTestVolumes (void)
 {
 	fog_volume_t volume;
 	vec3_t origin, forward, right, up;
+	int volume_count;
 	AngleVectors (r_refdef.viewangles, forward, right, up);
 	VectorCopy (r_refdef.vieworg, origin);
 
@@ -3535,23 +3555,32 @@ void R_FogVol_AddTestVolumes (void)
 	volume.priority   = 0;
 	volume.enabled    = 1;
 	volume.edgeSoftness = 0.f;
-	/* Place the box 100..260 units ahead, 96 units wide, 80 units tall.
-	 * Compute proper axis-aligned bounds from the oriented corners. */
+	volume_count = CLAMP (1, (int)Q_rint (r_fogvol_testvolumes.value), 8);
+	for (int i = 0; i < volume_count; ++i)
 	{
-		vec3_t c0, c1;
-		VectorMA (origin, 100.f, forward, c0);
-		VectorMA (origin, 260.f, forward, c1);
-		/* half-width along right axis */
+		fog_volume_t test_volume = volume;
+		vec3_t c0, c1, lateral_offset;
+		float offset_units = (float)(i - (volume_count - 1) * 0.5f) * 72.f;
+
+		VectorScale (right, offset_units, lateral_offset);
+		VectorMA (origin, 100.f + i * 18.f, forward, c0);
+		VectorMA (origin, 260.f + i * 18.f, forward, c1);
+		VectorAdd (c0, lateral_offset, c0);
+		VectorAdd (c1, lateral_offset, c1);
+		test_volume.color[0] = CLAMP (0.f, 0.55f + 0.06f * i, 1.f);
+		test_volume.color[1] = CLAMP (0.f, 0.72f - 0.03f * i, 1.f);
+		test_volume.color[2] = CLAMP (0.f, 1.0f - 0.05f * i, 1.f);
+		test_volume.density *= (i == 0) ? 1.f : 0.85f;
 		for (int a = 0; a < 3; ++a)
 		{
 			float span = fabsf (right[a]) * 96.f;
-			volume.mins[a] = q_min (c0[a], c1[a]) - span;
-			volume.maxs[a] = q_max (c0[a], c1[a]) + span;
+			test_volume.mins[a] = q_min (c0[a], c1[a]) - span;
+			test_volume.maxs[a] = q_max (c0[a], c1[a]) + span;
 		}
-		volume.mins[2] = origin[2] - 40.f;
-		volume.maxs[2] = origin[2] + 80.f;
+		test_volume.mins[2] = origin[2] - 40.f + i * 2.f;
+		test_volume.maxs[2] = origin[2] + 80.f + i * 2.f;
+		R_FogVol_AddVolume (&test_volume);
 	}
-	R_FogVol_AddVolume (&volume);
 }
 
 void R_FogVol_BuildList (void)
@@ -3949,6 +3978,103 @@ static void R_FogVol_BuildRuntimeConfig (fogvol_runtime_config_t *cfg, int steps
 	cfg->lightgrid_scale = lightgrid_scale;
 }
 
+static qboolean R_FogVol_CanUseClusteredLocal (const fogvol_runtime_config_t *cfg)
+{
+	if (!cfg)
+		return false;
+	if (r_fogvol_clustered.value <= 0.f)
+		return false;
+	/* Keep high/cinematic on the legacy path until clustered local rendering
+	 * reaches feature parity for lighting and occlusion. */
+	if (cfg->preset > 1)
+		return false;
+	if (r_fogvolume_count <= 1)
+		return false;
+
+	for (int i = 0; i < r_fogvolume_count; ++i)
+	{
+		const fog_volume_t *v = &r_fogvolumes[i];
+		const int blend_mode = (v->blendMode >= 0) ? v->blendMode : (int)Q_rint (r_fogvol_blendmode.value);
+
+		if (!v->enabled)
+			continue;
+		if (blend_mode != 0)
+			return false;
+		if (v->emissiveStrength > 0.f)
+			return false;
+	}
+
+	return true;
+}
+
+static qboolean R_FogVol_BuildClusteredTiles (int fog_width, int fog_height, const qboolean *scissor_valid, const int *scissor_x0, const int *scissor_y0, const int *scissor_x1, const int *scissor_y1, int *tiles_x, int *tiles_y, int *tile_size, int *index_count)
+{
+	int local_tile_size;
+	int local_tiles_x;
+	int local_tiles_y;
+	int tile_count;
+	int write_offset;
+
+	if (!tiles_x || !tiles_y || !tile_size || !index_count)
+		return false;
+
+	local_tile_size = CLAMP (8, (int)Q_rint (r_fogvol_cluster_tile_size.value), 64);
+	local_tiles_x = (fog_width + local_tile_size - 1) / local_tile_size;
+	local_tiles_y = (fog_height + local_tile_size - 1) / local_tile_size;
+	tile_count = local_tiles_x * local_tiles_y;
+	if (tile_count <= 0 || tile_count > FOGVOL_CLUSTER_MAX_TILES)
+		return false;
+
+	memset (r_fogvol_cluster_headers, 0, sizeof (fogvol_cluster_header_gpu_t) * tile_count);
+	memset (r_fogvol_cluster_tile_lists, 0xff, sizeof (int) * tile_count * MAX_FOGVOLUMES);
+
+	for (int i = 0; i < r_fogvolume_count; ++i)
+	{
+		int min_tx, min_ty, max_tx, max_ty;
+
+		if (!scissor_valid[i])
+			continue;
+
+		min_tx = CLAMP (0, scissor_x0[i] / local_tile_size, local_tiles_x - 1);
+		min_ty = CLAMP (0, scissor_y0[i] / local_tile_size, local_tiles_y - 1);
+		max_tx = CLAMP (0, (scissor_x1[i] - 1) / local_tile_size, local_tiles_x - 1);
+		max_ty = CLAMP (0, (scissor_y1[i] - 1) / local_tile_size, local_tiles_y - 1);
+
+		for (int ty = min_ty; ty <= max_ty; ++ty)
+		{
+			for (int tx = min_tx; tx <= max_tx; ++tx)
+			{
+				const int tile_index = ty * local_tiles_x + tx;
+				int count = r_fogvol_cluster_headers[tile_index].offset_count[1];
+
+				if (count >= MAX_FOGVOLUMES)
+					return false;
+				r_fogvol_cluster_tile_lists[tile_index][count] = i;
+				r_fogvol_cluster_headers[tile_index].offset_count[1] = count + 1;
+			}
+		}
+	}
+
+	write_offset = 0;
+	for (int tile_index = 0; tile_index < tile_count; ++tile_index)
+	{
+		const int count = r_fogvol_cluster_headers[tile_index].offset_count[1];
+
+		r_fogvol_cluster_headers[tile_index].offset_count[0] = write_offset;
+		if (write_offset + count > FOGVOL_CLUSTER_MAX_INDICES)
+			return false;
+		for (int i = 0; i < count; ++i)
+			r_fogvol_cluster_indices[write_offset + i] = r_fogvol_cluster_tile_lists[tile_index][i];
+		write_offset += count;
+	}
+
+	*tiles_x = local_tiles_x;
+	*tiles_y = local_tiles_y;
+	*tile_size = local_tile_size;
+	*index_count = write_offset;
+	return true;
+}
+
 static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfres,
 	int glwidth, int glheight, float depth_scale_x, float depth_scale_y,
 	const float *inv_viewproj, float view_x, float view_y, float view_w, float view_h,
@@ -3972,7 +4098,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int shadow_samples;
 
 #if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 49);
+	assert (FOGVOL_U_COUNT == 50);
 	assert (glwidth > 0);
 	assert (glheight > 0);
 	assert (view_w > 0.f);
@@ -4115,6 +4241,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1fFunc (FOGVOL_U_NOISE_DETAIL_STRENGTH, noise_detail_strength);
 	GL_Uniform1fFunc (FOGVOL_U_HEIGHT_MIST_STRENGTH, height_mist_strength);
 	GL_Uniform1fFunc (FOGVOL_U_ATMOSPHERE_BOOST, atmosphere_boost);
+	GL_Uniform4fFunc (FOGVOL_U_CLUSTER_PARAMS, 0.f, 0.f, 0.f, 0.f);
 }
 
 static void R_FogVol_LogPerfStats (const fogvol_perf_stats_t *stats)
@@ -4133,7 +4260,7 @@ static void R_FogVol_LogPerfStats (const fogvol_perf_stats_t *stats)
 	if ((stats->frame % interval) != 0)
 		return;
 
-	Con_Printf ("fogvol_stats: frame=%d preset=%d gpu_ms=%.3f passes=%d blits=%d global_passes=%d local_passes=%d global=%d locals=%d steps=%d shadow_samples=%d\n",
+	Con_Printf ("fogvol_stats: frame=%d preset=%d gpu_ms=%.3f passes=%d blits=%d global_passes=%d local_passes=%d clustered_passes=%d clustered_tiles=%d clustered_indices=%d global=%d locals=%d steps=%d shadow_samples=%d\n",
 		stats->frame,
 		stats->preset,
 		stats->gpu_ms,
@@ -4141,6 +4268,9 @@ static void R_FogVol_LogPerfStats (const fogvol_perf_stats_t *stats)
 		stats->blits,
 		stats->global_passes,
 		stats->local_passes,
+		stats->clustered_passes,
+		stats->clustered_tiles,
+		stats->clustered_indices,
 		stats->global_active ? 1 : 0,
 		stats->local_volumes,
 		stats->steps,
@@ -4256,6 +4386,97 @@ static qboolean R_FogVol_RenderGlobalSimple (const fogvol_shader_setup_t *setup,
 	{
 		stats->passes++;
 		stats->global_passes++;
+	}
+	return true;
+}
+
+static qboolean R_FogVol_RenderClusteredLocal (const fogvol_shader_setup_t *setup, const fogvol_runtime_config_t *runtime,
+	GLuint source_tex, GLuint source_fbo, GLuint depth_tex, GLuint *fog_tex, GLuint *fog_fbo,
+	int *fog_src, GLuint *final_tex, qboolean *has_drawn, fogvol_perf_stats_t *stats,
+	const qboolean *scissor_valid, const int *scissor_x0, const int *scissor_y0, const int *scissor_x1, const int *scissor_y1)
+{
+	fogvol_runtime_config_t clustered_runtime;
+	GLuint buf;
+	GLbyte *ofs;
+	GLuint dst_tex;
+	GLuint dst_fbo;
+	GLuint src_fbo_local;
+	GLuint src_tex_local;
+	int tiles_x, tiles_y, tile_size, index_count;
+
+	if (!setup || !runtime || !fog_tex || !fog_fbo || !fog_src || !final_tex || !has_drawn)
+		return false;
+	if (!R_FogVol_CanUseClusteredLocal (runtime))
+		return false;
+	if (!R_FogVol_BuildClusteredTiles (setup->fog_width, setup->fog_height, scissor_valid, scissor_x0, scissor_y0, scissor_x1, scissor_y1, &tiles_x, &tiles_y, &tile_size, &index_count))
+		return false;
+	if (index_count <= 0)
+		return false;
+
+	clustered_runtime = *runtime;
+	clustered_runtime.lighting_mode = 0;
+	clustered_runtime.light_enabled = false;
+	clustered_runtime.lightgrid_enabled = false;
+	clustered_runtime.froxel_enabled = false;
+	clustered_runtime.froxel_scale = 0.f;
+	clustered_runtime.lightlist_scale = 0.f;
+	clustered_runtime.lightgrid_scale = 0.f;
+	clustered_runtime.shadow_enabled = false;
+	clustered_runtime.shadow_samples = 0;
+	clustered_runtime.godray_coupling = false;
+	clustered_runtime.local_occlusion_mode = 0;
+
+	R_FogVol_UploadVolumeRange (r_fogvolumes, r_fogvolume_count);
+	GL_Upload (GL_SHADER_STORAGE_BUFFER, r_fogvol_cluster_headers, sizeof (fogvol_cluster_header_gpu_t) * tiles_x * tiles_y, &buf, &ofs);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 8, buf, (GLintptr)ofs, sizeof (fogvol_cluster_header_gpu_t) * tiles_x * tiles_y);
+	GL_Upload (GL_SHADER_STORAGE_BUFFER, r_fogvol_cluster_indices, sizeof (int) * index_count, &buf, &ofs);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 9, buf, (GLintptr)ofs, sizeof (int) * index_count);
+
+	dst_tex = fog_tex[*has_drawn ? (1 - *fog_src) : 0];
+	dst_fbo = fog_fbo[*has_drawn ? (1 - *fog_src) : 0];
+	src_tex_local = *has_drawn ? fog_tex[*fog_src] : source_tex;
+	src_fbo_local = *has_drawn ? fog_fbo[*fog_src] : source_fbo;
+
+	R_FogVol_UseProgram (glprogs.fogvol_clustered ? glprogs.fogvol_clustered : glprogs.fogvol);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, 0);
+	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, 0);
+	GL_SetScissorEnabled (false);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	R_FogVol_SetShaderUniforms (setup->steps, setup->mode, setup->use_halfres,
+		setup->glwidth, setup->glheight, setup->depth_scale_x, setup->depth_scale_y,
+		setup->inv_viewproj, setup->view_x, setup->view_y, setup->view_w, setup->view_h,
+		setup->depth_near, setup->depth_far, setup->depth_sky_cutoff,
+		&clustered_runtime, false);
+	GL_Uniform4fFunc (FOGVOL_U_CLUSTER_PARAMS, (float)tile_size, (float)tiles_x, (float)tiles_y, 1.f);
+
+	if (setup->use_halfres)
+		glViewport (0, 0, setup->fog_width, setup->fog_height);
+	else
+		glViewport ((int)setup->view_x, (int)setup->view_y, (int)setup->view_w, (int)setup->view_h);
+
+	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, src_fbo_local);
+	R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, dst_fbo);
+	R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "CLUSTER read=COLOR_ATTACHMENT0");
+	R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "CLUSTER draw=COLOR_ATTACHMENT0");
+	R_FogVol_LogHazardPass ("CLUSTER", src_tex_local, 0, src_tex_local);
+	R_FogVol_AssertNoFeedbackHazard ("CLUSTER", dst_tex, src_tex_local);
+	R_FogVol_AssertNoBoundFeedbackHazard ("CLUSTER");
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex_local);
+	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
+	GL_Uniform1iFunc (FOGVOL_U_VOLUME_INDEX, 0);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
+
+	*fog_src = *has_drawn ? (1 - *fog_src) : 0;
+	*final_tex = dst_tex;
+	*has_drawn = true;
+	if (stats)
+	{
+		stats->passes++;
+		stats->local_passes++;
+		stats->clustered_passes++;
+		stats->clustered_tiles = tiles_x * tiles_y;
+		stats->clustered_indices = index_count;
 	}
 	return true;
 }
@@ -4708,6 +4929,7 @@ void R_FogVol_Render (void)
 		scissor_valid[i] = true;
 	}
 
+	if (!R_FogVol_RenderClusteredLocal (&shader_setup, &runtime_cfg, composite_src_tex, composite_src_fbo, depth_tex, fog_tex, fog_fbo, &fog_src, &final_tex, &has_drawn, &perf_stats, scissor_valid, scissor_x0, scissor_y0, scissor_x1, scissor_y1))
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
 		fog_volume_t *v = &r_fogvolumes[i];
