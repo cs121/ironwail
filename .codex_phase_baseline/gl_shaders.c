@@ -830,8 +830,6 @@ void GL_CreateShaders (void)
 	glprogs.godrays_source = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("godrays_source.frag"), "world godrays|MODE 0; DITHER 0");
 	glprogs.godrays_source_sky = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays_source_sky.frag"), "godrays source sky");
 	glprogs.fogvol = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes");
-	glprogs.fogvol_global = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes global|FOGVOL_GLOBAL_SIMPLE 1");
-	glprogs.fogvol_clustered = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes clustered|FOGVOL_CLUSTERED_LOCAL 1");
 	glprogs.fogvol_temporal = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol_temporal.frag"), "fog volumes temporal");
 	glprogs.fogvol_froxel_inject = GL_CreateComputeProgram (GLSL_PATH("fogvol_froxel_inject.comp"), "fogvol froxel inject");
         for (mode = 0; mode < 2; mode++)
@@ -846,6 +844,8 @@ void GL_CreateShaders (void)
                 glprogs.world_dlight[alphatest] = GL_CreateProgram (GLSL_PATH("world_dlight.vert"), GLSL_PATH("world_dlight.frag"), "world dlight|ALPHATEST %d", alphatest);
 	for (mode = 0; mode < 2; mode++)
 		glprogs.world_shadow[mode] = GL_CreateProgram (GLSL_PATH("world_shadow.vert"), GLSL_PATH("world_shadow.frag"), "world shadow|DLIGHT %d", mode);
+
+	glprogs.dlight_composite = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("dlight_composite.frag"), "dlight composite");
 
 	for (dither = 0; dither < 2; dither++)
 	{

@@ -2205,13 +2205,9 @@ void SCR_UpdateScreen (void)
 
 	V_UpdateBlend (); //johnfitz -- V_UpdatePalette cleaned up and renamed
 
-       V_RenderView ();
-
-       GL_PostProcess ();
-
-       V_PolyBlend ();
-
-       R_StorePrevFrameState ();
+	V_RenderView ();
+	if (con_forcedup)
+		R_StorePrevFrameState ();
 
 	GL_BeginGroup ("2D");
 

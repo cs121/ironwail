@@ -6,6 +6,7 @@ struct InstanceData
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
 	vec4	DLightDir;   // xyz=dominant dlight direction
+	vec4	StaticLightDir; // xyz=dominant static light direction
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -121,7 +122,12 @@ void main()
 
 	mat3 orientation = mat3(normalize(worldmatrix[0].xyz), normalize(worldmatrix[1].xyz), normalize(worldmatrix[2].xyz));
 	orientation = transpose(orientation);
-	vec3 world_shade_dir = normalize(vec3(0.0, 0.5, 1.0));
+	vec3 world_shade_dir = inst.StaticLightDir.xyz;
+	float static_dir_len_sq = dot(world_shade_dir, world_shade_dir);
+	if (static_dir_len_sq > 1e-6)
+		world_shade_dir *= inversesqrt(static_dir_len_sq);
+	else
+		world_shade_dir = normalize(vec3(0.0, 0.5, 1.0));
 	vec3 shadevector = normalize(orientation * world_shade_dir);
 	float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
 	float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);

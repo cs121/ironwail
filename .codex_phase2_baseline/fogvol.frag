@@ -39,10 +39,6 @@
 #define FOGVOL_GLOBAL_SIMPLE 0
 #endif
 
-#ifndef FOGVOL_CLUSTERED_LOCAL
-#define FOGVOL_CLUSTERED_LOCAL 0
-#endif
-
 #define MAX_FOGVOLUMES 64
 #define MAX_FOGLIGHTS 31 // keep FogLightsUBO under 64KB std140 limit on some drivers
 
@@ -51,7 +47,6 @@ layout(binding=1) uniform sampler2D SceneDepth;
 layout(binding=3) uniform sampler3D FogNoiseTex;
 layout(binding=6) uniform sampler3D FogFroxelLightTex;
 layout(binding=7) uniform sampler2D FogGodrayShaftsTex;
-layout(binding=8) uniform sampler2D FogSunShadowTex;
 
 struct FogVolume
 {
@@ -92,21 +87,6 @@ layout(std140, binding=4) uniform FogLightsUBO
 layout(std140, binding=5) uniform FogLightgridUBO
 {
 	vec4 FogLightgridProbeRGB[MAX_FOGVOLUMES * 8];
-};
-
-struct FogClusterHeader
-{
-	ivec4 offset_count;
-};
-
-layout(std430, binding=8) readonly buffer FogClusterHeadersSSBO
-{
-	FogClusterHeader FogClusterHeaders[];
-};
-
-layout(std430, binding=9) readonly buffer FogClusterIndicesSSBO
-{
-	int FogClusterIndices[];
 };
 
 layout(location=0)  uniform int   FogSteps;
@@ -158,9 +138,6 @@ layout(location=45) uniform vec4  FogLocalOcclusionParams; // x depth thickness,
 layout(location=46) uniform float FogNoiseDetailStrength;
 layout(location=47) uniform float FogHeightMistStrength;
 layout(location=48) uniform float FogAtmosphereBoost;
-layout(location=49) uniform vec4  FogClusterParams; // x: tile size, y: tiles x, z: tiles y, w: clustered enabled
-layout(location=50) uniform mat4  FogSunShadowViewProj;
-layout(location=54) uniform vec4  FogSunShadowParams; // x: enabled, y: depth bias, z: pcf radius in UV, w: reserved
 
 layout(location=0) out vec4 FragColor;
 
@@ -417,18 +394,12 @@ bool RayAABB(vec3 ro, vec3 rd, vec3 bmin, vec3 bmax, out float tEnter, out float
 // values but causes the *frequency* to appear modulated once Time grows large.
 float Dither(vec2 pixel)
 {
-	return fract(sin(dot(pixel, vec2(12.9898, 78.233))) * 43758.5453 + float(FogFrameIndex) * 0.754877666);
+	return fract(sin(dot(pixel, vec2(12.9898, 78.233))) * 43758.5453 + Time);
 }
 
 float InterleavedGradientNoise(vec2 p)
 {
 	return fract(52.9829189 * fract(0.06711056 * p.x + 0.00583715 * p.y));
-}
-
-float StableWorldJitter(vec3 worldPos, vec3 seed)
-{
-	vec3 p = worldPos + seed;
-	return fract(sin(dot(p, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
 }
 
 // Henyey-Greenstein phase scaled so isotropic (g=0) evaluates to 1.0.
@@ -609,8 +580,7 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, f
 		noiseFactor = mix(1.0, shaped, amt);
 	}
 
-	// Macro modulation must stay world-anchored. A previous per-ray endpoint
-	// approximation made distant fog drift with camera movement.
+	// Macro billow density modulation is reused per-ray (computed once in main), so no per-step macro fetch.
 	float sigma = (density * macroDensityMul) * noiseFactor * edgeFade * HeightFactor(p, volume);
 	{
 		float baseSigma = max(density * macroDensityMul, 1e-4);
@@ -619,19 +589,6 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, float density, float falloff, f
 		sigma *= clumpBoost;
 	}
 	return IsFiniteFloat(sigma) ? max(sigma, 0.0) : 0.0;
-}
-
-float SampleMacroDensityMul(vec3 samplePos, float noiseScalePre, vec3 flowPre)
-{
-	float macroScale = clamp(noiseScalePre * FOG_MACRO_SCALE_MUL, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
-	vec3 macroFlow = flowPre * Time * macroScale;
-	float macroRaw = FogNoise(samplePos * macroScale + macroFlow + vec3(19.7, 11.3, 7.1), 1);
-	float billow = abs(2.0 * macroRaw - 1.0);
-	float macroStrength = FOG_MACRO_STRENGTH + 0.12 * clamp(FogNoiseDetailStrength, 0.0, 1.0);
-	if (FogHalfRes != 0)
-		macroStrength *= 0.85;
-	billow *= billow;
-	return mix(1.0, billow, macroStrength);
 }
 
 // PERF: Accept pre-normalized sunDir + pre-computed jitter to avoid redundant
@@ -662,60 +619,11 @@ float EstimateShadowVisibility(vec3 p, FogVolume volume, float density, float fa
 	return exp(-max(FogShadowStrength, 0.0) * tauLight);
 }
 
-float SampleSunShadowMapVisibility(vec3 worldPos)
-{
-	float enabled = FogSunShadowParams.x;
-	float bias = max(FogSunShadowParams.y, 0.0) * 2.0;
-	float pcf = max(FogSunShadowParams.z, 0.0);
-	vec4 clip;
-	vec3 ndc;
-	vec2 uv;
-	float depth;
-
-	if (enabled <= 0.5)
-		return 1.0;
-
-	clip = FogSunShadowViewProj * vec4(worldPos, 1.0);
-	if (abs(clip.w) <= 1e-6)
-		return 1.0;
-
-	ndc = clip.xyz / clip.w;
-	uv = ndc.xy * 0.5 + 0.5;
-	depth = ndc.z * 0.5 + 0.5;
-
-	if (uv.x <= 0.0 || uv.x >= 1.0 || uv.y <= 0.0 || uv.y >= 1.0)
-		return 1.0;
-	if (depth <= 0.0 || depth >= 1.0)
-		return 1.0;
-
-	if (pcf <= 1e-6)
-	{
-		float closest = texture(FogSunShadowTex, uv).r;
-		return (depth - bias <= closest) ? 1.0 : 0.0;
-	}
-	else
-	{
-		float sum = 0.0;
-		float taps = 0.0;
-		for (int y = -1; y <= 1; ++y)
-		{
-			for (int x = -1; x <= 1; ++x)
-			{
-				float closest = texture(FogSunShadowTex, uv + vec2(float(x), float(y)) * pcf).r;
-				sum += (depth - bias <= closest) ? 1.0 : 0.0;
-				taps += 1.0;
-			}
-		}
-		return (taps > 0.0) ? (sum / taps) : 1.0;
-	}
-}
-
 //  main 
 
 void main()
 {
-	ivec2 screenPixel = ivec2(floor(gl_FragCoord.xy * FogDepthScale));
-	vec2 screenPos = vec2(screenPixel) + vec2(0.5);
+	vec2 screenPos = gl_FragCoord.xy * FogDepthScale;
 	vec2 invScreen = FogViewportParams.zw;
 	vec2 screenUv  = screenPos * invScreen;
 	vec2 viewUv    = (screenPos - FogViewParams.xy) * FogViewParams.zw;
@@ -739,15 +647,14 @@ void main()
 	}
 
 	FogVolume volume = FogVolumes[FogVolumeIndex];
-#if !FOGVOL_CLUSTERED_LOCAL
 	if (volume.misc.y <= 0.0)
 	{
 		FragColor = vec4(scene, 0.0);
 		return;
 	}
-#endif
 
-	float depth      = texelFetch(SceneDepth, screenPixel, 0).r;
+	ivec2 depthCoord = ivec2(screenPos);
+	float depth      = texelFetch(SceneDepth, depthCoord, 0).r;
 
 	// FIX #5: Pass viewUv so LinearEyeDepth reconstructs the correct ray.
 	float linearDepth = LinearEyeDepth(depth, viewUv);
@@ -769,139 +676,6 @@ void main()
 		tScene = 2048.0; // BUG-F-02 FIX: cap sky path length — far_clip causes open areas to look/
 		                 // disproportionately foggier than enclosed rooms when sky is visible
 
-	#if FOGVOL_CLUSTERED_LOCAL
-	{
-		int tileSize = max(int(FogClusterParams.x + 0.5), 1);
-		int tilesX = max(int(FogClusterParams.y + 0.5), 1);
-		int tilesY = max(int(FogClusterParams.z + 0.5), 1);
-		ivec2 tileCoord = clamp(ivec2(gl_FragCoord.xy) / tileSize, ivec2(0), ivec2(tilesX - 1, tilesY - 1));
-		int tileIndex = tileCoord.y * tilesX + tileCoord.x;
-		FogClusterHeader clusterHeader = FogClusterHeaders[tileIndex];
-		int clusterOffset = max(clusterHeader.offset_count.x, 0);
-		int clusterCount = clamp(clusterHeader.offset_count.y, 0, MAX_FOGVOLUMES);
-		float tEnterCluster = 0.0;
-		float tExitCluster = tScene;
-		float lenCluster = max(tExitCluster - tEnterCluster, 0.0);
-		const float MAX_CLUSTER_STEP_LEN = 80.0;
-		float stepCountCluster = max(float(FogSteps), 1.0);
-		float idealStepLenCluster = lenCluster / stepCountCluster;
-		float stepLenCluster = (idealStepLenCluster > MAX_CLUSTER_STEP_LEN) ? MAX_CLUSTER_STEP_LEN : max(idealStepLenCluster, 1.0);
-		vec3 accumCluster = vec3(0.0);
-		float transmittanceCluster = 1.0;
-		vec3 viewDirCluster = -rd;
-		float sunScatterStrengthCluster = max(FogSunScatter, 0.0);
-		float sunDirLenSqCluster = dot(FogShadowDir, FogShadowDir);
-		vec3 sunDirCluster = (sunDirLenSqCluster > 1e-6) ? (FogShadowDir * inversesqrt(sunDirLenSqCluster)) : vec3(0.0);
-		float phaseSunCluster = (sunScatterStrengthCluster > 0.0 && dot(sunDirCluster, sunDirCluster) > 1e-6)
-			? AnisotropicPhase(clamp(dot(viewDirCluster, sunDirCluster), -1.0, 1.0), clamp(FogSunAnisotropy, -0.99, 0.99))
-			: 1.0;
-		bool doSunMapShadowCluster = (FogShadowEnabled != 0 && FogShadowSamples > 0
-			&& FogSunShadowParams.x > 0.5 && sunScatterStrengthCluster > 0.0 && dot(sunDirCluster, sunDirCluster) > 1e-6);
-		float sunMapVisibilityClusterPrev = 1.0;
-
-		if (clusterCount <= 0 || lenCluster <= 1e-4)
-		{
-			FragColor = vec4(scene, 0.0);
-			return;
-		}
-
-		if (idealStepLenCluster > MAX_CLUSTER_STEP_LEN)
-			stepCountCluster = max(ceil(lenCluster / stepLenCluster), 4.0);
-
-		for (int i = 0; i < FogSteps; ++i)
-		{
-			float sigmaAccum = 0.0;
-			vec3 colorAccum = vec3(0.0);
-			float t;
-			int noiseLod;
-
-			if (i >= int(stepCountCluster))
-				break;
-			t = tEnterCluster + (float(i) + 0.5) * stepLenCluster;
-			if (t >= tExitCluster)
-				break;
-
-			noiseLod = (t > FogNoiseLodSwitchDist || transmittanceCluster < 0.25) ? 1 : 0;
-			for (int v = 0; v < MAX_FOGVOLUMES; ++v)
-			{
-				int volumeIndex;
-				FogVolume volumeLocal;
-				vec3 samplePos;
-				float densityLocal;
-				float falloffLocal;
-				float noiseScaleLocal;
-				vec3 flowLocal;
-				float windDirLenLocal;
-				float rawSigmaLocal;
-
-				if (v >= clusterCount)
-					break;
-				volumeIndex = FogClusterIndices[clusterOffset + v];
-				if (volumeIndex < 0 || volumeIndex >= MAX_FOGVOLUMES)
-					continue;
-				volumeLocal = FogVolumes[volumeIndex];
-				if (volumeLocal.misc.y <= 0.0)
-					continue;
-				samplePos = ro + rd * t;
-				if (!PointInsideVolume(samplePos, volumeLocal))
-					continue;
-
-				densityLocal = max(volumeLocal.color_density.a * FogDensityParams.x, 0.0);
-				if (densityLocal <= 0.0)
-					continue;
-				falloffLocal = volumeLocal.misc.z;
-				noiseScaleLocal = clamp(volumeLocal.noise_params.x, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
-				windDirLenLocal = length(volumeLocal.wind_turbulence.xyz);
-				flowLocal = volumeLocal.velocity_windspeed.xyz;
-				if (windDirLenLocal > 1e-6)
-					flowLocal += (volumeLocal.wind_turbulence.xyz / windDirLenLocal) * volumeLocal.velocity_windspeed.w;
-				rawSigmaLocal = EvaluateFogSigma(samplePos, volumeLocal, densityLocal, falloffLocal, noiseScaleLocal, flowLocal, 1.0, noiseLod, t);
-				if (rawSigmaLocal <= 0.0)
-					continue;
-				sigmaAccum += rawSigmaLocal;
-				colorAccum += volumeLocal.color_density.rgb * rawSigmaLocal;
-			}
-
-			if (sigmaAccum <= 1e-5)
-				continue;
-
-			{
-				float opticalDepth = min(sigmaAccum * stepLenCluster, FogDensityParams.y);
-				float att = exp(-opticalDepth);
-				float mediumWeight = 1.0 - att;
-				vec3 scatterColor = colorAccum / max(sigmaAccum, 1e-5);
-				float sunMapVisibilityCluster = 1.0;
-				if (doSunMapShadowCluster)
-				{
-					vec3 samplePos = ro + rd * t;
-					if ((i & 1) != 0)
-						sunMapVisibilityCluster = sunMapVisibilityClusterPrev;
-					else
-					{
-						sunMapVisibilityCluster = SampleSunShadowMapVisibility(samplePos);
-						sunMapVisibilityClusterPrev = sunMapVisibilityCluster;
-					}
-				}
-				vec3 stepScatter = mediumWeight * scatterColor * (phaseSunCluster * sunMapVisibilityCluster);
-				accumCluster += transmittanceCluster * stepScatter;
-				transmittanceCluster *= att;
-				if (transmittanceCluster < 0.01)
-					break;
-			}
-		}
-
-		{
-			float fogAlphaCluster = clamp(1.0 - transmittanceCluster, 0.0, 1.0);
-			vec3 outColorCluster;
-			if (FogPhysBlend != 0)
-				outColorCluster = scene * transmittanceCluster + accumCluster;
-			else
-				outColorCluster = mix(scene, accumCluster + scene, fogAlphaCluster);
-			FragColor = vec4(outColorCluster, fogAlphaCluster);
-			return;
-		}
-	}
-	#endif
 	float tEnter, tExit;
 	if (int (volume.extra.x + 0.5) == FOGVOL_SHAPE_SPHERE)
 	{
@@ -966,7 +740,6 @@ void main()
 	}
 	// Safety: cap at FogSteps so we never exceed the uniform limit.
 	stepCount = min(stepCount, float(FogSteps));
-	vec3 rayJitterAnchor = ro + rd * (tEnter + min(stepLen, 16.0));
 
 	// FIX #2: Restructured jitter selection for clarity.
 	// When noise is enabled we always apply a jitter; which generator to use
@@ -974,13 +747,12 @@ void main()
 	if (FogNoiseEnabled != 0)
 	{
 		float jitter;
-		float jitterAmplitude = (FogHalfRes != 0) ? 0.25 : 0.18;
 		if (FogJitterEnabled != 0)
-			// Frame-varying screen-space jitter avoids camera-locked grain patterns,
-			// but keep the amplitude small to avoid visible speckle in low-density fog.
-			jitter = (InterleavedGradientNoise(screenPos + vec2(float(FogFrameIndex) * 0.754877666, float(FogFrameIndex) * 0.569840296)) - 0.5) * jitterAmplitude;
+			// Temporally-stable IGN variant: shifts pattern each frame via Time.
+			jitter = InterleavedGradientNoise(gl_FragCoord.xy + vec2(Time * 12.3, Time * 4.7));
 		else
-			jitter = (Dither(screenPos) - 0.5) * jitterAmplitude;
+			// Simple animated dither (fixed #1 version above).
+			jitter = Dither(gl_FragCoord.xy);
 		tEnter += jitter * stepLen;
 	}
 
@@ -1003,25 +775,24 @@ void main()
 	float sunDirLenSq   = dot(FogShadowDir, FogShadowDir);
 	vec3  sunDir        = (sunDirLenSq > 1e-6) ? (FogShadowDir * inversesqrt(sunDirLenSq)) : vec3(0.0);
 	sunDirLenSq         = dot(sunDir, sunDir); // recompute on normalized vector for guard checks
-	float sunScatterStrength = max(FogSunScatter, 0.0);
 
 	// Shadow jitter: compute once per ray (same screen pixel  same jitter value).
 	bool  doShadow      = (FogShadowEnabled != 0 && FogShadowSamples > 0 && sunDirLenSq > 1e-6);
 	float shadowJitter  = doShadow && (FogShadowJitter > 0.0)
-		? ((InterleavedGradientNoise(screenPos + vec2(float(FogFrameIndex) * 1.113983, float(FogFrameIndex) * 1.617221)) - 0.5) * 0.35)
+		? (InterleavedGradientNoise(gl_FragCoord.xy + Time * 13.37) - 0.5)
 		: 0.0;
 	// PERF: Precompute sun phase once per ray (viewDir and sunDir are constant).
-	float phaseSun      = (sunDirLenSq > 1e-6 && sunScatterStrength > 0.0)
+	float phaseSun      = (sunDirLenSq > 1e-6)
 		? AnisotropicPhase(clamp(dot(viewDir, sunDir), -1.0, 1.0), clamp(FogSunAnisotropy, -0.99, 0.99))
 		: 1.0;
 	float forwardScatterBoost = (sunDirLenSq > 1e-6)
 		? (1.0 + atmosphereBoost * 0.95 * pow(clamp(dot(viewDir, sunDir) * 0.5 + 0.5, 0.0, 1.0), 4.0))
 		: 1.0;
+	float sunScatterStrength = max(FogSunScatter, 0.0);
 	vec3 sunScatterColor = max(FogSunColor, vec3(0.0));
 	vec3 sunRadiance = (sunDirLenSq > 1e-6 && sunScatterStrength > 0.0)
 		? (sunScatterColor * (sunScatterStrength * phaseSun * forwardScatterBoost))
 		: vec3(0.0);
-	bool doSunMapShadow = (doShadow && FogSunShadowParams.x > 0.5 && sunScatterStrength > 0.0);
 	// PERF: Cache active light count and enabled flag to avoid UBO re-fetch in loop.
 	int lightOffset = 0;
 	int lightCount = 0;
@@ -1074,6 +845,26 @@ void main()
 		flowPre = volume.velocity_windspeed.xyz + flowDir * volume.velocity_windspeed.w;
 	}
 
+	float macroDensityMulNear = 1.0;
+	float macroDensityMulFar = 1.0;
+	if (FogNoiseEnabled != 0)
+	{
+		// Ray-endpoint macro sampling breaks up "curtain" artifacts from per-ray constant density.
+		float macroScale = clamp(noiseScalePre * FOG_MACRO_SCALE_MUL, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
+		vec3 macroFlow = flowPre * Time * macroScale;
+		float macroRawNear = FogNoise((ro + rd * tEnter) * macroScale + macroFlow, 1);
+		float macroRawFar = FogNoise((ro + rd * tExit) * (macroScale * 1.17) + macroFlow + vec3(19.7, 11.3, 7.1), 1);
+		float billowNear = abs(2.0 * macroRawNear - 1.0);
+		float billowFar = abs(2.0 * macroRawFar - 1.0);
+		billowNear *= billowNear;
+		billowFar *= billowFar;
+		float macroStrength = FOG_MACRO_STRENGTH + 0.12 * clamp(FogNoiseDetailStrength, 0.0, 1.0);
+		if (FogHalfRes != 0)
+			macroStrength *= 0.85;
+		macroDensityMulNear = mix(1.0, billowNear, macroStrength);
+		macroDensityMulFar = mix(1.0, billowFar, macroStrength);
+	}
+
 	int adaptiveSteps = int(stepCount); // adaptive, already capped at FogSteps
 #if FOGVOL_GLOBAL_SIMPLE
 	adaptiveSteps = clamp(adaptiveSteps, 6, min(FogSteps, 14));
@@ -1103,7 +894,6 @@ void main()
 	}
 	float sigmaEvenPrev = 0.0;
 	float shadowVisibilityPrev = 1.0;
-	float sunMapVisibilityPrev = 1.0;
 	vec3 lightScatterPrev = vec3(0.0);
 	vec3 godrayAccum = vec3(0.0);
 	for (int i = 0; i < FogSteps; ++i)
@@ -1115,12 +905,10 @@ void main()
 
 		vec3  p        = ro + rd * t;
 		float rayT = clamp((t - tEnter) / max(len, 1e-3), 0.0, 1.0);
-		float macroDensityMul = 1.0;
+		float macroDensityMul = mix(macroDensityMulNear, macroDensityMulFar, rayT);
 		// Heuristic: use coarse noise LOD for distant/faded segments.
 		// transmittance < 0.25 means contributions are already low, so 1-octave is safe.
 		int noiseLod = (t > FogNoiseLodSwitchDist || transmittance < 0.25) ? 1 : 0;
-		if (FogNoiseEnabled != 0)
-			macroDensityMul = SampleMacroDensityMul(p, noiseScalePre, flowPre);
 		float rawSigma;
 		if (FogNoiseSubsample != 0 && (i & 1) != 0)
 		{
@@ -1161,33 +949,22 @@ void main()
 				shadowVisibilityPrev = shadowVisibility;
 			}
 		}
-		float sunMapVisibility = 1.0;
-		if (doSunMapShadow && canAccumulateStep)
-		{
-			if ((i & 1) != 0)
-				sunMapVisibility = sunMapVisibilityPrev;
-			else
-			{
-				sunMapVisibility = SampleSunShadowMapVisibility(p);
-				sunMapVisibilityPrev = sunMapVisibility;
-			}
-		}
 
 		// phaseSun is already precomputed per-ray (constant for all steps on same ray).
-		vec3  stepScatter = mediumWeight * (scatterColor * phaseSun + (sunRadiance * sunMapVisibility)); // BUG-F-01 FIX: removed inner *transmittance (caused transmittance^2 weighting for sun term)
+		vec3  stepScatter = mediumWeight * (scatterColor * phaseSun + sunRadiance); // BUG-F-01 FIX: removed inner *transmittance (caused transmittance^2 weighting for sun term)
 		vec3 godrayStepScatter = vec3(0.0);
 		float godrayInject = 0.0;
 		if (doGodrayCoupling && canAccumulateStep)
 		{
 			float depthGate = clamp(1.0 - (t / max(FogDepthParams.y, 1e-3)), 0.0, 1.0);
 			godrayInject = shaftEnergyPre * depthGate * max(FogGodrayShaftsParams.z, 0.0);
-			godrayStepScatter = FogSunColor * FogSunScatter * mediumWeight * godrayInject * (1.0 + 0.4 * atmosphereBoost) * sunMapVisibility;
+			godrayStepScatter = FogSunColor * FogSunScatter * mediumWeight * godrayInject * (1.0 + 0.4 * atmosphereBoost);
 			stepScatter += godrayStepScatter;
 		}
 		{
 			float apertureGlow = atmosphereBoost * smoothstep(0.35, 1.0, sceneLuma) * (1.0 - rayT) * mediumWeight;
 			if (apertureGlow > 1e-4)
-				stepScatter += sunScatterColor * (0.22 * apertureGlow * sunMapVisibility);
+				stepScatter += sunScatterColor * (0.22 * apertureGlow);
 		}
 		if (doLightgrid && canAccumulateStep)
 		{

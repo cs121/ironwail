@@ -13,7 +13,7 @@ layout(binding=8) uniform samplerCubeArray DLightShadowTex;
 layout(location=30) uniform mat4 ShadowSunViewProj;
 layout(location=34) uniform vec4 ShadowEnableDebug;   // x=enabled, y=sun, z=dlight, w=debug mode
 layout(location=35) uniform vec4 ShadowDLightIndices; // selected light indices (float encoded ints)
-layout(location=36) uniform vec4 ShadowBiasCounts;    // x=num dlight slots, y=sun bias, z=dlight bias
+layout(location=36) uniform vec4 ShadowBiasCounts;    // x=num dlight slots, y=sun bias, z=dlight bias, w=receiver bias scale
 layout(location=37) uniform vec4 ShadowPCFTexel;      // x=sun pcf radius, y=dlight pcf radius, z=1/sun size, w=1/dlight size
 layout(location=45) uniform vec4 RimLightParams0; // x=enable, y=intensity, z=power, w=shadowed
 layout(location=46) uniform vec4 RimLightParams1; // x=world_enable, y=model_enable, z=sun_scale, w=dlight_scale
@@ -268,6 +268,8 @@ float SampleSunShadow(vec3 worldPos)
 		return 1.0;
 
 	float bias = max(ShadowBiasCounts.y, 0.0);
+	float receiver_bias = max(fwidth(depth), 0.0) * max(ShadowBiasCounts.w, 0.0);
+	bias += receiver_bias;
 	float pcf = max(ShadowPCFTexel.x, 0.0) * max(ShadowPCFTexel.z, 0.0);
 	float sum = 0.0;
 	float taps = 0.0;
@@ -321,6 +323,8 @@ float SampleDLightShadow(int lightIndex, vec3 worldPos, vec3 lightPos, float rad
 	// CPU muss ShadowLightPosFar.w = l.radius setzen — sonst falsche Tiefenvergleiche.
 	float ref = dist / radius;
 	float bias = max(ShadowBiasCounts.z, 0.0);
+	float receiver_bias = max(fwidth(ref), 0.0) * max(ShadowBiasCounts.w, 0.0);
+	bias += receiver_bias;
 	float pcf = max(ShadowPCFTexel.y, 0.0) * max(ShadowPCFTexel.w, 0.0) * 2.0;
 
 	vec3 axis = (abs(dirN.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);

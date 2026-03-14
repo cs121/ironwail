@@ -6,6 +6,7 @@ struct InstanceData
 	vec4	LightColor;
 	vec4	DLightColor;
 	vec4	DLightDir;
+	vec4	StaticLightDir;
 	int		Pose1;
 	int		Pose2;
 	float	Blend;

@@ -50,8 +50,24 @@ typedef struct gpumark_frame_s {
 	vec3_t		vieworg;
 	GLuint		oldskyleaf;
 	GLuint		framecount;
-	GLuint		padding[3];
+	GLuint		cull_flags;
+	GLuint		padding[2];
+	vec4_t		shadow_sphere; // xyz=center, w=radius (0 disables sphere cull)
 } gpumark_frame_t;
+
+enum
+{
+	GPUMARK_CULL_SKY = 1u << 0,
+	GPUMARK_CULL_VIS = 1u << 1,
+	GPUMARK_CULL_BACKFACE = 1u << 2,
+	GPUMARK_CULL_FRUSTUM = 1u << 3,
+	GPUMARK_CULL_SHADOW_SPHERE = 1u << 4
+};
+
+static uint32_t r_gpumark_dispatch_serial = 0u;
+static byte *r_gpumark_last_vis = NULL;
+static GLuint r_gpumark_last_flags = 0u;
+static qboolean r_gpumark_last_oldskyleaf = false;
 
 byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 
@@ -173,7 +189,7 @@ static gltexture_t *R_SanitizeGLTexture (gltexture_t *tex, const char *texname, 
 R_MarkVisSurfaces
 ===============
 */
-static void R_MarkVisSurfaces (byte* vis)
+static void R_MarkVisSurfaces (byte *vis, GLuint cull_flags, qboolean oldskyleaf, const vec3_t vieworg_override, const mplane_t shadow_frustum[4], const vec4_t *shadow_sphere)
 {
 	int			i;
 	GLuint		buf;
@@ -186,16 +202,43 @@ static void R_MarkVisSurfaces (byte* vis)
 
 	for (i = 0; i < 4; i++)
 	{
-		frame.frustum[i][0] = frustum[i].normal[0];
-		frame.frustum[i][1] = frustum[i].normal[1];
-		frame.frustum[i][2] = frustum[i].normal[2];
-		frame.frustum[i][3] = frustum[i].dist;
+		const mplane_t *src = shadow_frustum ? &shadow_frustum[i] : &frustum[i];
+		frame.frustum[i][0] = src->normal[0];
+		frame.frustum[i][1] = src->normal[1];
+		frame.frustum[i][2] = src->normal[2];
+		frame.frustum[i][3] = src->dist;
 	}
-	frame.vieworg[0] = r_refdef.vieworg[0];
-	frame.vieworg[1] = r_refdef.vieworg[1];
-	frame.vieworg[2] = r_refdef.vieworg[2];
-	frame.oldskyleaf = r_oldskyleaf.value != 0.f;
-	frame.framecount = r_framecount;
+	if (vieworg_override)
+	{
+		frame.vieworg[0] = vieworg_override[0];
+		frame.vieworg[1] = vieworg_override[1];
+		frame.vieworg[2] = vieworg_override[2];
+	}
+	else
+	{
+		frame.vieworg[0] = r_refdef.vieworg[0];
+		frame.vieworg[1] = r_refdef.vieworg[1];
+		frame.vieworg[2] = r_refdef.vieworg[2];
+	}
+	frame.oldskyleaf = oldskyleaf ? 1u : 0u;
+	if (++r_gpumark_dispatch_serial == 0u)
+		r_gpumark_dispatch_serial = 1u;
+	frame.framecount = r_gpumark_dispatch_serial;
+	frame.cull_flags = cull_flags;
+	if (shadow_sphere)
+	{
+		frame.shadow_sphere[0] = (*shadow_sphere)[0];
+		frame.shadow_sphere[1] = (*shadow_sphere)[1];
+		frame.shadow_sphere[2] = (*shadow_sphere)[2];
+		frame.shadow_sphere[3] = (*shadow_sphere)[3];
+	}
+	else
+	{
+		frame.shadow_sphere[0] = 0.f;
+		frame.shadow_sphere[1] = 0.f;
+		frame.shadow_sphere[2] = 0.f;
+		frame.shadow_sphere[3] = 0.f;
+	}
 
 	COMPILE_TIME_ASSERT (vis_alignment_must_be_power_of_2, (VIS_ALIGN & (VIS_ALIGN - 1)) == 0);
 	COMPILE_TIME_ASSERT (vis_alignment_must_be_multiple_of_uint, (VIS_ALIGN & 3) == 0);
@@ -249,8 +292,49 @@ void R_MarkSurfaces (void)
 
 	r_visframecount++;
 
-	R_MarkVisSurfaces (vis);
+	r_gpumark_last_vis = vis;
+	r_gpumark_last_flags = GPUMARK_CULL_SKY | GPUMARK_CULL_VIS | GPUMARK_CULL_BACKFACE | GPUMARK_CULL_FRUSTUM;
+	r_gpumark_last_oldskyleaf = (r_oldskyleaf.value != 0.f);
+
+	R_MarkVisSurfaces (vis, r_gpumark_last_flags, r_gpumark_last_oldskyleaf, NULL, NULL, NULL);
 	R_AddStaticModels (vis);
+}
+
+void R_MarkSurfaces_Shadow (const vec3_t vieworg, const mplane_t shadow_frustum[4], const vec4_t *shadow_sphere, qboolean use_vis, qboolean use_backface, qboolean use_frustum)
+{
+	byte *vis;
+	GLuint cull_flags = GPUMARK_CULL_SKY;
+
+	if (!cl.worldmodel)
+		return;
+
+	/* Shadow marking can optionally reuse camera VIS for speed. Frustum/sphere
+	 * culling is controlled by the caller per shadow pass. */
+	if (use_vis && r_gpumark_last_vis)
+	{
+		vis = r_gpumark_last_vis;
+		cull_flags |= GPUMARK_CULL_VIS;
+	}
+	else
+	{
+		vis = Mod_NoVisPVS (cl.worldmodel);
+	}
+	if (use_backface)
+		cull_flags |= GPUMARK_CULL_BACKFACE;
+	if (use_frustum)
+		cull_flags |= GPUMARK_CULL_FRUSTUM;
+	if (shadow_sphere && (*shadow_sphere)[3] > 0.f)
+		cull_flags |= GPUMARK_CULL_SHADOW_SPHERE;
+
+	R_MarkVisSurfaces (vis, cull_flags, false, vieworg, shadow_frustum, shadow_sphere);
+}
+
+void R_RestoreMarkedSurfaces (void)
+{
+	if (!cl.worldmodel || !r_gpumark_last_vis)
+		return;
+
+	R_MarkVisSurfaces (r_gpumark_last_vis, r_gpumark_last_flags, r_gpumark_last_oldskyleaf, NULL, NULL, NULL);
 }
 
 /*
@@ -345,8 +429,6 @@ static void R_GetPolygonOffsetValues (const shader_material_t *material, qboolea
 
 static void R_SampleBModelStaticLighting (const vec3_t pos, vec3_t out_color)
 {
-	float ao = 1.f;
-
 	VectorClear (out_color);
 
 	if (!cl.worldmodel)
@@ -354,8 +436,8 @@ static void R_SampleBModelStaticLighting (const vec3_t pos, vec3_t out_color)
 
 	if (r_model_lightgrid.value > 0.f && R_LightgridEnabled ())
 	{
-		R_LightgridLighting (pos, out_color, &ao);
-		VectorScale (out_color, ao, out_color);
+		// R_LightgridLighting already applies AO internally.
+		R_LightgridLighting (pos, out_color, NULL);
 	}
 	else
 	{
@@ -372,6 +454,105 @@ static void R_SampleBModelStaticLighting (const vec3_t pos, vec3_t out_color)
 			out_color[i] = 0.f;
 		out_color[i] = CLAMP (-1.f, out_color[i], 1.f);
 	}
+}
+
+static void R_RotateOffsetByAngles (vec3_t angles, const vec3_t local_offset, vec3_t out_world_offset)
+{
+	vec3_t forward, right, up;
+
+	AngleVectors (angles, forward, right, up);
+	out_world_offset[0] = forward[0] * local_offset[0] + right[0] * local_offset[1] + up[0] * local_offset[2];
+	out_world_offset[1] = forward[1] * local_offset[0] + right[1] * local_offset[1] + up[1] * local_offset[2];
+	out_world_offset[2] = forward[2] * local_offset[0] + right[2] * local_offset[1] + up[2] * local_offset[2];
+}
+
+static int R_BModelBuildProbePoints (entity_t *ent, const vec3_t origin, vec3_t angles,
+	vec3_t out_points[5], float out_weights[5])
+{
+	float scale;
+	float half_extent_x;
+	float half_extent_y;
+	float xofs;
+	float yofs;
+	int side_count = 0;
+	int count = 0;
+	float side_weight = 0.f;
+
+	VectorCopy (origin, out_points[count]);
+	out_weights[count++] = 1.f;
+
+	if (!ent || !ent->model)
+		return count;
+
+	scale = (ent == &cl_entities[0]) ? ENTSCALE_DEFAULT : ent->scale;
+	half_extent_x = q_max (fabsf (ent->model->mins[0]), fabsf (ent->model->maxs[0])) * scale;
+	half_extent_y = q_max (fabsf (ent->model->mins[1]), fabsf (ent->model->maxs[1])) * scale;
+
+	if (half_extent_x > 4.f)
+		side_count += 2;
+	if (half_extent_y > 4.f)
+		side_count += 2;
+
+	if (side_count <= 0)
+		return count;
+
+	out_weights[0] = 0.4f;
+	side_weight = 0.6f / (float)side_count;
+	xofs = CLAMP (8.f, half_extent_x * 0.4f, 64.f);
+	yofs = CLAMP (8.f, half_extent_y * 0.4f, 64.f);
+
+	if (half_extent_x > 4.f && count + 1 < 5)
+	{
+		vec3_t local = {xofs, 0.f, 0.f};
+		vec3_t world_offset;
+		R_RotateOffsetByAngles (angles, local, world_offset);
+		VectorAdd (origin, world_offset, out_points[count]);
+		out_weights[count++] = side_weight;
+
+		VectorScale (world_offset, -1.f, world_offset);
+		VectorAdd (origin, world_offset, out_points[count]);
+		out_weights[count++] = side_weight;
+	}
+
+	if (half_extent_y > 4.f && count + 1 < 5)
+	{
+		vec3_t local = {0.f, yofs, 0.f};
+		vec3_t world_offset;
+		R_RotateOffsetByAngles (angles, local, world_offset);
+		VectorAdd (origin, world_offset, out_points[count]);
+		out_weights[count++] = side_weight;
+
+		VectorScale (world_offset, -1.f, world_offset);
+		VectorAdd (origin, world_offset, out_points[count]);
+		out_weights[count++] = side_weight;
+	}
+
+	return count;
+}
+
+static void R_SampleBModelStaticLightingAveraged (entity_t *ent, const vec3_t origin, vec3_t angles, vec3_t out_color)
+{
+	vec3_t points[5];
+	float weights[5];
+	float weight_sum = 0.f;
+	int count;
+
+	VectorClear (out_color);
+	count = R_BModelBuildProbePoints (ent, origin, angles, points, weights);
+
+	for (int i = 0; i < count; i++)
+	{
+		vec3_t sample;
+		R_SampleBModelStaticLighting (points[i], sample);
+		VectorMA (out_color, weights[i], sample, out_color);
+		weight_sum += weights[i];
+	}
+
+	if (weight_sum > 0.f)
+		VectorScale (out_color, 1.f / weight_sum, out_color);
+
+	for (int i = 0; i < 3; i++)
+		out_color[i] = CLAMP (-1.f, out_color[i], 1.f);
 }
 
 /*
@@ -433,7 +614,7 @@ static void R_InitBModelInstance (bmodel_gpu_instance_t *inst, entity_t *ent)
 		/* External bmodel pickups (e.g. maps/b_bh*.bsp) may not carry baked
 		 * lightmap samples. Provide a static world-sample fallback so they
 		 * do not render as black cubes. */
-		R_SampleBModelStaticLighting (curr_origin, inst->relight);
+		R_SampleBModelStaticLightingAveraged (ent, curr_origin, angles, inst->relight);
 		for (int i = 0; i < 3; i++)
 			inst->relight[i] = CLAMP (0.f, inst->relight[i], 1.f);
 	}
@@ -442,8 +623,8 @@ static void R_InitBModelInstance (bmodel_gpu_instance_t *inst, entity_t *ent)
 		vec3_t current_static;
 		vec3_t baseline_static;
 
-		R_SampleBModelStaticLighting (curr_origin, current_static);
-		R_SampleBModelStaticLighting (ent->baseline.origin, baseline_static);
+		R_SampleBModelStaticLightingAveraged (ent, curr_origin, angles, current_static);
+		R_SampleBModelStaticLightingAveraged (ent, ent->baseline.origin, ent->baseline.angles, baseline_static);
 		VectorSubtract (current_static, baseline_static, inst->relight);
 		for (int i = 0; i < 3; i++)
 			inst->relight[i] = CLAMP (-1.f, inst->relight[i], 1.f);

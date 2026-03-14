@@ -313,11 +313,16 @@ TexMgr_LodBias_f -- called when gl_lodbias changes
 static void TexMgr_LodBias_f (cvar_t *var)
 {
 	extern cvar_t vid_fsaa, vid_fsaamode;
+	float effective_sample_rate = 1.f;
 
 	lodbias = var->value;
 
 	if (!q_strcasecmp (var->string, "auto"))
-		lodbias = Q_log2 (vid_fsaa.value * vid_fsaamode.value) / -2.f;
+	{
+		if (vid_fsaa.value > 1.f && vid_fsaamode.value > 0.f)
+			effective_sample_rate = vid_fsaa.value;
+		lodbias = Q_log2 (effective_sample_rate) / -2.f;
+	}
 }
 
 /*

@@ -97,16 +97,13 @@ handle an SVC_FOG message from server
 */
 void Fog_ParseServerMessage (void)
 {
-	float density, red, green, blue, time;
-
-	density = MSG_ReadByte() / 255.0;
-	red = MSG_ReadByte() / 255.0;
-	green = MSG_ReadByte() / 255.0;
-	blue = MSG_ReadByte() / 255.0;
-	time = MSG_ReadShort() / 100.0;
-	if (time < 0.0f) time = 0.0f;
-
-	Fog_Update (density, red, green, blue, time);
+	/* Legacy protocol compatibility only: consume svc_fog payload without
+	 * feeding the removed analytic GL fog path. */
+	MSG_ReadByte ();
+	MSG_ReadByte ();
+	MSG_ReadByte ();
+	MSG_ReadByte ();
+	MSG_ReadShort ();
 }
 
 /*
@@ -190,10 +187,8 @@ called at map load
 */
 void Fog_ParseWorldspawn (void)
 {
-	char key[128], value[4096];
-	const char *data;
-
-	//initially no fog
+	/* Keep the legacy state initialized to "no fog", but do not parse the
+	 * worldspawn fog key anymore. Global fog is owned by r_fogvol cvars now. */
 	fog_density = DEFAULT_DENSITY;
 	fog_red = DEFAULT_GRAY;
 	fog_green = DEFAULT_GRAY;
@@ -206,35 +201,6 @@ void Fog_ParseWorldspawn (void)
 
 	fade_time = 0.0;
 	fade_done = 0.0;
-
-	data = COM_Parse(cl.worldmodel->entities);
-	if (!data)
-		return; // error
-	if (com_token[0] != '{')
-		return; // error
-	while (1)
-	{
-		data = COM_Parse(data);
-		if (!data)
-			return; // error
-		if (com_token[0] == '}')
-			break; // end of worldspawn
-		if (com_token[0] == '_')
-			q_strlcpy(key, com_token + 1, sizeof(key));
-		else
-			q_strlcpy(key, com_token, sizeof(key));
-		while (key[0] && key[strlen(key)-1] == ' ') // remove trailing spaces
-			key[strlen(key)-1] = 0;
-		data = COM_ParseEx(data, CPE_ALLOWTRUNC);
-		if (!data)
-			return; // error
-		q_strlcpy(value, com_token, sizeof(value));
-
-		if (!strcmp("fog", key))
-		{
-			sscanf(value, "%f %f %f %f", &fog_density, &fog_red, &fog_green, &fog_blue);
-		}
-	}
 }
 
 /*
@@ -307,16 +273,8 @@ called at the beginning of each frame
 */
 void Fog_SetupFrame (void)
 {
-	const float ExpAdjustment = 1.20112241f; // sqrt(log2(e))
-	const float SphericalCorrection = 0.85f; // compensate higher perceived density with spherical fog
-	const float DensityScale = ExpAdjustment * SphericalCorrection / 96.0f;
-	float density = Fog_GetDensity() * DensityScale;
-	qboolean fogvol_global_active = R_FogVol_CanRenderGlobal ();
-	memcpy(r_framedata.fogdata, Fog_GetColor(), 3 * sizeof(float));
-	memcpy(r_framedata.skyfogdata, r_framedata.fogdata, 3 * sizeof(float));
-	/* Keep analytic global fog only when volumetric global replacement is not active. */
-	r_framedata.fogdata[3] = fogvol_global_active ? 0.f : density * density;
-	r_framedata.skyfogdata[3] = density > 0.f ? CLAMP (0.f, skyfog, 1.f) : 0.f;
+	memset (r_framedata.fogdata, 0, sizeof (r_framedata.fogdata));
+	memset (r_framedata.skyfogdata, 0, sizeof (r_framedata.skyfogdata));
 }
 
 /*
@@ -369,7 +327,7 @@ called whenever a map is loaded
 */
 void Fog_NewMap (void)
 {
-	Fog_ParseWorldspawn (); //for global fog
+	Fog_ParseWorldspawn ();
 	Fog_MarkModels (); //for volumetric fog
 }
 
@@ -382,11 +340,10 @@ called when quake initializes
 */
 void Fog_Init (void)
 {
-	Cmd_AddCommand ("fog",Fog_FogCommand_f);
-
 	//Cvar_RegisterVariable (&r_vfog);
 
-	//set up global fog
+	/* Legacy analytic fog command/path removed; volumetric fog is configured
+	 * entirely through r_fogvol_* cvars. */
 	fog_density = DEFAULT_DENSITY;
 	fog_red = DEFAULT_GRAY;
 	fog_green = DEFAULT_GRAY;

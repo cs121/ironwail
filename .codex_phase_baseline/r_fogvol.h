@@ -54,9 +54,6 @@ typedef struct froxel_grid_s
 
 extern cvar_t r_fogvol;
 extern cvar_t r_fogvol_halfres;
-extern cvar_t r_fogvol_preset;
-extern cvar_t r_fogvol_clustered;
-extern cvar_t r_fogvol_cluster_tile_size;
 /* BEST PRACTICE #11: Expose all cvars that may be referenced from other
  * translation units (e.g. menu, console completion, test harnesses). */
 extern cvar_t r_fogvol_steps;
@@ -93,7 +90,6 @@ extern cvar_t r_fogvol_testvolumes;
  * but not exported — violates BEST PRACTICE #11. */
 extern cvar_t r_fogvol_testvolumes_dumpstate;
 extern cvar_t r_fogvol_global;
-extern cvar_t r_fogvol_global_color;
 extern cvar_t r_fogvol_global_density_scale;
 extern cvar_t r_fogvol_global_falloff;
 extern cvar_t r_fogvol_global_noise_scale;
@@ -104,10 +100,8 @@ extern cvar_t r_fogvol_global_velocity_y;
 extern cvar_t r_fogvol_global_velocity_z;
 extern cvar_t r_fogvol_global_height;
 extern cvar_t r_fogvol_global_height_scale;
-extern cvar_t r_fogvol_global_shadow;
 extern cvar_t r_fogvol_height_mist_strength;
 extern cvar_t r_fogvol_global_priority;
-extern cvar_t r_fogvol_stats;
 extern cvar_t r_fogvol_light;
 extern cvar_t r_fogvol_lighting_mode;
 extern cvar_t r_fogvol_lightgrid;
@@ -166,9 +160,8 @@ qboolean R_FogVol_HasRenderableContent (void);
 qboolean R_FogVol_HasValidComposite (void);
 /* PostFX gate: volumetric output may be produced this frame (not tied to global fog density). */
 qboolean R_FogVol_ShouldAffectPostFX (void);
-/* Global-replacement gate: volumetric global fog is eligible this frame. */
+/* Global-replacement gate: volumetric global fog is eligible this frame (includes classic fog density + r_fogvol_global). */
 qboolean R_FogVol_CanRenderGlobal (void);
-qboolean R_FogVol_GetGlobalFogState (vec3_t color, float *density);
 /*
  * FogVol Composite Contract (for CPU + shader users):
  *  - RGB: fog radiance already composited over the scene color (display-space contribution).

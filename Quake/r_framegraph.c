@@ -4,62 +4,597 @@
 
 #include "r_fogvol.h"
 
+#ifndef GL_CLIP_DEPTH_MODE
+#define GL_CLIP_DEPTH_MODE 0x935D
+#endif
+#ifndef GL_NEGATIVE_ONE_TO_ONE
+#define GL_NEGATIVE_ONE_TO_ONE 0x935E
+#endif
+#ifndef GL_ZERO_TO_ONE
+#define GL_ZERO_TO_ONE 0x935F
+#endif
+#ifndef GL_TIMESTAMP
+#define GL_TIMESTAMP 0x8E28
+#endif
+
 void R_SetupView (void);
 void R_RenderShadowMaps (void);
 void R_RenderScene (void);
 void R_WarpScaleView (void);
+void GL_PostProcess (void);
 void R_DrawViewModel (void);
+void R_StorePrevFrameState (void);
+void V_PolyBlend (void);
+
+typedef enum framegraph_pass_id_e
+{
+	FG_PASS_SETUP_VIEW = 0,
+	FG_PASS_SHADOW_MAPS,
+	FG_PASS_DECALS,
+	FG_PASS_SCENE,
+	FG_PASS_WARP_RESOLVE,
+	FG_PASS_FOGVOL_PREPARE,
+	FG_PASS_FOGVOL,
+	FG_PASS_SSAO_HANDOFF,
+	FG_PASS_POSTPROCESS,
+	FG_PASS_VIEWMODEL,
+	FG_PASS_POLYBLEND,
+	FG_PASS_STORE_PREV,
+	FG_PASS_COUNT
+} framegraph_pass_id_t;
+
+typedef struct framegraph_pass_stats_s
+{
+	double cpu_ms;
+	double cpu_avg_ms;
+	double gpu_ms;
+	double gpu_avg_ms;
+	unsigned cpu_samples;
+	unsigned gpu_samples;
+	GLuint active_start_query;
+	GLuint active_end_query;
+	GLuint pending_start_query;
+	GLuint pending_end_query;
+} framegraph_pass_stats_t;
+
+static framegraph_pass_stats_t s_pass_stats[FG_PASS_COUNT];
+static int s_last_stats_print = -120;
+static RenderFramePlan s_cached_plan;
+static int s_cached_plan_frame = -1;
+
+static void FG_Backend_BeginPass (const char *name);
+static void FG_Backend_EndPass (void);
+static void FG_Backend_ValidatePassState (const char *pass_name, qboolean before_pass);
+static void FG_Backend_BeginTimer (int pass_id);
+static void FG_Backend_EndTimer (int pass_id);
+static void FG_Backend_ResolveTimers (void);
+
+static const IRenderBackend s_gl_backend = {
+	"OpenGL",
+	FG_Backend_BeginPass,
+	FG_Backend_EndPass,
+	FG_Backend_ValidatePassState,
+	FG_Backend_BeginTimer,
+	FG_Backend_EndTimer,
+	FG_Backend_ResolveTimers
+};
+
+static qboolean FG_PassAlways (const RenderPassContext *ctx)
+{
+	(void)ctx;
+	return true;
+}
+
+static qboolean FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
+{
+	return ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps;
+}
+
+static qboolean FG_PassWhenFogVolEnabled (const RenderPassContext *ctx)
+{
+	return ctx && ctx->frame_plan && ctx->frame_plan->run_fogvol;
+}
+
+static qboolean FG_PassWhenPostprocessEnabled (const RenderPassContext *ctx)
+{
+	return ctx && ctx->frame_plan && ctx->frame_plan->run_postprocess;
+}
+
+static qboolean FG_PassWhenViewmodelEnabled (const RenderPassContext *ctx)
+{
+	return ctx && ctx->frame_plan && ctx->frame_plan->run_viewmodel;
+}
+
+static qboolean FG_PassWhenPolyBlendEnabled (const RenderPassContext *ctx)
+{
+	return ctx && ctx->frame_plan && ctx->frame_plan->run_polyblend;
+}
+
+static qboolean FG_PassWhenStorePrevEnabled (const RenderPassContext *ctx)
+{
+	return ctx && ctx->frame_plan && ctx->frame_plan->run_store_prev;
+}
+
+static void FG_ExecSetupView (RenderPassContext *ctx)
+{
+	(void)ctx;
+	R_SetupView ();
+}
+
+static void FG_ExecShadowMaps (RenderPassContext *ctx)
+{
+	(void)ctx;
+	R_RenderShadowMaps ();
+}
+
+static void FG_ExecDecals (RenderPassContext *ctx)
+{
+	(void)ctx;
+	R_UpdateDecals ();
+}
+
+static void FG_ExecScene (RenderPassContext *ctx)
+{
+	(void)ctx;
+	R_RenderScene ();
+}
+
+static void FG_ExecWarpResolve (RenderPassContext *ctx)
+{
+	(void)ctx;
+	R_WarpScaleView ();
+}
+
+static void FG_ExecFogVolPrepare (RenderPassContext *ctx)
+{
+	if (!ctx || !ctx->legacy_state || !ctx->legacy_state->prepare_fogvol_inputs)
+		return;
+	ctx->legacy_state->prepare_fogvol_inputs ();
+}
+
+static void FG_ExecFogVol (RenderPassContext *ctx)
+{
+	if (ctx && ctx->legacy_state && ctx->legacy_state->fogvol_update_called)
+		(*ctx->legacy_state->fogvol_update_called)++;
+	R_FogVol_BuildList ();
+	if (ctx && ctx->legacy_state && ctx->legacy_state->fogvol_draw_called)
+		(*ctx->legacy_state->fogvol_draw_called)++;
+	R_FogVol_Render ();
+}
+
+static void FG_ExecSSAOHandoff (RenderPassContext *ctx)
+{
+	if (!ctx || !ctx->legacy_state || !ctx->legacy_state->ssao_fog_state)
+		return;
+	R_SSAO_CaptureFogState (&r_framedata, ctx->legacy_state->ssao_fog_state);
+}
+
+static void FG_ExecPostprocess (RenderPassContext *ctx)
+{
+	(void)ctx;
+	GL_PostProcess ();
+}
+
+static void FG_ExecViewmodel (RenderPassContext *ctx)
+{
+	(void)ctx;
+	R_DrawViewModel ();
+}
+
+static void FG_ExecPolyBlend (RenderPassContext *ctx)
+{
+	(void)ctx;
+	V_PolyBlend ();
+}
+
+static void FG_ExecStorePrev (RenderPassContext *ctx)
+{
+	if (ctx && ctx->legacy_state && ctx->legacy_state->frame_rendered_this_update)
+		*ctx->legacy_state->frame_rendered_this_update = true;
+	R_StorePrevFrameState ();
+}
+
+static const RenderPassDesc s_render_passes[FG_PASS_COUNT] = {
+	{
+		"Setup view",
+		RENDER_RES_NONE,
+		RENDER_RES_NONE,
+		1u << 0,
+		FG_PassAlways,
+		FG_ExecSetupView
+	},
+	{
+		"Shadow maps",
+		RENDER_RES_NONE,
+		RENDER_RES_SHADOW_SUN_DEPTH,
+		1u << 0,
+		FG_PassWhenShadowEnabled,
+		FG_ExecShadowMaps
+	},
+	{
+		"Update decals",
+		RENDER_RES_NONE,
+		RENDER_RES_NONE,
+		1u << 0,
+		FG_PassAlways,
+		FG_ExecDecals
+	},
+	{
+		"Render scene",
+		RENDER_RES_NONE,
+		RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_VELOCITY,
+		1u << 0,
+		FG_PassAlways,
+		FG_ExecScene
+	},
+	{
+		"Warp/resolve",
+		RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH,
+		RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH,
+		1u << 0,
+		FG_PassAlways,
+		FG_ExecWarpResolve
+	},
+	{
+		"Prepare fogvol inputs",
+		RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH,
+		RENDER_RES_NONE,
+		1u << 0,
+		FG_PassAlways,
+		FG_ExecFogVolPrepare
+	},
+	{
+		"Render fog volumes",
+		RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_SHADOW_SUN_DEPTH | RENDER_RES_FOGVOL_HISTORY | RENDER_RES_VELOCITY,
+		RENDER_RES_COMPOSITE_COLOR | RENDER_RES_FOGVOL_HISTORY,
+		1u << 0,
+		FG_PassWhenFogVolEnabled,
+		FG_ExecFogVol
+	},
+	{
+		"Capture fog handoff",
+		RENDER_RES_COMPOSITE_COLOR,
+		RENDER_RES_NONE,
+		1u << 0,
+		FG_PassAlways,
+		FG_ExecSSAOHandoff
+	},
+	{
+		"Postprocess",
+		RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH,
+		RENDER_RES_COMPOSITE_COLOR,
+		1u << 0,
+		FG_PassWhenPostprocessEnabled,
+		FG_ExecPostprocess
+	},
+	{
+		"Draw viewmodel",
+		RENDER_RES_NONE,
+		RENDER_RES_COMPOSITE_COLOR,
+		1u << 0,
+		FG_PassWhenViewmodelEnabled,
+		FG_ExecViewmodel
+	},
+	{
+		"Polyblend",
+		RENDER_RES_NONE,
+		RENDER_RES_COMPOSITE_COLOR,
+		1u << 0,
+		FG_PassWhenPolyBlendEnabled,
+		FG_ExecPolyBlend
+	},
+	{
+		"Store previous frame",
+		RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH,
+		RENDER_RES_NONE,
+		1u << 0,
+		FG_PassWhenStorePrevEnabled,
+		FG_ExecStorePrev
+	}
+};
+
+static qboolean FG_Backend_HasTimestampQueries (void)
+{
+	return (GL_GenQueriesFunc && GL_DeleteQueriesFunc
+		&& GL_QueryCounterFunc
+		&& GL_GetQueryObjectuivFunc
+		&& GL_GetQueryObjectui64vFunc);
+}
+
+static void FG_Backend_BeginPass (const char *name)
+{
+	GL_BeginGroup (name);
+}
+
+static void FG_Backend_EndPass (void)
+{
+	GL_EndGroup ();
+}
+
+static void FG_Backend_ValidatePassState (const char *pass_name, qboolean before_pass)
+{
+	GLenum err;
+
+	if (r_gl_state_validate.value <= 0.f)
+		return;
+
+	err = glGetError ();
+	if (err != GL_NO_ERROR)
+		Con_Warning ("FrameGraph %s(%s): GL error 0x%x\n", before_pass ? "before" : "after", pass_name, (unsigned)err);
+
+	{
+		GLint draw_fbo = 0;
+		GLint viewport[4] = {0};
+		glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
+		glGetIntegerv (GL_VIEWPORT, viewport);
+		if (viewport[2] <= 0 || viewport[3] <= 0)
+			Con_Warning ("FrameGraph %s(%s): invalid viewport %d %d %d %d\n",
+				before_pass ? "before" : "after",
+				pass_name,
+				viewport[0], viewport[1], viewport[2], viewport[3]);
+		if (draw_fbo && GL_CheckFramebufferStatusFunc)
+		{
+			GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
+			if (status != GL_FRAMEBUFFER_COMPLETE)
+				Con_Warning ("FrameGraph %s(%s): incomplete FBO %d status=0x%x\n",
+					before_pass ? "before" : "after",
+					pass_name, draw_fbo, (unsigned)status);
+		}
+	}
+
+	if (gl_clipcontrol_able)
+	{
+		GLint clip_depth_mode = GL_ZERO_TO_ONE;
+		glGetIntegerv (GL_CLIP_DEPTH_MODE, &clip_depth_mode);
+		if (clip_depth_mode != GL_ZERO_TO_ONE && clip_depth_mode != GL_NEGATIVE_ONE_TO_ONE)
+			Con_Warning ("FrameGraph %s(%s): invalid clip depth mode 0x%x\n",
+				before_pass ? "before" : "after",
+				pass_name, (unsigned)clip_depth_mode);
+	}
+}
+
+static void FG_Backend_BeginTimer (int pass_id)
+{
+	framegraph_pass_stats_t *stats;
+
+	if (!FG_Backend_HasTimestampQueries ())
+		return;
+	if (pass_id < 0 || pass_id >= FG_PASS_COUNT)
+		return;
+
+	stats = &s_pass_stats[pass_id];
+	if (stats->pending_start_query || stats->pending_end_query || stats->active_start_query || stats->active_end_query)
+		return;
+
+	GL_GenQueriesFunc (1, &stats->active_start_query);
+	GL_GenQueriesFunc (1, &stats->active_end_query);
+	if (!stats->active_start_query || !stats->active_end_query)
+	{
+		if (stats->active_start_query)
+			GL_DeleteQueriesFunc (1, &stats->active_start_query);
+		if (stats->active_end_query)
+			GL_DeleteQueriesFunc (1, &stats->active_end_query);
+		stats->active_start_query = 0;
+		stats->active_end_query = 0;
+		return;
+	}
+
+	GL_QueryCounterFunc (stats->active_start_query, GL_TIMESTAMP);
+}
+
+static void FG_Backend_EndTimer (int pass_id)
+{
+	framegraph_pass_stats_t *stats;
+
+	if (!FG_Backend_HasTimestampQueries ())
+		return;
+	if (pass_id < 0 || pass_id >= FG_PASS_COUNT)
+		return;
+
+	stats = &s_pass_stats[pass_id];
+	if (!stats->active_start_query || !stats->active_end_query)
+		return;
+
+	GL_QueryCounterFunc (stats->active_end_query, GL_TIMESTAMP);
+	stats->pending_start_query = stats->active_start_query;
+	stats->pending_end_query = stats->active_end_query;
+	stats->active_start_query = 0;
+	stats->active_end_query = 0;
+}
+
+static void FG_Backend_ResolveTimers (void)
+{
+	int i;
+
+	if (!FG_Backend_HasTimestampQueries ())
+		return;
+
+	for (i = 0; i < FG_PASS_COUNT; ++i)
+	{
+		framegraph_pass_stats_t *stats = &s_pass_stats[i];
+		GLuint available = 0;
+		GLuint64 start_ns = 0;
+		GLuint64 end_ns = 0;
+		double gpu_ms;
+
+		if (!stats->pending_start_query || !stats->pending_end_query)
+			continue;
+
+		GL_GetQueryObjectuivFunc (stats->pending_end_query, GL_QUERY_RESULT_AVAILABLE, &available);
+		if (!available)
+			continue;
+
+		GL_GetQueryObjectui64vFunc (stats->pending_start_query, GL_QUERY_RESULT, &start_ns);
+		GL_GetQueryObjectui64vFunc (stats->pending_end_query, GL_QUERY_RESULT, &end_ns);
+
+		if (end_ns >= start_ns)
+			gpu_ms = (double)(end_ns - start_ns) / 1000000.0;
+		else
+			gpu_ms = 0.0;
+
+		stats->gpu_ms = gpu_ms;
+		stats->gpu_avg_ms = (stats->gpu_samples == 0) ? gpu_ms : (stats->gpu_avg_ms * 0.8 + gpu_ms * 0.2);
+		stats->gpu_samples++;
+
+		GL_DeleteQueriesFunc (1, &stats->pending_start_query);
+		GL_DeleteQueriesFunc (1, &stats->pending_end_query);
+		stats->pending_start_query = 0;
+		stats->pending_end_query = 0;
+	}
+}
+
+static void FG_BuildResourceHandles (RenderGraphResourceHandle *out_handles)
+{
+	if (!out_handles)
+		return;
+
+	memset (out_handles, 0, sizeof (*out_handles));
+	out_handles->scene_fbo = framebufs.scene.fbo;
+	out_handles->composite_fbo = framebufs.composite.fbo;
+	out_handles->scene_depth_tex = framebufs.scene.depth_stencil_tex;
+	out_handles->shadow_sun_depth_tex = framebufs.shadow.sun_depth_tex;
+	out_handles->fogvol_history_tex = framebufs.fogvol.history_tex[0];
+	out_handles->velocity_tex = (framebufs.scene.samples > 1) ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
+}
+
+static void FG_AccumulateCPUStats (int pass_id, double cpu_ms)
+{
+	framegraph_pass_stats_t *stats;
+
+	if (pass_id < 0 || pass_id >= FG_PASS_COUNT)
+		return;
+
+	stats = &s_pass_stats[pass_id];
+	stats->cpu_ms = cpu_ms;
+	stats->cpu_avg_ms = (stats->cpu_samples == 0) ? cpu_ms : (stats->cpu_avg_ms * 0.8 + cpu_ms * 0.2);
+	stats->cpu_samples++;
+}
+
+static void FG_MaybePrintStats (void)
+{
+	if (r_speeds.value < 3.f)
+		return;
+	if (r_framecount < s_last_stats_print + 60)
+		return;
+
+	Con_Printf ("FrameGraph CPUms setup=%.2f shadow=%.2f scene=%.2f warp=%.2f fog=%.2f post=%.2f overlay=%.2f | GPUms shadow=%.2f scene=%.2f fog=%.2f post=%.2f\n",
+		s_pass_stats[FG_PASS_SETUP_VIEW].cpu_avg_ms,
+		s_pass_stats[FG_PASS_SHADOW_MAPS].cpu_avg_ms,
+		s_pass_stats[FG_PASS_SCENE].cpu_avg_ms,
+		s_pass_stats[FG_PASS_WARP_RESOLVE].cpu_avg_ms,
+		s_pass_stats[FG_PASS_FOGVOL].cpu_avg_ms,
+		s_pass_stats[FG_PASS_POSTPROCESS].cpu_avg_ms,
+		s_pass_stats[FG_PASS_VIEWMODEL].cpu_avg_ms + s_pass_stats[FG_PASS_POLYBLEND].cpu_avg_ms + s_pass_stats[FG_PASS_STORE_PREV].cpu_avg_ms,
+		s_pass_stats[FG_PASS_SHADOW_MAPS].gpu_avg_ms,
+		s_pass_stats[FG_PASS_SCENE].gpu_avg_ms,
+		s_pass_stats[FG_PASS_FOGVOL].gpu_avg_ms,
+		s_pass_stats[FG_PASS_POSTPROCESS].gpu_avg_ms);
+
+	s_last_stats_print = r_framecount;
+}
+
+static void FG_RunPass (int pass_id, const RenderPassDesc *pass, RenderPassContext *ctx)
+{
+	double cpu_start;
+
+	if (!pass || !ctx)
+		return;
+	if (pass->enabled && !pass->enabled (ctx))
+		return;
+
+	if (ctx->backend && ctx->backend->validate_pass_state)
+		ctx->backend->validate_pass_state (pass->name, true);
+	if (ctx->backend && ctx->backend->begin_pass)
+		ctx->backend->begin_pass (pass->name);
+	if (ctx->backend && ctx->backend->begin_timer)
+		ctx->backend->begin_timer (pass_id);
+
+	cpu_start = Sys_DoubleTime ();
+	pass->execute (ctx);
+	FG_AccumulateCPUStats (pass_id, (Sys_DoubleTime () - cpu_start) * 1000.0);
+
+	if (ctx->backend && ctx->backend->end_timer)
+		ctx->backend->end_timer (pass_id);
+	if (ctx->backend && ctx->backend->end_pass)
+		ctx->backend->end_pass ();
+	if (ctx->backend && ctx->backend->validate_pass_state)
+		ctx->backend->validate_pass_state (pass->name, false);
+}
+
+void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan)
+{
+	if (!out_plan)
+		return;
+
+	memset (out_plan, 0, sizeof (*out_plan));
+	out_plan->needs_scene_effects = GL_NeedsSceneEffects ();
+	out_plan->needs_postprocess = GL_NeedsPostprocess ();
+	out_plan->run_shadowmaps = true;
+	out_plan->run_fogvol = R_FogVol_IsEnabledForFrame () && R_FogVol_HasRenderableContent ();
+	out_plan->run_postprocess = out_plan->needs_postprocess;
+	out_plan->run_viewmodel = true;
+	out_plan->run_polyblend = true;
+	out_plan->run_store_prev = true;
+}
+
+void R_FrameGraph_SetRenderFramePlan (const RenderFramePlan *plan)
+{
+	if (!plan)
+	{
+		s_cached_plan_frame = -1;
+		memset (&s_cached_plan, 0, sizeof (s_cached_plan));
+		return;
+	}
+
+	s_cached_plan = *plan;
+	s_cached_plan_frame = r_framecount;
+}
+
+qboolean R_FrameGraph_GetRenderFramePlan (RenderFramePlan *out_plan)
+{
+	if (s_cached_plan_frame != r_framecount)
+		return false;
+	if (out_plan)
+		*out_plan = s_cached_plan;
+	return true;
+}
 
 /*
  * Framegraph pass order and data dependencies
  * ------------------------------------------
- * 1) Setup:
- *    - R_SetupView prepares camera/frustum globals used by every render pass.
- *    - R_UpdateDecals updates decal state consumed in opaque rendering.
- * 2) Opaque:
- *    - Fog_EnableGFog + R_RenderScene render solid geometry and scene buffers.
- *    - R_WarpScaleView resolves/warps the scene into composite targets.
- * 3) Transparency/volumetrics:
- *    - R_FogVol_BuildList gathers local/entity fog volumes and prepares global fog state.
- *    - R_FogVol_Render composites a global baseline first, then local/entity fog volumes.
- * 4) PostFX handoff:
- *    - Capture fog parameters for SSAO (postprocess runs after fog disable).
- *    - Fog_DisableGFog keeps 2D overlays fog-free.
- * 5) Overlay:
- *    - Overlay/UI rendering happens later in SCR_UpdateScreen.
+ * 1) Build a deterministic per-frame plan once and cache it.
+ * 2) Execute explicit passes with declared contracts and timing instrumentation.
+ * 3) Keep postprocess + overlays in the same scheduler so ordering remains stable.
  */
 void R_FrameGraph_RenderView (const r_framegraph_state_t *state)
 {
-	qboolean run_fogvol_pass;
+	RenderFramePlan frame_plan;
+	RenderGraphResourceHandle resources;
+	RenderPassContext pass_ctx;
+	int i = 0;
 
-	R_SetupView ();
-	R_RenderShadowMaps ();
-	R_UpdateDecals ();
-	Fog_EnableGFog ();
-	R_RenderScene ();
-	R_WarpScaleView ();
-	run_fogvol_pass = R_FogVol_IsEnabledForFrame () && R_FogVol_HasRenderableContent ();
-	if (state && state->prepare_fogvol_inputs)
-		state->prepare_fogvol_inputs ();
+	memset (&frame_plan, 0, sizeof (frame_plan));
+	FG_BuildResourceHandles (&resources);
 
-	if (run_fogvol_pass)
+	pass_ctx.legacy_state = state;
+	pass_ctx.frame_plan = &frame_plan;
+	pass_ctx.resources = &resources;
+	pass_ctx.backend = &s_gl_backend;
+
+	if (pass_ctx.backend && pass_ctx.backend->resolve_timers)
+		pass_ctx.backend->resolve_timers ();
+
+	/* Setup first so frame counters/state are current before building the plan cache. */
+	FG_RunPass (FG_PASS_SETUP_VIEW, &s_render_passes[FG_PASS_SETUP_VIEW], &pass_ctx);
+	i = FG_PASS_SETUP_VIEW + 1;
+
+	R_FrameGraph_BuildRenderFramePlan (&frame_plan);
+	R_FrameGraph_SetRenderFramePlan (&frame_plan);
+
+	for (; i < FG_PASS_COUNT; ++i)
 	{
-		if (state && state->fogvol_update_called)
-			(*state->fogvol_update_called)++;
-		R_FogVol_BuildList ();
-		if (state && state->fogvol_draw_called)
-			(*state->fogvol_draw_called)++;
-		R_FogVol_Render ();
+		FG_RunPass (i, &s_render_passes[i], &pass_ctx);
 	}
 
-	/* Draw the weapon after volumetric fog so viewmodel depth cannot punch holes
-	 * into fog/froxel reconstruction and temporal history. */
-	R_DrawViewModel ();
-
-	if (state && state->ssao_fog_state)
-		R_SSAO_CaptureFogState (&r_framedata, state->ssao_fog_state);
-
-	Fog_DisableGFog ();
-	if (state && state->frame_rendered_this_update)
-		*state->frame_rendered_this_update = true;
+	FG_MaybePrintStats ();
 }

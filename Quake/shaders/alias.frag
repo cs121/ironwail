@@ -6,6 +6,7 @@ struct InstanceData
 	vec4	LightColor; // xyz=LightColor w=Alpha
 	vec4	DLightColor; // xyz=DLightColor
 	vec4	DLightDir;   // xyz=dominant dlight direction
+	vec4	StaticLightDir; // xyz=dominant static light direction
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -51,7 +52,7 @@ layout(binding=8) uniform samplerCubeArray DLightShadowTex;
 layout(location=30) uniform mat4 ShadowSunViewProj;
 layout(location=34) uniform vec4 ShadowEnableDebug;   // x=enabled, y=sun, z=dlight, w=debug mode
 layout(location=35) uniform vec4 ShadowDLightIndices; // selected light indices (float encoded ints)
-layout(location=36) uniform vec4 ShadowBiasCounts;    // x=num dlight slots, y=sun bias, z=dlight bias
+layout(location=36) uniform vec4 ShadowBiasCounts;    // x=num dlight slots, y=sun bias, z=dlight bias, w=receiver bias scale
 layout(location=37) uniform vec4 ShadowPCFTexel;      // x=sun pcf radius, y=dlight pcf radius, z=1/sun size, w=1/dlight size
 layout(location=38) uniform vec4 ShadowSunDirEnabled; // xyz dir, w enabled
 layout(location=39) uniform vec4 ShadowSunColorIntensity;
@@ -206,6 +207,8 @@ float SampleSunShadow(vec3 worldPos)
 		return 1.0;
 
 	float bias = max(ShadowBiasCounts.y, 0.0);
+	float receiver_bias = max(fwidth(depth), 0.0) * max(ShadowBiasCounts.w, 0.0);
+	bias += receiver_bias;
 	float pcf = max(ShadowPCFTexel.x, 0.0) * max(ShadowPCFTexel.z, 0.0);
 	float sum = 0.0;
 	float taps = 0.0;
@@ -250,6 +253,8 @@ float SampleDLightShadowSlot(vec3 worldPos, vec3 lightPos, float radius, int slo
 	// CPU: ShadowLightPosFar.w = l.radius setzen.
 	float ref = dist / radius;
 	float bias = max(ShadowBiasCounts.z, 0.0);
+	float receiver_bias = max(fwidth(ref), 0.0) * max(ShadowBiasCounts.w, 0.0);
+	bias += receiver_bias;
 	float pcf = max(ShadowPCFTexel.y, 0.0) * max(ShadowPCFTexel.w, 0.0) * 2.0;
 
 	vec3 axis = (abs(dirN.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
@@ -276,7 +281,7 @@ vec3 ComputeAliasDLightContribution(vec3 worldPos, vec3 worldNormal)
 	float core_boost = max(ShadowDLightConfig1.x, 0.0);
 	float core_exp = max(ShadowDLightConfig1.y, 0.01);
 	float knee = max(ShadowDLightConfig1.z, 0.0);
-	float ndotl_mix = clamp(ShadowDLightConfig1.w, 0.0, 1.0);
+	float ndotl_mix = clamp(AliasFrameBuffer.DLightDirectionalMix, 0.0, 1.0);
 	float dlight_scale = max(ShadowDLightConfig0.x, 0.0);
 	vec3 dynamic_light = vec3(0.0);
 
@@ -409,11 +414,18 @@ void main()
 
 	result.a = lit_color.a;
 	vec3 albedo = result.rgb;
-	// Use CPU-accumulated model dlight contribution (full active pool).
-	// Keep aggregate shadow only for debug visualization; applying it to the
-	// summed color can incorrectly dim unrelated, non-shadow-selected dlights.
 	dlight_shadow = ComputeAliasDLightShadow(world_pos);
 	dlight_contrib = in_dlight_color;
+	if (ShadowEnableDebug.x > 0.5 && ShadowNumLights > 0.5)
+	{
+		/* Keep CPU-accumulated dlight as a robust baseline and blend towards
+		 * per-light directional response only when requested by the model mix cvar. */
+		vec3 gpu_dlight = ComputeAliasDLightContribution(world_pos, world_nor);
+		float gpu_energy = dot(gpu_dlight, vec3(0.2126, 0.7152, 0.0722));
+		float dir_mix = clamp(AliasFrameBuffer.DLightDirectionalMix, 0.0, 1.0);
+		if (gpu_energy > 1e-6)
+			dlight_contrib = mix(in_dlight_color, gpu_dlight, dir_mix);
+	}
 	result.rgb += albedo * dlight_contrib;
 
 	if (ShadowEnableDebug.x > 0.5 && ShadowSunDirEnabled.w > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)

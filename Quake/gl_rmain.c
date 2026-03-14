@@ -55,8 +55,8 @@ gpuframedata_t r_framedata;
 static int r_fogvol_update_called = 0;
 static int r_fogvol_draw_called = 0;
 
-/* BUG FIX #1 (SSAO/Fog): GL_GenerateSSAOTexture runs inside GL_PostProcess which
- * is called from SCR_UpdateScreen, AFTER Fog_DisableGFog() in R_RenderView.
+/* BUG FIX #1 (SSAO/Fog): GL_GenerateSSAOTexture runs inside GL_PostProcess, after
+ * the 3D scene pass in R_RenderView.
  * Fog_DisableGFog clears r_framedata.fogdata[3] (density) to 0 so 2D overlays stay
  * fog-free. At SSAO generation time the UBO therefore has density=0, making
  * FogTransmittanceFromViewPos always return 1.0 → ssao_fog_strength has zero
@@ -64,6 +64,7 @@ static int r_fogvol_draw_called = 0;
  * fading to AO=1.0.
  * Fix: save fog params just before Fog_DisableGFog and pass them explicitly to
  * ssao.frag via uniform 14 .yzw (previously unused, only .x = max_distance). */
+/* Cached global fogvol parameters for SSAO/postprocess fog damping. */
 static r_ssao_fog_state_t r_ssao_fog_state;
 static qboolean r_ssao_invalid_warned = false;
 
@@ -81,7 +82,39 @@ static entity_t* cl_shadow_visedicts[MAX_VISEDICTS];
 static int cl_numshadowedicts = 0;
 static entity_t* r_shadow_brush_ents[MAX_VISEDICTS + 1];
 static entity_t* r_shadow_alias_ents[MAX_VISEDICTS];
+static entity_t* r_shadow_filtered_brush_ents[MAX_VISEDICTS + 1];
+static entity_t* r_shadow_filtered_alias_ents[MAX_VISEDICTS];
 static int r_shadow_log_last_frame = -1024;
+static int r_shadow_profile_last_frame = -1024;
+
+typedef struct shadow_draw_cache_s
+{
+	qboolean	valid;
+	int		visframecount;
+	int		numshadowedicts;
+	qboolean	include_world;
+	qmodel_t	*worldmodel;
+	mleaf_t		*viewleaf;
+	entity_t	*first_shadow_ent;
+	entity_t	*last_shadow_ent;
+	int		brush_count;
+	int		alias_count;
+	entity_t	*brush_ents[MAX_VISEDICTS + 1];
+	entity_t	*alias_ents[MAX_VISEDICTS];
+} shadow_draw_cache_t;
+
+static shadow_draw_cache_t r_shadow_draw_cache;
+
+typedef struct shadow_profile_stats_s
+{
+	double	cpu_sun_ms;
+	double	cpu_dlight_ms;
+	double	cpu_total_ms;
+	double	gpu_sun_ms;
+	double	gpu_dlight_ms;
+} shadow_profile_stats_t;
+
+static shadow_profile_stats_t r_shadow_profile_stats;
 
 static vec3_t	frustum_absnormal[4];
 mplane_t	frustum[4];
@@ -99,7 +132,6 @@ static vec3_t r_prev_vieworg = { 0.f, 0.f, 0.f };
 static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
-static qboolean r_dlight_buffered_frame = false;
 
 static godrays_stabilization_t r_godrays_stabilization;
 static int r_godrays_generated_frame = -1;
@@ -134,6 +166,7 @@ typedef struct framesetup_s
 } framesetup_t;
 
 static framesetup_t framesetup;
+static void R_GetFramePlanDecisions (qboolean *out_needs_scene_effects, qboolean *out_needs_postprocess);
 
 static const float r_identity_mat4[16] = {
 		1.f, 0.f, 0.f, 0.f,
@@ -148,10 +181,13 @@ typedef struct shadow_runtime_s
 {
 	qboolean	valid;
 	float		sun_viewproj[16];
+	vec3_t		sun_eye;
+	mplane_t	sun_frustum[4];
 	int			num_dlights;
 	int			dlight_indices[SHADOW_DLIGHT_MAX];
 	vec4_t		dlight_pos_radius[SHADOW_DLIGHT_MAX];
 	float		dlight_viewproj[SHADOW_DLIGHT_MAX][SHADOW_DLIGHT_FACES][16];
+	mplane_t	dlight_frustum[SHADOW_DLIGHT_MAX][SHADOW_DLIGHT_FACES][4];
 	float		caster_viewproj[16];
 	vec4_t		caster_lightpos_far_mode; // xyz: light pos, w: far plane
 	int			caster_mode; // 0=sun, 1=dlight
@@ -356,15 +392,51 @@ static qboolean R_Shadow_DlightEnabled (void)
 	return R_Shadow_Enabled () && r_shadow_dlight.value > 0.f && r_framedata.numlights > 0;
 }
 
+static void R_Shadow_NormalizeSettings (void)
+{
+	int ivalue;
+	float fvalue;
+
+	ivalue = (r_shadow_mark_mode.value > 0.f) ? 1 : 0;
+	if (ivalue != (int)r_shadow_mark_mode.value)
+		Cvar_SetValueQuick (&r_shadow_mark_mode, (float)ivalue);
+	ivalue = (r_shadow_profile.value > 0.f) ? 1 : 0;
+	if (ivalue != (int)r_shadow_profile.value)
+		Cvar_SetValueQuick (&r_shadow_profile, (float)ivalue);
+	ivalue = (r_shadow_cull_vis.value > 0.f) ? 1 : 0;
+	if (ivalue != (int)r_shadow_cull_vis.value)
+		Cvar_SetValueQuick (&r_shadow_cull_vis, (float)ivalue);
+	ivalue = (r_shadow_cull_backface.value > 0.f) ? 1 : 0;
+	if (ivalue != (int)r_shadow_cull_backface.value)
+		Cvar_SetValueQuick (&r_shadow_cull_backface, (float)ivalue);
+	ivalue = (r_shadow_cull_frustum.value > 0.f) ? 1 : 0;
+	if (ivalue != (int)r_shadow_cull_frustum.value)
+		Cvar_SetValueQuick (&r_shadow_cull_frustum, (float)ivalue);
+	ivalue = (r_shadow_cull_sphere.value > 0.f) ? 1 : 0;
+	if (ivalue != (int)r_shadow_cull_sphere.value)
+		Cvar_SetValueQuick (&r_shadow_cull_sphere, (float)ivalue);
+
+	fvalue = CLAMP (0.f, r_shadow_receiver_bias.value, 16.f);
+	if (fvalue != r_shadow_receiver_bias.value)
+		Cvar_SetValueQuick (&r_shadow_receiver_bias, fvalue);
+}
+
 static void R_Shadow_ResetRuntime (void)
 {
 	int i;
+	int f;
 
 	r_shadow_state.valid = false;
 	r_shadow_state.num_dlights = 0;
 	R_Shadow_MatrixIdentity (r_shadow_state.sun_viewproj);
+	VectorClear (r_shadow_state.sun_eye);
 	for (i = 0; i < SHADOW_DLIGHT_MAX; ++i)
+	{
 		r_shadow_state.dlight_indices[i] = -1;
+		for (f = 0; f < SHADOW_DLIGHT_FACES; ++f)
+			memset (r_shadow_state.dlight_frustum[i][f], 0, sizeof (r_shadow_state.dlight_frustum[i][f]));
+	}
+	memset (r_shadow_state.sun_frustum, 0, sizeof (r_shadow_state.sun_frustum));
 }
 
 static void R_Shadow_SelectDlights (void)
@@ -424,6 +496,9 @@ static void R_Shadow_SelectDlights (void)
 	}
 }
 
+static void R_Shadow_ExtractFrustumPlane (const float mvp[16], int axis, float ndcval, qboolean flip, mplane_t *out);
+static void R_Shadow_ExtractFrustum (const float viewproj[16], mplane_t out[4]);
+
 static void R_Shadow_UpdateSunMatrix (void)
 {
 	const sun_t *sun = R_GetSun ();
@@ -432,9 +507,9 @@ static void R_Shadow_UpdateSunMatrix (void)
 	float znear = 1.f;
 	float zfar = sun_dist * 2.5f;
 	vec3_t center, forward, eye, up;
-	float view[16], proj[16], viewproj[16];
+	float view[16], proj[16];
 	float center_ls[4];
-	float texel;
+	float texel = 0.f;
 
 	/* Keep sun-shadow coverage stable while looking around:
 	 * anchoring to view direction (vpn) causes projection drift on camera yaw/pitch. */
@@ -442,30 +517,66 @@ static void R_Shadow_UpdateSunMatrix (void)
 	VectorScale (sun->dir, -1.f, forward);
 	VectorMA (center, -sun_dist, forward, eye);
 	VectorSet (up, 0.f, 0.f, 1.f);
+	VectorCopy (eye, r_shadow_state.sun_eye);
 
 	R_Shadow_MatrixLook (view, eye, forward, up);
 	R_Shadow_MatrixOrtho (proj, -radius, radius, -radius, radius, znear, zfar);
-	R_Shadow_MatrixMultiply (viewproj, proj, view);
 
-	/* Shadow stabilization via texel snapping in light space. */
-	center_ls[0] = view[0] * center[0] + view[4] * center[1] + view[8] * center[2] + view[12];
-	center_ls[1] = view[1] * center[0] + view[5] * center[1] + view[9] * center[2] + view[13];
-	center_ls[2] = view[2] * center[0] + view[6] * center[1] + view[10] * center[2] + view[14];
-	center_ls[3] = 1.f;
-	texel = (radius * 2.f) / q_max (1.f, (float)framebufs.shadow.sun_size);
-	center_ls[0] = floorf (center_ls[0] / texel) * texel;
-	center_ls[1] = floorf (center_ls[1] / texel) * texel;
-	view[12] -= center_ls[0] - (view[0] * center[0] + view[4] * center[1] + view[8] * center[2] + view[12]);
-	view[13] -= center_ls[1] - (view[1] * center[0] + view[5] * center[1] + view[9] * center[2] + view[13]);
+	/* Stable directional shadows: snap light-space translation to shadow texels. */
+	if (r_shadow_sun_snap.value > 0.f && framebufs.shadow.sun_size > 0)
+	{
+		texel = (radius * 2.f) / q_max (1.f, (float)framebufs.shadow.sun_size);
+		center_ls[0] = view[0] * center[0] + view[4] * center[1] + view[8] * center[2] + view[12];
+		center_ls[1] = view[1] * center[0] + view[5] * center[1] + view[9] * center[2] + view[13];
+		center_ls[2] = view[2] * center[0] + view[6] * center[1] + view[10] * center[2] + view[14];
+		center_ls[3] = 1.f;
+		center_ls[0] = floorf (center_ls[0] / texel + 0.5f) * texel;
+		center_ls[1] = floorf (center_ls[1] / texel + 0.5f) * texel;
+		view[12] += center_ls[0] - (view[0] * center[0] + view[4] * center[1] + view[8] * center[2] + view[12]);
+		view[13] += center_ls[1] - (view[1] * center[0] + view[5] * center[1] + view[9] * center[2] + view[13]);
+	}
+
 	R_Shadow_MatrixMultiply (r_shadow_state.sun_viewproj, proj, view);
+	R_Shadow_ExtractFrustum (r_shadow_state.sun_viewproj, r_shadow_state.sun_frustum);
 
 	if (r_shadow_log.value > 1.f && (r_framecount % 60) == 0)
 	{
-		Con_Printf ("Shadow sun: center=(%.1f %.1f %.1f) eye=(%.1f %.1f %.1f) dist=%.1f radius=%.1f z=[%.1f..%.1f]\n",
+		Con_Printf ("Shadow sun: center=(%.1f %.1f %.1f) eye=(%.1f %.1f %.1f) dist=%.1f radius=%.1f z=[%.1f..%.1f] snap=%d texel=%.4f\n",
 			center[0], center[1], center[2],
 			eye[0], eye[1], eye[2],
-			sun_dist, radius, znear, zfar);
+			sun_dist, radius, znear, zfar,
+			(r_shadow_sun_snap.value > 0.f) ? 1 : 0,
+			texel);
 	}
+}
+
+static void R_Shadow_ExtractFrustumPlane (const float mvp[16], int axis, float ndcval, qboolean flip, mplane_t *out)
+{
+	float nx = (mvp[0 * 4 + axis] - ndcval * mvp[0 * 4 + 3]);
+	float ny = (mvp[1 * 4 + axis] - ndcval * mvp[1 * 4 + 3]);
+	float nz = (mvp[2 * 4 + axis] - ndcval * mvp[2 * 4 + 3]);
+	float dist = -(mvp[3 * 4 + axis] - ndcval * mvp[3 * 4 + 3]);
+	float denom = sqrtf (nx * nx + ny * ny + nz * nz);
+	float scale;
+
+	if (denom < 1e-6f)
+		denom = 1e-6f;
+	scale = (flip ? -1.f : 1.f) / denom;
+
+	out->normal[0] = nx * scale;
+	out->normal[1] = ny * scale;
+	out->normal[2] = nz * scale;
+	out->dist = dist * scale;
+	out->type = PLANE_ANYZ;
+	out->signbits = 0;
+}
+
+static void R_Shadow_ExtractFrustum (const float viewproj[16], mplane_t out[4])
+{
+	R_Shadow_ExtractFrustumPlane (viewproj, 0, 1.f, true, &out[0]);   // right
+	R_Shadow_ExtractFrustumPlane (viewproj, 0, -1.f, false, &out[1]); // left
+	R_Shadow_ExtractFrustumPlane (viewproj, 1, -1.f, false, &out[2]); // bottom
+	R_Shadow_ExtractFrustumPlane (viewproj, 1, 1.f, true, &out[3]);   // top
 }
 
 static void R_Shadow_UpdateDlightMatrices (void)
@@ -492,6 +603,7 @@ static void R_Shadow_UpdateDlightMatrices (void)
 		{
 			R_Shadow_MatrixLook (view, *light, face_dirs[face], face_ups[face]);
 			R_Shadow_MatrixMultiply (r_shadow_state.dlight_viewproj[slot][face], proj, view);
+			R_Shadow_ExtractFrustum (r_shadow_state.dlight_viewproj[slot][face], r_shadow_state.dlight_frustum[slot][face]);
 		}
 	}
 }
@@ -623,8 +735,16 @@ cvar_t  r_shadow_dlight_size = { "r_shadow_dlight_size", "512", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun_distance = { "r_shadow_sun_distance", "1200", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun_bias = { "r_shadow_sun_bias", "0.0015", CVAR_ARCHIVE };
 cvar_t  r_shadow_dlight_bias = { "r_shadow_dlight_bias", "0.02", CVAR_ARCHIVE };
+cvar_t  r_shadow_receiver_bias = { "r_shadow_receiver_bias", "2.0", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun_pcf = { "r_shadow_sun_pcf", "1.5", CVAR_ARCHIVE };
 cvar_t  r_shadow_dlight_pcf = { "r_shadow_dlight_pcf", "0.75", CVAR_ARCHIVE };
+cvar_t  r_shadow_sun_snap = { "r_shadow_sun_snap", "1", CVAR_ARCHIVE };
+cvar_t  r_shadow_mark_mode = { "r_shadow_mark_mode", "1", CVAR_ARCHIVE };
+cvar_t  r_shadow_profile = { "r_shadow_profile", "0", CVAR_ARCHIVE };
+cvar_t  r_shadow_cull_vis = { "r_shadow_cull_vis", "0", CVAR_ARCHIVE };
+cvar_t  r_shadow_cull_backface = { "r_shadow_cull_backface", "0", CVAR_ARCHIVE };
+cvar_t  r_shadow_cull_frustum = { "r_shadow_cull_frustum", "1", CVAR_ARCHIVE };
+cvar_t  r_shadow_cull_sphere = { "r_shadow_cull_sphere", "1", CVAR_ARCHIVE };
 cvar_t  r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
 cvar_t  r_shadow_log = { "r_shadow_log", "0", CVAR_ARCHIVE };
 cvar_t  r_rimlight = { "r_rimlight", "1", CVAR_ARCHIVE };
@@ -833,6 +953,7 @@ cvar_t	r_showfields_align = { "r_showfields_align", "1", CVAR_ARCHIVE }; // 0=en
 cvar_t	r_lerpmodels = { "r_lerpmodels", "1", CVAR_ARCHIVE };
 cvar_t	r_lerpmove = { "r_lerpmove", "1", CVAR_ARCHIVE };
 cvar_t	r_nolerp_list = { "r_nolerp_list", "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", CVAR_NONE };
+cvar_t	r_noshadow_list = { "r_noshadow_list", "progs/missile.mdl,progs/grenade.mdl,progs/spike.mdl,progs/s_spike.mdl,progs/bolt.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/beam.mdl,progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/h2stuff/newfire.mdl", CVAR_NONE };
 
 extern cvar_t	r_vfog;
 extern cvar_t	vid_fsaa;
@@ -1391,18 +1512,6 @@ void GL_CreateFrameBuffers (void)
 		);
 	}
 
-	framebufs.dlight.tex = 0;
-	framebufs.dlight.fbo = 0;
-	if (framebufs.scene.samples == 1)
-	{
-		framebufs.dlight.tex = GL_CreateFBOAttachment (GL_RGBA16F, 1, GL_LINEAR, "dlight buffer");
-		framebufs.dlight.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.dlight.tex,
-			framebufs.scene.depth_stencil_tex,
-			framebufs.scene.depth_stencil_tex,
-			"dlight fbo"
-		);
-	}
-
 	/* weighted blended order-independent transparency (accum + revealage, potentially multisampled */
 	framebufs.oit.accum_tex = GL_CreateFBOAttachment (GL_RGBA16F, framebufs.scene.samples, GL_NEAREST, "oit accum");
 	framebufs.oit.revealage_tex = GL_CreateFBOAttachment (GL_R8, framebufs.scene.samples, GL_NEAREST, "oit revealage");
@@ -1459,7 +1568,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_composite);
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
 	GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
-	GL_DeleteFramebuffersFunc (1, &framebufs.dlight.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
 	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.fbo);
 	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.history_fbo);
@@ -1495,7 +1603,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
 	GL_DeleteNativeTexture (framebufs.scene.color_tex);
 	GL_DeleteNativeTexture (framebufs.scene.velocity_tex);
-	GL_DeleteNativeTexture (framebufs.dlight.tex);
 	GL_DeleteNativeTexture (framebufs.autoexposure.tex);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
@@ -1744,22 +1851,6 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 	GL_LogErrorIfDeveloper ("GL_LogSSAODepthInfo");
 }
 
-static void R_CompositeDlightBuffer (void)
-{
-	if (!r_dlight_buffered_frame)
-		return;
-	if (!framebufs.dlight.tex || !glprogs.dlight_composite)
-		return;
-
-	GL_BeginGroup ("Dlight composite");
-	GL_UseProgram (glprogs.dlight_composite);
-	GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.dlight.tex);
-	GL_Uniform1fFunc (0, 1.f);
-	glDrawArrays (GL_TRIANGLES, 0, 3);
-	GL_EndGroup ();
-}
-
 static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
 {
 	if ((r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f) && r_ssao_debug.value <= 0.f)
@@ -1880,11 +1971,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform1iFunc (11, normal_source);
 	GL_Uniform1iFunc (12, 0);
 	GL_Uniform1iFunc (13, noise_mode);
-	/* BUG FIX #1: Pass saved fog density (r_ssao_fog_state.density) as uniform 14.y
-	 * so ssao.frag FogTransmittanceFromViewPos uses the correct scene fog density
-	 * instead of the zero value left by Fog_DisableGFog. The ssao.frag u_fogParams
-	 * layout(location=14) must read .y as fog density instead of the UBO Fog.w.
-	 * .zw pass fog color rgb (xy = color.rg, see ssao.frag for usage). */
+	/* Feed cached fogvol global density to SSAO instead of the removed analytic
+	 * GL fog UBO channel. */
 	GL_Uniform4fFunc (14, max_distance, r_ssao_fog_state.density,
 		r_ssao_fog_state.color[0] * 0.299f + r_ssao_fog_state.color[1] * 0.587f + r_ssao_fog_state.color[2] * 0.114f,
 		0.f);
@@ -2770,6 +2858,7 @@ void GL_PostProcess (void)
 	int palidx, variant;
 	float saturation;
 	float dither;
+	qboolean needs_postprocess;
 	qboolean dof_enabled;
 	float dof_focus, dof_range, dof_strength;
 	float dof_znear, dof_zfar;
@@ -2825,7 +2914,8 @@ void GL_PostProcess (void)
 	float dv_debug;
 	float dv_time;
 	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
-	if (!GL_NeedsPostprocess ())
+	R_GetFramePlanDecisions (NULL, &needs_postprocess);
+	if (!needs_postprocess)
 		return;
 	if (framebufs.composite.fbo == 0 || framebufs.composite.color_tex == 0)
 		return;
@@ -3076,11 +3166,8 @@ void GL_PostProcess (void)
 		postfx_state.underwater_postfx_active ? postfx_state.underwater_fog_strength : 0.f,
 		postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
-	/* BUG FIX #1: uniform 24 .w was unused (0). Now carries scene fog density from
-	 * r_ssao_fog_state.density so postprocess.frag SampleSSAO fog-damping works correctly.
-	 * r_ssao_saved_fog is captured in R_RenderView before Fog_DisableGFog zeros the
-	 * density in r_framedata.fogdata[3]. postprocess.frag must read scene fog density
-	 * from uniform 24.w instead of Fog.w (UBO). */
+	/* Postprocess SSAO damping uses the cached fogvol global density instead of
+	 * the removed analytic GL fog UBO channel. */
 	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, r_ssao_fog_state.density);
 	{
 		int quality = (int)Q_rint (r_post_damage_dv_quality.value);
@@ -3750,6 +3837,7 @@ static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
 {
 	float saturation;
 	qboolean godrays_medium;
+	qboolean fogvol_configured = R_FogVol_HasRenderableContent ();
 
 	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
@@ -3765,30 +3853,21 @@ static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
 	godrays_medium = R_GodraysMediumEnabled ();
 	if (r_godrays.value > 0.f && godrays_medium)
 		return true;
-	if (include_fogvol && R_FogVol_ShouldAffectPostFX ())
+	if (include_fogvol && fogvol_configured)
 		return true;
 	return false;
 }
 
-static qboolean GL_NeedsPostprocessWithoutFogVol (void)
-{
-	return GL_NeedsPostprocess_Internal (false);
-}
-
 qboolean GL_NeedsSceneEffects (void)
 {
+	qboolean fogvol_active = R_FogVol_IsEnabledForFrame ();
+	qboolean fogvol_configured = fogvol_active && R_FogVol_HasRenderableContent ();
+
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
 		return true;
 
 	/* Bloom enabled: keep scene-effects path active for a full-frame bloom extract/composite pass. */
 	if (r_bloom.value > 0.f || GL_PostFXBloomBoostActive ())
-		return true;
-
-	/* Only force scene-effects for buffered dlights if postprocess is active,
-	 * and never when fogvol already owns the postfx path this frame. */
-	if (r_dynamic.value > 0.f && framebufs.dlight.fbo
-		&& GL_NeedsPostprocessWithoutFogVol ()
-		&& !R_FogVol_ShouldAffectPostFX ())
 		return true;
 
         if (GL_ShouldApplyMotionBlur ())
@@ -3797,7 +3876,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (R_DoFEnabled ())
 		return true;
 
-	if (R_FogVol_ShouldAffectPostFX ())
+	if (fogvol_configured)
 		return true;
 
 	return false;
@@ -3811,6 +3890,29 @@ GL_NeedsPostprocess
 qboolean GL_NeedsPostprocess (void)
 {
 	return GL_NeedsPostprocess_Internal (true);
+}
+
+static void R_GetFramePlanDecisions (qboolean *out_needs_scene_effects, qboolean *out_needs_postprocess)
+{
+	RenderFramePlan plan;
+	qboolean needs_scene_effects;
+	qboolean needs_postprocess;
+
+	if (R_FrameGraph_GetRenderFramePlan (&plan))
+	{
+		needs_scene_effects = plan.needs_scene_effects;
+		needs_postprocess = plan.needs_postprocess;
+	}
+	else
+	{
+		needs_scene_effects = GL_NeedsSceneEffects ();
+		needs_postprocess = GL_NeedsPostprocess ();
+	}
+
+	if (out_needs_scene_effects)
+		*out_needs_scene_effects = needs_scene_effects;
+	if (out_needs_postprocess)
+		*out_needs_postprocess = needs_postprocess;
 }
 
 /*
@@ -3835,9 +3937,14 @@ R_SetupGL
 */
 void R_SetupGL (void)
 {
-	if (!GL_NeedsSceneEffects ())
+	qboolean needs_scene_effects = false;
+	qboolean needs_postprocess = false;
+
+	R_GetFramePlanDecisions (&needs_scene_effects, &needs_postprocess);
+
+	if (!needs_scene_effects)
 	{
-		GLuint target = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0u;
+		GLuint target = needs_postprocess ? framebufs.composite.fbo : 0u;
 		qboolean srgb_output = (target == 0u) && GL_UseSRGBFramebuffer ();
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, target);
@@ -3993,8 +4100,9 @@ R_SetupView -- johnfitz -- this is the stuff that needs to be done once per fram
 void R_SetupView (void)
 {
 	static qboolean gpuframedata_layout_logged = false;
-	r_dlight_buffered_frame = false;
 	framesetup.composite_ready = false;
+	memset (r_framedata.fogdata, 0, sizeof (r_framedata.fogdata));
+	memset (r_framedata.skyfogdata, 0, sizeof (r_framedata.skyfogdata));
 
 	if (r_gl_state_validate.value > 0.f && !gpuframedata_layout_logged)
 	{
@@ -4318,16 +4426,24 @@ R_DrawViewModel -- johnfitz -- gutted
 void R_DrawViewModel (void)
 {
 	entity_t* e = &cl.viewent;
+	GLenum restore_depth_func = gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
 
 	if (!R_IsViewModelVisible ())
 		return;
 
 	GL_BeginGroup ("View model");
+	GL_SetScissorEnabled (false);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+
+	/* Viewmodel is rendered after postprocess to keep it out of blur/DoF/SSAO/bloom.
+	 * Depth for the postprocessed backbuffer is not guaranteed, so force ALWAYS. */
+	glDepthFunc (GL_ALWAYS);
 
 	// hack the depth range to prevent view model from poking into walls
 	GL_DepthRange (ZRANGE_VIEWMODEL);
 	R_DrawAliasModels (&e, 1);
 	GL_DepthRange (ZRANGE_FULL);
+	glDepthFunc (restore_depth_func);
 
 	GL_EndGroup ();
 }
@@ -5231,6 +5347,31 @@ static void R_Shadow_GetSelectedIndices (int outidx[SHADOW_DLIGHT_MAX])
 		outidx[i] = (i < r_shadow_state.num_dlights) ? r_shadow_state.dlight_indices[i] : -1;
 }
 
+qboolean R_Shadow_GetSunOcclusionData (float out_viewproj[16], float *out_bias, float *out_pcf_uv)
+{
+	qboolean enabled = (framebufs.shadow.available && R_Shadow_Enabled () && r_shadow_state.valid
+		&& R_Shadow_SunEnabled () && framebufs.shadow.sun_depth_tex);
+
+	if (out_viewproj)
+	{
+		if (enabled)
+			memcpy (out_viewproj, r_shadow_state.sun_viewproj, sizeof (r_shadow_state.sun_viewproj));
+		else
+			memcpy (out_viewproj, r_identity_mat4, sizeof (r_identity_mat4));
+	}
+	if (out_bias)
+		*out_bias = enabled ? q_max (0.f, r_shadow_sun_bias.value) : 0.f;
+	if (out_pcf_uv)
+	{
+		float texel = (enabled && framebufs.shadow.sun_size > 0)
+			? (1.f / (float)framebufs.shadow.sun_size)
+			: 0.f;
+		*out_pcf_uv = enabled ? (q_max (0.f, r_shadow_sun_pcf.value) * texel) : 0.f;
+	}
+
+	return enabled;
+}
+
 void R_Shadow_ApplyWorldReceiverUniforms (GLuint program)
 {
 	int idx[SHADOW_DLIGHT_MAX];
@@ -5266,7 +5407,7 @@ void R_Shadow_ApplyWorldReceiverUniforms (GLuint program)
 		GL_Uniform4fFunc (u->bias_counts, (float)r_shadow_state.num_dlights,
 			q_max (0.f, r_shadow_sun_bias.value),
 			q_max (0.f, r_shadow_dlight_bias.value),
-			0.f);
+			q_max (0.f, r_shadow_receiver_bias.value));
 	if (u->pcf_texel >= 0)
 		GL_Uniform4fFunc (u->pcf_texel,
 			q_max (0.f, r_shadow_sun_pcf.value),
@@ -5336,16 +5477,80 @@ static void R_Shadow_ClearDrawContext (void)
 	memset (&r_shadow_draw_ctx, 0, sizeof (r_shadow_draw_ctx));
 }
 
+static qboolean R_Shadow_CanReuseDrawCache (qboolean include_world)
+{
+	if (!r_shadow_draw_cache.valid)
+		return false;
+	if (r_shadow_draw_cache.visframecount != r_visframecount)
+		return false;
+	if (r_shadow_draw_cache.numshadowedicts != cl_numshadowedicts)
+		return false;
+	if (r_shadow_draw_cache.include_world != include_world)
+		return false;
+	if (r_shadow_draw_cache.worldmodel != cl.worldmodel)
+		return false;
+	if (r_shadow_draw_cache.viewleaf != r_viewleaf)
+		return false;
+	if (cl_numshadowedicts > 0)
+	{
+		if (r_shadow_draw_cache.first_shadow_ent != cl_shadow_visedicts[0])
+			return false;
+		if (r_shadow_draw_cache.last_shadow_ent != cl_shadow_visedicts[cl_numshadowedicts - 1])
+			return false;
+	}
+	else if (r_shadow_draw_cache.first_shadow_ent || r_shadow_draw_cache.last_shadow_ent)
+	{
+		return false;
+	}
+
+	return true;
+}
+
+static void R_Shadow_LoadDrawCache (void)
+{
+	r_shadow_draw_ctx.brush_count = r_shadow_draw_cache.brush_count;
+	r_shadow_draw_ctx.alias_count = r_shadow_draw_cache.alias_count;
+	if (r_shadow_draw_ctx.brush_count > 0)
+		memcpy (r_shadow_brush_ents, r_shadow_draw_cache.brush_ents, sizeof (entity_t *) * r_shadow_draw_ctx.brush_count);
+	if (r_shadow_draw_ctx.alias_count > 0)
+		memcpy (r_shadow_alias_ents, r_shadow_draw_cache.alias_ents, sizeof (entity_t *) * r_shadow_draw_ctx.alias_count);
+}
+
+static void R_Shadow_SaveDrawCache (qboolean include_world)
+{
+	r_shadow_draw_cache.valid = true;
+	r_shadow_draw_cache.visframecount = r_visframecount;
+	r_shadow_draw_cache.numshadowedicts = cl_numshadowedicts;
+	r_shadow_draw_cache.include_world = include_world;
+	r_shadow_draw_cache.worldmodel = cl.worldmodel;
+	r_shadow_draw_cache.viewleaf = r_viewleaf;
+	r_shadow_draw_cache.first_shadow_ent = (cl_numshadowedicts > 0) ? cl_shadow_visedicts[0] : NULL;
+	r_shadow_draw_cache.last_shadow_ent = (cl_numshadowedicts > 0) ? cl_shadow_visedicts[cl_numshadowedicts - 1] : NULL;
+	r_shadow_draw_cache.brush_count = r_shadow_draw_ctx.brush_count;
+	r_shadow_draw_cache.alias_count = r_shadow_draw_ctx.alias_count;
+	if (r_shadow_draw_cache.brush_count > 0)
+		memcpy (r_shadow_draw_cache.brush_ents, r_shadow_brush_ents, sizeof (entity_t *) * r_shadow_draw_cache.brush_count);
+	if (r_shadow_draw_cache.alias_count > 0)
+		memcpy (r_shadow_draw_cache.alias_ents, r_shadow_alias_ents, sizeof (entity_t *) * r_shadow_draw_cache.alias_count);
+}
+
 static void R_Shadow_BuildDrawContext (void)
 {
 	int i;
+	qboolean include_world = (r_drawworld.value && cl.worldmodel) ? true : false;
 
 	r_shadow_draw_ctx.brush_ents = r_shadow_brush_ents;
 	r_shadow_draw_ctx.alias_ents = r_shadow_alias_ents;
 	r_shadow_draw_ctx.brush_count = 0;
 	r_shadow_draw_ctx.alias_count = 0;
 
-	if (r_drawworld.value && cl.worldmodel)
+	if (R_Shadow_CanReuseDrawCache (include_world))
+	{
+		R_Shadow_LoadDrawCache ();
+		return;
+	}
+
+	if (include_world)
 		r_shadow_brush_ents[r_shadow_draw_ctx.brush_count++] = &cl_entities[0];
 
 	for (i = 0; i < cl_numshadowedicts; ++i)
@@ -5368,31 +5573,157 @@ static void R_Shadow_BuildDrawContext (void)
 				r_shadow_alias_ents[r_shadow_draw_ctx.alias_count++] = ent;
 		}
 	}
+
+	R_Shadow_SaveDrawCache (include_world);
+}
+
+static qboolean R_Shadow_AABBOutsideFrustum (const vec3_t mins, const vec3_t maxs, const mplane_t planes[4])
+{
+	int i;
+	vec3_t center, extents;
+
+	center[0] = (mins[0] + maxs[0]) * 0.5f;
+	center[1] = (mins[1] + maxs[1]) * 0.5f;
+	center[2] = (mins[2] + maxs[2]) * 0.5f;
+	extents[0] = (maxs[0] - mins[0]) * 0.5f;
+	extents[1] = (maxs[1] - mins[1]) * 0.5f;
+	extents[2] = (maxs[2] - mins[2]) * 0.5f;
+
+	for (i = 0; i < 4; ++i)
+	{
+		const mplane_t *plane = &planes[i];
+		float signed_distance = DotProduct (plane->normal, center) - plane->dist;
+		float radius =
+			fabsf (plane->normal[0]) * extents[0]
+			+ fabsf (plane->normal[1]) * extents[1]
+			+ fabsf (plane->normal[2]) * extents[2];
+		if (signed_distance < -radius)
+			return true;
+	}
+
+	return false;
+}
+
+static qboolean R_Shadow_EntityOutsideSphere (entity_t *ent, const vec4_t sphere)
+{
+	vec3_t mins, maxs, center, extents, to_center;
+	float dist;
+	float surf_radius;
+
+	if (!ent || sphere[3] <= 0.f)
+		return false;
+
+	R_GetEntityBounds (ent, mins, maxs);
+	center[0] = (mins[0] + maxs[0]) * 0.5f;
+	center[1] = (mins[1] + maxs[1]) * 0.5f;
+	center[2] = (mins[2] + maxs[2]) * 0.5f;
+	extents[0] = (maxs[0] - mins[0]) * 0.5f;
+	extents[1] = (maxs[1] - mins[1]) * 0.5f;
+	extents[2] = (maxs[2] - mins[2]) * 0.5f;
+	surf_radius = VectorLength (extents);
+
+	VectorSubtract (center, sphere, to_center);
+	dist = VectorLength (to_center);
+	return dist > sphere[3] + surf_radius;
+}
+
+static qboolean R_Shadow_EntityPassesCull (entity_t *ent, const vec4_t *sphere, const mplane_t frustum4[4])
+{
+	vec3_t mins, maxs;
+
+	if (!ent || !ent->model)
+		return false;
+	if (ent == &cl_entities[0])
+		return true;
+	if (sphere && r_shadow_cull_sphere.value > 0.f && R_Shadow_EntityOutsideSphere (ent, *sphere))
+		return false;
+	if (frustum4 && r_shadow_cull_frustum.value > 0.f)
+	{
+		R_GetEntityBounds (ent, mins, maxs);
+		if (R_Shadow_AABBOutsideFrustum (mins, maxs, frustum4))
+			return false;
+	}
+	return true;
+}
+
+static void R_Shadow_FilterDrawContext (const shadow_draw_context_t *src, shadow_draw_context_t *dst, const vec4_t *sphere, const mplane_t frustum4[4])
+{
+	int i;
+
+	dst->brush_ents = r_shadow_filtered_brush_ents;
+	dst->alias_ents = r_shadow_filtered_alias_ents;
+	dst->brush_count = 0;
+	dst->alias_count = 0;
+
+	for (i = 0; i < src->brush_count; ++i)
+	{
+		entity_t *ent = src->brush_ents[i];
+		if (!ent)
+			continue;
+		if (!R_Shadow_EntityPassesCull (ent, sphere, frustum4))
+			continue;
+		if (dst->brush_count < (int)countof (r_shadow_filtered_brush_ents))
+			dst->brush_ents[dst->brush_count++] = ent;
+	}
+
+	for (i = 0; i < src->alias_count; ++i)
+	{
+		entity_t *ent = src->alias_ents[i];
+		if (!ent)
+			continue;
+		if (!R_Shadow_EntityPassesCull (ent, sphere, frustum4))
+			continue;
+		if (dst->alias_count < (int)countof (r_shadow_filtered_alias_ents))
+			dst->alias_ents[dst->alias_count++] = ent;
+	}
 }
 
 void R_RenderSunShadowMap (void)
 {
+	shadow_draw_context_t pass_ctx;
+	const shadow_draw_context_t *ctx = &r_shadow_draw_ctx;
 	vec3_t dummy = {0.f, 0.f, 0.f};
+	qboolean shadow_mark = (r_shadow_mark_mode.value > 0.f) && (r_shadow_draw_ctx.brush_count > 0);
 
 	if (!R_Shadow_SunEnabled () || !framebufs.shadow.sun_fbo || !framebufs.shadow.sun_depth_tex)
 		return;
 	if (r_shadow_draw_ctx.brush_count <= 0 && r_shadow_draw_ctx.alias_count <= 0)
 		return;
 
+	if (r_shadow_cull_frustum.value > 0.f)
+	{
+		R_Shadow_FilterDrawContext (&r_shadow_draw_ctx, &pass_ctx, NULL, r_shadow_state.sun_frustum);
+		ctx = &pass_ctx;
+	}
+	if (ctx->brush_count <= 0 && ctx->alias_count <= 0)
+		return;
+
+	if (shadow_mark)
+	{
+		R_MarkSurfaces_Shadow (
+			r_shadow_state.sun_eye,
+			r_shadow_state.sun_frustum,
+			NULL,
+			r_shadow_cull_vis.value > 0.f,
+			r_shadow_cull_backface.value > 0.f,
+			r_shadow_cull_frustum.value > 0.f);
+	}
+
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.shadow.sun_fbo);
 	glViewport (0, 0, framebufs.shadow.sun_size, framebufs.shadow.sun_size);
 	glClear (GL_DEPTH_BUFFER_BIT);
 
 	R_Shadow_SetCasterState (r_shadow_state.sun_viewproj, false, dummy, 1.f);
-	if (r_shadow_draw_ctx.brush_count > 0)
-		R_DrawBrushModels_Shadow (r_shadow_draw_ctx.brush_ents, r_shadow_draw_ctx.brush_count, false);
-	if (r_shadow_draw_ctx.alias_count > 0)
-		R_DrawAliasModels_Shadow (r_shadow_draw_ctx.alias_ents, r_shadow_draw_ctx.alias_count, false);
+	if (ctx->brush_count > 0)
+		R_DrawBrushModels_Shadow (ctx->brush_ents, ctx->brush_count, false);
+	if (ctx->alias_count > 0)
+		R_DrawAliasModels_Shadow (ctx->alias_ents, ctx->alias_count, false);
 }
 
 void R_RenderDLightShadowMaps (void)
 {
 	int slot, face;
+	qboolean shadow_mark = (r_shadow_mark_mode.value > 0.f) && (r_shadow_draw_ctx.brush_count > 0);
 
 	if (!R_Shadow_DlightEnabled () || !framebufs.shadow.dlight_fbo || !framebufs.shadow.dlight_depth_tex)
 		return;
@@ -5407,36 +5738,82 @@ void R_RenderDLightShadowMaps (void)
 		const vec4_t *light = &r_shadow_state.dlight_pos_radius[slot];
 		for (face = 0; face < SHADOW_DLIGHT_FACES; ++face)
 		{
+			shadow_draw_context_t pass_ctx;
+			const shadow_draw_context_t *ctx = &r_shadow_draw_ctx;
+			vec4_t sphere;
 			int layer = slot * SHADOW_DLIGHT_FACES + face;
+
+			if (r_shadow_cull_frustum.value > 0.f || r_shadow_cull_sphere.value > 0.f)
+			{
+				if (r_shadow_cull_sphere.value > 0.f)
+				{
+					sphere[0] = (*light)[0];
+					sphere[1] = (*light)[1];
+					sphere[2] = (*light)[2];
+					sphere[3] = (*light)[3];
+				}
+				else
+				{
+					sphere[0] = sphere[1] = sphere[2] = sphere[3] = 0.f;
+				}
+				R_Shadow_FilterDrawContext (&r_shadow_draw_ctx, &pass_ctx,
+					(r_shadow_cull_sphere.value > 0.f) ? &sphere : NULL,
+					(r_shadow_cull_frustum.value > 0.f) ? r_shadow_state.dlight_frustum[slot][face] : NULL);
+				ctx = &pass_ctx;
+			}
+			if (ctx->brush_count <= 0 && ctx->alias_count <= 0)
+				continue;
+
+			if (shadow_mark)
+			{
+				sphere[0] = (*light)[0];
+				sphere[1] = (*light)[1];
+				sphere[2] = (*light)[2];
+				sphere[3] = (*light)[3];
+				R_MarkSurfaces_Shadow (
+					*light,
+					r_shadow_state.dlight_frustum[slot][face],
+					(r_shadow_cull_sphere.value > 0.f) ? &sphere : NULL,
+					r_shadow_cull_vis.value > 0.f,
+					r_shadow_cull_backface.value > 0.f,
+					r_shadow_cull_frustum.value > 0.f);
+			}
+
 			GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.dlight_depth_tex, 0, layer);
 			glViewport (0, 0, framebufs.shadow.dlight_size, framebufs.shadow.dlight_size);
 			glClear (GL_DEPTH_BUFFER_BIT);
 
 			R_Shadow_SetCasterState (r_shadow_state.dlight_viewproj[slot][face], true, *light, (*light)[3]);
-			if (r_shadow_draw_ctx.brush_count > 0)
-				R_DrawBrushModels_Shadow (r_shadow_draw_ctx.brush_ents, r_shadow_draw_ctx.brush_count, true);
-			if (r_shadow_draw_ctx.alias_count > 0)
-				R_DrawAliasModels_Shadow (r_shadow_draw_ctx.alias_ents, r_shadow_draw_ctx.alias_count, true);
+			if (ctx->brush_count > 0)
+				R_DrawBrushModels_Shadow (ctx->brush_ents, ctx->brush_count, true);
+			if (ctx->alias_count > 0)
+				R_DrawAliasModels_Shadow (ctx->alias_ents, ctx->alias_count, true);
 		}
 	}
 }
 
 void R_RenderShadowMaps (void)
 {
-	int old_viewport[4];
-	GLint old_draw_fbo = 0;
-	GLint old_read_fbo = 0;
-	GLint old_depth_func = GL_LEQUAL;
-	GLdouble old_clear_depth = 1.0;
-	GLboolean old_color_mask[4] = {GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE};
-	GLboolean old_depth_mask = GL_TRUE;
+	unsigned saved_state = glstate;
+	GLuint sun_query = 0;
+	GLuint dlight_query = 0;
+	double cpu_begin = 0.0;
+	double cpu_after_sun = 0.0;
+	double cpu_after_dlight = 0.0;
+	double cpu_end = 0.0;
+	double sun_gpu_ms = 0.0;
+	double dlight_gpu_ms = 0.0;
+	qboolean profile_enabled = false;
 	qboolean clip_depth_mode_changed = false;
 	qboolean want_sun_shadow = false;
 	qboolean want_dlight_shadows = false;
+	qboolean marked_for_shadow = false;
+	qboolean have_query_api = false;
 
 	R_Shadow_ResetRuntime ();
 	R_Shadow_ClearDrawContext ();
 	R_Shadow_ReconcileResources ();
+	R_Shadow_NormalizeSettings ();
 
 	if (!framebufs.shadow.available || !R_Shadow_Enabled ())
 		return;
@@ -5456,6 +5833,18 @@ void R_RenderShadowMaps (void)
 		R_Shadow_UpdateDlightMatrices ();
 	if (!want_sun_shadow && !want_dlight_shadows)
 		return;
+	marked_for_shadow = (r_shadow_draw_ctx.brush_count > 0 && r_shadow_mark_mode.value > 0.f);
+
+	have_query_api = (GL_GenQueriesFunc && GL_BeginQueryFunc && GL_EndQueryFunc
+		&& GL_GetQueryObjectui64vFunc && GL_DeleteQueriesFunc);
+	profile_enabled = (r_shadow_profile.value > 0.f);
+	if (profile_enabled && !have_query_api && r_framecount >= r_shadow_profile_last_frame + 300)
+	{
+		Con_Printf ("Shadow profile: GPU timer queries unavailable, reporting CPU timings only.\n");
+		r_shadow_profile_last_frame = r_framecount;
+	}
+	if (profile_enabled)
+		cpu_begin = Sys_DoubleTime ();
 	if (r_shadow_log.value > 0.f && r_framecount >= r_shadow_log_last_frame + 60)
 	{
 		Con_Printf ("Shadow frame: sun=%d dlight=%d casters(brush=%d alias=%d) selected_dlights=%d\n",
@@ -5467,13 +5856,6 @@ void R_RenderShadowMaps (void)
 		r_shadow_log_last_frame = r_framecount;
 	}
 
-	glGetIntegerv (GL_VIEWPORT, old_viewport);
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &old_draw_fbo);
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &old_read_fbo);
-	glGetIntegerv (GL_DEPTH_FUNC, &old_depth_func);
-	glGetDoublev (GL_DEPTH_CLEAR_VALUE, &old_clear_depth);
-	glGetBooleanv (GL_COLOR_WRITEMASK, old_color_mask);
-	glGetBooleanv (GL_DEPTH_WRITEMASK, &old_depth_mask);
 	/* Shadow matrices/shaders are built for classic NDC depth [-1,1].
 	 * Temporarily disable zero-to-one clip-depth mode if clip control is active. */
 	if (gl_clipcontrol_able && GL_ClipControlFunc)
@@ -5490,19 +5872,104 @@ void R_RenderShadowMaps (void)
 	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
 	GL_BeginGroup ("Shadow maps");
+	if (profile_enabled && have_query_api && want_sun_shadow)
+	{
+		GL_GenQueriesFunc (1, &sun_query);
+		GL_BeginQueryFunc (GL_TIME_ELAPSED, sun_query);
+	}
 	R_RenderSunShadowMap ();
+	if (profile_enabled && have_query_api && sun_query)
+		GL_EndQueryFunc (GL_TIME_ELAPSED);
+	if (profile_enabled)
+		cpu_after_sun = Sys_DoubleTime ();
+
+	if (profile_enabled && have_query_api && want_dlight_shadows)
+	{
+		GL_GenQueriesFunc (1, &dlight_query);
+		GL_BeginQueryFunc (GL_TIME_ELAPSED, dlight_query);
+	}
 	R_RenderDLightShadowMaps ();
+	if (profile_enabled && have_query_api && dlight_query)
+		GL_EndQueryFunc (GL_TIME_ELAPSED);
 	GL_EndGroup ();
 
-	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, old_draw_fbo);
-	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, old_read_fbo);
-	glViewport (old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
-	glDepthFunc (old_depth_func);
-	glClearDepth (old_clear_depth);
-	glDepthMask (old_depth_mask);
-	glColorMask (old_color_mask[0], old_color_mask[1], old_color_mask[2], old_color_mask[3]);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	GL_SetState (saved_state);
 	if (clip_depth_mode_changed)
 		GL_ClipControlFunc (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
+	if (gl_clipcontrol_able)
+	{
+		glDepthFunc (GL_GEQUAL);
+		glClearDepth (0.0);
+	}
+	else
+	{
+		glDepthFunc (GL_LEQUAL);
+		glClearDepth (1.0);
+	}
+	if (marked_for_shadow)
+		R_RestoreMarkedSurfaces ();
+
+	if (profile_enabled)
+	{
+		cpu_after_dlight = Sys_DoubleTime ();
+		cpu_end = cpu_after_dlight;
+
+		if (have_query_api)
+		{
+			if (sun_query)
+			{
+				GLuint64 ns = 0;
+				GL_GetQueryObjectui64vFunc (sun_query, GL_QUERY_RESULT, &ns);
+				sun_gpu_ms = (double)ns / 1000000.0;
+				GL_DeleteQueriesFunc (1, &sun_query);
+			}
+			if (dlight_query)
+			{
+				GLuint64 ns = 0;
+				GL_GetQueryObjectui64vFunc (dlight_query, GL_QUERY_RESULT, &ns);
+				dlight_gpu_ms = (double)ns / 1000000.0;
+				GL_DeleteQueriesFunc (1, &dlight_query);
+			}
+		}
+
+		{
+			const double cpu_sun_ms = (cpu_after_sun - cpu_begin) * 1000.0;
+			const double cpu_dlight_ms = (cpu_after_dlight - cpu_after_sun) * 1000.0;
+			const double cpu_total_ms = (cpu_end - cpu_begin) * 1000.0;
+			const double alpha = 0.2;
+
+			if (r_shadow_profile_stats.cpu_total_ms <= 0.0)
+			{
+				r_shadow_profile_stats.cpu_sun_ms = cpu_sun_ms;
+				r_shadow_profile_stats.cpu_dlight_ms = cpu_dlight_ms;
+				r_shadow_profile_stats.cpu_total_ms = cpu_total_ms;
+				r_shadow_profile_stats.gpu_sun_ms = sun_gpu_ms;
+				r_shadow_profile_stats.gpu_dlight_ms = dlight_gpu_ms;
+			}
+			else
+			{
+				r_shadow_profile_stats.cpu_sun_ms = r_shadow_profile_stats.cpu_sun_ms * (1.0 - alpha) + cpu_sun_ms * alpha;
+				r_shadow_profile_stats.cpu_dlight_ms = r_shadow_profile_stats.cpu_dlight_ms * (1.0 - alpha) + cpu_dlight_ms * alpha;
+				r_shadow_profile_stats.cpu_total_ms = r_shadow_profile_stats.cpu_total_ms * (1.0 - alpha) + cpu_total_ms * alpha;
+				r_shadow_profile_stats.gpu_sun_ms = r_shadow_profile_stats.gpu_sun_ms * (1.0 - alpha) + sun_gpu_ms * alpha;
+				r_shadow_profile_stats.gpu_dlight_ms = r_shadow_profile_stats.gpu_dlight_ms * (1.0 - alpha) + dlight_gpu_ms * alpha;
+			}
+		}
+
+		if (r_framecount >= r_shadow_profile_last_frame + 60)
+		{
+			Con_Printf (
+				"Shadow profile: CPU(ms) sun=%.3f dlight=%.3f total=%.3f | GPU(ms) sun=%.3f dlight=%.3f | dlights=%d\n",
+				r_shadow_profile_stats.cpu_sun_ms,
+				r_shadow_profile_stats.cpu_dlight_ms,
+				r_shadow_profile_stats.cpu_total_ms,
+				r_shadow_profile_stats.gpu_sun_ms,
+				r_shadow_profile_stats.gpu_dlight_ms,
+				r_shadow_state.num_dlights);
+			r_shadow_profile_last_frame = r_framecount;
+		}
+	}
 
 	r_shadow_state.valid =
 		(want_sun_shadow || want_dlight_shadows);
@@ -5525,37 +5992,15 @@ static void R_DrawDLightPass (void)
 {
         int count = 0;
         entity_t **ents;
-	qboolean use_buffer;
-
-	r_dlight_buffered_frame = false;
 
         if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
                 return;
-
-	/* PERF: Never use buffered dlights when fogvol is active in postfx path.
-	 * This avoids the AA=off + fogvol performance cliff regression. */
-	use_buffer = (framebufs.dlight.fbo
-		&& framebufs.scene.samples == 1
-		&& GL_NeedsPostprocessWithoutFogVol ()
-		&& !R_FogVol_ShouldAffectPostFX ());
 
         ents = R_GetVisEntities (mod_brush, false, &count);
         if (count <= 0)
                 return;
 
         GL_BeginGroup ("Dynamic lights (additive)");
-
-	if (use_buffer)
-	{
-		r_dlight_buffered_frame = true;
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.dlight.fbo);
-		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		{
-			static const float zeroes[4] = { 0.f, 0.f, 0.f, 0.f };
-			GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
-		}
-	}
 
         r_framedata.dlight_params[2] = 1.f;
         {
@@ -5578,21 +6023,6 @@ static void R_DrawDLightPass (void)
                 GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
         }
 
-	if (use_buffer)
-	{
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
-		if (framesetup.scene_fbo)
-		{
-			glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			glReadBuffer (GL_COLOR_ATTACHMENT0);
-		}
-		else
-		{
-			glDrawBuffer (GL_BACK);
-			glReadBuffer (GL_BACK);
-		}
-	}
-
         GL_EndGroup ();
 }
 
@@ -5604,13 +6034,11 @@ R_RenderScene
 void R_RenderScene (void)
 {
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
-	R_SetupGL ();
 	R_Clear ();
 	
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
-	R_DrawViewModel (); //johnfitz -- moved here from R_RenderView
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 	R_DrawDecals ();
@@ -5646,10 +6074,13 @@ void R_WarpScaleView (void)
 	qboolean msaa = framebufs.scene.samples > 1;
 	qboolean needwarpscale;
 	qboolean need_depth_resolve;
+	qboolean needs_scene_effects = false;
+	qboolean needs_postprocess = false;
 	GLuint fbodest;
 	double t;
 
-	if (!GL_NeedsSceneEffects ())
+	R_GetFramePlanDecisions (&needs_scene_effects, &needs_postprocess);
+	if (!needs_scene_effects)
 		return;
 
 	srcx = glx + r_refdef.vrect.x;
@@ -5658,7 +6089,7 @@ void R_WarpScaleView (void)
 	srch = r_refdef.vrect.height / r_refdef.scale;
 
 	needwarpscale = r_refdef.scale != 1 || water_warp;
-	fbodest = GL_NeedsPostprocess () ? framebufs.composite.fbo : 0;
+	fbodest = needs_postprocess ? framebufs.composite.fbo : 0;
 	need_depth_resolve = (fbodest == framebufs.composite.fbo)
 		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || R_FogVol_ShouldAffectPostFX ()
 			|| (R_Godrays_IsReady (cl.worldmodel, r_framecount) && (r_godrays.value > 0.f || r_godrays_debug.value > 0.f || r_godrays_debug_source.value > 0.f)));
@@ -5752,7 +6183,6 @@ void R_WarpScaleView (void)
 	{
 		if (fbodest == framebufs.composite.fbo)
 			framesetup.composite_ready = true;
-		R_CompositeDlightBuffer ();
 		return;
 	}
 
@@ -5778,7 +6208,6 @@ void R_WarpScaleView (void)
 
 	if (fbodest == framebufs.composite.fbo)
 		framesetup.composite_ready = true;
-	R_CompositeDlightBuffer ();
 }
 
 /*

@@ -171,12 +171,15 @@ vec4 ComputeHistoryClamp(vec2 uv, vec4 centerColor)
 
 void main()
 {
-	vec2 screenPos = gl_FragCoord.xy * FogDepthScale;
+	vec2 fogTexel = max(vec2(textureSize(FogCurrent, 0)), vec2(1.0));
+	vec2 fogUv = gl_FragCoord.xy / fogTexel;
+	ivec2 screenPixel = ivec2(floor(gl_FragCoord.xy * FogDepthScale));
+	vec2 screenPos = vec2(screenPixel) + vec2(0.5);
 	vec2 invScreen = FogViewportParams.zw;
 	vec2 screenUv  = screenPos * invScreen;
 	vec2 viewUv    = (screenPos - FogViewParams.xy) * FogViewParams.zw;
 	vec2 viewSize  = 1.0 / max(FogViewParams.zw, vec2(1e-6));
-	vec4 current   = texture(FogCurrent, screenUv);
+	vec4 current   = texture(FogCurrent, fogUv);
 	bool checkerboardMissing = (FogCheckerboard != 0 && current.a <= 0.0001);
 
 	// FIX #4: Cast PrevFrameValid to int to avoid signed/unsigned comparison
@@ -194,54 +197,25 @@ void main()
 		return;
 	}
 
-	ivec2 depthCoord = ivec2(screenPos);
-	float depth      = texelFetch(SceneDepth, depthCoord, 0).r;
+	float depth      = texelFetch(SceneDepth, screenPixel, 0).r;
 	float depthNdc   = DepthToNdcZ(depth);
 
 	vec2  prevViewUv = vec2(0.0);
 	float prevDepthNdc = depthNdc;
 	bool  valid = false;
-	bool  usedVelocityPath = false;
-	bool  usedFogMediumPath = false;
 	float depthAgreement = 0.0;
 	float motionConfidence = 0.0;
 	float varianceConfidence = 0.0;
 	float fogReprojectWeight = smoothstep(0.02, 0.20, current.a);
 
-	if (FogHasVelocity != 0 && fogReprojectWeight < 0.25)
-	{
-		vec2 velocityUv = clamp(screenUv, vec2(0.0), vec2(1.0));
-		vec2 velocity = texture(SceneVelocity, velocityUv).xy;
-		float velocityPx = length(velocity * FogViewportParams.xy);
-		if (velocityPx > 0.05)
-		{
-			vec2 prevScreenUvFromVel = screenUv - velocity;
-		/* BUG FIX (G-06): Original formula was:
-		 *   prevViewUv = (prevScreenUvFromVel * FogViewportParams.xy - FogViewParams.xy) * FogViewParams.zw
-		 * prevScreenUvFromVel is already a UV [0,1].  Multiplying by FogViewportParams.xy
-		 * gives pixel coordinates, subtracting FogViewParams.xy (also pixel-space view origin)
-		 * gives view-relative pixels, multiplying by FogViewParams.zw (inv-view-size) gives
-		 * view UV.  This is correct in halfres where FogViewParams.xy = (0,0), but WRONG in
-		 * fullres mode where view_x/view_y are non-zero — the intermediate pixel-space value
-		 * was never properly derived from prevScreenUvFromVel.
-		 *
-		 * Correct derivation:
-		 *   prevScreenPx = prevScreenUvFromVel * FogViewportParams.xy   (UV → screen pixels)
-		 *   prevViewUv   = (prevScreenPx - FogViewParams.xy) * FogViewParams.zw  (pixels → view UV)
-		 * This is identical to what Reproject() computes, just using velocity instead of
-		 * the matrix reprojection path. */
-			vec2 prevScreenPx = prevScreenUvFromVel * FogViewportParams.xy;
-			prevViewUv = (prevScreenPx - FogViewParams.xy) * FogViewParams.zw;
-			valid = all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
-			usedVelocityPath = valid;
-		}
-	}
-	if (!usedVelocityPath)
-	{
-		valid = ReprojectFogMedium(viewUv, depthNdc, current.a, prevViewUv, prevDepthNdc);
-		usedFogMediumPath = valid && (fogReprojectWeight > 0.0);
-		valid = valid && all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
-	}
+	/* Opaque motion vectors are correct for the surface behind the fog, not for
+	 * the participating medium itself. Using them on thin/distant fog makes the
+	 * reprojection track the camera too aggressively, which reads as the fog
+	 * sliding at roughly double speed while moving. Always reproject a point in
+	 * the medium instead; for alpha≈0 this collapses back to surface reprojection
+	 * through EstimateFogCentroidFactor(). */
+	valid = ReprojectFogMedium(viewUv, depthNdc, current.a, prevViewUv, prevDepthNdc);
+	valid = valid && all(greaterThanEqual(prevViewUv, vec2(0.0))) && all(lessThanEqual(prevViewUv, vec2(1.0)));
 
 	vec4 history     = vec4(0.0);
 	vec2 prevScreenUv = vec2(0.0);
@@ -256,7 +230,7 @@ void main()
 		float depthPrevNdc = DepthToNdcZ(depthPrev);
 		float depthReject  = max(FogTemporalDepthReject, 1e-5);
 		float disocclusionBias = max(FogTemporalConfidenceParams.y, 0.0);
-		float depthReferenceNdc = (usedVelocityPath || usedFogMediumPath) ? depthNdc : prevDepthNdc;
+		float depthReferenceNdc = depthNdc;
 		float depthSlack = mix(1.0, 1.75, fogReprojectWeight);
 		float depthDelta = abs(depthPrevNdc - depthReferenceNdc);
 		float depthRejectScaled = depthReject * depthSlack;
@@ -272,7 +246,7 @@ void main()
 		// does its own wrapping; explicitly clamping prevents edge bleed.
 		vec2 clampedPrevUv = clamp(prevScreenUv, vec2(0.0), vec2(1.0));
 		history = texture(FogHistory, clampedPrevUv);
-		history = ComputeHistoryClamp(screenUv, history);
+		history = ComputeHistoryClamp(fogUv, history);
 	}
 
 	// FIX #1 + #2: Compute motionFactor first; if invalid, skip the multiply.

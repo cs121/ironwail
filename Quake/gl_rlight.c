@@ -1028,6 +1028,29 @@ static float R_SampleIntensity255 (const vec3_t color255)
 	return (color255[0] + color255[1] + color255[2]) * (1.f / (3.f * 255.f));
 }
 
+static void R_ModelLightRotateOffset (entity_t *e, vec3_t local_offset, vec3_t out_world_offset)
+{
+	vec3_t forward, right, up;
+
+	if (!e)
+	{
+		VectorCopy (local_offset, out_world_offset);
+		return;
+	}
+
+	AngleVectors (e->angles, forward, right, up);
+	out_world_offset[0] = forward[0] * local_offset[0] + right[0] * local_offset[1] + up[0] * local_offset[2];
+	out_world_offset[1] = forward[1] * local_offset[0] + right[1] * local_offset[1] + up[1] * local_offset[2];
+	out_world_offset[2] = forward[2] * local_offset[0] + right[2] * local_offset[1] + up[2] * local_offset[2];
+}
+
+static void R_ModelLightBuildSamplePos (entity_t *e, vec3_t local_offset, vec3_t out_pos)
+{
+	vec3_t world_offset;
+	R_ModelLightRotateOffset (e, local_offset, world_offset);
+	VectorAdd (e->origin, world_offset, out_pos);
+}
+
 static qboolean R_ModelLightTryGridSample (entity_t *e, qmodel_t *lightmodel, const vec3_t pos, entity_static_sample_t *sample)
 {
 	const lightgrid_probe_t *probe;
@@ -1556,12 +1579,12 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 
 			if (height > 1.f)
 			{
-				VectorCopy (e->origin, sample_pos[num_samples]);
-				sample_pos[num_samples][2] += height * 0.25f;
+				vec3_t local_offset = {0.f, 0.f, height * 0.25f};
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
 				sample_weight[num_samples++] = 0.3f;
 
-				VectorCopy (e->origin, sample_pos[num_samples]);
-				sample_pos[num_samples][2] += height * 0.5f;
+				VectorSet (local_offset, 0.f, 0.f, height * 0.5f);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
 				sample_weight[num_samples++] = 0.2f;
 			}
 
@@ -1569,21 +1592,22 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 			{
 				const float xofs = CLAMP (8.f, half_extent_x * 0.35f, 32.f);
 				const float yofs = CLAMP (8.f, half_extent_y * 0.35f, 32.f);
+				vec3_t local_offset;
 
-				VectorCopy (e->origin, sample_pos[num_samples]);
-				sample_pos[num_samples][0] += xofs;
+				VectorSet (local_offset, xofs, 0.f, 0.f);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
 				sample_weight[num_samples++] = 0.15f;
 
-				VectorCopy (e->origin, sample_pos[num_samples]);
-				sample_pos[num_samples][0] -= xofs;
+				VectorSet (local_offset, -xofs, 0.f, 0.f);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
 				sample_weight[num_samples++] = 0.15f;
 
-				VectorCopy (e->origin, sample_pos[num_samples]);
-				sample_pos[num_samples][1] += yofs;
+				VectorSet (local_offset, 0.f, yofs, 0.f);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
 				sample_weight[num_samples++] = 0.15f;
 
-				VectorCopy (e->origin, sample_pos[num_samples]);
-				sample_pos[num_samples][1] -= yofs;
+				VectorSet (local_offset, 0.f, -yofs, 0.f);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
 				sample_weight[num_samples++] = 0.15f;
 			}
 

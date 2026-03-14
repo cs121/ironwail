@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "r_fogvol.h"
+#include "r_framegraph.h"
 #include "cfgfile.h"
 #include "bgmusic.h"
 #include "resource.h"
@@ -666,11 +667,32 @@ static void VID_RecreateRenderTargets (const char *reason, qboolean delete_exist
 	if (reason && *reason)
 		Con_DPrintf ("Recreating render targets (%s)\n", reason);
 
+	/* Drop cached frame-plan decisions before/after RT rebuilds so AA/FogVol
+	 * toggles cannot reuse stale pass selection from the previous layout. */
+	R_FrameGraph_SetRenderFramePlan (NULL);
+
 	if (delete_existing)
 		GL_DeleteFrameBuffers ();
 
 	GL_CreateFrameBuffers ();
 	R_FogVol_ClearHistory ();
+	R_FrameGraph_SetRenderFramePlan (NULL);
+}
+
+static void VID_ApplySampleShadingState (void)
+{
+	const qboolean enable_full_rate = (vid_fsaa.value > 1.f) && (vid_fsaamode.value > 0.f);
+
+	if (enable_full_rate)
+	{
+		glEnable (GL_SAMPLE_SHADING);
+		GL_MinSampleShadingFunc (1.f);
+	}
+	else
+	{
+		GL_MinSampleShadingFunc (0.f);
+		glDisable (GL_SAMPLE_SHADING);
+	}
 }
 
 /*
@@ -697,6 +719,7 @@ static void VID_FSAA_f (cvar_t *cvar)
 	if (!host_initialized)
 		return;
 	VID_RecreateRenderTargets ("vid_fsaa changed", true);
+	VID_ApplySampleShadingState ();
 	gl_lodbias.callback (&gl_lodbias);
 }
 
@@ -711,7 +734,7 @@ static void VID_FSAAMode_f (cvar_t *cvar)
 {
 	if (!host_initialized)
 		return;
-	GL_MinSampleShadingFunc (cvar->value);
+	VID_ApplySampleShadingState ();
 	gl_lodbias.callback (&gl_lodbias);
 }
 
@@ -1331,9 +1354,9 @@ static void GL_SetupState (void)
 	GL_DepthRange (ZRANGE_FULL); //johnfitz -- moved here becuase gl_ztrick is gone.
 	glEnable (GL_BLEND);
 	glEnable (GL_TEXTURE_CUBE_MAP_SEAMLESS);
-	glEnable (GL_SAMPLE_SHADING);
 
 	GL_ResetState ();
+	VID_ApplySampleShadingState ();
 }
 
 /*

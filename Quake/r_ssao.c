@@ -1,5 +1,6 @@
 #include "quakedef.h"
 
+#include "r_fogvol.h"
 #include "r_ssao.h"
 
 #include <math.h>
@@ -83,18 +84,23 @@ float R_SSAO_SanitizeValue (float value, float fallback, float minval, float max
 
 void R_SSAO_CaptureFogState (const gpuframedata_t *framedata, r_ssao_fog_state_t *out_state)
 {
+	vec3_t color;
+	float density;
+
+	(void)framedata;
+
 	if (!out_state)
 		return;
 
-	if (!framedata)
+	if (!R_FogVol_GetGlobalFogState (color, &density))
 	{
 		VectorClear (out_state->color);
 		out_state->density = 0.f;
 		return;
 	}
 
-	out_state->color[0] = framedata->fogdata[0];
-	out_state->color[1] = framedata->fogdata[1];
-	out_state->color[2] = framedata->fogdata[2];
-	out_state->density = framedata->fogdata[3];
+	out_state->color[0] = color[0];
+	out_state->color[1] = color[1];
+	out_state->color[2] = color[2];
+	out_state->density = density;
 }

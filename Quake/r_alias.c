@@ -76,6 +76,8 @@ typedef struct aliasinstance_s {
 	float		_pad0;
 	vec3_t		dlightdir;
 	float		_pad1;
+	vec3_t		staticlightdir;
+	float		_pad2;
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
@@ -108,7 +110,7 @@ struct ibuf_s {
 } ibuf;
 
 COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16 == 0);
-COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 208);
+COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 224);
 
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
@@ -146,6 +148,12 @@ static void R_ScaleAliasLighting (vec3_t light, vec3_t ambient, vec3_t dlight, f
 		ambient[i] *= scale;
 		dlight[i] *= scale;
 	}
+}
+
+static void R_DefaultStaticLightDir (vec3_t dir)
+{
+	VectorSet (dir, 0.f, 0.5f, 1.f);
+	VectorNormalize (dir);
 }
 
 static const char *R_StaticSourceName (entity_static_light_source_t source)
@@ -559,14 +567,31 @@ void R_SetupAliasLighting (entity_t     *e)
         unsigned int    i;
         vec3_t          dlightcolor = {0.f, 0.f, 0.f};
         vec3_t          dlightdir = {0.f, 0.f, 0.f};
+        vec3_t          staticlightdir;
         vec3_t          ambientcolor;
         vec3_t          static_color;
         entity_lightinfo_t lightinfo;
         entity_lightinfo_t *lightinfo_ptr = r_debug_itemlight.value > 0.f ? &lightinfo : NULL;
 
+        R_DefaultStaticLightDir (staticlightdir);
         R_EntityStaticLight (e, static_color, lightinfo_ptr);
         VectorCopy (static_color, lightcolor);
         VectorCopy (static_color, ambientcolor);
+
+        if (e != &cl.viewent && cl.worldmodel && cl.worldmodel->lightdirdata)
+        {
+                vec3_t sample_rgb;
+                vec3_t sample_dir;
+                if (R_SampleLightmapAndDeluxemapAtPoint (e->origin, sample_rgb, sample_dir) &&
+                        VectorLength (sample_dir) > 1e-6f)
+                {
+                        // Blend towards deluxemap direction while keeping a small legacy bias.
+                        vec3_t blended_dir;
+                        VectorLerp (staticlightdir, sample_dir, 0.75f, blended_dir);
+                        if (VectorNormalize (blended_dir) > 1e-6f)
+                                VectorCopy (blended_dir, staticlightdir);
+                }
+        }
 
         // Use the full active dlight pool for model lighting so short-lived/small lights
         // (muzzle flash, rockets, lava balls) are not dropped by render budgeting/culling.
@@ -668,6 +693,7 @@ void R_SetupAliasLighting (entity_t     *e)
 	VectorCopy (ambientcolor, e->lightcache.ambientcolor);
 	VectorCopy (dlightcolor, e->lightcache.dlightcolor);
 	VectorCopy (dlightdir, e->lightcache.dlightdir);
+	VectorCopy (staticlightdir, e->lightcache.staticlightdir);
 }
 
 /*
@@ -681,6 +707,7 @@ void R_FlushAliasInstances (qboolean showtris)
 	qmodel_t	*model;
 	aliashdr_t	*mainhdr, *hdr;
 	qboolean	alphatest, translucent, oit, md5;
+	qboolean	viewmodel;
 	int			skinnum, anim, mode;
 	unsigned	state;
 	GLuint		buf;
@@ -699,6 +726,7 @@ void R_FlushAliasInstances (qboolean showtris)
 	model = ibuf.ent->model;
 	mainhdr = (aliashdr_t *)Mod_Extradata (model);
 	anim = (int)(cl.time*10) & 3;
+	viewmodel = (ibuf.ent == &cl.viewent);
 
 	GL_BeginGroup (model->name);
 
@@ -706,7 +734,17 @@ void R_FlushAliasInstances (qboolean showtris)
 
 	alphatest = model->flags & MF_HOLEY ? 1 : 0;
 	translucent = !ENTALPHA_OPAQUE (ibuf.ent->alpha);
-	oit = translucent && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
+	/* Viewmodel stability path:
+	 * - keep opaque (no translucent ordering issues),
+	 * - disable alphatest (prevents accidental texture-alpha discard holes). */
+	if (viewmodel)
+	{
+		translucent = false;
+		alphatest = false;
+	}
+	/* Viewmodel and standard alpha entities should never rely on OIT blend targets.
+	 * OIT is only valid during the dedicated scene translucency pass. */
+	oit = translucent && !viewmodel && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
 	switch (softemu)
 	{
 	case SOFTEMU_BANDED:
@@ -723,14 +761,18 @@ void R_FlushAliasInstances (qboolean showtris)
 	R_Shadow_ApplyAliasReceiverUniforms (glprogs.alias[oit][mode][alphatest][md5]);
 
 	if (md5)
-		state = GLS_CULL_BACK | GLS_ATTRIBS(5);
+		state = (viewmodel ? GLS_CULL_NONE : GLS_CULL_BACK) | GLS_ATTRIBS(5);
 	else
-		state = GLS_CULL_BACK | GLS_ATTRIBS(1);
+		state = (viewmodel ? GLS_CULL_NONE : GLS_CULL_BACK) | GLS_ATTRIBS(1);
 
 	if (!translucent)
+	{
 		state |= GLS_BLEND_OPAQUE;
+	}
 	else
-		state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
+	{
+		state |= (oit ? GLS_BLEND_ALPHA_OIT : GLS_BLEND_ALPHA) | GLS_NO_ZWRITE;
+	}
 	GL_SetState (state);
 
 memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
@@ -960,6 +1002,8 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 		return;
 	if (e->model->flags & MF_HOLEY) /* alpha-test casters are intentionally excluded in v1 */
 		return;
+	if (e->model->flags & MOD_NOSHADOW)
+		return;
 	if (!ENTALPHA_OPAQUE (e->alpha))
 		return;
 
@@ -969,9 +1013,6 @@ static void R_DrawAliasModel_Shadow_Real (entity_t *e)
 
 	if (lerpdata.pose1 == lerpdata.pose2)
 		lerpdata.blend = 0.f;
-	if (R_CullModelForEntity (e))
-		return;
-
 	R_EntityMatrix (model_matrix, lerpdata.origin, lerpdata.angles, e->scale);
 	ApplyTranslation (model_matrix, paliashdr->scale_origin[0], paliashdr->scale_origin[1], paliashdr->scale_origin[2]);
 	ApplyScale (model_matrix, paliashdr->scale[0], paliashdr->scale[1], paliashdr->scale[2]);
@@ -1064,6 +1105,11 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         else
                 entalpha = ENTALPHA_DECODE(e->alpha);
 
+	/* Late viewmodel pass has no stable translucent ordering guarantees.
+	 * Force full alpha to prevent intermittent transparent weapon polygons. */
+	if (e == &cl.viewent)
+		entalpha = 1.f;
+
         if (entalpha == 0)
                 return;
 
@@ -1083,6 +1129,7 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
                 VectorCopy (lightcolor, e->lightcache.ambientcolor);
                 VectorClear (e->lightcache.dlightcolor);
                 VectorClear (e->lightcache.dlightdir);
+                R_DefaultStaticLightDir (e->lightcache.staticlightdir);
                 e->lightcache.lightgrid_has_sample = false;
                 e->lightcache.lightgrid_ao = 0.f;
                 VectorClear (e->lightcache.lightgrid_color);
@@ -1143,8 +1190,10 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         VectorCopy (lightcolor, instance->lightcolor);
         VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
         VectorCopy (e->lightcache.dlightdir, instance->dlightdir);
+        VectorCopy (e->lightcache.staticlightdir, instance->staticlightdir);
         instance->_pad0 = 0.f;
         instance->_pad1 = 0.f;
+        instance->_pad2 = 0.f;
         instance->alpha = entalpha;
         if (e == &cl.viewent)
                 instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;

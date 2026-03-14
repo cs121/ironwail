@@ -136,16 +136,10 @@ extern	cvar_t	r_shadow_dlight_size;
 extern	cvar_t	r_shadow_sun_distance;
 extern	cvar_t	r_shadow_sun_bias;
 extern	cvar_t	r_shadow_dlight_bias;
-extern	cvar_t	r_shadow_receiver_bias;
 extern	cvar_t	r_shadow_sun_pcf;
 extern	cvar_t	r_shadow_dlight_pcf;
 extern	cvar_t	r_shadow_sun_snap;
 extern	cvar_t	r_shadow_mark_mode;
-extern	cvar_t	r_shadow_profile;
-extern	cvar_t	r_shadow_cull_vis;
-extern	cvar_t	r_shadow_cull_backface;
-extern	cvar_t	r_shadow_cull_frustum;
-extern	cvar_t	r_shadow_cull_sphere;
 extern	cvar_t	r_shadow_debug;
 extern	cvar_t	r_shadow_log;
 extern	cvar_t	r_rimlight;
@@ -445,6 +439,11 @@ extern const float	r_avertexnormals[NUMVERTEXNORMALS][3];
 
 //johnfitz -- fog functions called from outside gl_fog.c
 void Fog_ParseServerMessage (void);
+float *Fog_GetColor (void);
+float Fog_GetDensity (void);
+void Fog_EnableGFog (void);
+void Fog_DisableGFog (void);
+void Fog_SetupFrame (void);
 void Fog_NewMap (void);
 void Fog_Init (void);
 
@@ -544,7 +543,7 @@ void R_Sun_UpdateFromWorld (void);
 
 void R_AnimateLight (void);
 void R_MarkSurfaces (void);
-void R_MarkSurfaces_Shadow (const vec3_t vieworg, const mplane_t shadow_frustum[4], const vec4_t *shadow_sphere, qboolean use_vis, qboolean use_backface, qboolean use_frustum);
+void R_MarkSurfaces_Shadow (void);
 void R_RestoreMarkedSurfaces (void);
 qboolean R_CullBox (vec3_t emins, vec3_t emaxs);
 qboolean R_CullModelForEntity (entity_t *e);
@@ -573,7 +572,6 @@ void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
 void R_DrawBrushModels_Shadow (entity_t **ents, int count, qboolean dlight);
-void R_DrawViewModel (void);
 void R_DrawAliasModels (entity_t **ents, int count);
 void R_DrawAliasModels_Shadow (entity_t **ents, int count, qboolean dlight);
 void R_DrawSpriteModels (entity_t **ents, int count);
@@ -584,7 +582,6 @@ void R_GLStateDump (const char *tag);
 void R_RenderShadowMaps (void);
 void R_RenderSunShadowMap (void);
 void R_RenderDLightShadowMaps (void);
-qboolean R_Shadow_GetSunOcclusionData (float out_viewproj[16], float *out_bias, float *out_pcf_uv);
 void R_Shadow_ApplyWorldReceiverUniforms (GLuint program);
 void R_Shadow_ApplyAliasReceiverUniforms (GLuint program);
 void R_Shadow_ApplyWorldCasterUniforms (GLuint program);
@@ -678,8 +675,6 @@ typedef struct glprogs_s {
 	GLuint		godrays_source;
 	GLuint		godrays_source_sky;
 	GLuint		fogvol;
-	GLuint		fogvol_global;
-	GLuint		fogvol_clustered;
 	GLuint		fogvol_temporal;
 	GLuint		fogvol_froxel_inject;
 	GLuint		oit_resolve[2];		// [msaa]
@@ -701,6 +696,8 @@ typedef struct glprogs_s {
 	GLuint		decal_instanced;
 	GLuint		particles[2][2];	// [OIT][dither]
 	GLuint		debug3d;
+	GLuint		dlight_composite;
+
 	/* compute */
 	GLuint		clear_indirect;
 	GLuint		gather_indirect;
@@ -770,6 +767,11 @@ typedef struct glframebufs_s {
 		int			width;
 		int			height;
 	}				bloom;
+
+	struct {
+		GLuint		tex;
+		GLuint		fbo;
+	}				dlight;
 
 	struct {
 		GLuint		source_tex;

@@ -82,7 +82,17 @@ layout(std140, binding=1) uniform FrameCullUBO
 	vec3	vieworg;
 	uint	oldskyleaf;
 	uint	framecount;
+	uint	cull_flags;
+	uint	_pad0;
+	uint	_pad1;
+	vec4	shadow_sphere; // xyz=center, w=radius (<=0 disables sphere cull)
 };
+
+const uint CULL_SKY = 1u << 0;
+const uint CULL_VIS = 1u << 1;
+const uint CULL_BACKFACE = 1u << 2;
+const uint CULL_FRUSTUM = 1u << 3;
+const uint CULL_SHADOW_SPHERE = 1u << 4;
 
 void main()
 {
@@ -91,35 +101,62 @@ void main()
 		return;
 	MarkSurface mark = marksurfs[thread_id];
 
-	// sky culling: when r_oldskyleaf is 0, surfaces inside a sky leaf are skipped
-	if ((mark.packedleafsky & 1u) > oldskyleaf)
+	// sky culling: when oldskyleaf is 0, surfaces inside a sky leaf are skipped
+	if ((cull_flags & CULL_SKY) != 0u && (mark.packedleafsky & 1u) > oldskyleaf)
 		return;
 
-	// vis culling
-	uint leaf = mark.packedleafsky >> 1u;
-	uint visible = vis[leaf >> 5u] & (1u << (leaf & 31u));
-	if (visible == 0u)
-		return;
+	if ((cull_flags & CULL_VIS) != 0u)
+	{
+		// vis culling
+		uint leaf = mark.packedleafsky >> 1u;
+		uint visible = vis[leaf >> 5u] & (1u << (leaf & 31u));
+		if (visible == 0u)
+			return;
+	}
 
 	uint surfbase = mark.surfindex * uint(SIZEOF_SURFACE);
-
-	// backface culling
-	vec4 surfplane = SURF_PLANE(surfbase);
-	if (dot(surfplane.xyz, vieworg) < surfplane.w)
-		return;
-
-	// frustum culling
-	vec3 mins = SURF_MINS(surfbase);
-	vec3 maxs = SURF_MAXS(surfbase);
-	vec3 center = (mins + maxs) * 0.5;
-	vec3 extents = (maxs - mins) * 0.5;
-	for (uint i = 0u; i < 4u; i++)
+	bool needs_bounds = ((cull_flags & (CULL_FRUSTUM | CULL_SHADOW_SPHERE)) != 0u);
+	vec3 center = vec3(0.0);
+	vec3 extents = vec3(0.0);
+	if (needs_bounds)
 	{
-		vec4 plane = frustum[i];
-		float signedDistance = dot(plane.xyz, center) - plane.w;
-		float radius = dot(abs(plane.xyz), extents);
-		if (signedDistance < -radius)
+		vec3 mins = SURF_MINS(surfbase);
+		vec3 maxs = SURF_MAXS(surfbase);
+		center = (mins + maxs) * 0.5;
+		extents = (maxs - mins) * 0.5;
+	}
+
+	vec4 surfplane = SURF_PLANE(surfbase);
+	if ((cull_flags & CULL_BACKFACE) != 0u)
+	{
+		// backface culling
+		if (dot(surfplane.xyz, vieworg) < surfplane.w)
 			return;
+	}
+
+	if ((cull_flags & CULL_SHADOW_SPHERE) != 0u)
+	{
+		float light_radius = max(shadow_sphere.w, 0.0);
+		if (light_radius > 0.0)
+		{
+			float surf_radius = length(extents);
+			float dist_center = length(center - shadow_sphere.xyz);
+			if (dist_center > light_radius + surf_radius)
+				return;
+		}
+	}
+
+	if ((cull_flags & CULL_FRUSTUM) != 0u)
+	{
+		// frustum culling
+		for (uint i = 0u; i < 4u; i++)
+		{
+			vec4 plane = frustum[i];
+			float signedDistance = dot(plane.xyz, center) - plane.w;
+			float radius = dot(abs(plane.xyz), extents);
+			if (signedDistance < -radius)
+				return;
+		}
 	}
 
 	// surfaces can appear in multiple leaves

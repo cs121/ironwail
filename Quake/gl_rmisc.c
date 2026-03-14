@@ -57,6 +57,7 @@ extern cvar_t r_showfields_align;
 extern cvar_t r_lerpmodels;
 extern cvar_t r_lerpmove;
 extern cvar_t r_nolerp_list;
+extern cvar_t r_noshadow_list;
 extern cvar_t r_lightmap_linear;
 extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
@@ -136,8 +137,16 @@ extern cvar_t r_shadow_dlight_size;
 extern cvar_t r_shadow_sun_distance;
 extern cvar_t r_shadow_sun_bias;
 extern cvar_t r_shadow_dlight_bias;
+extern cvar_t r_shadow_receiver_bias;
 extern cvar_t r_shadow_sun_pcf;
 extern cvar_t r_shadow_dlight_pcf;
+extern cvar_t r_shadow_sun_snap;
+extern cvar_t r_shadow_mark_mode;
+extern cvar_t r_shadow_profile;
+extern cvar_t r_shadow_cull_vis;
+extern cvar_t r_shadow_cull_backface;
+extern cvar_t r_shadow_cull_frustum;
+extern cvar_t r_shadow_cull_sphere;
 extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_log;
 extern cvar_t r_godrays_decay;
@@ -471,8 +480,16 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_shadow_sun_distance);
 	Cvar_RegisterVariable (&r_shadow_sun_bias);
 	Cvar_RegisterVariable (&r_shadow_dlight_bias);
+	Cvar_RegisterVariable (&r_shadow_receiver_bias);
 	Cvar_RegisterVariable (&r_shadow_sun_pcf);
 	Cvar_RegisterVariable (&r_shadow_dlight_pcf);
+	Cvar_RegisterVariable (&r_shadow_sun_snap);
+	Cvar_RegisterVariable (&r_shadow_mark_mode);
+	Cvar_RegisterVariable (&r_shadow_profile);
+	Cvar_RegisterVariable (&r_shadow_cull_vis);
+	Cvar_RegisterVariable (&r_shadow_cull_backface);
+	Cvar_RegisterVariable (&r_shadow_cull_frustum);
+	Cvar_RegisterVariable (&r_shadow_cull_sphere);
 	Cvar_RegisterVariable (&r_shadow_debug);
 	Cvar_RegisterVariable (&r_shadow_log);
 	Cvar_RegisterVariable (&r_rimlight);
@@ -588,7 +605,9 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_lerpmodels);
 	Cvar_RegisterVariable (&r_lerpmove);
 	Cvar_RegisterVariable (&r_nolerp_list);
+	Cvar_RegisterVariable (&r_noshadow_list);
 	Cvar_SetCallback (&r_nolerp_list, R_Model_ExtraFlags_List_f);
+	Cvar_SetCallback (&r_noshadow_list, R_Model_ExtraFlags_List_f);
 	//johnfitz
 
 	Cvar_RegisterVariable (&gl_zfix); // QuakeSpasm z-fighting fix
@@ -691,7 +710,7 @@ typedef struct
 static qboolean r_worldspawn_has_sun = false;
 static sun_presence_t r_worldspawn_sun_presence;
 sun_t r_sun_state;
-cvar_t r_sun_light = { "r_sun_light", "0", CVAR_ARCHIVE };
+cvar_t r_sun_light = { "r_sun_light", "1", CVAR_ARCHIVE };
 // Enables dynamic directional sunlight from parsed worldspawn sun keys (not baked lightmaps).
 
 static void R_SetDefaultSunDirection (vec3_t dir)
@@ -812,6 +831,24 @@ void R_Sun_Finalize (sun_t *s)
 	s->ray_density = q_max (0.f, s->ray_density);
 }
 
+static qboolean R_Sun_IsRenderable (const sun_t *s)
+{
+	if (!s)
+		return false;
+	if (DotProduct (s->dir, s->dir) <= 1e-6f)
+		return false;
+	if (s->intensity <= 0.f)
+		return false;
+	return (s->color[0] > 0.f || s->color[1] > 0.f || s->color[2] > 0.f);
+}
+
+static qboolean R_Sun_HasExplicitWorldspawnKeys (void)
+{
+	return r_worldspawn_sun_presence.dir_defined
+		|| r_worldspawn_sun_presence.color_defined
+		|| r_worldspawn_sun_presence.intensity_defined;
+}
+
 const sun_t* R_GetSun (void)
 {
 	return &r_sun_state;
@@ -843,9 +880,11 @@ void R_Sun_UpdateFromWorld (void)
 	R_Sun_Finalize (&sun);
 	R_SetSun (&sun);
 
-	r_worldspawn_has_sun = r_worldspawn_sun_presence.dir_defined
-		|| r_worldspawn_sun_presence.color_defined
-		|| r_worldspawn_sun_presence.intensity_defined;
+	/* Only explicit worldspawn sun keys should activate global sun lighting.
+	 * Fallback defaults must not leak fake "sky light" into indoor maps. */
+	r_worldspawn_has_sun =
+		R_Sun_HasExplicitWorldspawnKeys () &&
+		R_Sun_IsRenderable (&r_sun_state);
 }
 
 void R_NewGame (void)
@@ -985,9 +1024,8 @@ void R_TimeRefresh_f (void)
 	{
 		GL_BeginRendering(&glx, &gly, &glwidth, &glheight);
 		r_refdef.viewangles[1] = i*(360.0/128.0);
-               R_RenderView ();
-               GL_PostProcess ();
-               GL_EndRendering ();
+		R_RenderView ();
+		GL_EndRendering ();
 	}
 
 	glFinish ();
