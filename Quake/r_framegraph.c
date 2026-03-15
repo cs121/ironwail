@@ -71,6 +71,8 @@ static int s_cached_plan_frame = -1;
 static fg_runtime_pass_entry_t s_runtime_passes[FG_MAX_RUNTIME_PASSES];
 static int s_runtime_pass_count = 0;
 static qboolean s_pass_registration_locked = false;
+static unsigned s_cycle_warning_signature = 0u;
+static qboolean s_cycle_warning_emitted = false;
 
 static void FG_Backend_BeginPass (const char *name);
 static void FG_Backend_EndPass (void);
@@ -198,6 +200,7 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 	int indegree[FG_MAX_RUNTIME_PASSES];
 	qboolean emitted[FG_MAX_RUNTIME_PASSES];
 	fg_runtime_pass_entry_t sorted[FG_MAX_RUNTIME_PASSES];
+	unsigned cycle_signature = 2166136261u;
 	int total;
 	int out_index;
 	int i;
@@ -220,6 +223,26 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 
 	for (i = 0; i < total; ++i)
 	{
+		const RenderPassDesc *pass = s_runtime_passes[first_pass + i].desc;
+		const char *name = (pass && pass->name) ? pass->name : "";
+		int c;
+
+		/* Stable warning dedup key: pass order + declared read/write masks. */
+		cycle_signature ^= (unsigned)(uintptr_t)pass;
+		cycle_signature *= 16777619u;
+		if (pass)
+		{
+			cycle_signature ^= (unsigned)pass->reads;
+			cycle_signature *= 16777619u;
+			cycle_signature ^= (unsigned)pass->writes;
+			cycle_signature *= 16777619u;
+		}
+		for (c = 0; name[c]; ++c)
+		{
+			cycle_signature ^= (unsigned char)name[c];
+			cycle_signature *= 16777619u;
+		}
+
 		indegree[i] = 0;
 	}
 
@@ -275,8 +298,10 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 			}
 			else if (b_to_a)
 			{
-				incoming[i] |= (1ull << j);
-				indegree[i]++;
+				/* WAR hazard (later pass writes what an earlier pass reads):
+				 * keep registration order so the read observes the pre-overwrite value. */
+				incoming[j] |= (1ull << i);
+				indegree[j]++;
 			}
 			else if (waw_conflict)
 			{
@@ -303,7 +328,13 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 
 		if (ready < 0)
 		{
-			Con_Warning ("FrameGraph: pass dependency cycle detected, keeping registration order\n");
+			if (r_framegraph_debug.value > 0.f
+				&& (!s_cycle_warning_emitted || s_cycle_warning_signature != cycle_signature))
+			{
+				Con_Warning ("FrameGraph: pass dependency cycle detected, keeping registration order (further identical warnings suppressed)\n");
+				s_cycle_warning_signature = cycle_signature;
+				s_cycle_warning_emitted = true;
+			}
 			return;
 		}
 

@@ -781,7 +781,9 @@ static void R_FogVol_SetDepthMask (qboolean enabled)
 
 static qboolean R_FogVol_StateDebugEnabled (void)
 {
-	return r_fogvol_debug.value > 0.f || developer.value > 0.f;
+	/* Keep heavy fogvol state instrumentation opt-in only.
+	 * Coupling this to developer spammed per-frame logs in mods with active fog volumes. */
+	return r_fogvol_debug.value > 0.f;
 }
 
 static void R_FogVol_LogStateSnapshot (const char *marker)

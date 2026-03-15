@@ -1900,6 +1900,19 @@ static qboolean R_EntHasWater (entity_t *ent, qboolean translucent)
 	return false;
 }
 
+static void R_Water_SetTimeUniform (GLuint program, float shader_time)
+{
+	GLint loc;
+
+	if (!program)
+		return;
+
+	/* Teleport FBM uses u_time; water/world variants read Time from FrameDataUBO. */
+	loc = GL_GetUniformLocationFunc ? GL_GetUniformLocationFunc (program, "u_time") : -1;
+	if (loc >= 0)
+		GL_Uniform1fFunc (loc, shader_time);
+}
+
 /*
 =============
 R_DrawBrushModels_Water
@@ -1911,6 +1924,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	int totalinst, baseinst;
 	unsigned state;
 	GLuint buf, program, water_program, teleport_program;
+	GLuint water_program_fallback, teleport_program_fallback;
 	GLbyte *ofs;
 	qboolean oit;
 	double shader_time;
@@ -1940,16 +1954,37 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 
 	oit = translucent && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
 	if (cl.worldmodel->haslitwater && r_litwater.value)
+	{
 		water_program = glprogs.world[oit][q_max(0, (int)softemu - 1)][WORLDSHADER_WATER];
+		water_program_fallback = glprogs.world[0][q_max(0, (int)softemu - 1)][WORLDSHADER_WATER];
+	}
 	else
+	{
 		water_program = glprogs.water[oit][softemu == SOFTEMU_COARSE];
+		water_program_fallback = glprogs.water[0][softemu == SOFTEMU_COARSE];
+	}
 	teleport_program = glprogs.teleport[oit][softemu == SOFTEMU_COARSE];
+	teleport_program_fallback = glprogs.teleport[0][softemu == SOFTEMU_COARSE];
+
+	/* Some runtime combinations may miss OIT shader variants.
+	 * Fall back to the non-OIT water shaders instead of binding program 0. */
+	if (!water_program && oit)
+		water_program = water_program_fallback;
+	if (!teleport_program && oit)
+		teleport_program = teleport_program_fallback;
+	if (!water_program || !teleport_program)
+	{
+		Con_DWarning ("R_DrawBrushModels_Water: missing shader program(s) water=%u teleport=%u (oit=%d)\n",
+			(unsigned)water_program, (unsigned)teleport_program, oit ? 1 : 0);
+		GL_EndGroup ();
+		return;
+	}
 	program = water_program;
 	shader_time = cl.time;
 
 	R_ResetBModelCalls (program);
 	GL_UseProgram (program);
-	GL_Uniform1fFunc (12, shader_time);
+	R_Water_SetTimeUniform (program, (float)shader_time);
 	GL_SetState (state);
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
@@ -2007,7 +2042,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 				program = target_program;
 				R_ResetBModelCalls (program);
 				GL_UseProgram (program);
-				GL_Uniform1fFunc (12, shader_time);
+				R_Water_SetTimeUniform (program, (float)shader_time);
 			}
 			{
 				float polygon_offset_factor;

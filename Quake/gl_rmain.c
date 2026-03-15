@@ -3138,9 +3138,11 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
 		qboolean linear_debug = (debug_mode == 2);
 		qboolean output_srgb = (r_srgb_framebuffer.value <= 0.f) || !vid_framebuffer_srgb_capable;
+		GLint colorspace_params_loc = GL_GetUniformLocationFunc ? GL_GetUniformLocationFunc (glprogs.postprocess[variant], "ColorSpaceParams") : -1;
 		if (linear_debug)
 			output_srgb = false;
-		GL_Uniform4fFunc (19, (float)debug_mode, 0.f, output_srgb ? 1.f : 0.f, 0.f);
+		if (colorspace_params_loc >= 0)
+			GL_Uniform4fFunc (colorspace_params_loc, (float)debug_mode, 0.f, output_srgb ? 1.f : 0.f, 0.f);
 	}
 	GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_mode);
 	GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
@@ -3191,7 +3193,11 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		GL_Uniform4fFunc (25, postfx_damage_trauma, dv_strength, dv_max_px, dv_freq);
 		GL_Uniform4fFunc (26, dv_time, dv_quality, dv_debug, 0.f);
 	}
-	GL_Uniform4fFunc (16, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
+	{
+		GLint godrays_params_loc = GL_GetUniformLocationFunc ? GL_GetUniformLocationFunc (glprogs.postprocess[variant], "GodraysParams") : -1;
+		if (godrays_params_loc >= 0)
+			GL_Uniform4fFunc (godrays_params_loc, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
+	}
 	{
 		float upscale_nearest = (r_ssao_upscale_nearest.value > 0.f) ? 1.f : 0.f;
 		GL_Uniform4fFunc (17, ssao_intensity, ssao_debug_mode, upscale_nearest, ssao_fog_strength);
@@ -6417,7 +6423,8 @@ static void R_FG_ExecSSAOFogHandoff (RenderPassContext *ctx)
 
 static const RenderPassDesc s_ssao_fog_handoff_framegraph_pass = {
 	"Capture fog handoff",
-	RENDER_RES_COMPOSITE_COLOR,
+	/* Captures CPU-side fog state into SSAO handoff data; no framebuffer read required. */
+	RENDER_RES_NONE,
 	RENDER_RES_SSAO_FOG_STATE,
 	0,
 	FG_PASS_OUTPUT_KEEP,
