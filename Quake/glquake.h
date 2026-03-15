@@ -115,6 +115,8 @@ extern	cvar_t	r_drawentities;
 extern	cvar_t	r_drawworld;
 extern	cvar_t	r_drawviewmodel;
 extern	cvar_t	r_gl_state_validate;
+extern	cvar_t	r_framegraph_autobind;
+extern	cvar_t	r_framegraph_debug;
 extern	cvar_t	r_speeds;
 extern	cvar_t	r_pos;
 extern	cvar_t	r_waterwarp;

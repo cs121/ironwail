@@ -2,7 +2,6 @@
 #define R_FRAMEGRAPH_H
 
 #include "quakedef.h"
-#include "r_ssao.h"
 
 typedef struct render_frame_plan_s
 {
@@ -29,6 +28,43 @@ typedef enum render_graph_resource_bits_e
 	RENDER_RES_FOGVOL_INPUTS = 1u << 7,
 	RENDER_RES_SSAO_FOG_STATE = 1u << 8
 } render_graph_resource_bits_t;
+
+typedef enum fg_pass_output_target_e
+{
+	FG_PASS_OUTPUT_KEEP = 0,
+	FG_PASS_OUTPUT_BACKBUFFER,
+	FG_PASS_OUTPUT_SCENE_FBO,
+	FG_PASS_OUTPUT_COMPOSITE_FBO,
+	FG_PASS_OUTPUT_AUTO_SCENE,
+	FG_PASS_OUTPUT_AUTO_WARP
+} fg_pass_output_target_t;
+
+typedef enum fg_pass_viewport_mode_e
+{
+	FG_PASS_VIEWPORT_KEEP = 0,
+	FG_PASS_VIEWPORT_FULL_WINDOW,
+	FG_PASS_VIEWPORT_VIEW_RECT,
+	FG_PASS_VIEWPORT_VIEW_RECT_SCALED
+} fg_pass_viewport_mode_t;
+
+typedef enum fg_pass_stage_e
+{
+	FG_PASS_STAGE_MAIN = 0,
+	FG_PASS_STAGE_SETUP
+} fg_pass_stage_t;
+
+typedef enum fg_pass_stats_channel_e
+{
+	FG_PASS_STATS_NONE = 0,
+	FG_PASS_STATS_SETUP,
+	FG_PASS_STATS_SHADOW,
+	FG_PASS_STATS_SCENE,
+	FG_PASS_STATS_WARP,
+	FG_PASS_STATS_FOG,
+	FG_PASS_STATS_POST,
+	FG_PASS_STATS_OVERLAY,
+	FG_PASS_STATS_COUNT
+} fg_pass_stats_channel_t;
 
 typedef struct render_graph_resource_handle_s
 {
@@ -67,22 +103,16 @@ typedef struct render_pass_desc_s
 	unsigned reads;
 	unsigned writes;
 	unsigned side_effects;
+	unsigned char output_target;
+	unsigned char viewport_mode;
 	qboolean (*enabled)(const RenderPassContext *ctx);
 	void (*execute)(RenderPassContext *ctx);
+	unsigned char stage;
+	unsigned char stats_channel;
 } RenderPassDesc;
-
-typedef struct r_framegraph_state_s
-{
-	int *fogvol_update_called;
-	int *fogvol_draw_called;
-	void (*prepare_fogvol_inputs)(void);
-	qboolean *frame_rendered_this_update;
-	r_ssao_fog_state_t *ssao_fog_state;
-} r_framegraph_state_t;
 
 typedef struct render_pass_context_s
 {
-	const r_framegraph_state_t *legacy_state;
 	const RenderFramePlan *frame_plan;
 	const RenderGraphResourceHandle *resources;
 	const IRenderBackend *backend;
@@ -91,6 +121,8 @@ typedef struct render_pass_context_s
 void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan);
 void R_FrameGraph_SetRenderFramePlan (const RenderFramePlan *plan);
 qboolean R_FrameGraph_GetRenderFramePlan (RenderFramePlan *out_plan);
-void R_FrameGraph_RenderView (const r_framegraph_state_t *state);
+void R_FrameGraph_ResetPasses (void);
+qboolean R_FrameGraph_AddPass (const RenderPassDesc *pass_desc);
+void R_FrameGraph_RenderView (void);
 
 #endif

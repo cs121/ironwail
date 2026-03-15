@@ -191,6 +191,8 @@ void R_ClearDecals (void);
 void R_ReloadDecals (void);
 void R_UpdateDecals (void);
 void R_DrawDecals (void);
+void R_Decals_RegisterFrameGraphPasses (void);
+void R_RegisterFrameGraphPasses (void);
 void R_SpawnImpactDecalEx (const char *category, const vec3_t origin, const vec3_t normal, const vec3_t hit_dir, qboolean heavy_blood);
 void R_SpawnImpactDecal (const char *category, const vec3_t origin, const vec3_t normal);
 

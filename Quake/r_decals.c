@@ -10,6 +10,7 @@ of the License, or (at your option) any later version.
 */
 
 #include "quakedef.h"
+#include "r_framegraph.h"
 
 typedef enum
 {
@@ -1175,6 +1176,28 @@ void R_ReloadDecals (void)
 {
 	R_Decals_LoadScripts ();
 	R_Decals_ResetRuntime ();
+}
+
+static void R_Decals_ExecFrameGraphPass (RenderPassContext *ctx)
+{
+	(void)ctx;
+	R_UpdateDecals ();
+}
+
+static const RenderPassDesc s_decals_framegraph_pass = {
+	"Update decals",
+	RENDER_RES_NONE,
+	RENDER_RES_DECALS,
+	0,
+	FG_PASS_OUTPUT_KEEP,
+	FG_PASS_VIEWPORT_KEEP,
+	NULL,
+	R_Decals_ExecFrameGraphPass
+};
+
+void R_Decals_RegisterFrameGraphPasses (void)
+{
+	(void)R_FrameGraph_AddPass (&s_decals_framegraph_pass);
 }
 
 void R_UpdateDecals (void)

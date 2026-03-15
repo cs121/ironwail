@@ -1,0 +1,967 @@
+LOG started on: 03/15/2026 18:16:59 
+
+Using add-on server "https://kexquake.s3.amazonaws.com"
+Playing registered version.
+Using renderer/network isolation.
+Console initialized.
+UDP Initialized
+WIPX_OpenSocket: Address family not supported by protocol family
+WIPX_Init: Unable to open control socket, IPX disabled
+Server using protocol 999 (RMQ)
+Exe: 16:42:00 Mar 15 2026 (Windows 64-bit)
+384.0 megabyte heap
+
+Video initialization
+Video mode: 1920 x 1080 24bit Z24 S8 60Hz
+GL_VENDOR:   NVIDIA Corporation
+GL_RENDERER: NVIDIA GeForce GTX 1080/PCIe/SSE2
+GL_VERSION:  4.3.0 NVIDIA 560.94
+FOUND: EXT_texture_filter_anisotropic
+FOUND: ARB_buffer_storage
+FOUND: ARB_multi_bind
+FOUND: ARB_bindless_texture
+FOUND: ARB_shader_draw_parameters
+FOUND: ARB_clip_control
+Loaded 108 GLSL programs (63 shader cache entries)
+
+Sound Initialization
+SDL audio spec  : 44100 Hz, 1024 samples, 2 channels
+SDL audio driver: wasapi - KopfhC6rer (JBL TUNE510BT Hands-Free AG Audio), 65536 bytes buffer
+Audio: 16 bit, stereo, 44100 Hz
+
+Language initialization
+Loaded 1317 strings from 'localization/loc_german.txt'
+
+========= Quake Initialized =========
+
+
+Add-on server status:
+ 24 add-ons available for download
+  5 add-ons already installed
+
+execing quake.rc
+execing default.cfg
+execing ironwail.cfg
+couldn't exec autoexec.cfg
+SpawnServer: start
+Clearing memory
+Programs occupy 332K.
+Warning: Material 'decal': expected {, got 'bullet_hole_default'
+Warning: Material 'decal': expected {, got 'bullet_hole_metal'
+Warning: Material 'decal': expected {, got 'blood_splat_small'
+Warning: Material 'decal': expected {, got 'blood_splat_large'
+Warning: Material 'decal': expected {, got 'scorch_small'
+Warning: Material 'decal': expected {, got 'scorch_large'
+Warning: Material 'decal': expected {, got 'dirt_hit'
+Warning: Material 'decal': expected {, got 'plaster_hit'
+Warning: Material 'decal': expected {, got 'concrete_hit'
+MatShader: parsed 1 shaders (9 errors, 0 warnings, 0 unknown unique)
+FindFile: can't find textures/start/wizmet1_2.ktx2
+FindFile: can't find textures/start/wizmet1_2.png
+FindFile: can't find textures/start/wizmet1_2.jpg
+FindFile: can't find textures/start/wizmet1_2.lmp
+FindFile: can't find textures/wizmet1_2.ktx2
+Warning: textures/wizmet1_2.png not supported by QS, consider tga
+Texture textures/wizmet1_2: sRGB, GL_SRGB8
+FindFile: can't find textures/start/city4_7.ktx2
+FindFile: can't find textures/start/city4_7.png
+FindFile: can't find textures/start/city4_7.jpg
+FindFile: can't find textures/start/city4_7.lmp
+FindFile: can't find textures/city4_7.ktx2
+Warning: textures/city4_7.png not supported by QS, consider tga
+Texture textures/city4_7: sRGB, GL_SRGB8
+Texture maps/start.bsp:sky1_back: sRGB, GL_SRGB8
+Texture maps/start.bsp:sky1_front: sRGB, GL_SRGB8_ALPHA8
+FindFile: can't find textures/start/wbrick1_5.ktx2
+FindFile: can't find textures/start/wbrick1_5.png
+FindFile: can't find textures/start/wbrick1_5.jpg
+FindFile: can't find textures/start/wbrick1_5.lmp
+FindFile: can't find textures/wbrick1_5.ktx2
+Warning: textures/wbrick1_5.png not supported by QS, consider tga
+Texture textures/wbrick1_5: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wiz1_4.ktx2
+FindFile: can't find textures/start/wiz1_4.png
+FindFile: can't find textures/start/wiz1_4.jpg
+FindFile: can't find textures/start/wiz1_4.lmp
+FindFile: can't find textures/wiz1_4.ktx2
+Warning: textures/wiz1_4.png not supported by QS, consider tga
+Texture textures/wiz1_4: sRGB, GL_SRGB8
+FindFile: can't find textures/start/bricka2_2.ktx2
+FindFile: can't find textures/start/bricka2_2.png
+FindFile: can't find textures/start/bricka2_2.jpg
+FindFile: can't find textures/start/bricka2_2.lmp
+FindFile: can't find textures/bricka2_2.ktx2
+Warning: textures/bricka2_2.png not supported by QS, consider tga
+Texture textures/bricka2_2: sRGB, GL_SRGB8
+FindFile: can't find textures/start/dem4_1.ktx2
+FindFile: can't find textures/start/dem4_1.png
+FindFile: can't find textures/start/dem4_1.jpg
+FindFile: can't find textures/start/dem4_1.lmp
+FindFile: can't find textures/dem4_1.ktx2
+Warning: textures/dem4_1.png not supported by QS, consider tga
+Texture textures/dem4_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/#water1.ktx2
+FindFile: can't find textures/start/#water1.png
+FindFile: can't find textures/start/#water1.jpg
+FindFile: can't find textures/start/#water1.lmp
+FindFile: can't find textures/#water1.ktx2
+Warning: textures/#water1.png not supported by QS, consider tga
+Texture textures/#water1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/#lava1.ktx2
+FindFile: can't find textures/start/#lava1.png
+FindFile: can't find textures/start/#lava1.jpg
+FindFile: can't find textures/start/#lava1.lmp
+FindFile: can't find textures/#lava1.ktx2
+Warning: textures/#lava1.png not supported by QS, consider tga
+Texture textures/#lava1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/#water2.ktx2
+FindFile: can't find textures/start/#water2.png
+FindFile: can't find textures/start/#water2.jpg
+FindFile: can't find textures/start/#water2.lmp
+FindFile: can't find textures/#water2.ktx2
+Warning: textures/#water2.png not supported by QS, consider tga
+Texture textures/#water2: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wizwood1_5.ktx2
+FindFile: can't find textures/start/wizwood1_5.png
+FindFile: can't find textures/start/wizwood1_5.jpg
+FindFile: can't find textures/start/wizwood1_5.lmp
+FindFile: can't find textures/wizwood1_5.ktx2
+Warning: textures/wizwood1_5.png not supported by QS, consider tga
+Texture textures/wizwood1_5: sRGB, GL_SRGB8
+FindFile: can't find textures/start/window02_1.ktx2
+FindFile: can't find textures/start/window02_1.png
+FindFile: can't find textures/start/window02_1.jpg
+FindFile: can't find textures/start/window02_1.lmp
+FindFile: can't find textures/window02_1.ktx2
+Warning: textures/window02_1.png not supported by QS, consider tga
+Texture textures/window02_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/clip.ktx2
+FindFile: can't find textures/start/clip.png
+FindFile: can't find textures/start/clip.jpg
+FindFile: can't find textures/start/clip.lmp
+FindFile: can't find textures/clip.ktx2
+Warning: textures/clip.png not supported by QS, consider tga
+Texture textures/clip: sRGB, GL_SRGB8
+FindFile: can't find textures/start/skill0.ktx2
+FindFile: can't find textures/start/skill0.png
+FindFile: can't find textures/start/skill0.jpg
+FindFile: can't find textures/start/skill0.lmp
+FindFile: can't find textures/skill0.ktx2
+Warning: textures/skill0.png not supported by QS, consider tga
+Texture textures/skill0: sRGB, GL_SRGB8
+FindFile: can't find textures/start/#teleport.ktx2
+FindFile: can't find textures/start/#teleport.png
+FindFile: can't find textures/start/#teleport.jpg
+FindFile: can't find textures/start/#teleport.lmp
+FindFile: can't find textures/#teleport.ktx2
+Warning: textures/#teleport.png not supported by QS, consider tga
+Texture textures/#teleport: sRGB, GL_SRGB8
+FindFile: can't find textures/start/skill1.ktx2
+FindFile: can't find textures/start/skill1.png
+FindFile: can't find textures/start/skill1.jpg
+FindFile: can't find textures/start/skill1.lmp
+FindFile: can't find textures/skill1.ktx2
+Warning: textures/skill1.png not supported by QS, consider tga
+Texture textures/skill1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/skill2.ktx2
+FindFile: can't find textures/start/skill2.png
+FindFile: can't find textures/start/skill2.jpg
+FindFile: can't find textures/start/skill2.lmp
+FindFile: can't find textures/skill2.ktx2
+Warning: textures/skill2.png not supported by QS, consider tga
+Texture textures/skill2: sRGB, GL_SRGB8
+FindFile: can't find textures/start/sfloor4_5.ktx2
+FindFile: can't find textures/start/sfloor4_5.png
+FindFile: can't find textures/start/sfloor4_5.jpg
+FindFile: can't find textures/start/sfloor4_5.lmp
+FindFile: can't find textures/sfloor4_5.ktx2
+Warning: textures/sfloor4_5.png not supported by QS, consider tga
+Texture textures/sfloor4_5: sRGB, GL_SRGB8
+FindFile: can't find textures/start/tech04_3.ktx2
+FindFile: can't find textures/start/tech04_3.png
+FindFile: can't find textures/start/tech04_3.jpg
+FindFile: can't find textures/start/tech04_3.lmp
+FindFile: can't find textures/tech04_3.ktx2
+Warning: textures/tech04_3.png not supported by QS, consider tga
+Texture textures/tech04_3: sRGB, GL_SRGB8
+FindFile: can't find textures/start/tech08_1.ktx2
+FindFile: can't find textures/start/tech08_1.png
+FindFile: can't find textures/start/tech08_1.jpg
+FindFile: can't find textures/start/tech08_1.lmp
+FindFile: can't find textures/tech08_1.ktx2
+Warning: textures/tech08_1.png not supported by QS, consider tga
+Texture textures/tech08_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/sfloor4_2.ktx2
+FindFile: can't find textures/start/sfloor4_2.png
+FindFile: can't find textures/start/sfloor4_2.jpg
+FindFile: can't find textures/start/sfloor4_2.lmp
+FindFile: can't find textures/sfloor4_2.ktx2
+Warning: textures/sfloor4_2.png not supported by QS, consider tga
+Texture textures/sfloor4_2: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+0slip.ktx2
+FindFile: can't find textures/start/+0slip.png
+FindFile: can't find textures/start/+0slip.jpg
+FindFile: can't find textures/start/+0slip.lmp
+FindFile: can't find textures/+0slip.ktx2
+Warning: textures/+0slip.png not supported by QS, consider tga
+Texture textures/+0slip: sRGB, GL_SRGB8
+FindFile: can't find textures/start/slip1.ktx2
+FindFile: can't find textures/start/slip1.png
+FindFile: can't find textures/start/slip1.jpg
+FindFile: can't find textures/start/slip1.lmp
+FindFile: can't find textures/slip1.ktx2
+Warning: textures/slip1.png not supported by QS, consider tga
+Texture textures/slip1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/slipbotsd.ktx2
+FindFile: can't find textures/start/slipbotsd.png
+FindFile: can't find textures/start/slipbotsd.jpg
+FindFile: can't find textures/start/slipbotsd.lmp
+FindFile: can't find textures/slipbotsd.ktx2
+Warning: textures/slipbotsd.png not supported by QS, consider tga
+Texture textures/slipbotsd: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+0slipbot.ktx2
+FindFile: can't find textures/start/+0slipbot.png
+FindFile: can't find textures/start/+0slipbot.jpg
+FindFile: can't find textures/start/+0slipbot.lmp
+FindFile: can't find textures/+0slipbot.ktx2
+Warning: textures/+0slipbot.png not supported by QS, consider tga
+Texture textures/+0slipbot: sRGB, GL_SRGB8
+FindFile: can't find textures/start/slipside.ktx2
+FindFile: can't find textures/start/slipside.png
+FindFile: can't find textures/start/slipside.jpg
+FindFile: can't find textures/start/slipside.lmp
+FindFile: can't find textures/slipside.ktx2
+Warning: textures/slipside.png not supported by QS, consider tga
+Texture textures/slipside: sRGB, GL_SRGB8
+FindFile: can't find textures/start/sliplite.ktx2
+FindFile: can't find textures/start/sliplite.png
+FindFile: can't find textures/start/sliplite.jpg
+FindFile: can't find textures/start/sliplite.lmp
+FindFile: can't find textures/sliplite.ktx2
+Warning: textures/sliplite.png not supported by QS, consider tga
+Texture textures/sliplite: sRGB, GL_SRGB8
+FindFile: can't find textures/start/sliptopsd.ktx2
+FindFile: can't find textures/start/sliptopsd.png
+FindFile: can't find textures/start/sliptopsd.jpg
+FindFile: can't find textures/start/sliptopsd.lmp
+FindFile: can't find textures/sliptopsd.ktx2
+Warning: textures/sliptopsd.png not supported by QS, consider tga
+Texture textures/sliptopsd: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+0sliptop.ktx2
+FindFile: can't find textures/start/+0sliptop.png
+FindFile: can't find textures/start/+0sliptop.jpg
+FindFile: can't find textures/start/+0sliptop.lmp
+FindFile: can't find textures/+0sliptop.ktx2
+Warning: textures/+0sliptop.png not supported by QS, consider tga
+Texture textures/+0sliptop: sRGB, GL_SRGB8
+FindFile: can't find textures/start/tlight08.ktx2
+FindFile: can't find textures/start/tlight08.png
+FindFile: can't find textures/start/tlight08.jpg
+FindFile: can't find textures/start/tlight08.lmp
+FindFile: can't find textures/tlight08.ktx2
+Warning: textures/tlight08.png not supported by QS, consider tga
+Texture textures/tlight08: sRGB, GL_SRGB8
+FindFile: can't find textures/start/tlight07.ktx2
+FindFile: can't find textures/start/tlight07.png
+FindFile: can't find textures/start/tlight07.jpg
+FindFile: can't find textures/start/tlight07.lmp
+FindFile: can't find textures/tlight07.ktx2
+Warning: textures/tlight07.png not supported by QS, consider tga
+Texture textures/tlight07: sRGB, GL_SRGB8
+FindFile: can't find textures/start/tech01_1.ktx2
+FindFile: can't find textures/start/tech01_1.png
+FindFile: can't find textures/start/tech01_1.jpg
+FindFile: can't find textures/start/tech01_1.lmp
+FindFile: can't find textures/tech01_1.ktx2
+Warning: textures/tech01_1.png not supported by QS, consider tga
+Texture textures/tech01_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/tech01_6.ktx2
+FindFile: can't find textures/start/tech01_6.png
+FindFile: can't find textures/start/tech01_6.jpg
+FindFile: can't find textures/start/tech01_6.lmp
+FindFile: can't find textures/tech01_6.ktx2
+Warning: textures/tech01_6.png not supported by QS, consider tga
+Texture textures/tech01_6: sRGB, GL_SRGB8
+FindFile: can't find textures/start/tlight02.ktx2
+FindFile: can't find textures/start/tlight02.png
+FindFile: can't find textures/start/tlight02.jpg
+FindFile: can't find textures/start/tlight02.lmp
+FindFile: can't find textures/tlight02.ktx2
+Warning: textures/tlight02.png not supported by QS, consider tga
+Texture textures/tlight02: sRGB, GL_SRGB8
+FindFile: can't find textures/start/tech11_2.ktx2
+FindFile: can't find textures/start/tech11_2.png
+FindFile: can't find textures/start/tech11_2.jpg
+FindFile: can't find textures/start/tech11_2.lmp
+FindFile: can't find textures/tech11_2.ktx2
+Warning: textures/tech11_2.png not supported by QS, consider tga
+Texture textures/tech11_2: sRGB, GL_SRGB8
+FindFile: can't find textures/start/tech09_3.ktx2
+FindFile: can't find textures/start/tech09_3.png
+FindFile: can't find textures/start/tech09_3.jpg
+FindFile: can't find textures/start/tech09_3.lmp
+FindFile: can't find textures/tech09_3.ktx2
+Warning: textures/tech09_3.png not supported by QS, consider tga
+Texture textures/tech09_3: sRGB, GL_SRGB8
+FindFile: can't find textures/start/cop3_4.ktx2
+FindFile: can't find textures/start/cop3_4.png
+FindFile: can't find textures/start/cop3_4.jpg
+FindFile: can't find textures/start/cop3_4.lmp
+FindFile: can't find textures/cop3_4.ktx2
+Warning: textures/cop3_4.png not supported by QS, consider tga
+Texture textures/cop3_4: sRGB, GL_SRGB8
+FindFile: can't find textures/start/met5_1.ktx2
+FindFile: can't find textures/start/met5_1.png
+FindFile: can't find textures/start/met5_1.jpg
+FindFile: can't find textures/start/met5_1.lmp
+FindFile: can't find textures/met5_1.ktx2
+Warning: textures/met5_1.png not supported by QS, consider tga
+Texture textures/met5_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/metal5_4.ktx2
+FindFile: can't find textures/start/metal5_4.png
+FindFile: can't find textures/start/metal5_4.jpg
+FindFile: can't find textures/start/metal5_4.lmp
+FindFile: can't find textures/metal5_4.ktx2
+Warning: textures/metal5_4.png not supported by QS, consider tga
+Texture textures/metal5_4: sRGB, GL_SRGB8
+FindFile: can't find textures/start/metalt1_1.ktx2
+FindFile: can't find textures/start/metalt1_1.png
+FindFile: can't find textures/start/metalt1_1.jpg
+FindFile: can't find textures/start/metalt1_1.lmp
+FindFile: can't find textures/metalt1_1.ktx2
+Warning: textures/metalt1_1.png not supported by QS, consider tga
+Texture textures/metalt1_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/metal5_3.ktx2
+FindFile: can't find textures/start/metal5_3.png
+FindFile: can't find textures/start/metal5_3.jpg
+FindFile: can't find textures/start/metal5_3.lmp
+FindFile: can't find textures/metal5_3.ktx2
+Warning: textures/metal5_3.png not supported by QS, consider tga
+Texture textures/metal5_3: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wmet4_4.ktx2
+FindFile: can't find textures/start/wmet4_4.png
+FindFile: can't find textures/start/wmet4_4.jpg
+FindFile: can't find textures/start/wmet4_4.lmp
+FindFile: can't find textures/wmet4_4.ktx2
+Warning: textures/wmet4_4.png not supported by QS, consider tga
+Texture textures/wmet4_4: sRGB, GL_SRGB8
+FindFile: can't find textures/start/metal6_4.ktx2
+FindFile: can't find textures/start/metal6_4.png
+FindFile: can't find textures/start/metal6_4.jpg
+FindFile: can't find textures/start/metal6_4.lmp
+FindFile: can't find textures/metal6_4.ktx2
+Warning: textures/metal6_4.png not supported by QS, consider tga
+Texture textures/metal6_4: sRGB, GL_SRGB8
+FindFile: can't find textures/start/m5_5.ktx2
+FindFile: can't find textures/start/m5_5.png
+FindFile: can't find textures/start/m5_5.jpg
+FindFile: can't find textures/start/m5_5.lmp
+FindFile: can't find textures/m5_5.ktx2
+Warning: textures/m5_5.png not supported by QS, consider tga
+Texture textures/m5_5: sRGB, GL_SRGB8
+FindFile: can't find textures/start/cop1_6.ktx2
+FindFile: can't find textures/start/cop1_6.png
+FindFile: can't find textures/start/cop1_6.jpg
+FindFile: can't find textures/start/cop1_6.lmp
+FindFile: can't find textures/cop1_6.ktx2
+Warning: textures/cop1_6.png not supported by QS, consider tga
+Texture textures/cop1_6: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wizmet1_8.ktx2
+FindFile: can't find textures/start/wizmet1_8.png
+FindFile: can't find textures/start/wizmet1_8.jpg
+FindFile: can't find textures/start/wizmet1_8.lmp
+FindFile: can't find textures/wizmet1_8.ktx2
+Warning: textures/wizmet1_8.png not supported by QS, consider tga
+Texture textures/wizmet1_8: sRGB, GL_SRGB8
+FindFile: can't find textures/start/rune2_3.ktx2
+FindFile: can't find textures/start/rune2_3.png
+FindFile: can't find textures/start/rune2_3.jpg
+FindFile: can't find textures/start/rune2_3.lmp
+FindFile: can't find textures/rune2_3.ktx2
+Warning: textures/rune2_3.png not supported by QS, consider tga
+Texture textures/rune2_3: sRGB, GL_SRGB8
+FindFile: can't find textures/start/metal1_4.ktx2
+FindFile: can't find textures/start/metal1_4.png
+FindFile: can't find textures/start/metal1_4.jpg
+FindFile: can't find textures/start/metal1_4.lmp
+FindFile: can't find textures/metal1_4.ktx2
+Warning: textures/metal1_4.png not supported by QS, consider tga
+Texture textures/metal1_4: sRGB, GL_SRGB8
+FindFile: can't find textures/start/church1_2.ktx2
+FindFile: can't find textures/start/church1_2.png
+FindFile: can't find textures/start/church1_2.jpg
+FindFile: can't find textures/start/church1_2.lmp
+FindFile: can't find textures/church1_2.ktx2
+Warning: textures/church1_2.png not supported by QS, consider tga
+Texture textures/church1_2: sRGB, GL_SRGB8
+FindFile: can't find textures/start/m5_3.ktx2
+FindFile: can't find textures/start/m5_3.png
+FindFile: can't find textures/start/m5_3.jpg
+FindFile: can't find textures/start/m5_3.lmp
+FindFile: can't find textures/m5_3.ktx2
+Warning: textures/m5_3.png not supported by QS, consider tga
+Texture textures/m5_3: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wall9_8.ktx2
+FindFile: can't find textures/start/wall9_8.png
+FindFile: can't find textures/start/wall9_8.jpg
+FindFile: can't find textures/start/wall9_8.lmp
+FindFile: can't find textures/wall9_8.ktx2
+Warning: textures/wall9_8.png not supported by QS, consider tga
+Texture textures/wall9_8: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wmet3_1.ktx2
+FindFile: can't find textures/start/wmet3_1.png
+FindFile: can't find textures/start/wmet3_1.jpg
+FindFile: can't find textures/start/wmet3_1.lmp
+FindFile: can't find textures/wmet3_1.ktx2
+Warning: textures/wmet3_1.png not supported by QS, consider tga
+Texture textures/wmet3_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/m5_8.ktx2
+FindFile: can't find textures/start/m5_8.png
+FindFile: can't find textures/start/m5_8.jpg
+FindFile: can't find textures/start/m5_8.lmp
+FindFile: can't find textures/m5_8.ktx2
+Warning: textures/m5_8.png not supported by QS, consider tga
+Texture textures/m5_8: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wizwood1_3.ktx2
+FindFile: can't find textures/start/wizwood1_3.png
+FindFile: can't find textures/start/wizwood1_3.jpg
+FindFile: can't find textures/start/wizwood1_3.lmp
+FindFile: can't find textures/wizwood1_3.ktx2
+Warning: textures/wizwood1_3.png not supported by QS, consider tga
+Texture textures/wizwood1_3: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wizmet1_3.ktx2
+FindFile: can't find textures/start/wizmet1_3.png
+FindFile: can't find textures/start/wizmet1_3.jpg
+FindFile: can't find textures/start/wizmet1_3.lmp
+FindFile: can't find textures/wizmet1_3.ktx2
+Warning: textures/wizmet1_3.png not supported by QS, consider tga
+Texture textures/wizmet1_3: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wood1_1.ktx2
+FindFile: can't find textures/start/wood1_1.png
+FindFile: can't find textures/start/wood1_1.jpg
+FindFile: can't find textures/start/wood1_1.lmp
+FindFile: can't find textures/wood1_1.ktx2
+Warning: textures/wood1_1.png not supported by QS, consider tga
+Texture textures/wood1_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/tech10_1.ktx2
+FindFile: can't find textures/start/tech10_1.png
+FindFile: can't find textures/start/tech10_1.jpg
+FindFile: can't find textures/start/tech10_1.lmp
+FindFile: can't find textures/tech10_1.ktx2
+Warning: textures/tech10_1.png not supported by QS, consider tga
+Texture textures/tech10_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/switch_1.ktx2
+FindFile: can't find textures/start/switch_1.png
+FindFile: can't find textures/start/switch_1.jpg
+FindFile: can't find textures/start/switch_1.lmp
+FindFile: can't find textures/switch_1.ktx2
+Warning: textures/switch_1.png not supported by QS, consider tga
+Texture textures/switch_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+0light01.ktx2
+FindFile: can't find textures/start/+0light01.png
+FindFile: can't find textures/start/+0light01.jpg
+FindFile: can't find textures/start/+0light01.lmp
+FindFile: can't find textures/+0light01.ktx2
+Warning: textures/+0light01.png not supported by QS, consider tga
+Texture textures/+0light01: sRGB, GL_SRGB8
+FindFile: can't find textures/start/city1_4.ktx2
+FindFile: can't find textures/start/city1_4.png
+FindFile: can't find textures/start/city1_4.jpg
+FindFile: can't find textures/start/city1_4.lmp
+FindFile: can't find textures/city1_4.ktx2
+Warning: textures/city1_4.png not supported by QS, consider tga
+Texture textures/city1_4: sRGB, GL_SRGB8
+FindFile: can't find textures/start/bricka2_1.ktx2
+FindFile: can't find textures/start/bricka2_1.png
+FindFile: can't find textures/start/bricka2_1.jpg
+FindFile: can't find textures/start/bricka2_1.lmp
+FindFile: can't find textures/bricka2_1.ktx2
+Warning: textures/bricka2_1.png not supported by QS, consider tga
+Texture textures/bricka2_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/ceiling1_3.ktx2
+FindFile: can't find textures/start/ceiling1_3.png
+FindFile: can't find textures/start/ceiling1_3.jpg
+FindFile: can't find textures/start/ceiling1_3.lmp
+FindFile: can't find textures/ceiling1_3.ktx2
+Warning: textures/ceiling1_3.png not supported by QS, consider tga
+Texture textures/ceiling1_3: sRGB, GL_SRGB8
+FindFile: can't find textures/start/cop1_1.ktx2
+FindFile: can't find textures/start/cop1_1.png
+FindFile: can't find textures/start/cop1_1.jpg
+FindFile: can't find textures/start/cop1_1.lmp
+FindFile: can't find textures/cop1_1.ktx2
+Warning: textures/cop1_1.png not supported by QS, consider tga
+Texture textures/cop1_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/skill3.ktx2
+FindFile: can't find textures/start/skill3.png
+FindFile: can't find textures/start/skill3.jpg
+FindFile: can't find textures/start/skill3.lmp
+FindFile: can't find textures/skill3.ktx2
+Warning: textures/skill3.png not supported by QS, consider tga
+Texture textures/skill3: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wizwood1_8.ktx2
+FindFile: can't find textures/start/wizwood1_8.png
+FindFile: can't find textures/start/wizwood1_8.jpg
+FindFile: can't find textures/start/wizwood1_8.lmp
+FindFile: can't find textures/wizwood1_8.ktx2
+Warning: textures/wizwood1_8.png not supported by QS, consider tga
+Texture textures/wizwood1_8: sRGB, GL_SRGB8
+FindFile: can't find textures/start/rock4_1.ktx2
+FindFile: can't find textures/start/rock4_1.png
+FindFile: can't find textures/start/rock4_1.jpg
+FindFile: can't find textures/start/rock4_1.lmp
+FindFile: can't find textures/rock4_1.ktx2
+Warning: textures/rock4_1.png not supported by QS, consider tga
+Texture textures/rock4_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/metal5_1.ktx2
+FindFile: can't find textures/start/metal5_1.png
+FindFile: can't find textures/start/metal5_1.jpg
+FindFile: can't find textures/start/metal5_1.lmp
+FindFile: can't find textures/metal5_1.ktx2
+Warning: textures/metal5_1.png not supported by QS, consider tga
+Texture textures/metal5_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/wizmet1_1.ktx2
+FindFile: can't find textures/start/wizmet1_1.png
+FindFile: can't find textures/start/wizmet1_1.jpg
+FindFile: can't find textures/start/wizmet1_1.lmp
+FindFile: can't find textures/wizmet1_1.ktx2
+Warning: textures/wizmet1_1.png not supported by QS, consider tga
+Texture textures/wizmet1_1: sRGB, GL_SRGB8
+FindFile: can't find textures/start/quake.ktx2
+FindFile: can't find textures/start/quake.png
+FindFile: can't find textures/start/quake.jpg
+FindFile: can't find textures/start/quake.lmp
+FindFile: can't find textures/quake.ktx2
+Warning: textures/quake.png not supported by QS, consider tga
+Texture textures/quake: sRGB, GL_SRGB8
+FindFile: can't find textures/start/city4_6.ktx2
+FindFile: can't find textures/start/city4_6.png
+FindFile: can't find textures/start/city4_6.jpg
+FindFile: can't find textures/start/city4_6.lmp
+FindFile: can't find textures/city4_6.ktx2
+Warning: textures/city4_6.png not supported by QS, consider tga
+Texture textures/city4_6: sRGB, GL_SRGB8
+FindFile: can't find textures/start/trigger.ktx2
+FindFile: can't find textures/start/trigger.png
+FindFile: can't find textures/start/trigger.jpg
+FindFile: can't find textures/start/trigger.lmp
+FindFile: can't find textures/trigger.ktx2
+Warning: textures/trigger.png not supported by QS, consider tga
+Texture textures/trigger: sRGB, GL_SRGB8
+FindFile: can't find textures/start/door04_2.ktx2
+FindFile: can't find textures/start/door04_2.png
+FindFile: can't find textures/start/door04_2.jpg
+FindFile: can't find textures/start/door04_2.lmp
+FindFile: can't find textures/door04_2.ktx2
+Warning: textures/door04_2.png not supported by QS, consider tga
+Texture textures/door04_2: sRGB, GL_SRGB8
+FindFile: can't find textures/start/z_exit.ktx2
+FindFile: can't find textures/start/z_exit.png
+FindFile: can't find textures/start/z_exit.jpg
+FindFile: can't find textures/start/z_exit.lmp
+FindFile: can't find textures/z_exit.ktx2
+Warning: textures/z_exit.png not supported by QS, consider tga
+Texture textures/z_exit: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+1slip.ktx2
+FindFile: can't find textures/start/+1slip.png
+FindFile: can't find textures/start/+1slip.jpg
+FindFile: can't find textures/start/+1slip.lmp
+FindFile: can't find textures/+1slip.ktx2
+Warning: textures/+1slip.png not supported by QS, consider tga
+Texture textures/+1slip: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+2slip.ktx2
+FindFile: can't find textures/start/+2slip.png
+FindFile: can't find textures/start/+2slip.jpg
+FindFile: can't find textures/start/+2slip.lmp
+FindFile: can't find textures/+2slip.ktx2
+Warning: textures/+2slip.png not supported by QS, consider tga
+Texture textures/+2slip: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+3slip.ktx2
+FindFile: can't find textures/start/+3slip.png
+FindFile: can't find textures/start/+3slip.jpg
+FindFile: can't find textures/start/+3slip.lmp
+FindFile: can't find textures/+3slip.ktx2
+Warning: textures/+3slip.png not supported by QS, consider tga
+Texture textures/+3slip: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+4slip.ktx2
+FindFile: can't find textures/start/+4slip.png
+FindFile: can't find textures/start/+4slip.jpg
+FindFile: can't find textures/start/+4slip.lmp
+FindFile: can't find textures/+4slip.ktx2
+Warning: textures/+4slip.png not supported by QS, consider tga
+Texture textures/+4slip: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+5slip.ktx2
+FindFile: can't find textures/start/+5slip.png
+FindFile: can't find textures/start/+5slip.jpg
+FindFile: can't find textures/start/+5slip.lmp
+FindFile: can't find textures/+5slip.ktx2
+Warning: textures/+5slip.png not supported by QS, consider tga
+Texture textures/+5slip: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+6slip.ktx2
+FindFile: can't find textures/start/+6slip.png
+FindFile: can't find textures/start/+6slip.jpg
+FindFile: can't find textures/start/+6slip.lmp
+FindFile: can't find textures/+6slip.ktx2
+Warning: textures/+6slip.png not supported by QS, consider tga
+Texture textures/+6slip: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+1light01.ktx2
+FindFile: can't find textures/start/+1light01.png
+FindFile: can't find textures/start/+1light01.jpg
+FindFile: can't find textures/start/+1light01.lmp
+FindFile: can't find textures/+1light01.ktx2
+Warning: textures/+1light01.png not supported by QS, consider tga
+Texture textures/+1light01: sRGB, GL_SRGB8
+FindFile: can't find textures/start/+2light01.ktx2
+FindFile: can't find textures/start/+2light01.png
+FindFile: can't find textures/start/+2light01.jpg
+FindFile: can't find textures/start/+2light01.lmp
+FindFile: can't find textures/+2light01.ktx2
+Warning: textures/+2light01.png not supported by QS, consider tga
+Texture textures/+2light01: sRGB, GL_SRGB8
+loaded maps/start.lit lighting (ldr)
+LIT: loaded LIT_V1_BGR->RGB (217713 texels) from maps/start.lit
+Lightmap: source=LIT_V1_BGR->RGB fmt=BGR->RGB texels=217713
+BSPX: no FACENORMALS lump found
+trying to open external vis file
+maps/start.vis not found, trying id1.vis
+external vis not found
+maps/start.bsp: no BSPX lumps present
+FindFile: can't find progs/player_00_00.png
+FindFile: can't find progs/player_00_00.jpg
+Texture progs/player_00_00: sRGB, GL_SRGB8
+Texture progs/player_00_00_luma: sRGB, GL_SRGB8
+FindFile: can't find progs/player_00_01.png
+FindFile: can't find progs/player_00_01.jpg
+FindFile: can't find progs/player_00_01.lmp
+FindFile: can't find progs/player_01_00.png
+FindFile: can't find progs/player_01_00.jpg
+FindFile: can't find progs/player_01_00.lmp
+FindFile: can't find progs/eyes.md5mesh
+Texture progs/eyes.mdl:frame0: sRGB, GL_SRGB8
+FindFile: can't find progs/h_player.md5mesh
+Texture progs/h_player.mdl:frame0: sRGB, GL_SRGB8
+FindFile: can't find progs/gib1.md5mesh
+Texture progs/gib1.mdl:frame0: sRGB, GL_SRGB8
+FindFile: can't find progs/gib2.md5mesh
+Texture progs/gib2.mdl:frame0: sRGB, GL_SRGB8
+FindFile: can't find progs/gib3.md5mesh
+Texture progs/gib3.mdl:frame0: sRGB, GL_SRGB8
+Texture progs/s_bubble.spr:frame0: sRGB, GL_SRGB8_ALPHA8
+Texture progs/s_bubble.spr:frame1: sRGB, GL_SRGB8_ALPHA8
+Texture progs/s_explod.spr:frame0: sRGB, GL_SRGB8_ALPHA8
+Texture progs/s_explod.spr:frame1: sRGB, GL_SRGB8_ALPHA8
+Texture progs/s_explod.spr:frame2: sRGB, GL_SRGB8_ALPHA8
+Texture progs/s_explod.spr:frame3: sRGB, GL_SRGB8_ALPHA8
+Texture progs/s_explod.spr:frame4: sRGB, GL_SRGB8_ALPHA8
+Texture progs/s_explod.spr:frame5: sRGB, GL_SRGB8_ALPHA8
+FindFile: can't find progs/v_axe_00_00.png
+FindFile: can't find progs/v_axe_00_00.jpg
+Texture progs/v_axe_00_00: sRGB, GL_SRGB8
+FindFile: can't find progs/v_axe_00_01.png
+FindFile: can't find progs/v_axe_00_01.jpg
+FindFile: can't find progs/v_axe_00_01.lmp
+FindFile: can't find progs/v_axe_01_00.png
+FindFile: can't find progs/v_axe_01_00.jpg
+FindFile: can't find progs/v_axe_01_00.lmp
+FindFile: can't find progs/v_shot_00_00.png
+FindFile: can't find progs/v_shot_00_00.jpg
+Texture progs/v_shot_00_00: sRGB, GL_SRGB8
+Texture progs/v_shot_00_00_luma: sRGB, GL_SRGB8
+FindFile: can't find progs/v_shot_00_01.png
+FindFile: can't find progs/v_shot_00_01.jpg
+FindFile: can't find progs/v_shot_00_01.lmp
+FindFile: can't find progs/v_shot_01_00.png
+FindFile: can't find progs/v_shot_01_00.jpg
+FindFile: can't find progs/v_shot_01_00.lmp
+FindFile: can't find progs/v_nail_00_00.png
+FindFile: can't find progs/v_nail_00_00.jpg
+Texture progs/v_nail_00_00: sRGB, GL_SRGB8
+Texture progs/v_nail_00_00_luma: sRGB, GL_SRGB8
+FindFile: can't find progs/v_nail_00_01.png
+FindFile: can't find progs/v_nail_00_01.jpg
+FindFile: can't find progs/v_nail_00_01.lmp
+FindFile: can't find progs/v_nail_01_00.png
+FindFile: can't find progs/v_nail_01_00.jpg
+FindFile: can't find progs/v_nail_01_00.lmp
+FindFile: can't find progs/v_rock_00_00.png
+FindFile: can't find progs/v_rock_00_00.jpg
+Texture progs/v_rock_00_00: sRGB, GL_SRGB8
+Texture progs/v_rock_00_00_luma: sRGB, GL_SRGB8
+FindFile: can't find progs/v_rock_00_01.png
+FindFile: can't find progs/v_rock_00_01.jpg
+FindFile: can't find progs/v_rock_00_01.lmp
+FindFile: can't find progs/v_rock_01_00.png
+FindFile: can't find progs/v_rock_01_00.jpg
+FindFile: can't find progs/v_rock_01_00.lmp
+FindFile: can't find progs/v_shot2_00_00.png
+FindFile: can't find progs/v_shot2_00_00.jpg
+Texture progs/v_shot2_00_00: sRGB, GL_SRGB8
+Texture progs/v_shot2_00_00_luma: sRGB, GL_SRGB8
+FindFile: can't find progs/v_shot2_00_01.png
+FindFile: can't find progs/v_shot2_00_01.jpg
+FindFile: can't find progs/v_shot2_00_01.lmp
+FindFile: can't find progs/v_shot2_01_00.png
+FindFile: can't find progs/v_shot2_01_00.jpg
+FindFile: can't find progs/v_shot2_01_00.lmp
+FindFile: can't find progs/v_nail2_00_00.png
+FindFile: can't find progs/v_nail2_00_00.jpg
+Texture progs/v_nail2_00_00: sRGB, GL_SRGB8
+Texture progs/v_nail2_00_00_luma: sRGB, GL_SRGB8
+FindFile: can't find progs/v_nail2_00_01.png
+FindFile: can't find progs/v_nail2_00_01.jpg
+FindFile: can't find progs/v_nail2_00_01.lmp
+FindFile: can't find progs/v_nail2_01_00.png
+FindFile: can't find progs/v_nail2_01_00.jpg
+FindFile: can't find progs/v_nail2_01_00.lmp
+FindFile: can't find progs/v_rock2_00_00.png
+FindFile: can't find progs/v_rock2_00_00.jpg
+Texture progs/v_rock2_00_00: sRGB, GL_SRGB8
+Texture progs/v_rock2_00_00_luma: sRGB, GL_SRGB8
+FindFile: can't find progs/v_rock2_00_01.png
+FindFile: can't find progs/v_rock2_00_01.jpg
+FindFile: can't find progs/v_rock2_00_01.lmp
+FindFile: can't find progs/v_rock2_01_00.png
+FindFile: can't find progs/v_rock2_01_00.jpg
+FindFile: can't find progs/v_rock2_01_00.lmp
+FindFile: can't find progs/bolt.md5mesh
+Texture progs/bolt.mdl:frame0: sRGB, GL_SRGB8_ALPHA8
+FindFile: can't find progs/bolt2.md5mesh
+Texture progs/bolt2.mdl:frame0: sRGB, GL_SRGB8_ALPHA8
+FindFile: can't find progs/bolt3.md5mesh
+Texture progs/bolt3.mdl:frame0: sRGB, GL_SRGB8_ALPHA8
+FindFile: can't find progs/lavaball.md5mesh
+Texture progs/lavaball.mdl:frame0: sRGB, GL_SRGB8_ALPHA8
+FindFile: can't find progs/missile_00_00.png
+FindFile: can't find progs/missile_00_00.jpg
+Texture progs/missile_00_00: sRGB, GL_SRGB8_ALPHA8
+Texture progs/missile_00_00_luma: sRGB, GL_SRGB8_ALPHA8
+FindFile: can't find progs/missile_00_01.png
+FindFile: can't find progs/missile_00_01.jpg
+FindFile: can't find progs/missile_00_01.lmp
+FindFile: can't find progs/missile_01_00.png
+FindFile: can't find progs/missile_01_00.jpg
+FindFile: can't find progs/missile_01_00.lmp
+FindFile: can't find progs/grenade_00_00.png
+FindFile: can't find progs/grenade_00_00.jpg
+Texture progs/grenade_00_00: sRGB, GL_SRGB8
+Texture progs/grenade_00_00_luma: sRGB, GL_SRGB8
+FindFile: can't find progs/grenade_00_01.png
+FindFile: can't find progs/grenade_00_01.jpg
+FindFile: can't find progs/grenade_00_01.lmp
+FindFile: can't find progs/grenade_01_00.png
+FindFile: can't find progs/grenade_01_00.jpg
+FindFile: can't find progs/grenade_01_00.lmp
+FindFile: can't find progs/spike.md5mesh
+Texture progs/spike.mdl:frame0: sRGB, GL_SRGB8
+FindFile: can't find progs/s_spike.md5mesh
+Texture progs/s_spike.mdl:frame0: sRGB, GL_SRGB8
+FindFile: can't find progs/backpack_00_00.png
+FindFile: can't find progs/backpack_00_00.jpg
+Texture progs/backpack_00_00: sRGB, GL_SRGB8
+FindFile: can't find progs/backpack_00_01.png
+FindFile: can't find progs/backpack_00_01.jpg
+FindFile: can't find progs/backpack_00_01.lmp
+FindFile: can't find progs/backpack_01_00.png
+FindFile: can't find progs/backpack_01_00.jpg
+FindFile: can't find progs/backpack_01_00.lmp
+FindFile: can't find progs/zom_gib.md5mesh
+Texture progs/zom_gib.mdl:frame0: sRGB, GL_SRGB8
+FindFile: can't find progs/v_light_00_00.png
+FindFile: can't find progs/v_light_00_00.jpg
+Texture progs/v_light_00_00: sRGB, GL_SRGB8
+Texture progs/v_light_00_00_luma: sRGB, GL_SRGB8
+FindFile: can't find progs/v_light_00_01.png
+FindFile: can't find progs/v_light_00_01.jpg
+FindFile: can't find progs/v_light_00_01.lmp
+FindFile: can't find progs/v_light_01_00.png
+FindFile: can't find progs/v_light_01_00.jpg
+FindFile: can't find progs/v_light_01_00.lmp
+FindFile: can't find progs/flame2.md5mesh
+Texture progs/flame2.mdl:frame0: sRGB, GL_SRGB8_ALPHA8
+FindFile: can't find progs/flame.md5mesh
+Texture progs/flame.mdl:frame0: sRGB, GL_SRGB8_ALPHA8
+FindFile: can't find progs/zombie_00_00.png
+FindFile: can't find progs/zombie_00_00.jpg
+Texture progs/zombie_00_00: sRGB, GL_SRGB8
+FindFile: can't find progs/zombie_00_01.png
+FindFile: can't find progs/zombie_00_01.jpg
+FindFile: can't find progs/zombie_00_01.lmp
+FindFile: can't find progs/zombie_01_00.png
+FindFile: can't find progs/zombie_01_00.jpg
+FindFile: can't find progs/zombie_01_00.lmp
+Warning: progs/zombie.mdl uses up to 5 influences per vertex (weakest: 1)
+FindFile: can't find progs/h_zombie.md5mesh
+Texture progs/h_zombie.mdl:frame0: sRGB, GL_SRGB8
+40 entities inhibited
+FindFile: can't find maps/start.nav2
+Server spawned.
+
+=====================================
+
+Map checklist (start.bsp):
+
+[x] lightmap data
+[x] vis data
+[x] trigger_changelevel (5)
+[x] info_intermission (4)
+[x] skill spawnflags/triggers
+[x] info_player_coop (4/3+)
+[x] info_player_deathmatch (6/5+)
+[x] music track (4)
+[x] map title (Introduction)
+
+=====================================
+
+CL_EstablishConnection: connected to local
+Client LOCAL connected
+
+FITZQUAKE 0.85 SERVER (3064 CRC)
+FOGVOL_TEST marker=END_FRAME draw_fbo=1 read_fbo=1 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x8ce0 read_buffer=0x8ce0
+Serverinfo packet received.
+
+----------------------------------------
+
+Introduction
+Using protocol 999
+FindFile: can't find decals.shader
+Warning: decals/bullet/bhole_01.png not supported by QS, consider tga
+Texture decal:bullet_hole_default: sRGB, GL_SRGB8_ALPHA8
+Warning: decals/bullet/bhole_01.png not supported by QS, consider tga
+Texture decal:bullet_hole_metal: linear, GL_RGBA8
+FindFile: can't find decals/blood/splat_01.png
+Texture decal:blood_splat_small: sRGB, GL_SRGB8_ALPHA8
+FindFile: can't find decals/blood/splat_02.png
+Texture decal:blood_splat_large: sRGB, GL_SRGB8_ALPHA8
+Warning: decals/bullet/bhole_01.png not supported by QS, consider tga
+Texture decal:scorch_small: sRGB, GL_SRGB8_ALPHA8
+Warning: decals/bullet/bhole_01.png not supported by QS, consider tga
+Texture decal:scorch_large: sRGB, GL_SRGB8_ALPHA8
+Warning: decals/bullet/bhole_01.png not supported by QS, consider tga
+Texture decal:dirt_hit: sRGB, GL_SRGB8_ALPHA8
+Warning: decals/bullet/bhole_01.png not supported by QS, consider tga
+Texture decal:plaster_hit: sRGB, GL_SRGB8_ALPHA8
+Warning: decals/bullet/bhole_01.png not supported by QS, consider tga
+Texture decal:concrete_hit: sRGB, GL_SRGB8_ALPHA8
+Lightmap upload format: GL_BGRA (policy 0)
+Lightmap size:   1024 x 1024 (1/1 blocks)
+Lightmap memory: 4.0 MB (21.8% efficiency)
+Texture lightmap: sRGB, GL_RGBA16F
+Spawned 0 entity dlights (showing 0):
+FogVol: static probes mode=1 lights=0 samples=11772 complete=0
+FindFile: can't find music/start.iwm
+FindFile: can't find music/track04.opus
+FindFile: can't find music/track04.mp3
+FindFile: can't find music/track04.flac
+FindFile: can't find music/track04.wav
+FindFile: can't find music/track04.it
+FindFile: can't find music/track04.s3m
+FindFile: can't find music/track04.xm
+FindFile: can't find music/track04.mod
+FindFile: can't find music/track04.umx
+CL_SignonReply: 1
+FOGVOL_TEST marker=END_FRAME draw_fbo=1 read_fbo=1 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x8ce0 read_buffer=0x8ce0
+FOGVOL_TEST marker=END_FRAME draw_fbo=1 read_fbo=1 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x8ce0 read_buffer=0x8ce0
+FindFile: can't find csprogs.dat
+Programs occupy 332K.
+CL_SignonReply: 2
+FOGVOL_TEST marker=END_FRAME draw_fbo=1 read_fbo=1 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x8ce0 read_buffer=0x8ce0
+FOGVOL_TEST marker=END_FRAME draw_fbo=1 read_fbo=1 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x8ce0 read_buffer=0x8ce0
+player entered the game
+CL_SignonReply: 3
+363.5 megabyte data cache
+FOGVOL_TEST marker=END_FRAME draw_fbo=1 read_fbo=1 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x8ce0 read_buffer=0x8ce0
+FOGVOL_TEST marker=END_FRAME draw_fbo=1 read_fbo=1 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x8ce0 read_buffer=0x8ce0
+CL_SignonReply: 4
+Texture player_0: sRGB, GL_SRGB8
+FindFile: can't find progs/player_00_00.png
+FindFile: can't find progs/player_00_00.jpg
+Texture player_0: sRGB, GL_SRGB8
+gpuframedata layout: sizeof=432 vieworg=256 viewproj=0 time=268 dlight_params=336 fog=192
+FrameGraph prune: skipped 'Prepare fogvol inputs'
+FrameGraph prune: skipped 'Render fog volumes'
+Shadow: sun depth map created (2048x2048)
+Shadow: dlight cube-array atlas created (512x512, layers=24)
+GL_STATE[before-alias] prog=68 acttex=3 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=9/9/0 tex2d(0/1/2)=193/0/191
+GL_STATE[before-alias] prog=211 acttex=6 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=9/9/0 tex2d(0/1/2)=180/32/32
+Warning: FrameGraph after(Render scene): GL error 0x502
+Warning: FrameGraph after(Postprocess): GL error 0x502
+GL_STATE[before-viewmodel] prog=15 acttex=2 fbo(draw/read)=0/0 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=0 depthmask=1 cull=0 srgb=1 ubo(0/1/2)=9/9/0 tex2d(0/1/2)=1/0/2
+fogvol_update_called=0 r_fogvol=0.0
+fogvol_draw_called=0 r_fogvol=0.0
+Texture scrap: sRGB, GL_SRGB8_ALPHA8
+FOGVOL_TEST marker=END_FRAME draw_fbo=0 read_fbo=0 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x0405 read_buffer=0x0405
+FrameGraph prune: skipped 'Prepare fogvol inputs'
+FrameGraph prune: skipped 'Render fog volumes'
+GL_STATE[before-alias] prog=68 acttex=3 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=5/5/0 tex2d(0/1/2)=0/0/191
+GL_STATE[before-alias] prog=211 acttex=6 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=5/5/0 tex2d(0/1/2)=180/32/32
+Warning: FrameGraph after(Render scene): GL error 0x502
+Warning: FrameGraph after(Postprocess): GL error 0x502
+GL_STATE[before-viewmodel] prog=15 acttex=2 fbo(draw/read)=0/0 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=0 depthmask=1 cull=0 srgb=1 ubo(0/1/2)=5/5/0 tex2d(0/1/2)=1/0/2
+fogvol_update_called=0 r_fogvol=0.0
+fogvol_draw_called=0 r_fogvol=0.0
+FOGVOL_TEST marker=END_FRAME draw_fbo=0 read_fbo=0 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x0405 read_buffer=0x0405
+FrameGraph prune: skipped 'Prepare fogvol inputs'
+FrameGraph prune: skipped 'Render fog volumes'
+GL_STATE[before-alias] prog=68 acttex=3 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=7/7/0 tex2d(0/1/2)=0/0/191
+GL_STATE[before-alias] prog=211 acttex=6 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=7/7/0 tex2d(0/1/2)=180/32/32
+Warning: FrameGraph after(Render scene): GL error 0x502
+Warning: FrameGraph after(Postprocess): GL error 0x502
+GL_STATE[before-viewmodel] prog=15 acttex=2 fbo(draw/read)=0/0 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=0 depthmask=1 cull=0 srgb=1 ubo(0/1/2)=7/7/0 tex2d(0/1/2)=1/0/2
+fogvol_update_called=0 r_fogvol=0.0
+fogvol_draw_called=0 r_fogvol=0.0
+FOGVOL_TEST marker=END_FRAME draw_fbo=0 read_fbo=0 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x0405 read_buffer=0x0405
+FrameGraph prune: skipped 'Prepare fogvol inputs'
+FrameGraph prune: skipped 'Render fog volumes'
+GL_STATE[before-alias] prog=68 acttex=3 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=9/9/0 tex2d(0/1/2)=0/0/191
+GL_STATE[before-alias] prog=211 acttex=6 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=9/9/0 tex2d(0/1/2)=180/32/32
+Warning: FrameGraph after(Render scene): GL error 0x502
+Warning: FrameGraph after(Postprocess): GL error 0x502
+GL_STATE[before-viewmodel] prog=15 acttex=2 fbo(draw/read)=0/0 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=0 depthmask=1 cull=0 srgb=1 ubo(0/1/2)=9/9/0 tex2d(0/1/2)=1/0/2
+fogvol_update_called=0 r_fogvol=0.0
+fogvol_draw_called=0 r_fogvol=0.0
+FOGVOL_TEST marker=END_FRAME draw_fbo=0 read_fbo=0 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x0405 read_buffer=0x0405
+FrameGraph prune: skipped 'Prepare fogvol inputs'
+FrameGraph prune: skipped 'Render fog volumes'
+GL_STATE[before-alias] prog=68 acttex=3 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=5/5/0 tex2d(0/1/2)=0/0/191
+GL_STATE[before-alias] prog=211 acttex=6 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=5/5/0 tex2d(0/1/2)=180/32/32
+Warning: FrameGraph after(Render scene): GL error 0x502
+Warning: FrameGraph after(Postprocess): GL error 0x502
+GL_STATE[before-viewmodel] prog=15 acttex=2 fbo(draw/read)=0/0 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=0 depthmask=1 cull=0 srgb=1 ubo(0/1/2)=5/5/0 tex2d(0/1/2)=1/0/2
+fogvol_update_called=0 r_fogvol=0.0
+fogvol_draw_called=0 r_fogvol=0.0
+FOGVOL_TEST marker=END_FRAME draw_fbo=0 read_fbo=0 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x0405 read_buffer=0x0405
+FrameGraph prune: skipped 'Prepare fogvol inputs'
+FrameGraph prune: skipped 'Render fog volumes'
+GL_STATE[before-alias] prog=68 acttex=3 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=7/7/0 tex2d(0/1/2)=0/0/191
+GL_STATE[before-alias] prog=211 acttex=6 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=7/7/0 tex2d(0/1/2)=180/32/32
+Warning: FrameGraph after(Render scene): GL error 0x502
+Warning: FrameGraph after(Postprocess): GL error 0x502
+GL_STATE[before-viewmodel] prog=15 acttex=2 fbo(draw/read)=0/0 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=0 depthmask=1 cull=0 srgb=1 ubo(0/1/2)=7/7/0 tex2d(0/1/2)=1/0/2
+fogvol_update_called=0 r_fogvol=0.0
+fogvol_draw_called=0 r_fogvol=0.0
+FOGVOL_TEST marker=END_FRAME draw_fbo=0 read_fbo=0 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x0405 read_buffer=0x0405
+FrameGraph prune: skipped 'Prepare fogvol inputs'
+FrameGraph prune: skipped 'Render fog volumes'
+GL_STATE[before-alias] prog=68 acttex=3 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=9/9/0 tex2d(0/1/2)=0/0/191
+GL_STATE[before-alias] prog=211 acttex=6 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=9/9/0 tex2d(0/1/2)=180/32/32
+Warning: FrameGraph after(Render scene): GL error 0x502
+Warning: FrameGraph after(Postprocess): GL error 0x502
+GL_STATE[before-viewmodel] prog=15 acttex=2 fbo(draw/read)=0/0 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=0 depthmask=1 cull=0 srgb=1 ubo(0/1/2)=9/9/0 tex2d(0/1/2)=1/0/2
+fogvol_update_called=0 r_fogvol=0.0
+fogvol_draw_called=0 r_fogvol=0.0
+FOGVOL_TEST marker=END_FRAME draw_fbo=0 read_fbo=0 viewport=(0 0 1920 1080) scissor=0 scissor_box=(0 0 1920 1080) prog=3 draw_buffer=0x0405 read_buffer=0x0405
+3 demo(s) in loop
+FrameGraph prune: skipped 'Prepare fogvol inputs'
+FrameGraph prune: skipped 'Render fog volumes'
+GL_STATE[before-alias] prog=68 acttex=3 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=5/5/0 tex2d(0/1/2)=0/0/191
+GL_STATE[before-alias] prog=211 acttex=6 fbo(draw/read)=20/20 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=1 depthmask=1 cull=1 srgb=0 ubo(0/1/2)=5/5/0 tex2d(0/1/2)=180/32/32
+Warning: FrameGraph after(Render scene): GL error 0x502
+Warning: FrameGraph after(Postprocess): GL error 0x502
+GL_STATE[before-viewmodel] prog=15 acttex=2 fbo(draw/read)=0/0 vp=(0 0 1920 1080) sci=0 box=(0 0 1920 1080) blend=1 depth=0 depthmask=1 cull=0 srgb=1 ubo(0/1/2)=5/5/0 tex2d(0/1/2)=1/0/2
+fogvol_update_called=0 r_fogvol=0.0
+fogvol_draw_called=0 r_fogvol=0.0
+Sending clc_disconnect
+Client player removed
+AsyncQueue metrics: pushes=1 peak=1 full_hits=0 waits=0 timeouts=0 dropped=0 exec=0
+Wrote ironwail.cfg.
+Shutting down SDL sound
