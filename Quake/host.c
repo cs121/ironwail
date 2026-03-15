@@ -784,7 +784,7 @@ static void AsyncQueue_Init (asyncqueue_t *queue, size_t capacity)
 		capacity = Q_nextPow2 (capacity);
 	queue->capacity = capacity;
 	capacity *= sizeof (queue->procs[0]);
-	queue->procs = (asyncproc_t *) malloc (capacity);
+	queue->procs = (asyncproc_t *) q_malloc(capacity);
 	if (!queue->procs)
 		Sys_Error ("AsyncQueue_Init: malloc failed on %" SDL_PRIu64 " bytes", (uint64_t) capacity);
 
@@ -1251,7 +1251,7 @@ static void CL_LoadCSProgs (void)
 		    (PR_LoadProgs ("progs.dat", false) && qcvm->extfuncs.CSQC_DrawHud))
 		{
 			qcvm->max_edicts = CLAMP (MIN_EDICTS, (int)max_edicts.value, MAX_EDICTS);
-			qcvm->edicts = (edict_t *)malloc (qcvm->max_edicts * qcvm->edict_size);
+			qcvm->edicts = (edict_t *)q_malloc(qcvm->max_edicts * qcvm->edict_size);
 			qcvm->num_edicts = qcvm->reserved_edicts = 1;
 			memset (qcvm->edicts, 0, qcvm->num_edicts * qcvm->edict_size);
 

@@ -49,8 +49,8 @@ void DLightPool_Init (void)
 
 void DLightPool_Shutdown (void)
 {
-	free (dlight_pool.items);
-	free (dlight_pool.scratch);
+	q_free(dlight_pool.items);
+	q_free(dlight_pool.scratch);
 	DLightPool_Init ();
 }
 
@@ -77,7 +77,7 @@ static qboolean DLightPool_EnsureScratch (int needed)
 	if (needed <= dlight_pool.scratch_capacity)
 		return true;
 
-	dlight_t **new_scratch = (dlight_t **)realloc (dlight_pool.scratch, sizeof (dlight_pool.scratch[0]) * needed);
+	dlight_t **new_scratch = (dlight_t **)q_realloc(dlight_pool.scratch, sizeof (dlight_pool.scratch[0]) * needed);
 	if (!new_scratch)
 	{
 		Con_DPrintf ("DLightPool_EnsureScratch: allocation failed for %d entries (capacity stays %d)\n",
@@ -106,7 +106,7 @@ static qboolean DLightPool_EnsureCapacity (int desired)
 	if (new_capacity <= dlight_pool.capacity)
 		return true;
 
-	dlight_t *new_items = (dlight_t *)realloc (dlight_pool.items, sizeof (dlight_pool.items[0]) * new_capacity);
+	dlight_t *new_items = (dlight_t *)q_realloc(dlight_pool.items, sizeof (dlight_pool.items[0]) * new_capacity);
 	if (!new_items)
 	{
 		Con_Warning ("DLightPool_EnsureCapacity: allocation failed for %d lights (capacity stays %d)\n",

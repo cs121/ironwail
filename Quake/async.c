@@ -134,7 +134,7 @@ static JobHandle *Jobs_CreateCompletedHandle (void)
 {
 	JobHandle *handle;
 
-	handle = (JobHandle *) calloc (1, sizeof (*handle));
+	handle = (JobHandle *) q_calloc(1, sizeof (*handle));
 	if (!handle)
 		Sys_Error ("Jobs_CreateCompletedHandle: out of memory");
 	handle->mutex = SDL_CreateMutex ();
@@ -165,14 +165,14 @@ static qboolean Jobs_EnsureRingCapacityLocked (jobs_ring_t *ring, size_t require
 	while (new_capacity < required)
 		new_capacity <<= 1;
 
-	new_items = (jobnode_t *) calloc (new_capacity, sizeof (*new_items));
+	new_items = (jobnode_t *) q_calloc(new_capacity, sizeof (*new_items));
 	if (!new_items)
 		return false;
 
 	for (size_t i = 0; i < ring->count; ++i)
 		new_items[i] = ring->items[(ring->head + i) & (ring->capacity - 1)];
 
-	free (ring->items);
+	q_free(ring->items);
 	ring->items = new_items;
 	ring->capacity = new_capacity;
 	ring->head = 0;
@@ -224,7 +224,7 @@ JobHandle *Jobs_SubmitPriority (jobs_priority_t priority, jobs_func_t func, void
 
 	if (!jobs_mutex)
 	{
-		handle = (JobHandle *) calloc (1, sizeof (*handle));
+		handle = (JobHandle *) q_calloc(1, sizeof (*handle));
 		if (!handle)
 			Sys_Error ("Jobs_SubmitPriority: out of memory");
 		handle->mutex = SDL_CreateMutex ();
@@ -248,7 +248,7 @@ JobHandle *Jobs_SubmitPriority (jobs_priority_t priority, jobs_func_t func, void
 	}
 	SDL_UnlockMutex (jobs_mutex);
 
-	handle = (JobHandle *) calloc (1, sizeof (*handle));
+	handle = (JobHandle *) q_calloc(1, sizeof (*handle));
 	if (!handle)
 		Sys_Error ("Jobs_SubmitPriority: out of memory");
 	handle->mutex = SDL_CreateMutex ();
@@ -523,7 +523,7 @@ void Jobs_Wait (JobHandle *handle)
 	SDL_UnlockMutex (handle->mutex);
 	SDL_DestroyCond (handle->cond);
 	SDL_DestroyMutex (handle->mutex);
-	free (handle);
+	q_free(handle);
 }
 
 typedef struct fs_completion_s {
@@ -595,7 +595,7 @@ static qboolean FS_IdSetEnsureCapacityLocked (fs_idset_t *set, size_t required)
 	while (required * 10 > new_capacity * 7)
 		new_capacity <<= 1;
 
-	new_keys = (unsigned int *) calloc (new_capacity, sizeof (*new_keys));
+	new_keys = (unsigned int *) q_calloc(new_capacity, sizeof (*new_keys));
 	if (!new_keys)
 		return false;
 
@@ -612,7 +612,7 @@ static qboolean FS_IdSetEnsureCapacityLocked (fs_idset_t *set, size_t required)
 				idx = (idx + 1) & (new_capacity - 1);
 			new_keys[idx] = key;
 		}
-		free (set->keys);
+		q_free(set->keys);
 	}
 	set->keys = new_keys;
 	set->capacity = new_capacity;
@@ -704,7 +704,7 @@ static qboolean FS_IdSetRemoveLocked (fs_idset_t *set, unsigned int id)
 
 static void FS_IdSet_ClearLocked (fs_idset_t *set)
 {
-	free (set->keys);
+	q_free(set->keys);
 	set->keys = NULL;
 	set->capacity = 0;
 	set->count = 0;
@@ -725,12 +725,12 @@ static qboolean FS_CancelSetEnsureCapacityLocked (size_t required)
 	while (required * 10 > new_capacity * 7)
 		new_capacity <<= 1;
 
-	new_keys = (unsigned int *) calloc (new_capacity, sizeof (*new_keys));
-	new_generations = (unsigned int *) calloc (new_capacity, sizeof (*new_generations));
+	new_keys = (unsigned int *) q_calloc(new_capacity, sizeof (*new_keys));
+	new_generations = (unsigned int *) q_calloc(new_capacity, sizeof (*new_generations));
 	if (!new_keys || !new_generations)
 	{
-		free (new_keys);
-		free (new_generations);
+		q_free(new_keys);
+		q_free(new_generations);
 		return false;
 	}
 
@@ -749,8 +749,8 @@ static qboolean FS_CancelSetEnsureCapacityLocked (size_t required)
 			new_keys[idx] = key;
 			new_generations[idx] = generation;
 		}
-		free (fs_cancel_set.keys);
-		free (fs_cancel_set.generations);
+		q_free(fs_cancel_set.keys);
+		q_free(fs_cancel_set.generations);
 	}
 	fs_cancel_set.keys = new_keys;
 	fs_cancel_set.generations = new_generations;
@@ -866,8 +866,8 @@ static void FS_CancelSet_PruneLocked (void)
 
 static void FS_CancelSet_ClearLocked (void)
 {
-	free (fs_cancel_set.keys);
-	free (fs_cancel_set.generations);
+	q_free(fs_cancel_set.keys);
+	q_free(fs_cancel_set.generations);
 	fs_cancel_set.keys = NULL;
 	fs_cancel_set.generations = NULL;
 	fs_cancel_set.capacity = 0;
@@ -988,14 +988,14 @@ static uint8_t *FS_LoadMallocThread (const char *path, size_t *len_out)
 		fclose (f);
 		return NULL;
 	}
-	buf = (uint8_t *) malloc ((size_t) len + 1);
+	buf = (uint8_t *) q_malloc((size_t) len + 1);
 	if (!buf)
 		Sys_Error ("FS_LoadMallocThread: out of memory");
 	nread = fread (buf, 1, (size_t) len, f);
 	fclose (f);
 	if (nread != (size_t) len)
 	{
-		free (buf);
+		q_free(buf);
 		return NULL;
 	}
 	buf[len] = 0;
@@ -1006,7 +1006,7 @@ static uint8_t *FS_LoadMallocThread (const char *path, size_t *len_out)
 static void FS_AsyncReadJob (void *userdata)
 {
 	fs_job_t *job = (fs_job_t *) userdata;
-	fs_completion_t *comp = (fs_completion_t *) calloc (1, sizeof (*comp));
+	fs_completion_t *comp = (fs_completion_t *) q_calloc(1, sizeof (*comp));
 	if (!comp)
 		Sys_Error ("FS_AsyncReadJob: out of memory");
 
@@ -1026,7 +1026,7 @@ static void FS_AsyncReadJob (void *userdata)
 	fs_comp_tail = comp;
 	SDL_UnlockMutex (fs_mutex);
 
-	free (job);
+	q_free(job);
 }
 
 fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user)
@@ -1050,7 +1050,7 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 		return handle;
 	}
 
-	job = (fs_job_t *) calloc (1, sizeof (*job));
+	job = (fs_job_t *) q_calloc(1, sizeof (*job));
 	if (!job)
 		Sys_Error ("FS_AsyncRead: out of memory");
 	q_strlcpy (job->path, path, sizeof (job->path));
@@ -1071,7 +1071,7 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 		SDL_UnlockMutex (fs_mutex);
 		handle.id = 0;
 		cb (user, NULL, 0, -1);
-		free (job);
+		q_free(job);
 	}
 	return handle;
 }
@@ -1147,9 +1147,9 @@ void FS_PumpAsyncCompletions (void)
 			if (stale)
 				list->cb (list->user, NULL, 0, -1);
 			if (list->data)
-				free (list->data);
+				q_free(list->data);
 		}
-		free (list);
+		q_free(list);
 		list = next;
 	}
 }
@@ -1182,7 +1182,7 @@ void Jobs_Shutdown (void)
 			if (jobs_threads[i])
 				SDL_WaitThread (jobs_threads[i], NULL);
 		}
-		free (jobs_threads);
+		q_free(jobs_threads);
 		jobs_threads = NULL;
 	}
 	jobs_num_threads = 0;
@@ -1197,8 +1197,8 @@ void Jobs_Shutdown (void)
 	{
 		fs_completion_t *next = comp->next;
 		if (comp->data)
-			free (comp->data);
-		free (comp);
+			q_free(comp->data);
+		q_free(comp);
 		comp = next;
 	}
 
@@ -1281,7 +1281,7 @@ void Jobs_Init (void)
 		if (cpu_count < 1)
 			cpu_count = 1;
 		worker_count = CLAMP (1, (int) host_async_workers.value, cpu_count);
-		jobs_threads = (SDL_Thread **) calloc ((size_t) worker_count, sizeof (*jobs_threads));
+		jobs_threads = (SDL_Thread **) q_calloc((size_t) worker_count, sizeof (*jobs_threads));
 		if (!jobs_threads)
 			Sys_Error ("Jobs_Init: out of memory");
 

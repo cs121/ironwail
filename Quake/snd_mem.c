@@ -175,7 +175,7 @@ static void S_LoadSoundDecodeJob (void *userdata)
 	}
 
 	job->decoded_bytes = outcount * (loadas8bit.value ? 1 : job->info.width);
-	job->decoded = (byte *) malloc (job->decoded_bytes);
+	job->decoded = (byte *) q_malloc(job->decoded_bytes);
 	if (!job->decoded)
 		Sys_Error ("S_LoadSoundDecodeJob: out of memory");
 
@@ -234,18 +234,18 @@ static sfxcache_t *S_CommitPendingSound (pending_snd_job_t *job)
 
 	if (job->status != 0)
 	{
-		free (job->file_data);
-		free (job->decoded);
-		free (job);
+		q_free(job->file_data);
+		q_free(job->decoded);
+		q_free(job);
 		return NULL;
 	}
 
 	sc = (sfxcache_t *) Cache_Alloc (&job->sfx->cache, job->decoded_bytes + sizeof (sfxcache_t), job->sfx->name);
 	if (!sc)
 	{
-		free (job->file_data);
-		free (job->decoded);
-		free (job);
+		q_free(job->file_data);
+		q_free(job->decoded);
+		q_free(job);
 		return NULL;
 	}
 
@@ -256,9 +256,9 @@ static sfxcache_t *S_CommitPendingSound (pending_snd_job_t *job)
 	sc->stereo = 0;
 	memcpy (sc->data, job->decoded, job->decoded_bytes);
 
-	free (job->file_data);
-	free (job->decoded);
-	free (job);
+	q_free(job->file_data);
+	q_free(job->decoded);
+	q_free(job);
 	return sc;
 }
 
@@ -298,7 +298,7 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 
 	if (Host_AsyncAssetsEnabled ())
 	{
-		job = (pending_snd_job_t *) calloc (1, sizeof (*job));
+		job = (pending_snd_job_t *) q_calloc(1, sizeof (*job));
 		if (!job)
 			Sys_Error ("S_LoadSound: out of memory");
 
@@ -336,14 +336,14 @@ static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer)
 	info = GetWavinfo (s->name, data, com_filesize);
 	if (info.channels != 1)
 	{
-		free (data);
+		q_free(data);
 		Con_Printf ("%s is a stereo sample\n",s->name);
 		return NULL;
 	}
 
 	if (info.width != 1 && info.width != 2)
 	{
-		free (data);
+		q_free(data);
 		Con_Printf("%s is not 8 or 16 bit\n", s->name);
 		return NULL;
 	}
@@ -355,7 +355,7 @@ static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer)
 
 	if (info.samples == 0 || len == 0)
 	{
-		free (data);
+		q_free(data);
 		Con_Printf("%s has zero samples\n", s->name);
 		return NULL;
 	}
@@ -363,7 +363,7 @@ static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer)
 	sc = (sfxcache_t *) Cache_Alloc ( &s->cache, len + sizeof(sfxcache_t), s->name);
 	if (!sc)
 	{
-		free (data);
+		q_free(data);
 		return NULL;
 	}
 
@@ -375,7 +375,7 @@ static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer)
 
 	ResampleSfx (s, sc->speed, sc->width, data + info.dataofs);
 
-	free (data);
+	q_free(data);
 
 	return sc;
 }

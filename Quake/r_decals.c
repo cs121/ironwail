@@ -384,7 +384,7 @@ static void R_Decals_LoadScript (const char *path)
 	if (def)
 		R_DecalFinalizeDef (def);
 
-	free (data);
+	q_free(data);
 }
 
 static void R_Decals_LoadScripts (void)
@@ -866,7 +866,7 @@ static void R_SpawnImpactDecalSingle (const char *category, const vec3_t origin,
 	qboolean has_align_dir = false;
 	const char *lookup_category = category;
 	const char *debug_category = category;
-	int i, inst_idx, first_vert, temp_count;
+	int i, inst_idx, first_vert, temp_count = 0;
 	decalinst_t *inst;
 	const char *fail_reason = NULL;
 	qboolean spawned = false;

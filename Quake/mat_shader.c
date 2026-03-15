@@ -425,7 +425,7 @@ static void Mat_Shader_ReportAppend (char **buffer, size_t *len, size_t *cap, co
 		char *newbuf;
 		while (newcap < *len + add + 1)
 			newcap *= 2;
-		newbuf = (char *) realloc (*buffer, newcap);
+		newbuf = (char *) q_realloc(*buffer, newcap);
 		if (!newbuf)
 			return;
 		*buffer = newbuf;
@@ -488,7 +488,7 @@ static void Mat_Shader_ReportKeywords (char **buffer, size_t *len, size_t *cap, 
 		if (row->def->status != status)
 			continue;
 		printed++;
-		Mat_Shader_ReportAppend (buffer, len, cap, "- `%s` (%s) — Seen: %s",
+		Mat_Shader_ReportAppend (buffer, len, cap, "- `%s` (%s) â€” Seen: %s",
 			row->def->keyword,
 			Mat_Shader_ScopeName (row->def->scope),
 			row->seen ? "yes" : "no");
@@ -515,7 +515,7 @@ static void Mat_Shader_WriteReport (void)
 	size_t cap = 0;
 	size_t i;
 
-	rows = (mat_shader_keyword_row_t *) malloc (keyword_count * sizeof (*rows));
+	rows = (mat_shader_keyword_row_t *) q_malloc(keyword_count * sizeof (*rows));
 	if (!rows)
 		return;
 
@@ -536,7 +536,7 @@ static void Mat_Shader_WriteReport (void)
 	Mat_Shader_ReportAppend (&report, &len, &cap, "## Unknown-Seen\n");
 	if (unknown_count > 0)
 	{
-		unknown_rows = (mat_shader_unknown_t **) malloc (unknown_count * sizeof (*unknown_rows));
+		unknown_rows = (mat_shader_unknown_t **) q_malloc(unknown_count * sizeof (*unknown_rows));
 		if (unknown_rows)
 		{
 			for (i = 0; i < unknown_count; ++i)
@@ -549,7 +549,7 @@ static void Mat_Shader_WriteReport (void)
 				char location[MAX_QPATH * 2];
 				Mat_Shader_FormatSourceLine (location, sizeof (location), entry->first_source, entry->first_line);
 				Mat_Shader_ReportAppend (&report, &len, &cap,
-					"- `%s` (%s) — Count: %u. First seen in %s (material: %s)\n",
+					"- `%s` (%s) â€” Count: %u. First seen in %s (material: %s)\n",
 					entry->token,
 					Mat_Shader_ScopeName (entry->scope),
 					entry->count,
@@ -565,7 +565,7 @@ static void Mat_Shader_WriteReport (void)
 				char location[MAX_QPATH * 2];
 				Mat_Shader_FormatSourceLine (location, sizeof (location), entry->first_source, entry->first_line);
 				Mat_Shader_ReportAppend (&report, &len, &cap,
-					"- `%s` (%s) — Count: %u. First seen in %s (material: %s)\n",
+					"- `%s` (%s) â€” Count: %u. First seen in %s (material: %s)\n",
 					entry->token,
 					Mat_Shader_ScopeName (entry->scope),
 					entry->count,
@@ -596,9 +596,9 @@ static void Mat_Shader_WriteReport (void)
 	if (report && len > 0)
 		COM_WriteFile (path, report, (int)len);
 
-	free (unknown_rows);
-	free (rows);
-	free (report);
+	q_free(unknown_rows);
+	q_free(rows);
+	q_free(report);
 }
 
 static qboolean Mat_Shader_ShouldWriteReport (void)
@@ -638,7 +638,7 @@ static void Mat_Shader_LogUnknownSummary (void)
 	if (!unknown_count)
 		return;
 
-	unknown_rows = (mat_shader_unknown_t **) malloc (unknown_count * sizeof (*unknown_rows));
+	unknown_rows = (mat_shader_unknown_t **) q_malloc(unknown_count * sizeof (*unknown_rows));
 	if (!unknown_rows)
 		return;
 
@@ -654,7 +654,7 @@ static void Mat_Shader_LogUnknownSummary (void)
 		Con_Printf ("  %s (%s) x%u\n", entry->token, Mat_Shader_ScopeName (entry->scope), entry->count);
 	}
 
-	free (unknown_rows);
+	q_free(unknown_rows);
 }
 
 static void Mat_Shader_LogSummary (size_t parsed_total)
@@ -896,7 +896,7 @@ static size_t Mat_Shader_LoadFromDirectory (const searchpath_t *search)
 			continue;
 		}
 
-		buffer = (byte *) malloc (size + 1);
+		buffer = (byte *) q_malloc(size + 1);
 		if (!buffer)
 		{
 			Sys_FileClose (handle);
@@ -905,7 +905,7 @@ static size_t Mat_Shader_LoadFromDirectory (const searchpath_t *search)
 
 		if (Sys_FileRead (handle, buffer, size) != size)
 		{
-			free (buffer);
+			q_free(buffer);
 			Sys_FileClose (handle);
 			continue;
 		}
@@ -915,7 +915,7 @@ static size_t Mat_Shader_LoadFromDirectory (const searchpath_t *search)
 
 		parsed_total += (size_t)Mat_Shader_ReadFile (relpath, buffer, (size_t) size, relpath);
 
-		free (buffer);
+		q_free(buffer);
 	}
 
 	return parsed_total;
@@ -949,13 +949,13 @@ static size_t Mat_Shader_LoadFromPack (const searchpath_t *search)
 		}
 		else
 		{
-			buffer = (byte *) malloc (size + 1);
+			buffer = (byte *) q_malloc(size + 1);
 			if (!buffer)
 				continue;
 			Sys_FileSeek (pak->handle, pak->files[i].filepos);
 			if (Sys_FileRead (pak->handle, buffer, (int) size) != (int) size)
 			{
-				free (buffer);
+				q_free(buffer);
 				continue;
 			}
 		}
@@ -968,7 +968,7 @@ static size_t Mat_Shader_LoadFromPack (const searchpath_t *search)
 			if (pak->is_pk3)
 				MZ_FREE (buffer);
 			else
-				free (buffer);
+				q_free(buffer);
 		}
 	}
 

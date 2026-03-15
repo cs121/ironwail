@@ -304,7 +304,7 @@ const char *WIPX_AddrToString (struct qsockaddr *addr)
 {
 	static char buf[28];
 
-	sprintf(buf, "%02x%02x%02x%02x:%02x%02x%02x%02x%02x%02x:%u",
+	q_snprintf (buf, sizeof (buf), "%02x%02x%02x%02x:%02x%02x%02x%02x%02x%02x:%u",
 		((struct sockaddr_ipx *)addr)->sa_netnum[0] & 0xff,
 		((struct sockaddr_ipx *)addr)->sa_netnum[1] & 0xff,
 		((struct sockaddr_ipx *)addr)->sa_netnum[2] & 0xff,
@@ -394,12 +394,12 @@ int WIPX_GetAddrFromName (const char *name, struct qsockaddr *addr)
 
 	if (n == 12)
 	{
-		sprintf(buf, "00000000:%s:%u", name, net_hostport);
+		q_snprintf (buf, sizeof (buf), "00000000:%s:%u", name, net_hostport);
 		return WIPX_StringToAddr (buf, addr);
 	}
 	if (n == 21)
 	{
-		sprintf(buf, "%s:%u", name, net_hostport);
+		q_snprintf (buf, sizeof (buf), "%s:%u", name, net_hostport);
 		return WIPX_StringToAddr (buf, addr);
 	}
 	if (n > 21 && n <= 27)
@@ -445,4 +445,3 @@ int WIPX_SetSocketPort (struct qsockaddr *addr, int port)
 }
 
 //=============================================================================
-

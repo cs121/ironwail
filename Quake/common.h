@@ -36,6 +36,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #  pragma warning(disable:4267)
 	/* 'var'	: conversion from 'size_t' to 'type',
 			  possible loss of data (/Wp64 warning) */
+#  pragma warning(disable:4100)
+	/* unreferenced formal parameter (common in callback-style APIs) */
+#  pragma warning(disable:4505)
+	/* unreferenced local function has been removed (common with feature switches) */
+#  pragma warning(disable:4702)
+	/* unreachable code in legacy error-handling/macros on MSVC */
 #  pragma warning(error:4431)
 	/* missing type specifier - int assumed */
 #endif	/* _MSC_VER */
@@ -277,6 +283,21 @@ extern char *q_strupr (char *str);
 /* snprintf, vsnprintf : always use our versions. */
 extern int q_snprintf (char *str, size_t size, const char *format, ...) FUNC_PRINTF(3,4);
 extern int q_vsnprintf(char *str, size_t size, const char *format, va_list args) FUNC_PRINTF(3,0);
+extern int q_sscanf (const char *str, const char *format, ...);
+extern int q_fscanf (FILE *stream, const char *format, ...);
+
+/* checked heap allocation wrappers: abort on OOM, q_free accepts NULL */
+void *q_malloc (size_t size);
+void *q_calloc (size_t count, size_t size);
+void *q_realloc (void *ptr, size_t size);
+void q_free (void *ptr);
+
+#if defined(IRONWAIL_ENFORCE_SAFE_CRT)
+#define strcpy  IRONWAIL_USE_q_strlcpy_INSTEAD
+#define sprintf IRONWAIL_USE_q_snprintf_INSTEAD
+#define sscanf  q_sscanf
+#define fscanf  q_fscanf
+#endif
 
 #define PLURAL(count)	((int)(count)), ((int)(count) == 1 ? "" : "s")
 
@@ -364,8 +385,8 @@ size_t UTF8_ToQuake (char *dst, size_t maxbytes, const char *src);
 #define UNICODE_MAX			0x10FFFF
 
 #define QCHAR_BOX			11
-#define QCHAR_COLOR_MASK	((char)0x80)
-#define QCHAR_COLORED(x)	((char)((x) | QCHAR_COLOR_MASK))
+#define QCHAR_COLOR_MASK	((unsigned char)0x80)
+#define QCHAR_COLORED(x)	((unsigned char)((unsigned char)(x) | QCHAR_COLOR_MASK))
 
 //============================================================================
 

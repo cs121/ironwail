@@ -4,6 +4,9 @@ project(ironwail VERSION ${IRONWAIL_VERSION})
 
 cmake_policy(SET CMP0072 NEW)   #OpenGL_GL_PREFERENCE to GLVND
 
+option(IRONWAIL_STRICT_WARNINGS "Enable stricter compiler warnings for engine code" ON)
+option(IRONWAIL_MSVC_SECURE_CRT_WARNINGS "Keep MSVC secure CRT warnings enabled" ON)
+
 if (WIN32)
 	list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Windows/cmake-modules)
 endif()
@@ -96,7 +99,19 @@ endif()
 
 target_compile_definitions(ironwail PRIVATE $<$<CONFIG:Debug>:DEBUG=1> $<$<NOT:$<CONFIG:Debug>>:NDEBUG=1> USE_SDL2 USE_CODEC_WAVE)
 if (MSVC)
-	target_compile_definitions(ironwail PRIVATE _CRT_SECURE_NO_WARNINGS _WIN32)
+	target_compile_definitions(ironwail PRIVATE _WIN32)
+	if (NOT IRONWAIL_MSVC_SECURE_CRT_WARNINGS)
+		target_compile_definitions(ironwail PRIVATE _CRT_SECURE_NO_WARNINGS)
+	endif()
+endif()
+
+if (IRONWAIL_STRICT_WARNINGS)
+	target_compile_definitions(ironwail PRIVATE IRONWAIL_ENFORCE_SAFE_CRT=1)
+	if (MSVC)
+		target_compile_options(ironwail PRIVATE /W4)
+	else()
+		target_compile_options(ironwail PRIVATE -Wall -Wextra -Wpedantic)
+	endif()
 endif()
 
 if (ENABLE_USERDIRS)
@@ -179,4 +194,3 @@ if (WIN32)
 				COMMAND_EXPAND_LISTS)
 	endif()
 endif()
-

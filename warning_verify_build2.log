@@ -1,0 +1,205 @@
+==========================================
+Build + Deploy Ironwail (Release x64)
+==========================================
+[1/5] Clean + Build "Windows\VisualStudio\ironwail.sln" (Release x64)...
+MSBuild-Version 17.14.40+3e7442088 für .NET Framework
+
+  quakedef.c
+  async.c
+  bgmusic.c
+  cd_null.c
+  cfgfile.c
+  chase.c
+  cl_demo.c
+  cl_input.c
+  cl_iwmusic.c
+  cl_main.c
+  cl_parse.c
+  cl_postfx.c
+  cl_tent.c
+  cmd.c
+  common.c
+  console.c
+  crc.c
+  cvar.c
+  gl_draw.c
+  gl_fog.c
+  gl_lightgrid.c
+  gl_mesh.c
+  gl_model.c
+  gl_refrag.c
+  gl_rlight.c
+  gl_rmain.c
+  gl_rmisc.c
+  r_decals.c
+  gl_screen.c
+  gl_shaders.c
+  gl_sky.c
+  gl_texmgr.c
+  gl_ktx2.c
+  ktx2_write.c
+  gl_vidsdl.c
+  gl_warp.c
+  lightgrid.c
+  host.c
+  host_cmd.c
+  bot_main.c
+  bot_ai.c
+  bot_combat.c
+  bot_nav2.c
+  image.c
+  in_sdl.c
+  json.c
+  keys.c
+  main_sdl.c
+  mathlib.c
+  mat_shader.c
+  mat_shader_parse.c
+  menu.c
+  net_dgrm.c
+  net_loop.c
+  net_main.c
+  net_win.c
+  net_wins.c
+  net_wipx.c
+  pl_win.c
+  pr_cmds.c
+  pr_edict.c
+  pr_exec.c
+  r_alias.c
+  r_brush.c
+  r_dlight_pool.c
+  r_framegraph.c
+  r_fogvol.c
+  r_godrays.c
+  r_postfx.c
+  r_part.c
+  r_part_q3p.c
+  r_ssao.c
+  r_sprite.c
+  r_tonemap.c
+  r_world.c
+C:\Quake\source\ironwail\Quake\common.c(3068,15): warning C4456: Deklaration von "game" blendet vorherige lokale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  sbar.c
+  (Quelldatei „/Quake/common.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\common.c(3058,14):
+      Siehe Deklaration von "game"
+  
+C:\Quake\source\ironwail\Quake\bot_combat.c(172,8): warning C4459: Deklaration von "skill" blendet globale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/bot_combat.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\server.h(257,15):
+      Siehe Deklaration von "skill"
+  
+C:\Quake\source\ironwail\Quake\gl_rlight.c(667,61): warning C4459: Deklaration von "lightcolor" blendet globale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/gl_rlight.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\gl_rlight.c(626,8):
+      Siehe Deklaration von "lightcolor"
+  
+C:\Quake\source\ironwail\Quake\gl_model.c(2044,35): warning C4456: Deklaration von "i" blendet vorherige lokale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/gl_model.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\gl_model.c(1686,6):
+      Siehe Deklaration von "i"
+  
+C:\Quake\source\ironwail\Quake\gl_model.c(2064,35): warning C4456: Deklaration von "i" blendet vorherige lokale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/gl_model.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\gl_model.c(1686,6):
+      Siehe Deklaration von "i"
+  
+C:\Quake\source\ironwail\Quake\gl_screen.c(1446,10): warning C4459: Deklaration von "crosshair" blendet globale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/gl_screen.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\gl_screen.c(129,15):
+      Siehe Deklaration von "crosshair"
+  
+  snd_codec.c
+  snd_dma.c
+  snd_flac.c
+  snd_mem.c
+  snd_mikmod.c
+  snd_mix.c
+  snd_modplug.c
+C:\Quake\source\ironwail\Quake\pr_edict.c(1435,6): warning C4459: Deklaration von "skill" blendet globale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/pr_edict.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\server.h(257,15):
+      Siehe Deklaration von "skill"
+  
+  snd_mp3tag.c
+C:\Quake\source\ironwail\Quake\pr_edict.c(1876,13): warning C4456: Deklaration von "func" blendet vorherige lokale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/pr_edict.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\pr_edict.c(1866,15):
+      Siehe Deklaration von "func"
+  
+  snd_mpg123.c
+  snd_opus.c
+  snd_sdl.c
+C:\Quake\source\ironwail\Quake\r_part_q3p.c(535,8): warning C4456: Deklaration von "i" blendet vorherige lokale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/r_part_q3p.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\r_part_q3p.c(523,6):
+      Siehe Deklaration von "i"
+  
+C:\Quake\source\ironwail\Quake\pr_cmds.c(2003,13): warning C4210: Nicht dem Standard entsprechende Erweiterung: Funktion gehört zum Gültigkeitsbereich der Datei [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/pr_cmds.c“ wird kompiliert)
+  
+  snd_umx.c
+  snd_vorbis.c
+  snd_wave.c
+  snd_xmp.c
+  steam.c
+  sv_main.c
+  sv_move.c
+C:\Quake\source\ironwail\Quake\net_wins.c(121,10): warning C4245: "return": Konvertierung von "int" in "sys_socket_t", signed/unsigned-Konflikt. [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/net_wins.c“ wird kompiliert)
+  
+  sv_phys.c
+  sv_user.c
+  sys_sdl_win.c
+  view.c
+  wad.c
+  world.c
+  zone.c
+C:\Quake\source\ironwail\Quake\r_fogvol.c(4010,6): warning C4459: Deklaration von "glwidth" blendet globale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/r_fogvol.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\glquake.h(32,22):
+      Siehe Deklaration von "glwidth"
+  
+C:\Quake\source\ironwail\Quake\r_fogvol.c(4010,19): warning C4459: Deklaration von "glheight" blendet globale Deklaration aus [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/r_fogvol.c“ wird kompiliert)
+      C:\Quake\source\ironwail\Quake\glquake.h(32,31):
+      Siehe Deklaration von "glheight"
+  
+  bc7enc.c
+  miniz.c
+  strlcat.c
+  strlcpy.c
+C:\Quake\source\ironwail\Quake\miniz.c(1535,13): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details. [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+C:\Quake\source\ironwail\Quake\miniz.c(2029,53): warning C4127: Bedingter Ausdruck ist konstant [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+C:\Quake\source\ironwail\Quake\miniz.c(2111,49): warning C4127: Bedingter Ausdruck ist konstant [C:\Quake\source\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+     Bibliothek "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.lib" und Objekt "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exp" werden erstellt.
+  Code wird generiert.
+  Previous IPDB not found, fall back to full compilation.
+  All 3689 functions were compiled because no usable IPDB/IOBJ from previous compilation was found.
+  Codegenerierung ist abgeschlossen.
+  ironwail.vcxproj -> C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exe
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libFLAC-8.dll
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libmad-0.dll
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libmikmod-3.dll
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libmpg123-0.dll
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libogg-0.dll
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libopus-0.dll
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libopusfile-0.dll
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libvorbis-0.dll
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libvorbisfile-3.dll
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libxmp.dll
+         10 Datei(en) kopiert.
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\SDL2\lib64\SDL2.dll
+          1 Datei(en) kopiert.
+  C:\Quake\source\ironwail\Windows\VisualStudio\\..\curl\lib\x64\libcurl.dll
+          1 Datei(en) kopiert.
+  C:\Quake\source\ironwail\Windows\VisualStudio\..\zlib\x64\zlib1.dll
+          1 Datei(en) kopiert.
+[2/5] Kopiere Executable...
+[3/5] Kopiere Runtime-DLLs (optional)...
+[4/5] Kopiere Shader...
+[5/5] Kopiere Game...
+[WARN] Game-Ordner fehlt, ueberspringe: Quake\game
+Fertig. Deploy unter: C:\Quake\rerelease
+Drücken Sie eine beliebige Taste . . . 

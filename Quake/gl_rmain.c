@@ -59,8 +59,8 @@ static int r_fogvol_draw_called = 0;
  * the 3D scene pass in R_RenderView.
  * Fog_DisableGFog clears r_framedata.fogdata[3] (density) to 0 so 2D overlays stay
  * fog-free. At SSAO generation time the UBO therefore has density=0, making
- * FogTransmittanceFromViewPos always return 1.0 → ssao_fog_strength has zero
- * effect → SSAO darkens far fogged/purple areas with full strength instead of
+ * FogTransmittanceFromViewPos always return 1.0 â†’ ssao_fog_strength has zero
+ * effect â†’ SSAO darkens far fogged/purple areas with full strength instead of
  * fading to AO=1.0.
  * Fix: save fog params just before Fog_DisableGFog and pass them explicitly to
  * ssao.frag via uniform 14 .yzw (previously unused, only .x = max_distance). */
@@ -789,8 +789,8 @@ cvar_t	r_exposure_speed_up = { "r_exposure_speed_up", "0.6", CVAR_ARCHIVE };
 cvar_t	r_exposure_speed_down = { "r_exposure_speed_down", "0.3", CVAR_ARCHIVE };
 cvar_t	r_exposure_lock = { "r_exposure_lock", "0", CVAR_ARCHIVE };
 cvar_t	r_exposure_debug = { "r_exposure_debug", "0", CVAR_NONE };
-cvar_t	r_tonemap_black_lift = { "r_tonemap_black_lift", "0.0", CVAR_ARCHIVE };
-cvar_t	r_tonemap_black_lift_strength = { "r_tonemap_black_lift_strength", "1.0", CVAR_ARCHIVE };
+
+
 cvar_t	r_bloom = { "r_bloom", "3.00", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
 
@@ -986,7 +986,7 @@ static float r_dof_autofocus_value = 0.f;
 
 static float R_GetDynamicDoFFocus (float fallback)
 {
-	trace_t trace;
+	trace_t trace = {0};
 	vec3_t end;
 	float range;
 	float target;
@@ -2439,7 +2439,7 @@ static void R_EnsureGodraysTexturesForFrame (qboolean allow_debug_source)
 
 static void R_PrepareFogVolInputs (void)
 {
-	const qboolean need_godray_inputs = (r_fogvol_godray_coupling.value > 0.f || r_fogvol_froxel_godrays.value > 0.f);
+	const qboolean need_godray_inputs = R_FogVol_IsEnabledForFrame () && R_FogVol_HasRenderableContent ();
 
 	if (!need_godray_inputs || !R_FogVol_IsEnabledForFrame () || !R_FogVol_HasRenderableContent ())
 	{
@@ -2510,7 +2510,7 @@ static void GL_PostProcessFallback (void)
 	if (framebufs.composite.fbo == 0 || framebufs.composite.color_tex == 0)
 		return;
 
-	pixels = (byte *)malloc (bufsize);
+	pixels = (byte *)q_malloc(bufsize);
 	if (!pixels)
 		return;
 
@@ -2591,7 +2591,7 @@ static void GL_PostProcessFallback (void)
 	glPopMatrix ();
 	glMatrixMode (GL_MODELVIEW);
 
-	free (pixels);
+	q_free(pixels);
 }
 
 static int GL_CompareFloat (const void *a, const void *b)
@@ -2829,7 +2829,7 @@ static void GL_PostProcess_SetMediumScatterUniforms (void)
 	medium_scatter_source_t medium = GL_GetMediumScatterSource ();
 
 	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, medium.texture);
-	GL_Uniform4fFunc (28, medium.valid, 0.f, 0.f, 0.f);
+	GL_Uniform4fFunc (27, medium.valid, 0.f, 0.f, 0.f);
 }
 
 static float GL_ComputeEffectiveBloomIntensity (float bloom_base, float bloom_boost)
@@ -3154,11 +3154,11 @@ void GL_PostProcess (void)
 	GL_Uniform4fFunc (11, teleport_fade, teleport_blur, 0.f, 0.f);
 	GL_Uniform1fFunc (12, saturation);
 	GL_Uniform1fFunc (20, q_max (0.1f, r_color_midtone.value));
-	{
-		float black_lift = CLAMP (0.f, r_tonemap_black_lift.value, 0.05f);
-		float black_lift_strength = q_max (0.f, r_tonemap_black_lift_strength.value);
-		GL_Uniform4fFunc (27, black_lift, black_lift_strength, 0.f, 0.f);
-	}
+
+
+
+
+
 	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
 	GL_Uniform4fFunc (22,
 		postfx_lut_strength,
@@ -3915,6 +3915,29 @@ static void R_GetFramePlanDecisions (qboolean *out_needs_scene_effects, qboolean
 		*out_needs_postprocess = needs_postprocess;
 }
 
+static int R_GetDesiredSceneSampleCount (void)
+{
+	int desired = Q_nextPow2 ((int)q_max (1.f, vid_fsaa.value));
+	int max_samples = framebufs.max_samples > 0 ? framebufs.max_samples : 1;
+
+	return CLAMP (1, desired, max_samples);
+}
+
+static void R_EnsureRenderTargetSampleState (void)
+{
+	int desired_samples = R_GetDesiredSceneSampleCount ();
+	int current_samples = framebufs.scene.samples > 0 ? framebufs.scene.samples : 1;
+
+	if (current_samples == desired_samples)
+		return;
+
+	Con_DPrintf ("Recreating render targets (scene samples %d -> %d)\n", current_samples, desired_samples);
+	GL_DeleteFrameBuffers ();
+	GL_CreateFrameBuffers ();
+	R_FogVol_ClearHistory ();
+	R_FrameGraph_SetRenderFramePlan (NULL);
+}
+
 /*
 ====================================================================================================
 COLOR-SPACE POLICY (HYBRID LINEAR)
@@ -4100,6 +4123,8 @@ R_SetupView -- johnfitz -- this is the stuff that needs to be done once per fram
 void R_SetupView (void)
 {
 	static qboolean gpuframedata_layout_logged = false;
+
+	R_EnsureRenderTargetSampleState ();
 	framesetup.composite_ready = false;
 	memset (r_framedata.fogdata, 0, sizeof (r_framedata.fogdata));
 	memset (r_framedata.skyfogdata, 0, sizeof (r_framedata.skyfogdata));
@@ -4436,8 +4461,15 @@ void R_DrawViewModel (void)
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 	/* Viewmodel is rendered after postprocess to keep it out of blur/DoF/SSAO/bloom.
-	 * Depth for the postprocessed backbuffer is not guaranteed, so force ALWAYS. */
-	glDepthFunc (GL_ALWAYS);
+	 * Reinitialize depth so world depth cannot clip the weapon while preserving
+	 * correct self-occlusion inside the model. */
+	glDepthMask (GL_TRUE);
+	if (gl_clipcontrol_able)
+		glClearDepth (0.0);
+	else
+		glClearDepth (1.0);
+	glClear (GL_DEPTH_BUFFER_BIT);
+	glDepthFunc (restore_depth_func);
 
 	// hack the depth range to prevent view model from poking into walls
 	GL_DepthRange (ZRANGE_VIEWMODEL);

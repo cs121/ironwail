@@ -144,7 +144,11 @@ FILE *Sys_fopen (const char *path, const char *mode)
 		}
 	}
 
-	f = _wfopen (wpath, wmode);
+	{
+		errno_t ferr = _wfopen_s (&f, wpath, wmode);
+		if (ferr != 0)
+			f = NULL;
+	}
 
 	return f;
 }
@@ -220,7 +224,12 @@ int Sys_FileOpenWrite (const char *path)
 	f = Sys_fopen (path, "wb");
 
 	if (!f)
-		Sys_Error ("Error opening %s: %s", path, strerror(errno));
+	{
+		char errbuf[128];
+		if (strerror_s (errbuf, sizeof (errbuf), errno) != 0)
+			q_strlcpy (errbuf, "unknown error", sizeof (errbuf));
+		Sys_Error ("Error opening %s: %s", path, errbuf);
+	}
 
 	sys_handles[i] = f;
 	return i;
@@ -510,7 +519,7 @@ const char *Sys_GetEGSLauncherData (void)
 	}
 
 	size = (int) filesize;
-	buf = (char *) malloc (size + 1);
+	buf = (char *) q_malloc(size + 1);
 	if (!buf)
 	{
 		fclose (file);
@@ -519,7 +528,7 @@ const char *Sys_GetEGSLauncherData (void)
 
 	if (fread (buf, size, 1, file) != 1)
 	{
-		free (buf);
+		q_free(buf);
 		fclose (file);
 		return NULL;
 	}
@@ -536,27 +545,27 @@ const char *Sys_GetEGSLauncherData (void)
 		size8 = WideCharToMultiByte (CP_UTF8, 0, (WCHAR *)(buf + 2), size / 2 - 1, NULL, 0, NULL, NULL);
 		if (!size8)
 		{
-			free (buf);
+			q_free(buf);
 			return NULL;
 		}
 
-		buf8 = (char *) malloc (size8 + 1);
+		buf8 = (char *) q_malloc(size8 + 1);
 		if (!buf8)
 		{
-			free (buf);
+			q_free(buf);
 			return NULL;
 		}
 
 		size8 = WideCharToMultiByte (CP_UTF8, 0, (WCHAR *)(buf + 2), size / 2 - 1, buf8, size8, NULL, NULL);
 		if (!size8)
 		{
-			free (buf8);
-			free (buf);
+			q_free(buf8);
+			q_free(buf);
 			return NULL;
 		}
 		buf8[size8] = '\0';
 
-		free (buf);
+		q_free(buf);
 		buf = buf8;
 	}
 
@@ -761,7 +770,7 @@ findfile_t *Sys_FindFirst (const char *dir, const char *ext)
 	if (handle == INVALID_HANDLE_VALUE)
 		return NULL;
 
-	ret = (winfindfile_t *) calloc (1, sizeof (winfindfile_t));
+	ret = (winfindfile_t *) q_calloc(1, sizeof (winfindfile_t));
 	if (!ret)
 		Sys_Error ("Sys_FindFirst: out of memory");
 	ret->handle = handle;
@@ -789,7 +798,7 @@ void Sys_FindClose (findfile_t *find)
 	{
 		winfindfile_t *wfind = (winfindfile_t *) find;
 		FindClose (wfind->handle);
-		free (wfind);
+		q_free(wfind);
 	}
 }
 
@@ -1090,7 +1099,7 @@ void Sys_ReportError (const char *error, ...)
 	PR_SwitchQCVM(NULL);
 
 	if (!MultiByteToWideChar (CP_UTF8, 0, text, -1, wtext, countof (wtext)))
-		wcscpy (wtext, L"An unknown error has occurred");
+		wcscpy_s (wtext, countof (wtext), L"An unknown error has occurred");
 
 	if (isDedicated)
 		WriteConsoleW (houtput, errortxt1, wcslen(errortxt1), NULL, NULL);
@@ -1269,7 +1278,14 @@ void *Sys_LoadLibrary (const char *path)
 
 void *Sys_GetLibraryFunction (void *lib, const char *func)
 {
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable:4152)
+#endif
 	return GetProcAddress ((HMODULE) lib, func);
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 }
 
 void Sys_CloseLibrary (void *lib)

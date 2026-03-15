@@ -1000,7 +1000,7 @@ void R_RocketTrail (vec3_t start, vec3_t end, int type)
 	static int	tracercount;
 	qboolean	use_q3p;
 	const q3p_legacy_effect_desc_t *trail_desc = NULL;
-	q3p_legacy_effect_state_t trail_effect;
+	q3p_legacy_effect_state_t trail_effect = {0};
 
 	VectorSubtract (end, start, vec);
 	len = VectorNormalize (vec);

@@ -211,7 +211,7 @@ static void GL_EnsureProgramCapacity (int needed)
 	while (newcapacity < needed)
 		newcapacity *= 2;
 
-	newprograms = (GLuint *) realloc (gl_programs, newcapacity * sizeof (*gl_programs));
+	newprograms = (GLuint *) q_realloc(gl_programs, newcapacity * sizeof (*gl_programs));
 	if (!newprograms)
 		Sys_Error ("GL_EnsureProgramCapacity: out of memory");
 
@@ -231,7 +231,7 @@ static void GL_EnsureShaderCacheCapacity (int needed)
 	while (newcapacity < needed)
 		newcapacity *= 2;
 
-	newcache = (shader_cache_t *) realloc (shader_cache, newcapacity * sizeof (*shader_cache));
+	newcache = (shader_cache_t *) q_realloc(shader_cache, newcapacity * sizeof (*shader_cache));
 	if (!newcache)
 		Sys_Error ("GL_EnsureShaderCacheCapacity: out of memory");
 
@@ -477,7 +477,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
         capacity = strlen (source) + 1;
         if (capacity < 64)
                 capacity = 64;
-        result = (char *) malloc (capacity);
+        result = (char *) q_malloc(capacity);
         if (!result)
                 Sys_Error ("GL_LoadShaderFile: out of memory processing %s", path);
         result[0] = '\0';
@@ -490,11 +490,11 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
                 while (result_len + _need + 1 > capacity)                              \
                 {                                                                      \
                         size_t _newcap = capacity * 2;                                 \
-                        char *_newbuf = (char *) realloc (result, _newcap);            \
+                        char *_newbuf = (char *) q_realloc(result, _newcap);            \
                         if (!_newbuf)                                                  \
                         {                                                              \
-                                free (result);                                         \
-                                free (source);                                         \
+                                q_free(result);                                         \
+                                q_free(source);                                         \
                                 Sys_Error ("GL_LoadShaderFile: realloc failed for %s", path); \
                         }                                                              \
                         result = _newbuf;                                              \
@@ -546,8 +546,8 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
 
                                         if (include_len >= sizeof (include_path))
                                         {
-                                                free (result);
-                                                free (source);
+                                                q_free(result);
+                                                q_free(source);
                                                 Sys_Error ("GL_LoadShaderFile: include path too long in %s", path);
                                         }
 
@@ -556,8 +556,8 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
 
 								if (!GL_NormalizeShaderIncludePath (path, include_path, full_path, sizeof (full_path), &reason))
 								{
-									free (result);
-									free (source);
+									q_free(result);
+									q_free(source);
 									GL_InitError ("Shader include rejected in %s: '%s' (%s)",
 										path, include_path, reason ? reason : "invalid path");
 								}
@@ -583,8 +583,8 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
                                                         if (remaining > 0)
                                                                 q_snprintf (dst, remaining, "%s", full_path);
 
-                                                        free (result);
-                                                        free (source);
+                                                        q_free(result);
+                                                        q_free(source);
                                                         GL_InitError ("Shader include cycle detected: %s", cycle);
                                                 }
                                         }
@@ -618,7 +618,7 @@ static char *GL_LoadShaderFile_Internal (const char *path, int depth, const char
 
 #undef APPEND_STR
 
-        free (source);
+        q_free(source);
 
         shader_cache[shader_cache_count].data = result;
         q_strlcpy (shader_cache[shader_cache_count].path, path, sizeof (shader_cache[shader_cache_count].path));
@@ -903,7 +903,7 @@ void GL_DeleteShaders (void)
         {
                 GL_DeleteProgramFunc (gl_programs[i]);
         }
-        free (gl_programs);
+        q_free(gl_programs);
         gl_programs = NULL;
         gl_num_programs = 0;
         gl_programs_capacity = 0;
@@ -915,9 +915,9 @@ void GL_DeleteShaders (void)
 
         for (i = 0; i < shader_cache_count; i++)
         {
-                free (shader_cache[i].data);
+                q_free(shader_cache[i].data);
         }
-        free (shader_cache);
+        q_free(shader_cache);
         shader_cache = NULL;
         shader_cache_count = 0;
         shader_cache_capacity = 0;

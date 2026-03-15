@@ -479,7 +479,7 @@ void BotNav_LoadForMap (const char *mapname)
 
 	if (!parsed)
 	{
-		text_copy = (char *) malloc (len + 1);
+		text_copy = (char *) q_malloc(len + 1);
 		if (text_copy)
 		{
 			if (len > 0)
@@ -516,8 +516,8 @@ void BotNav_LoadForMap (const char *mapname)
 	}
 
 	if (text_copy)
-		free (text_copy);
-	free (data);
+		q_free(text_copy);
+	q_free(data);
 }
 
 qboolean BotNav_IsLoaded (void)

@@ -260,8 +260,8 @@ static int Lightgrid_OctreeDepth(const lightgrid_octree_t *oct)
         return 0;
 
     size_t stack_size = oct->node_count;
-    uint32_t *node_stack = (uint32_t *)malloc(stack_size * sizeof(uint32_t));
-    int *depth_stack = (int *)malloc(stack_size * sizeof(int));
+    uint32_t *node_stack = (uint32_t *)q_malloc(stack_size * sizeof(uint32_t));
+    int *depth_stack = (int *)q_malloc(stack_size * sizeof(int));
 
     if (!node_stack || !depth_stack)
         goto done;
@@ -296,9 +296,9 @@ static int Lightgrid_OctreeDepth(const lightgrid_octree_t *oct)
 
 done:
     if (node_stack)
-        free(node_stack);
+        q_free(node_stack);
     if (depth_stack)
-        free(depth_stack);
+        q_free(depth_stack);
 
     return max_depth;
 }

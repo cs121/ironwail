@@ -508,7 +508,7 @@ static qboolean Q3P_LoadAndParseEffectDefFile (q3p_prt_parser_t *parser, const c
 		ok = false;
 	}
 
-	free (buffer);
+	q_free(buffer);
 	return ok;
 }
 

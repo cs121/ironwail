@@ -1295,7 +1295,6 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 		qboolean isworld = (e == &cl_entities[0]);
 		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
 			qboolean zfix = !isworld && !isstatic;
-		int frame = isworld ? 0 : e->frame;
 		int numtex = model->texofs[texend] - model->texofs[texbegin];
 
 		if (model->texofs[TEXTYPE_COUNT] < 0

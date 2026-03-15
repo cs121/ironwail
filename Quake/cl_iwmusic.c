@@ -347,13 +347,13 @@ static void CL_IWMusic_LoadEventFile (void)
 	if (!(data = COM_Parse(data)) || q_strcasecmp(com_token, "iw_music"))
 	{
 		Con_DWarning("iwmusic: invalid header in event file\n");
-		free(buf);
+		q_free(buf);
 		return;
 	}
 	if (!(data = COM_Parse(data)) || strcmp(com_token, "{"))
 	{
 		Con_DWarning("iwmusic: expected root block\n");
-		free(buf);
+		q_free(buf);
 		return;
 	}
 	while ((data = COM_Parse(data)) != NULL)
@@ -364,7 +364,7 @@ static void CL_IWMusic_LoadEventFile (void)
 		else if (!q_strcasecmp(com_token, "state")) CL_IWMusic_ParseStateBlock(&data);
 		else if (!q_strcasecmp(com_token, "rule")) CL_IWMusic_ParseRuleBlock(&data);
 	}
-	free(buf);
+	q_free(buf);
 }
 
 static const cvar_t *CL_IWMusic_FindCvar (const char *name)

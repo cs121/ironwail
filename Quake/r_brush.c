@@ -180,7 +180,7 @@ static void Chart_Init (chart_t *chart, int width, int height)
 {
 	if (chart->width != width)
 	{
-		chart->allocated = (int *)realloc (chart->allocated, sizeof (chart->allocated[0]) * width);
+		chart->allocated = (int *)q_realloc(chart->allocated, sizeof (chart->allocated[0]) * width);
 		if (!chart->allocated)
 			Sys_Error ("Chart_Init: could not allocate %" SDL_PRIu64 " bytes", (uint64_t) (sizeof (chart->allocated[0]) * width));
 	}
@@ -264,7 +264,7 @@ static int AllocBlock (int w, int h, short *x, short *y)
 		if (texnum == lightmap_count)
 		{
 			lightmap_count++;
-			lightmaps = (lightmap_t *) realloc(lightmaps, sizeof(*lightmaps)*lightmap_count);
+			lightmaps = (lightmap_t *) q_realloc(lightmaps, sizeof(*lightmaps)*lightmap_count);
 			memset(&lightmaps[texnum], 0, sizeof(lightmaps[texnum]));
 			// as we're only tracking one texture, we don't need multiple copies any more.
 			Chart_Init (&lightmap_chart, lightmap_block_width, lightmap_block_height);
@@ -451,17 +451,17 @@ static void GL_FreeLightmapData (void)
 {
         if (lightmap_data)
         {
-                free (lightmap_data);
+                q_free(lightmap_data);
                 lightmap_data = NULL;
         }
         if (lightmap_dir_data)
         {
-                free (lightmap_dir_data);
+                q_free(lightmap_dir_data);
                 lightmap_dir_data = NULL;
         }
         if (lightmaps)
         {
-                free (lightmaps);
+                q_free(lightmaps);
                 lightmaps = NULL;
         }
 
@@ -528,8 +528,8 @@ static void GL_PackLitSurfaces (void)
 	if (VEC_SIZE (lit_surfs) == 0)
 		return;
 
-	lit_surf_order[0] = (int *) realloc (lit_surf_order[0], sizeof (lit_surf_order[0][0]) * VEC_SIZE (lit_surfs));
-	lit_surf_order[1] = (int *) realloc (lit_surf_order[1], sizeof (lit_surf_order[1][0]) * VEC_SIZE (lit_surfs));
+	lit_surf_order[0] = (int *) q_realloc(lit_surf_order[0], sizeof (lit_surf_order[0][0]) * VEC_SIZE (lit_surfs));
+	lit_surf_order[1] = (int *) q_realloc(lit_surf_order[1], sizeof (lit_surf_order[1][0]) * VEC_SIZE (lit_surfs));
 
 	if (!lit_surf_order[0] || !lit_surf_order[1])
 		Sys_Error ("GL_PackLitSurfaces: out of memory (%" SDL_PRIu64 " surfs)", (uint64_t) VEC_SIZE (lit_surfs));
@@ -667,13 +667,13 @@ void GL_BuildLightmaps (void)
 		(lightmap_bytes * lmsize) / (float)0x100000, 100.0 * num_lightmap_samples / lmsize
 	);
 
-	lightmap_data = (unsigned *) calloc (lmsize, sizeof (*lightmap_data));
+	lightmap_data = (unsigned *) q_calloc(lmsize, sizeof (*lightmap_data));
 	if (!lightmap_data)
 		Sys_Error ("GL_BuildLightmaps: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(lmsize * sizeof (*lightmap_data)));
 
 	if (use_lightdir)
 	{
-		lightmap_dir_data = (unsigned *) calloc (lmsize, sizeof (*lightmap_dir_data));
+		lightmap_dir_data = (unsigned *) q_calloc(lmsize, sizeof (*lightmap_dir_data));
 		if (!lightmap_dir_data)
 			Sys_Error ("GL_BuildLightmaps: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(lmsize * sizeof (*lightmap_dir_data)));
 	}
@@ -816,7 +816,7 @@ void GL_BuildBModelVertexBuffer (void)
 	
 // build vertex array
 	varray_bytes = sizeof (glvert_t) * numverts;
-	varray = (glvert_t *) malloc (varray_bytes);
+	varray = (glvert_t *) q_malloc(varray_bytes);
 	if (!varray)
 		Sys_Error ("GL_BuildBModelVertexBuffer: out of memory on %u bytes", varray_bytes);
 	varray_index = 0;
@@ -982,7 +982,7 @@ void GL_BuildBModelVertexBuffer (void)
 // upload to GPU
 	gl_bmodel_vbo_size = varray_bytes;
 	gl_bmodel_vbo = GL_CreateBuffer (GL_ARRAY_BUFFER, GL_STATIC_DRAW, "brushverts", varray_bytes, varray);
-	free (varray);
+	q_free(varray);
 }
 
 /*
@@ -1057,28 +1057,28 @@ void GL_BuildBModelMarkBuffers (void)
 	gl_bmodel_ibo_size = numtris * 3 * sizeof(idx[0]);
 	gl_bmodel_indirect_buffer_size = numtex * sizeof(cmds[0]);
 	gl_bmodel_marksurf_buffer_size = nummark * sizeof(mark[0]);
-	cmds = (bmodel_draw_indirect_t *) calloc (numtex, sizeof(cmds[0]));
+	cmds = (bmodel_draw_indirect_t *) q_calloc(numtex, sizeof(cmds[0]));
 	if (!cmds)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d cmds)", numtex);
-	idx = (GLuint *) calloc (numtris * 3, sizeof(idx[0]));
+	idx = (GLuint *) q_calloc(numtris * 3, sizeof(idx[0]));
 	if (!idx)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d indices)", numtris * 3);
-	mark = (bmodel_gpu_marksurf_t *) calloc (nummark, sizeof (mark[0]));
+	mark = (bmodel_gpu_marksurf_t *) q_calloc(nummark, sizeof (mark[0]));
 	if (!mark)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d marksurfs)", nummark);
-	surfs = (bmodel_gpu_surf_t *) calloc (cl.worldmodel->numsurfaces, sizeof(surfs[0]));
+	surfs = (bmodel_gpu_surf_t *) q_calloc(cl.worldmodel->numsurfaces, sizeof(surfs[0]));
 	if (!surfs)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d surfs)", cl.worldmodel->numsurfaces);
-	texidx = (int *) calloc (maxnumtex, sizeof(texidx[0]));
+	texidx = (int *) q_calloc(maxnumtex, sizeof(texidx[0]));
 	if (!texidx)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d tex indices)", maxnumtex);
-	minverts = (GLuint *) malloc (sizeof(minverts[0]) * numtex);
+	minverts = (GLuint *) q_malloc(sizeof(minverts[0]) * numtex);
 	if (!minverts)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d base verts)", numtex);
-	surfindices = (int *) malloc (sizeof(surfindices[0]) * cl.worldmodel->numsurfaces);
+	surfindices = (int *) q_malloc(sizeof(surfindices[0]) * cl.worldmodel->numsurfaces);
 	if (!surfindices)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d surf indices)", cl.worldmodel->numsurfaces);
-	surfremap = (int *) malloc (sizeof(surfremap[0]) * cl.worldmodel->numsurfaces);
+	surfremap = (int *) q_malloc(sizeof(surfremap[0]) * cl.worldmodel->numsurfaces);
 	if (!surfremap)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d surf remap entries)", cl.worldmodel->numsurfaces);
 	for (i = 0; i < numtex; i++)
@@ -1129,7 +1129,7 @@ void GL_BuildBModelMarkBuffers (void)
 	surfsort_array = surfs;
 	qsort (surfindices, cl.worldmodel->numsurfaces, sizeof(surfindices[0]), CompareBModelSurface);
 
-	sorted_surfs = (bmodel_gpu_surf_t *) malloc (sizeof(sorted_surfs[0]) * cl.worldmodel->numsurfaces);
+	sorted_surfs = (bmodel_gpu_surf_t *) q_malloc(sizeof(sorted_surfs[0]) * cl.worldmodel->numsurfaces);
 	if (!sorted_surfs)
 		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d sorted surfs)", cl.worldmodel->numsurfaces);
 
@@ -1143,7 +1143,7 @@ void GL_BuildBModelMarkBuffers (void)
 	for (i = 0; i < nummark; i++)
 		mark[i].surfindex = surfremap[mark[i].surfindex];
 
-	free (surfs);
+	q_free(surfs);
 	surfs = sorted_surfs;
 
 	// count triangles for each model texture
@@ -1230,12 +1230,12 @@ void GL_BuildBModelMarkBuffers (void)
 	);
 
 	// free cpu-side arrays
-	free (texidx);
-	free (surfs);
-	free (surfremap);
-	free (surfindices);
-	free (mark);
-	free (idx);
-	free (minverts);
-	free (cmds);
+	q_free(texidx);
+	q_free(surfs);
+	q_free(surfremap);
+	q_free(surfindices);
+	q_free(mark);
+	q_free(idx);
+	q_free(minverts);
+	q_free(cmds);
 }

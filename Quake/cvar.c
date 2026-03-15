@@ -650,7 +650,7 @@ cvar_t *Cvar_Create (const char *name, const char *value)
 
 	newvar = Z_Malloc(sizeof(cvar_t) + strlen(name)+1);
 	newvar->name = (char*)(newvar+1);
-	strcpy((char*)(newvar+1), name);
+	memcpy ((char *)(newvar + 1), name, strlen (name) + 1);
 	newvar->flags = CVAR_USERDEFINED;
 
 	newvar->string = value;
@@ -740,4 +740,3 @@ void Cvar_WriteVariables (FILE *f)
 			fprintf (f, "%s \"%s\"\n", var->name, var->string);
 	}
 }
-

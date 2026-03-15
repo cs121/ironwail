@@ -89,7 +89,7 @@ sys_socket_t UDP_Init (void)
 					myAddr = inet_addr(com_argv[i + 1]);
 					if (myAddr == INADDR_NONE)
 						Sys_Error ("%s is not a valid IP address", com_argv[i + 1]);
-					strcpy(my_tcpip_address, com_argv[i + 1]);
+					q_strlcpy (my_tcpip_address, com_argv[i + 1], sizeof (my_tcpip_address));
 				}
 				else
 				{
@@ -114,7 +114,7 @@ sys_socket_t UDP_Init (void)
 	broadcastaddr.sin_port = htons((unsigned short)net_hostport);
 
 	UDP_GetSocketAddr (net_controlsocket, &addr);
-	strcpy(my_tcpip_address, UDP_AddrToString (&addr));
+	q_strlcpy (my_tcpip_address, UDP_AddrToString (&addr), sizeof (my_tcpip_address));
 	tst = strrchr(my_tcpip_address, ':');
 	if (tst) *tst = 0;
 
@@ -213,7 +213,7 @@ static int PartialIPAddress (const char *in, struct qsockaddr *hostaddr)
 
 	buff[0] = '.';
 	b = buff;
-	strcpy(buff+1, in);
+	q_strlcpy (buff + 1, in, sizeof (buff) - 1);
 	if (buff[1] == '.')
 		b++;
 
@@ -419,7 +419,7 @@ int UDP_GetNameFromAddr (struct qsockaddr *addr, char *name)
 		return 0;
 	}
 
-	strcpy (name, UDP_AddrToString (addr));
+	q_strlcpy (name, UDP_AddrToString (addr), NET_NAMELEN);
 	return 0;
 }
 
@@ -477,4 +477,3 @@ int UDP_SetSocketPort (struct qsockaddr *addr, int port)
 }
 
 //=============================================================================
-

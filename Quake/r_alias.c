@@ -734,14 +734,10 @@ void R_FlushAliasInstances (qboolean showtris)
 
 	alphatest = model->flags & MF_HOLEY ? 1 : 0;
 	translucent = !ENTALPHA_OPAQUE (ibuf.ent->alpha);
-	/* Viewmodel stability path:
-	 * - keep opaque (no translucent ordering issues),
-	 * - disable alphatest (prevents accidental texture-alpha discard holes). */
+	/* Late viewmodel pass has no stable translucent ordering guarantees. */
 	if (viewmodel)
-	{
 		translucent = false;
-		alphatest = false;
-	}
+
 	/* Viewmodel and standard alpha entities should never rely on OIT blend targets.
 	 * OIT is only valid during the dedicated scene translucency pass. */
 	oit = translucent && !viewmodel && R_GetEffectiveAlphaMode () == ALPHAMODE_OIT;
@@ -761,9 +757,9 @@ void R_FlushAliasInstances (qboolean showtris)
 	R_Shadow_ApplyAliasReceiverUniforms (glprogs.alias[oit][mode][alphatest][md5]);
 
 	if (md5)
-		state = (viewmodel ? GLS_CULL_NONE : GLS_CULL_BACK) | GLS_ATTRIBS(5);
+		state = GLS_CULL_BACK | GLS_ATTRIBS(5);
 	else
-		state = (viewmodel ? GLS_CULL_NONE : GLS_CULL_BACK) | GLS_ATTRIBS(1);
+		state = GLS_CULL_BACK | GLS_ATTRIBS(1);
 
 	if (!translucent)
 	{

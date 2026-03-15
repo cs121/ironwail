@@ -778,7 +778,7 @@ static void Con_Clear_f (void)
 
 	Con_SetHotLink (NULL);
 	for (i = 0; i < VEC_SIZE (con_links); i++)
-		free (con_links[i]);
+		q_free(con_links[i]);
 	VEC_CLEAR (con_links);
 }
 
@@ -817,7 +817,7 @@ qboolean Con_CopySelectionToClipboard (void)
 
 	// Convert to UTF-8
 	maxsize = UTF8_FromQuake (NULL, 0, qtext);
-	utf8 = (char *) malloc (maxsize);
+	utf8 = (char *) q_malloc(maxsize);
 	if (!utf8)
 		Sys_Error ("Con_CopySelectionToClipboard: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)maxsize);
 	UTF8_FromQuake (utf8, maxsize, qtext);
@@ -826,7 +826,7 @@ qboolean Con_CopySelectionToClipboard (void)
 	SDL_SetClipboardText (utf8);
 
 	// Clean up temporary buffers
-	free (utf8);
+	q_free(utf8);
 	VEC_FREE (qtext);
 
 	Con_ClearSelection ();
@@ -874,7 +874,7 @@ static void Con_Dump_f (void)
 	for ( ; l <= con_current; l++)
 	{
 		line = con_text + (l%con_totallines)*con_linewidth;
-		strncpy (buffer, line, con_linewidth);
+		memcpy (buffer, line, con_linewidth);
 		for (x = con_linewidth - 1; x >= 0; x--)
 		{
 			if (buffer[x] == ' ')
@@ -1394,7 +1394,7 @@ void Con_LinkPrintf (const char *addr, const char *fmt, ...)
 	char		*text;
 
 	len = strlen (addr);
-	link = (conlink_t *) malloc (sizeof (conlink_t) + len + 1);
+	link = (conlink_t *) q_malloc(sizeof (conlink_t) + len + 1);
 	if (!link)
 		Sys_Error ("Con_LinkPrintf: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(sizeof (conlink_t) + len + 1));
 	
@@ -1508,7 +1508,7 @@ void Con_LogCenterPrint (const char *str)
 	if (cl.gametype == GAME_DEATHMATCH && con_logcenterprint.value != 2)
 		return; //don't log in deathmatch
 
-	strcpy(con_lastcenterstring, str);
+	q_strlcpy (con_lastcenterstring, str, sizeof (con_lastcenterstring));
 
 	if (con_logcenterprint.value)
 	{
@@ -2274,7 +2274,7 @@ void Con_DrawConsole (int lines, qboolean drawbg, qboolean drawinput)
 	int	i, x, y, j, sb, rows;
 	const char	*text;
 	qboolean forced;
-	float alpha;
+	float alpha = 1.f;
 
 	Con_UpdateMouseState ();
 
@@ -2395,18 +2395,32 @@ void Con_NotifyBox (const char *text)
 void LOG_Init (quakeparms_t *parms)
 {
 	time_t	inittime;
+	struct tm session_tm;
+	struct tm *session_tm_ptr;
 	char	session[24];
 
 	if (!COM_CheckParm("-condebug"))
 		return;
 
 	inittime = time (NULL);
-	strftime (session, sizeof(session), "%m/%d/%Y %H:%M:%S", localtime(&inittime));
+#if defined(_WIN32)
+	if (localtime_s (&session_tm, &inittime) != 0)
+		memset (&session_tm, 0, sizeof (session_tm));
+	session_tm_ptr = &session_tm;
+#else
+	session_tm_ptr = localtime (&inittime);
+#endif
+	strftime (session, sizeof(session), "%m/%d/%Y %H:%M:%S", session_tm_ptr);
 	q_snprintf (logfilename, sizeof(logfilename), "%s/qconsole.log", parms->basedir);
 
 //	unlink (logfilename);
 
+#if defined(_WIN32)
+	if (_sopen_s (&log_fd, logfilename, O_WRONLY | O_CREAT | O_TRUNC, _SH_DENYNO, _S_IREAD | _S_IWRITE) != 0)
+		log_fd = -1;
+#else
 	log_fd = open (logfilename, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+#endif
 	if (log_fd == -1)
 	{
 		fprintf (stderr, "Error: Unable to create log file %s\n", logfilename);

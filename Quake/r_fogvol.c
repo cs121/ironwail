@@ -231,8 +231,6 @@ cvar_t r_fogvol_noise_detail_strength = { "r_fogvol_noise_detail_strength", "0.2
 cvar_t r_fogvol_quality = { "r_fogvol_quality", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_atmosphere = { "r_fogvol_atmosphere", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_testvolumes = { "r_fogvol_testvolumes", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_testvolumes_dumpstate = { "r_fogvol_testvolumes_dumpstate", "0", CVAR_NONE };
 cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_blendmode = { "r_fogvol_blendmode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_emissive = { "r_fogvol_emissive", "1", CVAR_ARCHIVE };
@@ -245,10 +243,9 @@ cvar_t r_fogvol_checkerboard = { "r_fogvol_checkerboard", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_subsample = { "r_fogvol_light_subsample", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_inject_debug = { "r_fogvol_inject_debug", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
 /* r_fogvol_sigma_max: maximum optical depth *per raymarching step*.
- * exp(-4) ≈ 0.018, so 4.0 is already near-black in one step.
+ * exp(-4) â‰ˆ 0.018, so 4.0 is already near-black in one step.
  * Previous default of "2" was applied as a per-unit extinction cap, which
  * saturated instantly at any stepLen > ~1 unit.  Now treated as an optical
  * depth cap (sigma*stepLen), making the value scale-independent. */
@@ -298,23 +295,14 @@ cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
  * Mode 2 is automatically downgraded to mode 1 when shadow marching is disabled
  * because there is no additional shadow context to justify the extra taps. */
 cvar_t r_fogvol_local_occlusion = { "r_fogvol_local_occlusion", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_sun_dir = { "r_fogvol_sun_dir", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_sun_scatter = { "r_fogvol_sun_scatter", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_sun_color = { "r_fogvol_sun_color", "0 0 0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel = { "r_fogvol_froxel", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_parity = { "r_fogvol_froxel_parity", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_sun = { "r_fogvol_froxel_sun", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_sun_legacy = { "r_fogvol_froxel_sun_legacy", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_froxel_static = { "r_fogvol_froxel_static", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_static_probe_mode = { "r_fogvol_static_probe_mode", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_static_probe_density = { "r_fogvol_static_probe_density", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_static_probe_budget_load = { "r_fogvol_static_probe_budget_load", "12000", CVAR_ARCHIVE };
 cvar_t r_fogvol_static_probe_budget_frame = { "r_fogvol_static_probe_budget_frame", "2000", CVAR_ARCHIVE };
-cvar_t r_fogvol_static_probe_grid = { "r_fogvol_static_probe_grid", "24", CVAR_ARCHIVE };
-cvar_t r_fogvol_froxel_godrays = { "r_fogvol_froxel_godrays", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_temporal_alpha = { "r_fogvol_froxel_temporal_alpha", "0.85", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_temporal_reject_threshold = { "r_fogvol_froxel_temporal_reject_threshold", "24", CVAR_ARCHIVE };
-cvar_t r_fogvol_godray_coupling = { "r_fogvol_godray_coupling", "1", CVAR_ARCHIVE };
 /* Source weighting policy for local fog lighting contributions.
  * - r_fogvol_froxel_scale controls FogFroxelLightTex contribution when enabled.
  * - r_fogvol_lightlist_scale controls per-volume FogLights list contribution.
@@ -355,8 +343,6 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_quality, "quality", "1"},
 	{&r_fogvol_atmosphere, "quality", "0.8"},
 	{&r_fogvol_noisemode, "noise", "0"},
-	{&r_fogvol_testvolumes, "debug", "0"},
-	{&r_fogvol_testvolumes_dumpstate, "debug", "0"},
 	{&r_fogvol_physblend, "core", "1"},
 	{&r_fogvol_blendmode, "core", "0"},
 	{&r_fogvol_emissive, "lighting", "1"},
@@ -369,7 +355,6 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_light_subsample, "lighting", "1"},
 	{&r_fogvol_jitter, "quality", "1"},
 	{&r_fogvol_debug, "debug", "0"},
-	{&r_fogvol_inject_debug, "debug", "0"},
 	{&r_fogvol_density_scale, "core", "1"},
 	{&r_fogvol_sigma_max, "core", "4"},
 	{&r_fogvol_global, "global", "1"},
@@ -401,23 +386,14 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_shadow_strength, "lighting", "0.8"},
 	{&r_fogvol_shadow_jitter, "lighting", "1"},
 	{&r_fogvol_local_occlusion, "lighting", "0"},
-	{&r_fogvol_sun_dir, "lighting", "1"},
-	{&r_fogvol_sun_scatter, "lighting", "1"},
-	{&r_fogvol_sun_color, "lighting", "0 0 0"},
 	{&r_fogvol_froxel, "lighting", "0"},
 	{&r_fogvol_froxel_parity, "lighting", "0"},
 	{&r_fogvol_froxel_sun, "lighting", "1"},
 	{&r_fogvol_froxel_sun_legacy, "lighting", "0"},
-	{&r_fogvol_froxel_static, "lighting", "1"},
-	{&r_fogvol_static_probe_mode, "lighting", "1"},
-	{&r_fogvol_static_probe_density, "lighting", "1"},
 	{&r_fogvol_static_probe_budget_load, "lighting", "12000"},
 	{&r_fogvol_static_probe_budget_frame, "lighting", "2000"},
-	{&r_fogvol_static_probe_grid, "lighting", "24"},
-	{&r_fogvol_froxel_godrays, "lighting", "0"},
 	{&r_fogvol_froxel_temporal_alpha, "temporal", "0.85"},
 	{&r_fogvol_froxel_temporal_reject_threshold, "temporal", "24"},
-	{&r_fogvol_godray_coupling, "lighting", "1"},
 	{&r_fogvol_froxel_scale, "lighting", "1"},
 	{&r_fogvol_lightlist_scale, "lighting", "1"},
 	{&r_fogvol_lightgrid_scale, "lighting", "1"},
@@ -584,6 +560,10 @@ static qboolean r_fogvol_resource_warned = false;
 static fogvol_static_build_config_t r_fogvol_static_build_cached;
 static qboolean r_fogvol_static_build_cached_valid = false;
 
+static const int fogvol_static_probe_mode_fixed = 1;
+static const int fogvol_static_probe_grid_fixed = 24;
+static const float fogvol_static_probe_density_fixed = 1.f;
+
 static const vec3_t r_fogvol_corner_lut[8] = {
 	{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f, 0.f},
 	{0.f, 0.f, 1.f}, {1.f, 0.f, 1.f}, {0.f, 1.f, 1.f}, {1.f, 1.f, 1.f}
@@ -595,9 +575,9 @@ static void R_FogVol_CaptureStaticBuildConfig (fogvol_static_build_config_t *cfg
 		return;
 
 	cfg->worldmodel = cl.worldmodel;
-	cfg->probe_mode = (int)Q_rint (r_fogvol_static_probe_mode.value);
-	cfg->probe_grid = CLAMP (8, (int)Q_rint (r_fogvol_static_probe_grid.value), 64);
-	cfg->probe_density = q_max (0.25f, r_fogvol_static_probe_density.value);
+	cfg->probe_mode = fogvol_static_probe_mode_fixed;
+	cfg->probe_grid = CLAMP (8, fogvol_static_probe_grid_fixed, 64);
+	cfg->probe_density = q_max (0.25f, fogvol_static_probe_density_fixed);
 	cfg->lava_emissive = CLAMP (0.f, r_fogvol_lava_emissive.value, 8.f);
 	cfg->emissive_enabled = (r_fogvol_emissive.value > 0.f) ? 1 : 0;
 	cfg->lightmap_srgb = !q_strcasecmp (r_lightmap_colorspace.string, "srgb") ? 1 : 0;
@@ -661,7 +641,7 @@ void R_FogVol_ClearHistory (void)
 
 	/* BUG FIX (C-04): Save the previously bound draw FBO so we can restore it
 	 * after clearing.  R_FogVol_ClearHistory() may be called during map loading
-	 * or from contexts where a different FBO is active — unconditionally leaving
+	 * or from contexts where a different FBO is active â€” unconditionally leaving
 	 * composite.fbo bound corrupts the GL state for the caller. */
 	{
 		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
@@ -796,11 +776,6 @@ static void R_FogVol_SetDepthMask (qboolean enabled)
 		GL_SetState (glstate | GLS_NO_ZWRITE);
 }
 
-static qboolean R_FogVol_TestDebugEnabled (void)
-{
-	return r_fogvol_testvolumes.value > 0.f || r_fogvol_testvolumes_dumpstate.value > 0.f;
-}
-
 static qboolean R_FogVol_StateDebugEnabled (void)
 {
 	return r_fogvol_debug.value > 0.f || developer.value > 0.f;
@@ -845,7 +820,7 @@ static void R_FogVol_LogBufferMarker (const char *marker)
 	GLint draw_fbo = 0, read_fbo = 0;
 	GLint draw_buffer = 0, read_buffer = 0;
 
-	if (!R_FogVol_TestDebugEnabled ())
+	if (!R_FogVol_StateDebugEnabled ())
 		return;
 
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
@@ -922,7 +897,7 @@ static void R_FogVol_LogPipelineState (const char *marker)
 	GLint program = 0;
 	GLboolean scissor_enabled = GL_FALSE;
 
-	if (!R_FogVol_TestDebugEnabled ())
+	if (!R_FogVol_StateDebugEnabled ())
 		return;
 
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
@@ -1034,7 +1009,7 @@ static void R_FogVol_LogHazardPass (const char *pass,
 	GLuint draw_tex = 0;
 	GLuint read_tex = 0;
 
-	if (!R_FogVol_TestDebugEnabled ())
+	if (!R_FogVol_StateDebugEnabled ())
 		return;
 
 	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
@@ -1696,9 +1671,9 @@ static qboolean R_FogVol_TryGetSurfaceLightSample (const qmodel_t *model, const 
 static void R_FogVol_FreeStaticField (void)
 {
 	if (r_fog_static_field.rgb)
-		free (r_fog_static_field.rgb);
+		q_free(r_fog_static_field.rgb);
 	if (r_fog_static_field.weight)
-		free (r_fog_static_field.weight);
+		q_free(r_fog_static_field.weight);
 	R_FogVol_GPUStaticBuildReset ();
 	memset (&r_fog_static_field, 0, sizeof (r_fog_static_field));
 }
@@ -1985,7 +1960,7 @@ static void R_FogVol_AccumulateStaticLightsAtPoint (const vec3_t p, vec3_t out_r
 static void R_FogVol_ContinueStaticFieldBuild (int sample_budget)
 {
 	qmodel_t *model = cl.worldmodel;
-	const float density = q_max (0.25f, r_fogvol_static_probe_density.value);
+	const float density = q_max (0.25f, fogvol_static_probe_density_fixed);
 	const int texel_step = CLAMP (1, (int)Q_rint (2.5f / density), 8);
 
 	if (!r_fog_static_field.valid || r_fog_static_field.build_complete)
@@ -2069,10 +2044,10 @@ static void R_FogVol_BuildStaticLightInjection (void)
 		return;
 	}
 
-	dims = CLAMP (8, (int)Q_rint (r_fogvol_static_probe_grid.value), 64);
+	dims = CLAMP (8, fogvol_static_probe_grid_fixed, 64);
 	total_cells = (size_t)dims * (size_t)dims * (size_t)dims;
-	r_fog_static_field.rgb = (float *)calloc (total_cells * 3u, sizeof (float));
-	r_fog_static_field.weight = (float *)calloc (total_cells, sizeof (float));
+	r_fog_static_field.rgb = (float *)q_calloc(total_cells * 3u, sizeof (float));
+	r_fog_static_field.weight = (float *)q_calloc(total_cells, sizeof (float));
 	if (!r_fog_static_field.rgb || !r_fog_static_field.weight)
 	{
 		R_FogVol_FreeStaticField ();
@@ -2095,57 +2070,12 @@ static void R_FogVol_BuildStaticLightInjection (void)
 	r_fog_static_field.next_surface = 0;
 	r_fog_static_field.total_samples = 0;
 
-	if (r_fogvol_static_probe_mode.value <= 0.f)
-	{
-		/* low-end mode: preserve legacy pseudo-light list path */
-		for (int i = 0, stride = q_max (1, model->numsurfaces / MAX_FOG_STATIC_LIGHTS);
-			i < model->numsurfaces && r_num_fog_static_lights < MAX_FOG_STATIC_LIGHTS; i += stride)
-		{
-			msurface_t *surf = &model->surfaces[i];
-			const qboolean is_lava = R_FogVol_SurfaceIsLava (model, surf);
-			fog_light_gpu_t *dst;
-			vec3_t center;
-			vec3_t color;
-			float radius;
-			if (!surf->samples && !is_lava)
-				continue;
-			if (!surf->texinfo || surf->texinfo->texnum < 0 || surf->texinfo->texnum >= model->numtextures)
-				continue;
-			if (!model->textures[surf->texinfo->texnum])
-				continue;
-			if ((surf->texinfo->flags & TEX_SPECIAL) && !is_lava)
-				continue;
-			if (!R_FogVol_TryGetSurfaceLightSample (model, surf, color))
-				continue;
-			center[0] = 0.5f * (surf->mins[0] + surf->maxs[0]);
-			center[1] = 0.5f * (surf->mins[1] + surf->maxs[1]);
-			center[2] = 0.5f * (surf->mins[2] + surf->maxs[2]);
-			radius = 0.5f * sqrtf (
-				(surf->maxs[0] - surf->mins[0]) * (surf->maxs[0] - surf->mins[0]) +
-				(surf->maxs[1] - surf->mins[1]) * (surf->maxs[1] - surf->mins[1]) +
-				(surf->maxs[2] - surf->mins[2]) * (surf->maxs[2] - surf->mins[2]));
-			radius = CLAMP (64.f, radius * 1.5f, 384.f);
-			dst = &r_fog_static_lights[r_num_fog_static_lights++];
-			dst->pos_rad[0] = center[0];
-			dst->pos_rad[1] = center[1];
-			dst->pos_rad[2] = center[2];
-			dst->pos_rad[3] = radius;
-			dst->col_int[0] = color[0] * 0.65f;
-			dst->col_int[1] = color[1] * 0.65f;
-			dst->col_int[2] = color[2] * 0.65f;
-			dst->col_int[3] = 1.f;
-		}
-		r_fog_static_field.build_complete = true;
-	}
-	else
-	{
-		R_FogVol_ContinueStaticFieldBuild (q_max (1, (int)Q_rint (r_fogvol_static_probe_budget_load.value)));
-	}
+	R_FogVol_ContinueStaticFieldBuild (q_max (1, (int)Q_rint (r_fogvol_static_probe_budget_load.value)));
 
 	if (developer.value > 0.f)
 	{
 		Con_DPrintf ("FogVol: static probes mode=%d lights=%d samples=%d complete=%d\n",
-			(int)Q_rint (r_fogvol_static_probe_mode.value), r_num_fog_static_lights,
+			fogvol_static_probe_mode_fixed, r_num_fog_static_lights,
 			r_fog_static_field.total_samples, r_fog_static_field.build_complete ? 1 : 0);
 	}
 	R_FogVol_CommitStaticBuildConfig ();
@@ -2201,12 +2131,12 @@ static void R_FogVol_FreeGodrayReadbackBuffers (void)
 {
 	if (r_fogvol_godray_mask_cpu)
 	{
-		free (r_fogvol_godray_mask_cpu);
+		q_free(r_fogvol_godray_mask_cpu);
 		r_fogvol_godray_mask_cpu = NULL;
 	}
 	if (r_fogvol_godray_source_cpu)
 	{
-		free (r_fogvol_godray_source_cpu);
+		q_free(r_fogvol_godray_source_cpu);
 		r_fogvol_godray_source_cpu = NULL;
 	}
 	r_fogvol_godray_mask_w = 0;
@@ -2424,12 +2354,10 @@ static void R_Froxel_InjectStaticLights (void)
 	int candidate_count = 0;
 	int capacity;
 
-	if (!r_froxel.valid || r_fogvol_froxel_static.value <= 0.f)
+	if (!r_froxel.valid)
 		return;
 
-	static_scale = q_max (0.f, r_fogvol_froxel_static.value);
-	if (static_scale <= 0.f)
-		return;
+	static_scale = 1.f;
 
 	if (r_num_fog_static_lights <= 0)
 		return;
@@ -3371,8 +3299,6 @@ qboolean R_FogVol_IsEnabledForFrame (void)
 
 qboolean R_FogVol_HasRenderableContent (void)
 {
-	if (r_fogvol_testvolumes.value > 0.f)
-		return true;
 	if (r_fogvol.value <= 0.f)
 		return false;
 	if (r_fogvol_global.value > 0.f)
@@ -3413,7 +3339,7 @@ qboolean R_FogVol_CanRenderGlobal (void)
 
 /* Returns the fogvol composite texture that was rendered this frame.
  * After R_FogVol_Render(), r_fogvol_history_index points to the slot that
- * received the temporal composite output — that is the most recent result.
+ * received the temporal composite output â€” that is the most recent result.
  * Returns 0 if fogvol did not render this frame (no active volumes).
  * Semantics: returns a non-zero texture only when output is valid this frame. */
 GLuint R_FogVol_GetCompositeTex (void)
@@ -3533,7 +3459,8 @@ void R_FogVol_ParseEntities (void)
 	R_FogVol_BuildStaticLightInjection ();
 }
 
-void R_FogVol_AddTestVolumes (void)
+/* Legacy debug helper retained only as dead code block during cleanup migration. */
+static void R_FogVol_AddTestVolumes (void)
 {
 	fog_volume_t volume;
 	vec3_t origin, forward, right, up;
@@ -3549,7 +3476,7 @@ void R_FogVol_AddTestVolumes (void)
 	 * If the scene outside the volume looks correct and the volume itself
 	 * shows fog colour, the pipeline is working.
 	 *
-	 * density=0.02 → tau≈2.0 at 100 units → transmittance≈0.14 (clearly
+	 * density=0.02 â†’ tauâ‰ˆ2.0 at 100 units â†’ transmittanceâ‰ˆ0.14 (clearly
 	 * visible, opaque-looking fog patch). */
 	memset (&volume, 0, sizeof (volume));
 	VectorSet (volume.color, 0.6f, 0.75f, 1.0f);
@@ -3566,7 +3493,7 @@ void R_FogVol_AddTestVolumes (void)
 	volume.priority   = 0;
 	volume.enabled    = 1;
 	volume.edgeSoftness = 0.f;
-	volume_count = CLAMP (1, (int)Q_rint (r_fogvol_testvolumes.value), 8);
+	volume_count = 1;
 	for (int i = 0; i < volume_count; ++i)
 	{
 		fog_volume_t test_volume = volume;
@@ -3598,13 +3525,6 @@ void R_FogVol_BuildList (void)
 {
 	R_FogVol_Clear ();
 	R_FogDlights_Clear ();
-
-	/* BUG FIX (testvolumes): r_fogvol_testvolumes must work independently of
-	 * r_fogvol so developers can test the pipeline without setting up entity
-	 * fog volumes.  Add test volumes first if requested, then check r_fogvol
-	 * for the entity-volume path. */
-	if (r_fogvol_testvolumes.value > 0.f)
-		R_FogVol_AddTestVolumes ();
 
 	if (r_fogvol.value <= 0.f)
 		goto sort_and_done;
@@ -3671,7 +3591,7 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 
 		/* BUG FIX (C-SCISSOR-01): When the camera is inside the fog volume,
 		 * projecting the 8 AABB corners can produce a degenerate or zero-area
-		 * scissor rect (all corners behind near-plane → behind==8 → return false,
+		 * scissor rect (all corners behind near-plane â†’ behind==8 â†’ return false,
 		 * or clipped NDC rect that doesn't cover the screen centre).
 		 * This caused the fog to disappear entirely when looking away from the
 		 * volume's corners while standing inside it (Image 1 vs Image 2 bug).
@@ -3721,7 +3641,7 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 			/* BUG FIX #2 / BUG-C-01: Track corners behind the near plane.
 			 * If ALL 8 corners are behind the camera the volume is fully
 			 * occluded and we return false.  If some are behind and some in
-			 * front, the AABB straddles the near plane — conservatively expand
+			 * front, the AABB straddles the near plane â€” conservatively expand
 			 * to the full viewport so we never miss geometry near the edges.
 			 * The original code broke out of the loop on the first behind-corner,
 			 * which prevented detection of the all-behind case. */
@@ -3742,7 +3662,7 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 			maxy = q_max (maxy, proj[1]);
 			valid = 1;
 		}
-		/* All corners behind the near plane — volume is not visible. */
+		/* All corners behind the near plane â€” volume is not visible. */
 		if (behind == 8)
 			return false;
 	}
@@ -3882,7 +3802,7 @@ static void R_FogVol_BuildRuntimeConfig (fogvol_runtime_config_t *cfg, int steps
 	lightlist_scale = q_max (0.f, r_fogvol_lightlist_scale.value);
 	lightgrid_scale = q_max (0.f, r_fogvol_lightgrid_scale.value);
 	shadow_enabled = global_simple ? (r_fogvol_global_shadow.value > 0.f) : (r_fogvol_shadow.value > 0.f);
-	godray_coupling = r_fogvol_godray_coupling.value > 0.f;
+	godray_coupling = true;
 	light_enabled = fog_light_enabled;
 	froxel_enabled = (r_fogvol_froxel.value > 0.f);
 
@@ -4100,9 +4020,9 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float height_mist_strength;
 	float atmosphere_boost;
 	float sun_shadow_viewproj[16];
-	float sun_shadow_bias;
-	float sun_shadow_pcf_uv;
-	qboolean sun_shadow_enabled;
+	float sun_shadow_bias = 0.f;
+	float sun_shadow_pcf_uv = 0.f;
+	qboolean sun_shadow_enabled = false;
 	float quality_fx_scale;
 	float quality_step_scale;
 	int quality_mode;
@@ -4172,19 +4092,10 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	shadow_samples = cfg ? cfg->shadow_samples : CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
 	if (quality_mode <= 1)
 		shadow_samples = q_min (shadow_samples, 1);
-	if (r_fogvol_sun_dir.value > 0.f)
-	{
-		/* Convention: sun->dir points from scene toward the sun (light source).
-		 * Fog shadow marching moves from sample point toward the blocker, so use
-		 * the same direction without flipping to keep shader/CPU conventions aligned. */
-		VectorCopy (sun->dir, shadow_dir);
-	}
-	else
-	{
-		/* Keep fog-shadow direction camera-orientation independent.
-		 * Using -vpn here causes angle-dependent shadow drift when only looking around. */
-		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
-	}
+	/* Convention: sun->dir points from scene toward the sun (light source).
+	 * Fog shadow marching moves from sample point toward the blocker, so use
+	 * the same direction without flipping to keep shader/CPU conventions aligned. */
+	VectorCopy (sun->dir, shadow_dir);
 	if (VectorLength (shadow_dir) < 0.001f)
 		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
 	else
@@ -4203,7 +4114,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		q_max (0.f, sun_shadow_pcf_uv),
 		0.f);
 	GL_Uniform1iFunc (FOGVOL_U_LIGHTGRID_ENABLED, (cfg && !global_simple && cfg->lightgrid_enabled) ? 1 : 0);
-	sun_scatter = sun->volumetric_intensity * q_max (0.f, r_fogvol_sun_scatter.value);
+	sun_scatter = q_max (0.f, sun->volumetric_intensity);
 	if (R_WorldHasSun ())
 	{
 		VectorCopy (sun->color, sun_color);
@@ -4213,13 +4124,6 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	{
 		VectorSet (sun_color, 0.f, 0.f, 0.f);
 		sun_intensity = 0.f;
-	}
-	if (R_WorldHasSun () && r_fogvol_sun_color.string && r_fogvol_sun_color.string[0])
-	{
-		vec3_t user_sun_color;
-		R_FogVol_ParseColor (r_fogvol_sun_color.string, user_sun_color);
-		if (user_sun_color[0] > 0.f || user_sun_color[1] > 0.f || user_sun_color[2] > 0.f)
-			VectorCopy (user_sun_color, sun_color);
 	}
 	GL_Uniform1fFunc (FOGVOL_U_SUN_SCATTER, sun_scatter * q_max (0.f, sun_intensity));
 	GL_Uniform3fFunc (FOGVOL_U_SUN_COLOR, q_max (0.f, sun_color[0]), q_max (0.f, sun_color[1]), q_max (0.f, sun_color[2]));
@@ -4240,8 +4144,8 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_GODRAY_SHAFTS_PARAMS,
 		(float)q_max (1, framebufs.godrays.width),
 		(float)q_max (1, framebufs.godrays.height),
-		(cfg && !global_simple && cfg->godray_coupling) ? q_max (0.f, r_fogvol_godray_coupling.value) : 0.f,
-		q_max (0.f, r_fogvol_froxel_godrays.value));
+		(cfg && !global_simple && cfg->godray_coupling) ? 1.f : 0.f,
+		1.f);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_TEMPORAL_PARAMS,
 		CLAMP (0.f, r_fogvol_froxel_temporal_alpha.value, 1.f),
 		q_max (1.f, r_fogvol_froxel_temporal_reject_threshold.value),
@@ -4510,7 +4414,6 @@ void R_FogVol_Render (void)
 		{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f, 0.f},
 		{0.f, 0.f, 1.f}, {1.f, 0.f, 1.f}, {0.f, 1.f, 1.f}, {1.f, 1.f, 1.f}
 	};
-	static int last_dumpstate = -1;
 	int steps;
 	GLuint buf;
 	GLbyte *ofs;
@@ -4602,27 +4505,18 @@ void R_FogVol_Render (void)
 	R_FogVol_WarnFroxelLightingConfig ();
 	if (R_FogVol_StaticBuildNeedsRebuild ())
 		R_FogVol_BuildStaticLightInjection ();
-	if (r_fogvol_static_probe_mode.value > 0.f && r_fog_static_field.valid && !r_fog_static_field.build_complete)
+	if (r_fog_static_field.valid && !r_fog_static_field.build_complete)
 	{
 		R_FogVol_ContinueStaticFieldBuild (q_max (1, (int)Q_rint (r_fogvol_static_probe_budget_frame.value)));
 		if (r_fog_static_field.total_samples > 0)
 			R_FogVol_SummarizeStaticLightsFromField ();
 	}
-	dumpstate_always = (r_fogvol_testvolumes_dumpstate.value > 0.f);
-	if (last_dumpstate != (int)Q_rint (r_fogvol_testvolumes_dumpstate.value))
-	{
-		Con_Printf ("FOGVOL_TEST dumpstate %s\n", dumpstate_always ? "enabled" : "disabled");
-		last_dumpstate = (int)Q_rint (r_fogvol_testvolumes_dumpstate.value);
-	}
-
-	use_test_guard = (r_fogvol_testvolumes.value > 0.f);
+	dumpstate_always = false;
+	use_test_guard = false;
 	if (use_test_guard)
 		R_FogVol_CaptureRestoreState (&restore_state);
-	if (R_FogVol_TestDebugEnabled ())
-	{
-		R_GLStateDump ("before-fogvol");
+	if (R_FogVol_StateDebugEnabled ())
 		R_FogVol_LogPipelineState ("FOGVOL_BEGIN");
-	}
 	R_FogVol_LogStateSnapshot ("before-pass");
 	if (use_test_guard)
 		R_FogVol_LogBufferMarker ("pre");
@@ -4689,7 +4583,7 @@ void R_FogVol_Render (void)
 	froxel_injection_enabled = runtime_cfg.froxel_enabled;
 	want_froxel_dlights = froxel_injection_enabled && (r_fogvol_dlightscale.value > 0.f);
 	want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
-	want_froxel_static = froxel_injection_enabled && (r_fogvol_froxel_static.value > 0.f) && (r_num_fog_static_lights > 0);
+	want_froxel_static = froxel_injection_enabled && (r_num_fog_static_lights > 0);
 	run_froxel_injection = froxel_injection_enabled && (want_froxel_dlights || want_froxel_sun || want_froxel_static);
 
 	if (run_froxel_injection)
@@ -4821,7 +4715,7 @@ void R_FogVol_Render (void)
 #if !defined(NDEBUG)
 	/* Clear any stale GL errors before the lights UBO upload so glGetError()
 	 * below only catches errors from THIS call, not from earlier unrelated GL
-	 * operations — a stale error would silently disable all fog lights. */
+	 * operations â€” a stale error would silently disable all fog lights. */
 	while (glGetError () != GL_NO_ERROR) {}
 #endif
 	if (raymarch_lighting_enabled)
@@ -4914,7 +4808,7 @@ void R_FogVol_Render (void)
 	 * `fog_dst = (i==0) ? 0 : (1 - fog_src)`, and never advanced fog_src after
 	 * the first iteration for the i==0 case.  fog_src is now explicitly set to
 	 * match fog_dst at the bottom of each iteration via `fog_src = fog_dst`
-	 * (which already existed at line 1181) — the missing piece was initialising
+	 * (which already existed at line 1181) â€” the missing piece was initialising
 	 * it consistently here so the first `(1 - fog_src)` is deterministic. */
 	fog_src = 0;
 	R_FogVol_PrepareBaseSource (use_halfres, fog_width, fog_height, &perf_stats.blits, &src_tex, &composite_src_fbo);
@@ -5016,7 +4910,7 @@ void R_FogVol_Render (void)
 	GL_SetScissorEnabled (false);
 	/* BUG FIX (C-08): final_fbo is derived from fog_src which is 0 here only
 	 * when no iterations ran (has_drawn=false).  In that case the code jumps
-	 * to `done` via the has_drawn check below and final_fbo is never used —
+	 * to `done` via the has_drawn check below and final_fbo is never used â€”
 	 * but the declaration order made this non-obvious and fragile.  Declare
 	 * final_fbo only after confirming has_drawn so the value is always valid
 	 * when it reaches code that actually uses it.  This matches final_tex
@@ -5081,7 +4975,7 @@ void R_FogVol_Render (void)
 		GL_Uniform1iFunc (6, history_valid ? 1 : 0);
 		/* BUG FIX (halfres distortion): temporal shader also runs at viewport
 		 * (0,0,fog_width,fog_height) in halfres, so view_x/view_y must not be
-		 * subtracted — pass (0,0) as the origin, same reasoning as FogViewParams
+		 * subtracted â€” pass (0,0) as the origin, same reasoning as FogViewParams
 		 * in the raymarcher pass above. */
 		GL_Uniform4fFunc (7,
 			use_halfres ? 0.f : view_x,
@@ -5154,7 +5048,7 @@ void R_FogVol_Render (void)
 			R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
 			/* BUG FIX (white screen): Protect composite FBO alpha channel.
 			 * BUG FIX (grey washout): Only blit the viewrect region, not the
-			 * full glwidth×glheight.  The fog FBO is cleared to (0,0,0,0)
+			 * full glwidthÃ—glheight.  The fog FBO is cleared to (0,0,0,0)
 			 * outside the viewrect; blitting that area would overwrite HUD
 			 * and other non-fog pixels with black.  Blit only the view area
 			 * that was actually rendered by the fog shader. */
@@ -5178,7 +5072,7 @@ void R_FogVol_Render (void)
 
 done:
 	R_FogVol_LogStateSnapshot ("after-pass");
-	if (use_halfres && (r_gl_state_validate.value > 0.f || R_FogVol_TestDebugEnabled ()))
+	if (use_halfres && (r_gl_state_validate.value > 0.f || R_FogVol_StateDebugEnabled ()))
 	{
 		GLint viewport[4] = {0};
 		GLint scissor_box[4] = {0};
@@ -5201,11 +5095,8 @@ done:
 			glScissor (expected_vp[0], expected_vp[1], expected_vp[2], expected_vp[3]);
 		}
 	}
-	if (R_FogVol_TestDebugEnabled ())
-	{
+	if (R_FogVol_StateDebugEnabled ())
 		R_FogVol_LogPipelineState ("FOGVOL_END");
-		R_GLStateDump ("after-fogvol");
-	}
 	if (use_test_guard)
 	{
 		R_FogVol_Restore3DRenderState (&restore_state);
@@ -5271,7 +5162,7 @@ static qboolean R_FogVol_GridVolumeOverlapsCell (const fog_volume_t *vol, const 
 void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int num)
 {
 	vec3_t cell_size;
-	const qboolean inject_debug = (r_fogvol_inject_debug.value > 0.f) || (r_fogvol_debug.value >= 7.f);
+	const qboolean inject_debug = (r_fogvol_debug.value >= 7.f);
 
 	if (!grid || !vols || num <= 0)
 		return;

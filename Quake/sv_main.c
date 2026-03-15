@@ -183,7 +183,7 @@ void SV_Init (void)
 	Bot_Init ();
 
 	for (i=0 ; i<MAX_MODELS ; i++)
-		sprintf (localmodels[i], "*%i", i);
+		q_snprintf (localmodels[i], sizeof (localmodels[i]), "*%i", i);
 
 	i = COM_CheckParm ("-protocol");
 	if (i && i < com_argc - 1)
@@ -411,7 +411,7 @@ void SV_SendServerinfo (client_t *client)
 	int				i; //johnfitz
 
 	MSG_WriteByte (&client->message, svc_print);
-	sprintf (message, "%c\nFITZQUAKE %1.2f SERVER (%i CRC)\n", 2, FITZQUAKE_VERSION, qcvm->crc); //johnfitz -- include fitzquake version
+	q_snprintf (message, sizeof (message), "%c\nFITZQUAKE %1.2f SERVER (%i CRC)\n", 2, FITZQUAKE_VERSION, qcvm->crc); //johnfitz -- include fitzquake version
 	MSG_WriteString (&client->message,message);
 
 	MSG_WriteByte (&client->message, svc_serverinfo);
@@ -493,7 +493,7 @@ void SV_ConnectClient (int clientnum)
 	memset (client, 0, sizeof(*client));
 	client->netconnection = netconnection;
 
-	strcpy (client->name, "unconnected");
+	q_strlcpy (client->name, "unconnected", sizeof (client->name));
 	client->active = true;
 	client->spawned = false;
 	client->edict = ent;
@@ -636,9 +636,9 @@ byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel) //johnfitz -- added worldmode
 	if (fatpvs == NULL || fatbytes > fatpvs_capacity)
 	{
 		fatpvs_capacity = fatbytes;
-		fatpvs = (byte *) realloc (fatpvs, fatpvs_capacity);
+		fatpvs = (byte *) q_realloc(fatpvs, fatpvs_capacity);
 		if (!fatpvs)
-			Sys_Error ("SV_FatPVS: realloc() failed on %d bytes", fatpvs_capacity);
+			Sys_Error ("SV_FatPVS: q_realloc() failed on %d bytes", fatpvs_capacity);
 	}
 	
 	Q_memset (fatpvs, 0, fatbytes);
@@ -1279,7 +1279,7 @@ void SV_WriteStats (client_t *client)
 			if (!os)	os="";
 			if (strcmp(os,ns))
 			{
-				free(client->oldstats_s[i]);
+				q_free (client->oldstats_s[i]);
 				client->oldstats_s[i] = strdup(ns);
 
 				MSG_WriteByte (&client->message, svc_stufftext);
@@ -1985,7 +1985,7 @@ void SV_SpawnServer (const char *server)
 // allocate server memory
 	/* Host_ClearMemory() called above already cleared the whole sv structure */
 	qcvm->max_edicts = CLAMP (MIN_EDICTS,(int)max_edicts.value,MAX_EDICTS); //johnfitz -- max_edicts cvar
-	qcvm->edicts = (edict_t *) malloc (qcvm->max_edicts*qcvm->edict_size); // ericw -- sv.edicts switched to use malloc()
+	qcvm->edicts = (edict_t *) q_malloc (qcvm->max_edicts * qcvm->edict_size); // ericw -- sv.edicts switched to use q_malloc()
 	if (!qcvm->edicts)
 		Sys_Error ("SV_SpawnServer: out of memory (%d edicts x %d bytes)", qcvm->max_edicts, qcvm->edict_size);
 	ClearLink (&qcvm->free_edicts);
@@ -2002,7 +2002,7 @@ void SV_SpawnServer (const char *server)
 
 // leave slots at start for clients only
 	qcvm->num_edicts = svs.maxclients+1;
-	memset(qcvm->edicts, 0, qcvm->num_edicts*qcvm->edict_size); // ericw -- sv.edicts switched to use malloc()
+	memset(qcvm->edicts, 0, qcvm->num_edicts*qcvm->edict_size); // ericw -- sv.edicts switched to use q_malloc()
 	for (i=0 ; i<svs.maxclients ; i++)
 	{
 		ent = EDICT_NUM(i+1);

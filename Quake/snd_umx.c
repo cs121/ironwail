@@ -216,7 +216,10 @@ static int read_typname(fshandle_t *f, const struct upkg_hdr *hdr,
 		}
 	}
 
-	strcpy(out, (hdr->file_version >= 64)? &buf[1] : buf);
+	{
+		const char *src = (hdr->file_version >= 64) ? &buf[1] : buf;
+		memcpy (out, src, strlen (src) + 1);
+	}
 	return 0;
 }
 
@@ -410,4 +413,3 @@ snd_codec_t umx_codec =
 };
 
 #endif	/* USE_CODEC_UMX */
-

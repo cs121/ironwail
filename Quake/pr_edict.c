@@ -71,7 +71,8 @@ PR_HashGet
 */
 static int PR_HashGet (prhashtable_t *table, const char *key)
 {
-	unsigned pos = COM_HashString (key) % table->capacity, end = pos;
+	unsigned capacity = (unsigned) table->capacity;
+	unsigned pos = COM_HashString (key) % capacity, end = pos;
 
 	do
 	{
@@ -82,7 +83,7 @@ static int PR_HashGet (prhashtable_t *table, const char *key)
 			return table->indices[pos];
 
 		++pos;
-		if (pos == table->capacity)
+		if (pos == capacity)
 			pos = 0;
 	}
 	while (pos != end);
@@ -98,7 +99,8 @@ PR_HashAdd
 static void PR_HashAdd (prhashtable_t *table, int skey, int value)
 {
 	const char *name = PR_GetString (skey);
-	unsigned pos = COM_HashString (name) % table->capacity, end = pos;
+	unsigned capacity = (unsigned) table->capacity;
+	unsigned pos = COM_HashString (name) % capacity, end = pos;
 
 	do
 	{
@@ -110,7 +112,7 @@ static void PR_HashAdd (prhashtable_t *table, int skey, int value)
 		}
 
 		++pos;
-		if (pos == table->capacity)
+		if (pos == capacity)
 			pos = 0;
 	}
 	while (pos != end);
@@ -219,7 +221,7 @@ edict_t *ED_Alloc (void)
 		Host_Error ("ED_Alloc: no free edicts (max_edicts is %i)", qcvm->max_edicts);
 
 	e = EDICT_NUM(qcvm->num_edicts++);
-	memset(e, 0, qcvm->edict_size); // ericw -- switched sv.edicts to malloc(), so we are accessing uninitialized memory and must fully zero it, not just ED_ClearEdict
+	memset(e, 0, qcvm->edict_size); // ericw -- switched sv.edicts to q_malloc(), so we are accessing uninitialized memory and must fully zero it, not just ED_ClearEdict
 	e->baseline.scale = ENTSCALE_DEFAULT;
 
 	return e;
@@ -640,10 +642,10 @@ const char *PR_GlobalString (int ofs)
 
 	i = strlen(line);
 	for ( ; i < 20; i++)
-		strcat (line, " ");
+		q_strlcat (line, " ", sizeof (line));
 
 	if (i < lastchari)
-		strcat (line, " ");
+		q_strlcat (line, " ", sizeof (line));
 	else
 		line[lastchari] = ' ';
 
@@ -665,10 +667,10 @@ const char *PR_GlobalStringNoContents (int ofs)
 
 	i = strlen(line);
 	for ( ; i < 20; i++)
-		strcat (line, " ");
+		q_strlcat (line, " ", sizeof (line));
 
 	if (i < lastchari)
-		strcat (line, " ");
+		q_strlcat (line, " ", sizeof (line));
 	else
 		line[lastchari] = ' ';
 
@@ -1354,7 +1356,7 @@ const char *ED_ParseEdict (const char *data, edict_t *ent)
 		// and allow them to be turned into vectors. (FIXME...)
 		if (!strcmp(com_token, "angle"))
 		{
-			strcpy (com_token, "angles");
+			q_strlcpy (com_token, "angles", sizeof (com_token));
 			anglehack = true;
 		}
 		else
@@ -1362,7 +1364,7 @@ const char *ED_ParseEdict (const char *data, edict_t *ent)
 
 		// FIXME: change light to _light to get rid of this hack
 		if (!strcmp(com_token, "light"))
-			strcpy (com_token, "light_lev");	// hack for single light def
+			q_strlcpy (com_token, "light_lev", sizeof (com_token));	// hack for single light def
 
 		q_strlcpy (keyname, com_token, sizeof(keyname));
 
@@ -1409,8 +1411,8 @@ const char *ED_ParseEdict (const char *data, edict_t *ent)
 		if (anglehack)
 		{
 			char	temp[32];
-			strcpy (temp, com_token);
-			sprintf (com_token, "0 %s 0", temp);
+			q_strlcpy (temp, com_token, sizeof (temp));
+			q_snprintf (com_token, sizeof (com_token), "0 %s 0", temp);
 		}
 
 		if (!ED_ParseEpair ((void *)&ent->v, key, com_token, qcvm != &sv.qcvm))
@@ -1651,9 +1653,9 @@ void PR_ClearProgs(qcvm_t *vm)
 
 	if (qcvm->knownstrings)
 		Z_Free ((void *)qcvm->knownstrings);
-	free(qcvm->edicts); // ericw -- sv.edicts switched to use malloc()
+	q_free (qcvm->edicts); // ericw -- sv.edicts switched to use q_malloc()
 	if (qcvm->fielddefs != (ddef_t *)((byte *)qcvm->progs + qcvm->progs->ofs_fielddefs))
-		free(qcvm->fielddefs);
+		q_free (qcvm->fielddefs);
 	memset(qcvm, 0, sizeof(*qcvm));
 
 	qcvm = NULL;
@@ -1819,12 +1821,12 @@ static void PR_MergeEngineFieldDefs (void)
 	if (maxdefs != qcvm->progs->numfielddefs)
 	{	//we now know how many entries we need to add...
 		ddef_t *olddefs = qcvm->fielddefs;
-		qcvm->fielddefs = malloc(maxdefs * sizeof(*qcvm->fielddefs));
+		qcvm->fielddefs = q_malloc (maxdefs * sizeof (*qcvm->fielddefs));
 		if (!qcvm->fielddefs)
 			Sys_Error ("PR_MergeEngineFieldDefs: out of memory (%d defs)", maxdefs);
 		memcpy(qcvm->fielddefs, olddefs, qcvm->progs->numfielddefs*sizeof(*qcvm->fielddefs));
 		if (olddefs != (ddef_t *)((byte *)qcvm->progs + qcvm->progs->ofs_fielddefs))
-			free(olddefs);
+			q_free (olddefs);
 
 		//allocate the extra defs
 		for (j = 0; j < countof(extrafields); j++)
@@ -2447,7 +2449,7 @@ void SaveData_Init (savedata_t *save)
 {
 	memset (save, 0, sizeof (*save));
 	save->buffersize = 48 * 1024 * 1024; // ad_sepulcher needs ~32 MB
-	save->buffer = (byte *) malloc (save->buffersize);
+	save->buffer = (byte *) q_malloc (save->buffersize);
 	if (!save->buffer)
 		Sys_Error ("SaveData_Init: couldn't allocate %d bytes", save->buffersize);
 }
@@ -2456,7 +2458,7 @@ void SaveData_Clear (savedata_t *save)
 {
 	if (save->file)
 		fclose (save->file);
-	free (save->buffer);
+	q_free (save->buffer);
 	memset (save, 0, sizeof (*save));
 }
 
@@ -2492,7 +2494,7 @@ void SaveData_Fill (savedata_t *save)
 	if (size > save->buffersize)
 	{
 		save->buffersize = size + size/2;
-		save->buffer = (byte *) realloc (save->buffer, save->buffersize);
+		save->buffer = (byte *) q_realloc(save->buffer, save->buffersize);
 		if (!save->buffer)
 			Sys_Error ("SaveData_Fill: failed to allocate %d bytes", save->buffersize);
 	}

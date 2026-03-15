@@ -42,18 +42,18 @@ static void Snd_WriteLinearBlastStereo16 (void)
 	for (i = 0; i < snd_linear_count; i += 2)
 	{
 		val = snd_p[i] / 256;
-		if (val > 0x7fff)
-			snd_out[i] = 0x7fff;
-		else if (val < (short)0x8000)
-			snd_out[i] = (short)0x8000;
+		if (val > 32767)
+			snd_out[i] = 32767;
+		else if (val < -32768)
+			snd_out[i] = -32768;
 		else
 			snd_out[i] = val;
 
 		val = snd_p[i+1] / 256;
-		if (val > 0x7fff)
-			snd_out[i+1] = 0x7fff;
-		else if (val < (short)0x8000)
-			snd_out[i+1] = (short)0x8000;
+		if (val > 32767)
+			snd_out[i+1] = 32767;
+		else if (val < -32768)
+			snd_out[i+1] = -32768;
 		else
 			snd_out[i+1] = val;
 	}
@@ -113,10 +113,10 @@ static void S_TransferPaintBuffer (int endtime)
 		{
 			val = *p / 256;
 			p+= step;
-			if (val > 0x7fff)
-				val = 0x7fff;
-			else if (val < (short)0x8000)
-				val = (short)0x8000;
+			if (val > 32767)
+				val = 32767;
+			else if (val < -32768)
+				val = -32768;
 			out[out_idx] = val;
 			out_idx = (out_idx + 1) & out_mask;
 		}
@@ -128,10 +128,10 @@ static void S_TransferPaintBuffer (int endtime)
 		{
 			val = *p / 256;
 			p+= step;
-			if (val > 0x7fff)
-				val = 0x7fff;
-			else if (val < (short)0x8000)
-				val = (short)0x8000;
+			if (val > 32767)
+				val = 32767;
+			else if (val < -32768)
+				val = -32768;
 			out[out_idx] = (val / 256) + 128;
 			out_idx = (out_idx + 1) & out_mask;
 		}
@@ -143,10 +143,10 @@ static void S_TransferPaintBuffer (int endtime)
 		{
 			val = *p / 256;
 			p+= step;
-			if (val > 0x7fff)
-				val = 0x7fff;
-			else if (val < (short)0x8000)
-				val = (short)0x8000;
+			if (val > 32767)
+				val = 32767;
+			else if (val < -32768)
+				val = -32768;
 			out[out_idx] = (val / 256);
 			out_idx = (out_idx + 1) & out_mask;
 		}
@@ -210,8 +210,8 @@ static void S_UpdateFilter(filter_t *filter, int M, float f_c)
 {
 	if (filter->f_c != f_c || filter->M != M)
 	{
-		if (filter->memory != NULL) free(filter->memory);
-		if (filter->kernel != NULL) free(filter->kernel);
+		if (filter->memory != NULL) q_free(filter->memory);
+		if (filter->kernel != NULL) q_free(filter->kernel);
 
 		filter->M = M;
 		filter->f_c = f_c;
@@ -219,8 +219,8 @@ static void S_UpdateFilter(filter_t *filter, int M, float f_c)
 		filter->parity = 0;
 	// M + 1 rounded up to the next multiple of 16
 		filter->kernelsize = (M + 1) + 16 - ((M + 1) % 16);
-		filter->memory = (float *) calloc(filter->kernelsize, sizeof(float));
-		filter->kernel = (float *) calloc(filter->kernelsize, sizeof(float));
+		filter->memory = (float *) q_calloc(filter->kernelsize, sizeof(float));
+		filter->kernel = (float *) q_calloc(filter->kernelsize, sizeof(float));
 
 		if (!filter->memory || !filter->kernel)
 			Sys_Error ("S_UpdateFilter: out of memory (%" SDL_PRIu64 " bytes)", (uint64_t)(filter->kernelsize * sizeof (float)));
@@ -620,4 +620,3 @@ static void SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int count, in
 
 	ch->pos += count;
 }
-

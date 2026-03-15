@@ -180,7 +180,7 @@ static void R_PostFX_ReloadLUTs (void)
 		return;
 
 	layer_bytes = size * size * size * 4;
-	lut_storage = (byte *)calloc (PFX_LUT_COUNT * layer_bytes, 1);
+	lut_storage = (byte *)q_calloc(PFX_LUT_COUNT * layer_bytes, 1);
 	if (!lut_storage)
 		return;
 
@@ -209,7 +209,7 @@ static void R_PostFX_ReloadLUTs (void)
 	GL_TexImage3DFunc (GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, size * size, size, PFX_LUT_COUNT, 0, GL_RGBA, GL_UNSIGNED_BYTE, lut_storage);
 	GL_ObjectLabelFunc (GL_TEXTURE, r_postfx_lut_tex, -1, "postfx lut");
 
-	free (lut_storage);
+	q_free(lut_storage);
 	r_postfx_lut_size = size;
 }
 

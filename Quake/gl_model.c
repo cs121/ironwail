@@ -59,7 +59,7 @@ void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size);
 
 static void Mod_Print (void);
 
-// Forward declarations für Lightgrid-Funktionen
+// Forward declarations fÃ¼r Lightgrid-Funktionen
 void Lightgrid_Clear(void);
 const lightgrid_t *Lightgrid_Get(void);
 const char *Lightgrid_GetSource(void);
@@ -166,11 +166,11 @@ void Mod_Init (void)
 
         //johnfitz -- create notexture miptex
         r_notexture_mip = (texture_t *) Hunk_AllocName (sizeof(texture_t), "r_notexture_mip");
-        strcpy (r_notexture_mip->name, "notexture");
+        q_strlcpy (r_notexture_mip->name, "notexture", sizeof (r_notexture_mip->name));
         r_notexture_mip->height = r_notexture_mip->width = 32;
 
 	r_notexture_mip2 = (texture_t *) Hunk_AllocName (sizeof(texture_t), "r_notexture_mip2");
-	strcpy (r_notexture_mip2->name, "notexture2");
+	q_strlcpy (r_notexture_mip2->name, "notexture2", sizeof (r_notexture_mip2->name));
 	r_notexture_mip2->height = r_notexture_mip2->width = 32;
 	//johnfitz
 }
@@ -257,9 +257,9 @@ static byte *Mod_DecompressVis (byte *in, qmodel_t *model)
 	if (mod_decompressed == NULL || row > mod_decompressed_capacity)
 	{
 		mod_decompressed_capacity = (row + VIS_ALIGN_MASK) & ~VIS_ALIGN_MASK;
-		mod_decompressed = (byte *) realloc (mod_decompressed, mod_decompressed_capacity);
+		mod_decompressed = (byte *) q_realloc(mod_decompressed, mod_decompressed_capacity);
 		if (!mod_decompressed)
-			Sys_Error ("Mod_DecompressVis: realloc() failed on %d bytes", mod_decompressed_capacity);
+			Sys_Error ("Mod_DecompressVis: q_realloc() failed on %d bytes", mod_decompressed_capacity);
 	}
 	out = mod_decompressed;
 	outend = mod_decompressed + row;
@@ -320,9 +320,9 @@ byte *Mod_NoVisPVS (qmodel_t *model)
 	if (mod_novis == NULL || pvsbytes > mod_novis_capacity)
 	{
 		mod_novis_capacity = pvsbytes;
-		mod_novis = (byte *) realloc (mod_novis, mod_novis_capacity);
+		mod_novis = (byte *) q_realloc(mod_novis, mod_novis_capacity);
 		if (!mod_novis)
-			Sys_Error ("Mod_NoVisPVS: realloc() failed on %d bytes", mod_novis_capacity);
+			Sys_Error ("Mod_NoVisPVS: q_realloc() failed on %d bytes", mod_novis_capacity);
 		
 		memset(mod_novis, 0xff, mod_novis_capacity);
 	}
@@ -500,7 +500,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		break;
 	}
 
-	free (buf);
+	q_free(buf);
 	Host_EndAssetLoading ();
 
 	return mod;
@@ -1296,13 +1296,13 @@ static gltexture_t *Mod_LoadKTX2Texture(const char *name)
                 gltex = R_LoadKTX2Texture(ktx2path, rawbuf, (size_t)filesize);
                 if (gltex)
                 {
-                        free(rawbuf);
+                        q_free(rawbuf);
                         return gltex;
                 }
                 Con_Printf("KTX2 load failed, falling back.\n");
         }
 
-        free(rawbuf);
+        q_free(rawbuf);
         return NULL;
 }
 
@@ -1322,11 +1322,11 @@ static void Mod_LoadTextures (lump_t *l)
 //johnfitz -- more variables
 	char		texturename[64];
 	int			nummiptex;
-	int			mark, fwidth, fheight;
+	int			mark, fwidth = 0, fheight = 0;
 	char		filename[MAX_OSPATH], mapname[MAX_OSPATH];
 	byte		*data;
 	gltexture_t	*ktx2tex;
-	enum srcformat fmt;
+	enum srcformat fmt = SRC_RGBA;
 	qboolean	malloced;
 //johnfitz
 
@@ -1497,7 +1497,7 @@ static void Mod_LoadTextures (lump_t *l)
                                         }
                                 }
                                 if (malloced)
-                                        free(data);
+                                        q_free(data);
                                 Hunk_FreeToLowMark (mark);
                         }
                         else //regular texture
@@ -1568,7 +1568,7 @@ static void Mod_LoadTextures (lump_t *l)
                                         }
                                 }
                                 if (malloced)
-                                        free(data);
+                                        q_free(data);
                                 Hunk_FreeToLowMark (mark);
                         }
                 }
@@ -1691,7 +1691,7 @@ static void Mod_LoadLighting (lump_t *l)
 	byte d, q64_b0, q64_b1;
 	char litfilename[MAX_OSPATH];
 	const char *lighting_source;
-	unsigned int path_id;
+	unsigned int path_id = 0;
 	int	bspxsize, bspx_lighting_size, bspx_rgb_size, bspx_dlit_size;
 	int remastered_lump_samples;
 	qboolean bsp_lightmap_bgr = false;
@@ -1787,7 +1787,7 @@ static void Mod_LoadLighting (lump_t *l)
 
 					if (bsp_lightmap_bgr)
 					{
-						byte *tmp = (byte *)malloc(l->filelen * 3);
+						byte *tmp = (byte *)q_malloc(l->filelen * 3);
 						byte *hunkbuf;
 						const byte *src;
 						byte *dst;
@@ -1811,7 +1811,7 @@ static void Mod_LoadLighting (lump_t *l)
 						Hunk_FreeToLowMark(mark);
 						hunkbuf = (byte *)Hunk_AllocName(l->filelen * 3, litfilename);
 						memcpy(hunkbuf, tmp, l->filelen * 3);
-						free(tmp);
+						q_free(tmp);
 						loadmodel->lightdata = hunkbuf;
 						lightmap_source_name = "LIT_V1_BGR->RGB";
 					}
@@ -1834,7 +1834,7 @@ static void Mod_LoadLighting (lump_t *l)
 			{
                                 if (8+l->filelen*4 == com_filesize)
                                 {
-                                        byte *rgbe = (byte *)malloc(l->filelen * 4);
+                                        byte *rgbe = (byte *)q_malloc(l->filelen * 4);
                                         byte *decoded = NULL;
 
                                         if (!rgbe)
@@ -1852,7 +1852,7 @@ static void Mod_LoadLighting (lump_t *l)
                                         Con_Printf("loaded %s lighting (hdr)\n", lighting_source);
                                         Mod_DecodeRgbeLighting(decoded, rgbe, l->filelen, bsp_lightmap_bgr);
 
-                                        free(rgbe);
+                                        q_free(rgbe);
 
                                         loadmodel->lightdata = decoded;
                                         loadmodel->lightdatasamples = l->filelen;
@@ -2683,7 +2683,7 @@ done:
 	memcpy (loadname, old_loadname, sizeof(loadname));
 	loadmodel = old_loadmodel;
 	mod_base = old_mod_base;
-	free (buffer);
+	q_free(buffer);
 	return ok;
 }
 
@@ -3631,7 +3631,7 @@ static void Mod_FindUsedTextures (qmodel_t *mod)
 	int			ofs[TEXTYPE_COUNT];
 	uint32_t	*inuse;
 
-	inuse = (uint32_t *) calloc (BITARRAY_DWORDS (mod->numtextures), sizeof (uint32_t));
+	inuse = (uint32_t *) q_calloc(BITARRAY_DWORDS (mod->numtextures), sizeof (uint32_t));
 	if (!inuse)
 		Sys_Error ("Mod_FindUsedTextures: out of memory (%d bits)", mod->numtextures);
 
@@ -3665,7 +3665,7 @@ static void Mod_FindUsedTextures (qmodel_t *mod)
 			mod->usedtextures[ofs[t->type]++] = i;
 	}
 
-	free (inuse);
+	q_free(inuse);
 
 	//Con_Printf("%s: %d/%d textures\n", mod->name, count, mod->numtextures);
 }
@@ -4402,10 +4402,10 @@ visdone:
 		{	// duplicate the basic information
 			char	name[12];
 
-			sprintf (name, "*%i", i+1);
+			q_snprintf (name, sizeof (name), "*%i", i + 1);
 			loadmodel = Mod_FindName (name);
 			*loadmodel = *mod;
-			strcpy (loadmodel->name, name);
+			q_strlcpy (loadmodel->name, name, sizeof (loadmodel->name));
 			mod = loadmodel;
 		}
 	}
@@ -5134,7 +5134,7 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer)
 			if (md5buffer)
 			{
 				Mod_LoadMD5MeshModel (mod, md5buffer);
-				free (md5buffer);
+				q_free(md5buffer);
 				return;
 			}
 		}
@@ -5723,9 +5723,9 @@ static void MD5_ComputeNormals(iqmvert_t *vert, size_t numverts, unsigned short 
 	unsigned short	*weld;
 
 	hashsize = numverts * 2;
-	hashmap = (int *) calloc (hashsize, sizeof (*hashmap));
-	weld = (unsigned short *) malloc (numverts * sizeof (*weld));
-	normals = (vec3_t *) calloc (numverts, sizeof (vec3_t));
+	hashmap = (int *) q_calloc(hashsize, sizeof (*hashmap));
+	weld = (unsigned short *) q_malloc(numverts * sizeof (*weld));
+	normals = (vec3_t *) q_calloc(numverts, sizeof (vec3_t));
 	if (!hashmap || !weld || !normals)
 		Sys_Error ("MD5_ComputeNormals: out of memory (%u verts/%u tris)", (unsigned int)numverts, (unsigned int)(numindexes/3));
 
@@ -5795,9 +5795,9 @@ static void MD5_ComputeNormals(iqmvert_t *vert, size_t numverts, unsigned short 
 		}
 	}
 
-	free (normals);
-	free (weld);
-	free (hashmap);
+	q_free(normals);
+	q_free(weld);
+	q_free(hashmap);
 }
 
 typedef struct
@@ -5848,7 +5848,7 @@ static void MD5Anim_Load(md5animctx_t *ctx, boneinfo_t *bones, size_t numbones)
 
 	if (!buffer)
 	{
-		free(ctx->animfile);
+		q_free(ctx->animfile);
 		return;
 	}
 
@@ -5861,7 +5861,7 @@ static void MD5Anim_Load(md5animctx_t *ctx, boneinfo_t *bones, size_t numbones)
 	ab = (md5animbase_t *) Z_Malloc(sizeof(*ab)*ctx->numjoints);
 
 	ctx->posedata = outposes = (bonepose_t *) Hunk_Alloc(sizeof(*outposes)*ctx->numjoints*ctx->numposes);
-	frameposes = (bonepose_t *) malloc (sizeof (*frameposes) * ctx->numjoints);
+	frameposes = (bonepose_t *) q_malloc(sizeof (*frameposes) * ctx->numjoints);
 	if (!frameposes)
 		Sys_Error ("MD5Anim_Load: out of memory (%u joints)", (unsigned int)ctx->numjoints);
 
@@ -5964,8 +5964,8 @@ static void MD5Anim_Load(md5animctx_t *ctx, boneinfo_t *bones, size_t numbones)
 
 	Z_Free(raw);
 	Z_Free(ab);
-	free(frameposes);
-	free(ctx->animfile);
+	q_free(frameposes);
+	q_free(ctx->animfile);
 }
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer)
 {

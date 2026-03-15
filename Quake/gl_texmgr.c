@@ -492,7 +492,7 @@ static void TexMgr_Imagedump_f (void)
 				*c = '_';
 
 		GL_Bind (GL_TEXTURE0, glt);
-		buffer = (byte *) malloc(glt->width * glt->height * glt->depth * channels);
+		buffer = (byte *) q_malloc(glt->width * glt->height * glt->depth * channels);
 		if (!buffer)
 			Sys_Error ("TexMgr_Imagedump_f: out of memory (%dx%dx%d %d bpp)", glt->width, glt->height, glt->depth, channels * 8);
 
@@ -514,7 +514,7 @@ static void TexMgr_Imagedump_f (void)
 			Image_WriteTGA (tganame, buffer, glt->width, glt->height*glt->depth, channels*8, true);
 		}
 
-		free (buffer);
+		q_free(buffer);
 		count++;
 	}
 
@@ -957,7 +957,7 @@ static byte *TexMgr_LoadFileWithSize (const char *path, size_t *size_out)
 		return NULL;
 	}
 
-	buffer = (byte *) malloc ((size_t) length);
+	buffer = (byte *) q_malloc((size_t) length);
 	if (!buffer)
 	{
 		fclose (f);
@@ -967,7 +967,7 @@ static byte *TexMgr_LoadFileWithSize (const char *path, size_t *size_out)
 	if (fread (buffer, 1, (size_t) length, f) != (size_t) length)
 	{
 		fclose (f);
-		free (buffer);
+		q_free(buffer);
 		return NULL;
 	}
 
@@ -1016,7 +1016,7 @@ static qboolean TexMgr_LoadPaletteKTX2 (byte *pal)
 
 cleanup:
 	KTX2_FreeDecodedImage (&decoded);
-	free (raw);
+	q_free(raw);
 	return ok;
 }
 
@@ -1740,7 +1740,7 @@ static qboolean TexMgr_CompressLevelToBC7 (const byte *rgba, int width, int heig
 	blocks_h = (size_t) ((height + 3) / 4);
 	block_count = blocks_w * blocks_h;
 	*out_size = block_count * BC7ENC_BLOCK_SIZE;
-	*out_blocks = (uint8_t *) malloc (*out_size);
+	*out_blocks = (uint8_t *) q_malloc(*out_size);
 	if (!*out_blocks)
 		return false;
 
@@ -1769,7 +1769,7 @@ static qboolean TexMgr_UploadBC7 (gltexture_t *glt, unsigned *data)
 		return false;
 
 		GL_CompressedTexImage2DFunc (GL_TEXTURE_2D, miplevel, internal_format, mipwidth, mipheight, 0, (GLsizei) bc7_size, bc7_blocks);
-		free (bc7_blocks);
+		q_free(bc7_blocks);
 
 		if (!use_mipmaps || (mipwidth == 1 && mipheight == 1))
 		break;
@@ -1876,7 +1876,7 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
                 base_pixels = (size_t) glt->width * glt->height * glt->depth;
                 if (base_pixels)
                 {
-                        base_copy = (unsigned *) malloc (base_pixels * sizeof (*base_copy));
+                        base_copy = (unsigned *) q_malloc(base_pixels * sizeof (*base_copy));
                         if (!base_copy)
                                 bc7_requested = false;
                         else
@@ -1893,7 +1893,7 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
                 }
         }
         if (base_copy)
-                free (base_copy);
+                q_free(base_copy);
 
         if (bc7_requested && !bc7_uploaded)
         {
@@ -2210,14 +2210,14 @@ GLuint TexMgr_LoadDDS (const char *path)
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, mip_levels - 1);
 
-	free (file_buffer);
+	q_free(file_buffer);
 	return texnum;
 
 	fail:
 	if (texnum)
 	glDeleteTextures (1, &texnum);
 	if (file_buffer)
-	free (file_buffer);
+	q_free(file_buffer);
 	return 0;
 }
 
@@ -2390,7 +2390,7 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 	{
 		glt->internal_format = GL_RGBA16F;
 	        size_t pixels = (size_t)glt->width * glt->height * 4;
-	        GLfloat *float_data = (GLfloat *) malloc (pixels * sizeof (*float_data));
+	        GLfloat *float_data = (GLfloat *) q_malloc(pixels * sizeof (*float_data));
 	        if (!float_data)
 	                Sys_Error ("TexMgr_LoadLightmap: out of memory on %" SDL_PRIu64 " bytes", (uint64_t)(pixels * sizeof (*float_data)));
 	        for (size_t idx = 0; idx < pixels; idx++)
@@ -2401,7 +2401,7 @@ static void TexMgr_LoadLightmap (gltexture_t *glt, byte *data)
 	                float_data[idx] = value;
 	        }
 	        GL_TexImage (glt, 0, GL_RGBA16F, glt->width, glt->height, GL_RGBA, GL_FLOAT, float_data);
-	        free (float_data);
+	        q_free(float_data);
 	}
 	else
 	{

@@ -406,7 +406,7 @@ void Cmd_Alias_f (void)
 			a->next = cmd_alias;
 			cmd_alias = a;
 		}
-		strcpy (a->name, s);
+		q_strlcpy (a->name, s, sizeof (a->name));
 
 		// copy the rest of the command line
 		cmd[0] = 0;		// start out with a null string
@@ -777,10 +777,13 @@ cmd_function_t *Cmd_AddCommand2 (const char *cmd_name, xcommand_t function, cmd_
 
 	if (host_initialized)
 	{
-		cmd = (cmd_function_t *) malloc(sizeof(*cmd) + strlen(cmd_name)+1);
+		char *namebuf;
+		cmd = (cmd_function_t *) q_malloc(sizeof(*cmd) + strlen(cmd_name)+1);
 		if (!cmd)
 			Sys_Error ("Cmd_AddCommand2: out of memory (%s)", cmd_name);
-		cmd->name = strcpy((char*)(cmd + 1), cmd_name);
+		namebuf = (char *)(cmd + 1);
+		cmd->name = namebuf;
+		memcpy (namebuf, cmd_name, strlen (cmd_name) + 1);
 		cmd->dynamic = true;
 	}
 	else
@@ -823,7 +826,7 @@ void Cmd_RemoveCommand (cmd_function_t *cmd)
 		if (*link == cmd)
 		{
 			*link = cmd->next;
-			free(cmd);
+			q_free(cmd);
 			return;
 		}
 	}
@@ -980,4 +983,3 @@ int Cmd_CheckParm (const char *parm)
 
 	return 0;
 }
-

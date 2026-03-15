@@ -70,7 +70,7 @@ qboolean KTX2_WriteRGBA8File(const char *path, int width, int height, int mip_co
         for (i = 0; i < (size_t)mip_count; ++i)
                 total_size = KTX2_Align4(total_size + mip_sizes[i]);
 
-        buffer = (uint8_t *)calloc(1, total_size);
+        buffer = (uint8_t *)q_calloc(1, total_size);
         if (!buffer)
                 return false;
 
@@ -110,10 +110,10 @@ qboolean KTX2_WriteRGBA8File(const char *path, int width, int height, int mip_co
 
         if (!COM_WriteFile_OSPath(path, buffer, total_size))
         {
-                free(buffer);
+                q_free(buffer);
                 return false;
         }
 
-        free(buffer);
+        q_free(buffer);
         return true;
 }

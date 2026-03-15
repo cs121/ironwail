@@ -74,7 +74,7 @@ static filelist_item_t *FileList_AddWithData (const char *name, const void *data
 		if (!q_strcasecmp (name, item->name))
 			return item;
 
-	item = (filelist_item_t *) malloc (sizeof(filelist_item_t) + datasize);
+	item = (filelist_item_t *) q_malloc(sizeof(filelist_item_t) + datasize);
 	if (!item)
 		Sys_Error ("FileList_AddWithData: out of memory on %" SDL_PRIu64 " bytes (%s)", (uint64_t)(sizeof(filelist_item_t) + datasize), name);
 	q_strlcpy (item->name, name, sizeof(item->name));
@@ -131,7 +131,7 @@ static void FileList_Clear (filelist_item_t **list)
 	while (*list)
 	{
 		blah = (*list)->next;
-		free (*list);
+		q_free(*list);
 		*list = blah;
 	}
 }
@@ -179,7 +179,7 @@ static void FileList_Print (filelist_item_t *list, const char *types[2], const c
 	filelist_item_t	*item;
 	const char		*desc;
 	char			buf[256], buf2[256];
-	char			padchar = QCHAR_COLORED ('.');
+	int				padchar = QCHAR_COLORED ('.');
 	size_t			ofsdesc = list == extralevels ? maxlevelnamelen + 2 : 0;
 
 	if (substr && *substr)
@@ -196,7 +196,7 @@ static void FileList_Print (filelist_item_t *list, const char *types[2], const c
 				const char *tinted_name = COM_TintSubstring (item->name, substr, buf, sizeof (buf));
 				const char *tinted_desc = COM_TintSubstring (desc, substr, buf2, sizeof (buf2));
 				if (*desc)
-					Con_SafePrintf ("   %s%c%s\n", RightPad (tinted_name, ofsdesc, padchar), padchar, tinted_desc);
+					Con_SafePrintf ("   %s%c%s\n", RightPad (tinted_name, ofsdesc, (char)padchar), (char)padchar, tinted_desc);
 				else
 					Con_SafePrintf ("   %s\n", tinted_name);
 				i++;
@@ -216,7 +216,7 @@ static void FileList_Print (filelist_item_t *list, const char *types[2], const c
 				continue;
 			desc = ofsdesc ? ExtraMaps_GetMessage (item) : NULL;
 			if (desc && *desc)
-				Con_SafePrintf ("   %s%c%s\n", RightPad (item->name, ofsdesc, padchar), padchar, desc);
+				Con_SafePrintf ("   %s%c%s\n", RightPad (item->name, ofsdesc, (char)padchar), (char)padchar, desc);
 			else
 				Con_SafePrintf ("   %s\n", item->name);
 			i++;
@@ -368,7 +368,7 @@ static void ExtraMaps_Sort (void)
 	}
 	sum++; // NULL terminator
 
-	extralevels_sorted = (filelist_item_t **) realloc (extralevels_sorted, sizeof (*extralevels_sorted) * sum);
+	extralevels_sorted = (filelist_item_t **) q_realloc(extralevels_sorted, sizeof (*extralevels_sorted) * sum);
 	if (!extralevels_sorted)
 		Sys_Error ("ExtraMaps_Sort: out of memory on %d items", sum);
 
@@ -506,7 +506,7 @@ void ExtraMaps_Clear (void)
 		levelinfo_t *extra = (levelinfo_t *) (item + 1);
 		if (extra->message && *extra->message)
 		{
-			free ((void *)extra->message);
+			q_free((void *)extra->message);
 			extra->message = NULL;
 		}
 	}
@@ -860,7 +860,7 @@ static int Modlist_DownloadJSON (void *unused)
 		char *cachedurl = (char *) COM_LoadMallocFile_TextMode_OSPath (cacheurlpath, NULL);
 		if (cachedurl && !strcmp (cachedurl, extramods_addons_url))
 			urlchanged = false;
-		free (cachedurl);
+		q_free(cachedurl);
 	}
 
 	// check cached manifest
@@ -872,7 +872,7 @@ static int Modlist_DownloadJSON (void *unused)
 		if (manifest)
 		{
 			json = JSON_Parse (manifest);
-			free (manifest);
+			q_free(manifest);
 			manifest = NULL;
 			if (json)
 				goto done;
@@ -1124,7 +1124,7 @@ static void Modlist_Add (const char *name)
 				*end = '\0';
 			if (*description)
 				info->full_name = strdup (description);
-			free (buf);
+			q_free(buf);
 
 			if (info->full_name)
 				break;
@@ -1139,7 +1139,7 @@ static void Modlist_Add (const char *name)
 		{
 			qboolean is_base_mapdb = !com_searchpaths || path_id < com_searchpaths->path_id;
 			json_t *json = JSON_Parse (mapdb);
-			free (mapdb);
+			q_free(mapdb);
 			if (json)
 			{
 				const jsonentry_t *episodes = JSON_Find (json->root, "episodes", JSON_ARRAY);
@@ -2280,7 +2280,7 @@ void Host_SavegameComment (char text[SAVEGAME_COMMENT_LENGTH + 1])
 	while ((p = strchr(text, '\r')) != NULL)
 		*p = ' ';
 
-	sprintf (kills,"kills:%3i/%3i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
+	q_snprintf (kills, sizeof (kills), "kills:%3i/%3i", cl.stats[STAT_MONSTERS], cl.stats[STAT_TOTALMONSTERS]);
 	memcpy (text+22, kills, strlen(kills));
 
 // convert space to _ to make stdio happy
@@ -2637,7 +2637,7 @@ static void Host_Loadgame_f (void)
 
 // avoid leaking if the previous Host_Loadgame_f failed with a Host_Error
 	if (start != NULL)
-		free (start);
+		q_free(start);
 	
 	start = (char *) COM_LoadMallocFile_TextMode_OSPath(name, NULL);
 	if (start == NULL)
@@ -2671,7 +2671,7 @@ static void Host_Loadgame_f (void)
 	else if (version != SAVEGAME_VERSION || kexonly)
 	{
 		int expected = kexonly ? SAVEGAME_VERSION_KEX : SAVEGAME_VERSION;
-		free (start);
+		q_free(start);
 		start = NULL;
 		if (sv.autoloading)
 			Con_Printf ("ERROR: Savegame is version %i, not %i\n", version, expected);
@@ -2704,7 +2704,7 @@ static void Host_Loadgame_f (void)
 	if (!sv.active)
 	{
 		PR_SwitchQCVM(NULL);
-		free (start);
+		q_free(start);
 		start = NULL;
 		SCR_EndLoadingPlaque ();
 		Con_Printf ("Couldn't load map\n");
@@ -2768,7 +2768,7 @@ static void Host_Loadgame_f (void)
 	qcvm->time = time;
 	sv.autosave.time = time;
 
-	free (start);
+	q_free(start);
 	start = NULL;
 
 	for (i = 0; i < NUM_SPAWN_PARMS; i++)

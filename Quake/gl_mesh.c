@@ -190,15 +190,15 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *mainhdr)
 	if (!numindexes) return;
 
 	//create an elements buffer
-	ebodata = (byte *) malloc(numindexes * sizeof(unsigned short));
+	ebodata = (byte *) q_malloc(numindexes * sizeof(unsigned short));
 	if (!ebodata)
 		return;	//fatal
 
 	// create the vertex buffer (empty)
-	vbodata = (byte *) malloc(totalvbosize);
+	vbodata = (byte *) q_malloc(totalvbosize);
 	if (!vbodata)
 	{	//fatal
-		free(ebodata);
+		q_free(ebodata);
 		return;
 	}
 	memset(vbodata, 0, totalvbosize);
@@ -304,8 +304,8 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *mainhdr)
 	GL_DeleteBuffer (m->meshvbo);
 	m->meshvbo = GL_CreateBuffer (GL_ARRAY_BUFFER, GL_STATIC_DRAW, va ("%s vertices", m->name), totalvbosize, vbodata);
 
-	free (vbodata);
-	free (ebodata);
+	q_free(vbodata);
+	q_free(ebodata);
 }
 
 /*

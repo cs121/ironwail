@@ -81,7 +81,7 @@ void CL_FreeState(void)
 {
         int i;
         for (i = 0; i < MAX_CL_STATS; i++)
-                free (cl.statss[i]);
+                q_free(cl.statss[i]);
         Lightgrid_Free(cl.lightgrid);
         PR_ClearProgs (&cl.qcvm);
         memset (&cl, 0, sizeof(cl));
@@ -239,7 +239,7 @@ void CL_SignonReply (void)
 		MSG_WriteString (&cls.message, va("color %i %i\n", ((int)cl_color.value)>>4, ((int)cl_color.value)&15));
 
 		MSG_WriteByte (&cls.message, clc_stringcmd);
-		sprintf (str, "spawn %s", cls.spawnparms);
+		q_snprintf (str, sizeof (str), "spawn %s", cls.spawnparms);
 		MSG_WriteString (&cls.message, str);
 		break;
 
@@ -285,7 +285,7 @@ void CL_NextDemo (void)
 
 	SCR_BeginLoadingPlaque ();
 
-	sprintf (str,"playdemo %s 1\n", cls.demos[cls.demonum]);
+	q_snprintf (str, sizeof (str), "playdemo %s 1\n", cls.demos[cls.demonum]);
 	Cbuf_InsertText (str);
 	cls.demonum++;
 }
@@ -1055,7 +1055,7 @@ void CL_SetStatString_f (void)
 		if (stnum < 0 || stnum >= MAX_CL_STATS)
 			Host_Error ("CL_SetStatString_f: stnum(%d) >= MAX_CL_STATS\n", stnum);
 
-		free (cl.statss[stnum]);
+		q_free(cl.statss[stnum]);
 		cl.statss[stnum] = strdup (Cmd_Argv (i + 1));
 	}
 }

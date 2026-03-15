@@ -1480,7 +1480,7 @@ static const char *ParseStageBlock (const char *data, shader_material_t *materia
 					/* Token limit hit mid-animMap frame list. Simply mark the stage
 					   invalid and break; the outer ParseStageBlock loop will handle
 					   cleanup. Do NOT call SkipUnknownBlockOrLine with already_open=true
-					   here — there is no extra '{' open, so that would consume the
+					   here â€” there is no extra '{' open, so that would consume the
 					   stage block's own closing '}' and corrupt the parse position. */
 					valid = false;
 					goto stage_done;
@@ -2019,7 +2019,7 @@ static char *Mat_Shader_BuildLongPathShader (void)
 	const char *suffix = " }\n}\n";
 	const size_t path_len = MAX_QPATH * 4;
 	const size_t total = strlen (prefix) + path_len + strlen (suffix) + 1;
-	char *buffer = (char *) malloc (total);
+	char *buffer = (char *) q_malloc(total);
 	size_t offset = 0;
 
 	if (!buffer)
@@ -2039,7 +2039,7 @@ static char *Mat_Shader_BuildManyStagesShader (void)
 	const char *suffix = "}\n";
 	const size_t stage_count = MAT_SHADER_MAX_STAGES + 2;
 	const size_t total = strlen (prefix) + (stage_count * strlen (stage)) + strlen (suffix) + 1;
-	char *buffer = (char *) malloc (total);
+	char *buffer = (char *) q_malloc(total);
 	size_t offset = 0;
 
 	if (!buffer)
@@ -2149,6 +2149,6 @@ void Mat_Shader_DebugFuzzParse (void)
 		Mat_Shader_ParseGetWarnings () - warnings_before,
 		Mat_Shader_ParseGetErrors () - errors_before);
 
-	free (fuzz_longpath);
-	free (fuzz_many_stages);
+	q_free(fuzz_longpath);
+	q_free(fuzz_many_stages);
 }

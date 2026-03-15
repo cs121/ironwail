@@ -219,7 +219,7 @@ qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const kt
         out->width[i] = width;
         out->height[i] = height;
         out->mip_size[i] = (size_t)width * (size_t)height * 4u;
-        out->mip_data[i] = (uint8_t *)malloc(out->mip_size[i]);
+        out->mip_data[i] = (uint8_t *)q_malloc(out->mip_size[i]);
         if (!out->mip_data[i])
         {
             KTX2_LogError("failed at step alloc mip: level %d", i);
@@ -230,7 +230,7 @@ qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const kt
         if (hdr->supercompression == 0)
         {
             level_size = (size_t)length;
-            level_data = (uint8_t *)malloc(level_size);
+            level_data = (uint8_t *)q_malloc(level_size);
             if (!level_data)
             {
                 KTX2_LogError("failed at step copy level: out of memory");
@@ -251,13 +251,13 @@ qboolean KTX2_TranscodeToRGBA(const uint8_t *filedata, size_t filesize, const kt
         {
             KTX2_LogError("failed at step transcode: level %d", i);
             if (level_owned)
-                free(level_data);
+                q_free(level_data);
             KTX2_FreeDecodedImage(out);
             return false;
         }
 
         if (level_owned)
-            free(level_data);
+            q_free(level_data);
     }
 
     KTX2_LogInfo("Transcoded %d mip levels to RGBA8", out->mip_count);
@@ -401,7 +401,7 @@ void KTX2_FreeDecodedImage(ktx2_decoded_image_t *img)
 
     for (i = 0; i < img->mip_count; i++)
     {
-        free(img->mip_data[i]);
+        q_free(img->mip_data[i]);
         img->mip_data[i] = NULL;
     }
     memset(img, 0, sizeof(*img));
@@ -412,4 +412,4 @@ void KTX2_FreeDecodedImage(ktx2_decoded_image_t *img)
 // if (COM_HasExtension(name, ".ktx2")) {
 //     return R_LoadKTX2Texture(name, rawbuf, filesize);
 // }
-// (derzeit nur Stub, lädt nichts)
+// (derzeit nur Stub, lÃ¤dt nichts)

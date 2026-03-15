@@ -405,7 +405,7 @@ qboolean Sys_GetSteamAPILibraryPath (char *path, size_t pathsize, const steamgam
 		if ((bytes_read = getline (&line, &line_size, config_info)) == -1)
 		{
 			fclose (config_info);
-			free (line);
+			q_free(line);
 			return false;
 		}
 	}
@@ -423,7 +423,7 @@ qboolean Sys_GetSteamAPILibraryPath (char *path, size_t pathsize, const steamgam
 
 	result = (size_t) q_snprintf (path, pathsize, "%s/libsteam_api.so", line) < pathsize;
 
-	free (line);
+	q_free(line);
 
 	return result;
 }
@@ -638,7 +638,7 @@ static void Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 		/* strip off the binary name */
 		if (! (tmp = strdup (dst))) goto _fail;
 		q_strlcpy (dst, dirname(tmp), dstsize);
-		free (tmp);
+		q_free(tmp);
 	}
 
 	tmp = OSX_StripAppBundle(dst);
@@ -662,7 +662,7 @@ static void Sys_GetBasedir (char *argv0, char *dst, size_t dstsize)
 		/* strip off the binary name */
 		if (! (tmp = strdup (dst))) goto _fail;
 		q_strlcpy (dst, dirname(tmp), dstsize);
-		free (tmp);
+		q_free(tmp);
 	}
 	#else
 	if (getcwd(dst, dstsize - 1) == NULL)
@@ -747,7 +747,7 @@ findfile_t *Sys_FindFirst (const char *dir, const char *ext)
 		return NULL;
 	}
 
-	ret = (unixfindfile_t *) calloc (1, sizeof (unixfindfile_t));
+	ret = (unixfindfile_t *) q_calloc(1, sizeof (unixfindfile_t));
 	if (!ret)
 		Sys_Error ("Sys_FindFirst: out of memory");
 	ret->handle = handle;
@@ -777,7 +777,7 @@ void Sys_FindClose (findfile_t *find)
 	{
 		unixfindfile_t *ufind = (unixfindfile_t *) find;
 		closedir (ufind->handle);
-		free (ufind);
+		q_free(ufind);
 	}
 }
 

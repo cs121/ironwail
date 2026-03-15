@@ -402,9 +402,9 @@ qboolean Steam_FindGame (steamgame_t *game, int appid)
 	ret = true;
 
 done_manifest:
-	free (manifest);
+	q_free(manifest);
 done_cfg:
-	free (steamcfg);
+	q_free(steamcfg);
 
 	return ret;
 }
@@ -663,7 +663,7 @@ qboolean Steam_SaveScreenshot (const void *rgb, int width, int height)
 		if (flipped)
 		{
 			qboolean result = SteamAPI_ISteamScreenshots_WriteScreenshot_Func (steamapi.screenshots, flipped, width*height*3, width, height) != 0;
-			free (flipped);
+			q_free(flipped);
 			return result;
 		}
 	}
@@ -700,7 +700,7 @@ qboolean EGS_FindGame (char *path, size_t pathsize, const char *nspace, const ch
 	if (launcherdata)
 	{
 		json_t *json = JSON_Parse (launcherdata);
-		free ((void *) launcherdata);
+		q_free((void *) launcherdata);
 		if (json)
 		{
 			const jsonentry_t *list = JSON_Find (json->root, "InstallationList", JSON_ARRAY);
@@ -753,7 +753,7 @@ qboolean EGS_FindGame (char *path, size_t pathsize, const char *nspace, const ch
 		if (!manifest)
 			continue;
 		json = JSON_Parse (manifest);
-		free (manifest);
+		q_free(manifest);
 		if (!json)
 			continue;
 

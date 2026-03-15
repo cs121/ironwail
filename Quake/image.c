@@ -70,7 +70,7 @@ typedef struct stdio_buffer_s {
 
 static stdio_buffer_t *Buf_Alloc(FILE *f)
 {
-	stdio_buffer_t *buf = (stdio_buffer_t *) calloc(1, sizeof(stdio_buffer_t));
+	stdio_buffer_t *buf = (stdio_buffer_t *) q_calloc(1, sizeof(stdio_buffer_t));
 	if (!buf)
 		Sys_Error ("Buf_Alloc: out of memory");
 	buf->f = f;
@@ -79,7 +79,7 @@ static stdio_buffer_t *Buf_Alloc(FILE *f)
 
 static void Buf_Free(stdio_buffer_t *buf)
 {
-	free(buf);
+	q_free(buf);
 }
 
 static inline int Buf_GetC(stdio_buffer_t *buf)
@@ -122,7 +122,7 @@ byte *Image_LoadImage (const char *name, int *width, int *height, enum srcformat
 				int numbytes = (*width) * (*height) * 4;
 				byte *hunkdata = (byte *) Hunk_AllocNameNoFill (numbytes, ext);
 				memcpy (hunkdata, data, numbytes);
-				free (data);
+				q_free(data);
 				data = hunkdata;
 				*fmt = SRC_RGBA;
 				if ((developer.value || map_checks.value) && strcmp (ext, "tga") != 0)
@@ -353,7 +353,7 @@ static byte *Image_LoadLMP (FILE *f, int *width, int *height)
 
 	pix = qpic.width*qpic.height;
 
-	if (com_filesize != sizeof (qpic) + pix)
+	if (com_filesize < 0 || (size_t)com_filesize != sizeof (qpic) + pix)
 	{
 		fclose (f);
 		return NULL;
@@ -388,7 +388,7 @@ byte* Image_CopyFlipped (const void *src, int width, int height, int bpp)
 	byte		*flipped;
 
 	rowsize = width * (bpp / 8);
-	flipped = (byte *) malloc(height * rowsize);
+	flipped = (byte *) q_malloc(height * rowsize);
 	if (!flipped)
 		return NULL;
 
@@ -431,7 +431,7 @@ qboolean Image_WriteJPG (const char *name, byte *data, int width, int height, in
 
 	error = stbi_write_jpg (pathname, width, height, bytes_per_pixel, flipped, quality);
 	if (!upsidedown)
-		free (flipped);
+		q_free(flipped);
 
 	return (error != 0);
 }
@@ -452,12 +452,12 @@ qboolean Image_WritePNG (const char *name, byte *data, int width, int height, in
 	q_snprintf (pathname, sizeof(pathname), "%s/%s", com_gamedir, name);
 
 	flipped = (!upsidedown)? Image_CopyFlipped (data, width, height, bpp) : data;
-	filters = (unsigned char *) malloc (height);
+	filters = (unsigned char *) q_malloc(height);
 	if (!filters || !flipped)
 	{
 		if (!upsidedown)
-		  free (flipped);
-		free (filters);
+		  q_free(flipped);
+		q_free(filters);
 		return false;
 	}
 
@@ -489,9 +489,9 @@ qboolean Image_WritePNG (const char *name, byte *data, int width, int height, in
 
 	lodepng_state_cleanup (&state);
 	lodepng_free (png); /* png was allocated by lodepng */
-	free (filters);
+	q_free(filters);
 	if (!upsidedown) {
-	  free (flipped);
+	  q_free(flipped);
 	}
 
 	return (error == 0);

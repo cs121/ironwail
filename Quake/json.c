@@ -19,7 +19,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "json.h"
-#include "json.h"
 
 // https://github.com/zserge/jsmn
 #define JSMN_PARENT_LINKS
@@ -159,7 +158,7 @@ json_t *JSON_Parse (const char *text)
 	if (numtokens <= 0)
 		return NULL;
 
-	tokens = (jsmntok_t *) malloc (sizeof (*tokens) * numtokens);
+	tokens = (jsmntok_t *) q_malloc (sizeof (*tokens) * numtokens);
 	if (!tokens)
 		return NULL;
 
@@ -168,7 +167,7 @@ json_t *JSON_Parse (const char *text)
 	if (i != numtokens)
 	{
 	free_tokens:
-		free (tokens);
+		q_free (tokens);
 		return NULL;
 	}
 
@@ -176,7 +175,7 @@ json_t *JSON_Parse (const char *text)
 		if (tokens[i].type == JSMN_STRING)
 			len += tokens[i].end - tokens[i].start + 1;
 
-	json = (json_t *) calloc (sizeof (json_t) + sizeof (jsonentry_t) * numtokens + len, 1);
+	json = (json_t *) q_calloc (1, sizeof (json_t) + sizeof (jsonentry_t) * numtokens + len);
 	if (!json)
 		goto free_tokens;
 	entries = (jsonentry_t *) (json + 1);
@@ -241,7 +240,7 @@ json_t *JSON_Parse (const char *text)
 	}
 	*strings++ = '\0';
 
-	free (tokens);
+	q_free (tokens);
 
 	return json;
 }
@@ -253,7 +252,7 @@ JSON_Free
 */
 void JSON_Free (json_t *json)
 {
-	free (json);
+	q_free (json);
 }
 
 /*

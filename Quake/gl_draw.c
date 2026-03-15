@@ -334,7 +334,7 @@ qpic_t *Draw_PicFromWad2 (const char *name, unsigned int texflags)
 	}
 
 	menu_numcachepics++;
-	strcpy (pic->name, name);
+	q_strlcpy (pic->name, name, sizeof (pic->name));
 	pic->pic = *p;
 	memcpy (pic->pic.data, &gl, sizeof(glpic_t));
 
@@ -366,7 +366,7 @@ qpic_t	*Draw_TryCachePic (const char *path, unsigned int texflags)
 	if (menu_numcachepics == MAX_CACHED_PICS)
 		Sys_Error ("menu_numcachepics == MAX_CACHED_PICS");
 	menu_numcachepics++;
-	strcpy (pic->name, path);
+	q_strlcpy (pic->name, path, sizeof (pic->name));
 
 //
 // load the pic from disk
@@ -404,7 +404,7 @@ qpic_t	*Draw_TryCachePic (const char *path, unsigned int texflags)
 		gl.th = (float)dat->height/(float)TexMgr_PadConditional(dat->height); //johnfitz
 	}
 
-	free (dat);
+	q_free(dat);
 	memcpy (pic->pic.data, &gl, sizeof(glpic_t));
 
 	return &pic->pic;

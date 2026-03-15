@@ -310,7 +310,7 @@ void M_PrintScroll (int x, int y, int maxwidth, const char *str, double time, qb
 	int maxchars = maxwidth / 8;
 	int len = strlen (str);
 	int i, ofs;
-	char mask = color ? QCHAR_COLOR_MASK : 0;
+	int mask = color ? QCHAR_COLOR_MASK : 0;
 
 	if (len <= maxchars)
 	{
@@ -1458,7 +1458,7 @@ void M_ScanSaves (void)
 
 	for (i = 0; i < MAX_SAVEGAMES; i++)
 	{
-		strcpy (m_filenames[i], "--- UNUSED SLOT ---");
+		q_strlcpy (m_filenames[i], "--- UNUSED SLOT ---", sizeof (m_filenames[i]));
 		loadable[i] = false;
 		q_snprintf (name, sizeof(name), "%s/s%i.sav", com_gamedir, i);
 		f = Sys_fopen (name, "r");
@@ -2912,7 +2912,7 @@ static void VID_Menu_ChooseNextAA (int dir)
 		samples <<= 1;
 	else
 		samples >>= 1;
-	Cvar_SetValueQuick (&vid_fsaa, CLAMP (1, samples, framebufs.max_samples));
+	Cvar_SetValue ("vid_fsaa", CLAMP (1, samples, framebufs.max_samples));
 }
 
 /*
@@ -3096,8 +3096,11 @@ void M_Calibration_Draw (void)
 
 	case CALIBRATION_IN_ROGRESS:
 		progress = (int) (IN_GetGyroCalibrationProgress () * (Q_COUNTOF (anim) - 1) + 0.5f);
-		for (i = 0; i < (int) Q_COUNTOF (anim) - 1; i++)
-			anim[i] = i < progress ? QCHAR_COLORED ('.') : '.';
+		{
+			int colored_dot = QCHAR_COLORED ('.');
+			for (i = 0; i < (int) Q_COUNTOF (anim) - 1; i++)
+				anim[i] = i < progress ? (char)colored_dot : '.';
+		}
 		anim[i] = '\0';
 		M_PrintAligned (160, y, ALIGN_CENTER, "Calibrating, please wait...");
 		M_PrintAligned (160, y + 16, ALIGN_CENTER, anim);
@@ -4138,7 +4141,7 @@ qboolean M_SetSliderValue (int option, float f)
 		return true;
 	case OPT_FSAA:
 		f = Exp2f (floor (f * Log2f (framebufs.max_samples) + 0.5f));
-		Cvar_SetValueQuick (&vid_fsaa, CLAMP (1, (int)f, framebufs.max_samples));
+		Cvar_SetValue ("vid_fsaa", CLAMP (1, (int)f, framebufs.max_samples));
 		return true;
 	case OPT_MOUSESPEED:	// mouse speed
 		f = f * 10.f + 1.f;
@@ -5269,7 +5272,7 @@ void M_Keys_Key (int k)
 			M_FindKeysForCommand (command, keys);
 			if (keys[2] != -1)
 				M_UnbindCommand (command);
-			sprintf (cmd, "bind \"%s\" \"%s\"\n", Key_KeynumToString (k), command);
+			q_snprintf (cmd, sizeof (cmd), "bind \"%s\" \"%s\"\n", Key_KeynumToString (k), command);
 			Cbuf_InsertText (cmd);
 		}
 
@@ -5591,7 +5594,7 @@ void M_Menu_LanConfig_f (void)
 	if (StartingGame && lanConfig_cursor == 2)
 		lanConfig_cursor = 1;
 	lanConfig_port = DEFAULTnet_hostport;
-	sprintf(lanConfig_portname, "%u", lanConfig_port);
+	q_snprintf (lanConfig_portname, sizeof (lanConfig_portname), "%u", lanConfig_port);
 
 	m_return_onerror = false;
 	m_return_reason[0] = 0;
@@ -5749,7 +5752,7 @@ void M_LanConfig_Key (int key)
 		l = lanConfig_port;
 	else
 		lanConfig_port = l;
-	sprintf(lanConfig_portname, "%u", lanConfig_port);
+	q_snprintf (lanConfig_portname, sizeof (lanConfig_portname), "%u", lanConfig_port);
 }
 
 

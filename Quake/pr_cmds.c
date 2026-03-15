@@ -819,9 +819,9 @@ static int PF_newcheckclient (int check)
 	if (checkpvs == NULL || pvsbytes > checkpvs_capacity)
 	{
 		checkpvs_capacity = pvsbytes;
-		checkpvs = (byte *) realloc (checkpvs, checkpvs_capacity);
+		checkpvs = (byte *) q_realloc(checkpvs, checkpvs_capacity);
 		if (!checkpvs)
-			Sys_Error ("PF_newcheckclient: realloc() failed on %d bytes", checkpvs_capacity);
+			Sys_Error ("PF_newcheckclient: q_realloc() failed on %d bytes", checkpvs_capacity);
 	}
 	memcpy (checkpvs, pvs, pvsbytes);
 
@@ -1032,9 +1032,9 @@ static void PF_ftos (void)
 	v = G_FLOAT(OFS_PARM0);
 	s = PR_GetTempString();
 	if (v == (int)v)
-		sprintf (s, "%d",(int)v);
+		q_snprintf (s, sizeof (s), "%d", (int)v);
 	else
-		sprintf (s, "%5.1f",v);
+		q_snprintf (s, sizeof (s), "%5.1f", v);
 	G_INT(OFS_RETURN) = PR_SetEngineString(s);
 }
 
@@ -1050,7 +1050,7 @@ static void PF_vtos (void)
 	char	*s;
 
 	s = PR_GetTempString();
-	sprintf (s, "'%5.1f %5.1f %5.1f'", G_VECTOR(OFS_PARM0)[0], G_VECTOR(OFS_PARM0)[1], G_VECTOR(OFS_PARM0)[2]);
+	q_snprintf (s, sizeof (s), "'%5.1f %5.1f %5.1f'", G_VECTOR(OFS_PARM0)[0], G_VECTOR(OFS_PARM0)[1], G_VECTOR(OFS_PARM0)[2]);
 	G_INT(OFS_RETURN) = PR_SetEngineString(s);
 }
 
@@ -2069,7 +2069,7 @@ void PR_ReloadPics(qboolean purge)
 {
 	numqcpics = 0;
 
-	free(qcpics);
+	q_free(qcpics);
 	qcpics = NULL;
 	maxqcpics = 0;
 }
@@ -2104,10 +2104,10 @@ static qpic_t *DrawQC_CachePic(const char *picname, unsigned int flags)
 	if (i+1 > maxqcpics)
 	{
 		maxqcpics = i + 32;
-		qcpics = realloc(qcpics, maxqcpics * sizeof(*qcpics));
+		qcpics = q_realloc(qcpics, maxqcpics * sizeof(*qcpics));
 	}
 
-	strcpy(qcpics[i].name, picname);
+	q_strlcpy (qcpics[i].name, picname, sizeof (qcpics[i].name));
 	qcpics[i].flags = flags;
 	qcpics[i].pic = NULL;
 
@@ -3107,7 +3107,7 @@ static int tokenizeqc(const char *str, qboolean dpfuckage)
 	while(qctoken_count > 0)
 	{
 		qctoken_count--;
-		free(qctoken[qctoken_count].token);
+		q_free(qctoken[qctoken_count].token);
 	}
 	qctoken_count = 0;
 	while (qctoken_count < MAXQCTOKENS)

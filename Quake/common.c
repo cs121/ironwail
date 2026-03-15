@@ -381,13 +381,8 @@ char *q_strupr (char *str)
 }
 
 /* platform dependant (v)snprintf function names: */
-#if defined(_WIN32)
-#define	snprintf_func		_snprintf
-#define	vsnprintf_func		_vsnprintf
-#else
 #define	snprintf_func		snprintf
 #define	vsnprintf_func		vsnprintf
-#endif
 
 int q_vsnprintf(char *str, size_t size, const char *format, va_list args)
 {
@@ -415,6 +410,82 @@ int q_snprintf (char *str, size_t size, const char *format, ...)
 	va_end (argptr);
 
 	return ret;
+}
+
+#if defined(sscanf)
+#undef sscanf
+#endif
+#if defined(fscanf)
+#undef fscanf
+#endif
+
+int q_sscanf (const char *str, const char *format, ...)
+{
+	int ret;
+	va_list args;
+
+	va_start (args, format);
+	ret = vsscanf (str, format, args);
+	va_end (args);
+
+	return ret;
+}
+
+int q_fscanf (FILE *stream, const char *format, ...)
+{
+	int ret;
+	va_list args;
+
+	va_start (args, format);
+	ret = vfscanf (stream, format, args);
+	va_end (args);
+
+	return ret;
+}
+
+void *q_malloc (size_t size)
+{
+	void *ptr;
+	size_t alloc_size = size ? size : 1;
+
+	ptr = malloc (alloc_size);
+	if (!ptr)
+		Sys_Error ("q_malloc: failed to allocate %llu bytes", (unsigned long long)alloc_size);
+	return ptr;
+}
+
+void *q_calloc (size_t count, size_t size)
+{
+	void *ptr;
+	size_t alloc_count = count ? count : 1;
+	size_t alloc_size = size ? size : 1;
+
+	if (alloc_size > SIZE_MAX / alloc_count)
+		Sys_Error ("q_calloc: overflow (%llu x %llu bytes)",
+			(unsigned long long)alloc_count, (unsigned long long)alloc_size);
+
+	ptr = calloc (alloc_count, alloc_size);
+	if (!ptr)
+		Sys_Error ("q_calloc: failed to allocate %llu bytes",
+			(unsigned long long)(alloc_count * alloc_size));
+	return ptr;
+}
+
+void *q_realloc (void *ptr, size_t size)
+{
+	void *new_ptr;
+	size_t alloc_size = size ? size : 1;
+
+	new_ptr = realloc (ptr, alloc_size);
+	if (!new_ptr)
+		Sys_Error ("q_realloc: failed to allocate %llu bytes", (unsigned long long)alloc_size);
+	return new_ptr;
+}
+
+void q_free (void *ptr)
+{
+	if (ptr)
+		free (ptr);
 }
 
 void Q_memset (void *dest, int fill, size_t count)
@@ -3279,11 +3350,11 @@ COM_InitBaseDir
 */
 static void COM_InitBaseDir (void)
 {
-	steamgame_t steamquake;
+	steamgame_t steamquake = {0};
 	char path[MAX_OSPATH];
 	char original[MAX_OSPATH] = {0};
 	char remastered[MAX_OSPATH] = {0};
-	int i, steam, gog, egs;
+	int i, steam = 0, gog = 0, egs = 0;
 
 	// command-line basedir takes priority over everything else
 	i = COM_CheckParm ("-basedir");
@@ -4095,8 +4166,9 @@ fail:			mz_zip_reader_end(&archive);
 
 	for (i = 0; i < localization.numentries; i++)
 	{
+		unsigned numindices = (unsigned) localization.numindices;
 		locentry_t *entry = &localization.entries[i];
-		unsigned pos = COM_HashString(entry->key) % localization.numindices, end = pos;
+		unsigned pos = COM_HashString(entry->key) % numindices, end = pos;
 
 		for (;;)
 		{
@@ -4107,7 +4179,7 @@ fail:			mz_zip_reader_end(&archive);
 			}
 
 			++pos;
-			if (pos == localization.numindices)
+			if (pos == numindices)
 				pos = 0;
 
 			if (pos == end)
@@ -4248,24 +4320,26 @@ const char* LOC_GetRawString (const char *key)
 		return NULL;
 	key++;
 
-	pos = COM_HashString(key) % localization.numindices;
-	end = pos;
-
-	do
 	{
-		unsigned idx = localization.indices[pos];
-		locentry_t *entry;
-		if (!idx)
-			return NULL;
+		unsigned numindices = (unsigned) localization.numindices;
+		pos = COM_HashString(key) % numindices;
+		end = pos;
+		do
+		{
+			unsigned idx = localization.indices[pos];
+			locentry_t *entry;
+			if (!idx)
+				return NULL;
 
-		entry = &localization.entries[idx - 1];
-		if (!Q_strcmp(entry->key, key))
-			return entry->value;
+			entry = &localization.entries[idx - 1];
+			if (!Q_strcmp(entry->key, key))
+				return entry->value;
 
-		++pos;
-		if (pos == localization.numindices)
-			pos = 0;
-	} while (pos != end);
+			++pos;
+			if (pos == numindices)
+				pos = 0;
+		} while (pos != end);
+	}
 
 	return NULL;
 }

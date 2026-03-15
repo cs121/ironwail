@@ -732,9 +732,9 @@ void SCR_DrawFPS (void)
 		char	st[16];
 		int	x, y;
 		if (scr_showfps.value > 0.f)
-			sprintf (st, "%4.0f fps", lastfps);
+			q_snprintf (st, sizeof (st), "%4.0f fps", lastfps);
 		else
-			sprintf (st, "%.2f ms", 1000.f / lastfps);
+			q_snprintf (st, sizeof (st), "%.2f ms", 1000.f / lastfps);
 		x = 320 - (strlen(st)<<3);
 		if (hudstyle != HUD_CLASSIC)
 		{
@@ -792,7 +792,7 @@ void SCR_DrawSpeed (void)
 			float y;
 			char str[12];
 
-			sprintf (str, "%d", (int) display_speed);
+			q_snprintf (str, sizeof (str), "%d", (int) display_speed);
 			GL_SetCanvas (CANVAS_CROSSHAIR);
 			y = CLAMP (glcanvas.top, 4.f + scr_showspeed_ofs.value, glcanvas.bottom - 8.f);
 			Draw_String (-(int)strlen(str)*4, y, str);
@@ -823,7 +823,7 @@ void SCR_DrawClock (void)
 		minutes = cl.time / 60;
 		seconds = ((int)cl.time)%60;
 
-		sprintf (str,"%i:%i%i", minutes, seconds/10, seconds%10);
+		q_snprintf (str, sizeof (str), "%i:%i%i", minutes, seconds / 10, seconds % 10);
 	}
 	else
 		return;
@@ -996,34 +996,34 @@ void SCR_DrawDevStats (void)
 
 	Draw_Fill (x, y*8, 21*8, 10*8, 0, 0.5); //dark rectangle
 
-	sprintf (str, "devstats | Curr  Peak");
+	q_snprintf (str, sizeof (str), "devstats | Curr  Peak");
 	Draw_String (x, (y++)*8-x, str);
 
-	sprintf (str, "---------+-----------");
+	q_snprintf (str, sizeof (str), "---------+-----------");
 	Draw_String (x, (y++)*8-x, str);
 
-	sprintf (str, "Edicts   |%5i %5i", dev_stats.edicts, dev_peakstats.edicts);
+	q_snprintf (str, sizeof (str), "Edicts   |%5i %5i", dev_stats.edicts, dev_peakstats.edicts);
 	Draw_String (x, (y++)*8-x, str);
 
-	sprintf (str, "Packet   |%5i %5i", dev_stats.packetsize, dev_peakstats.packetsize);
+	q_snprintf (str, sizeof (str), "Packet   |%5i %5i", dev_stats.packetsize, dev_peakstats.packetsize);
 	Draw_String (x, (y++)*8-x, str);
 
-	sprintf (str, "Visedicts|%5i %5i", dev_stats.visedicts, dev_peakstats.visedicts);
+	q_snprintf (str, sizeof (str), "Visedicts|%5i %5i", dev_stats.visedicts, dev_peakstats.visedicts);
 	Draw_String (x, (y++)*8-x, str);
 
-	sprintf (str, "Efrags   |%5i %5i", dev_stats.efrags, dev_peakstats.efrags);
+	q_snprintf (str, sizeof (str), "Efrags   |%5i %5i", dev_stats.efrags, dev_peakstats.efrags);
 	Draw_String (x, (y++)*8-x, str);
 
-	sprintf (str, "Dlights  |%5i %5i", dev_stats.dlights, dev_peakstats.dlights);
+	q_snprintf (str, sizeof (str), "Dlights  |%5i %5i", dev_stats.dlights, dev_peakstats.dlights);
 	Draw_String (x, (y++)*8-x, str);
 
-	sprintf (str, "Beams    |%5i %5i", dev_stats.beams, dev_peakstats.beams);
+	q_snprintf (str, sizeof (str), "Beams    |%5i %5i", dev_stats.beams, dev_peakstats.beams);
 	Draw_String (x, (y++)*8-x, str);
 
-	sprintf (str, "Tempents |%5i %5i", dev_stats.tempents, dev_peakstats.tempents);
+	q_snprintf (str, sizeof (str), "Tempents |%5i %5i", dev_stats.tempents, dev_peakstats.tempents);
 	Draw_String (x, (y++)*8-x, str);
 
-	sprintf (str, "GL upload|%4iK %4iK", dev_stats.gpu_upload/1024, dev_peakstats.gpu_upload/1024);
+	q_snprintf (str, sizeof (str), "GL upload|%4iK %4iK", dev_stats.gpu_upload / 1024, dev_peakstats.gpu_upload / 1024);
 	Draw_String (x, (y++)*8-x, str);
 }
 
@@ -1045,13 +1045,13 @@ void SCR_DrawExposureDebug (void)
 
 	Draw_Fill (x, y * 8, 21 * 8, 3 * 8, 0, 0.5);
 
-	sprintf (str, "Exposure %6.3f", r_autoexposure_debug_exposure);
+	q_snprintf (str, sizeof (str), "Exposure %6.3f", r_autoexposure_debug_exposure);
 	Draw_String (x, (y++) * 8 - x, str);
 
-	sprintf (str, "Luma     %6.3f", r_autoexposure_debug_luminance);
+	q_snprintf (str, sizeof (str), "Luma     %6.3f", r_autoexposure_debug_luminance);
 	Draw_String (x, (y++) * 8 - x, str);
 
-	sprintf (str, "AutoExp  %s", r_autoexposure.value > 0.f ? "on" : "off");
+	q_snprintf (str, sizeof (str), "AutoExp  %s", r_autoexposure.value > 0.f ? "on" : "off");
 	Draw_String (x, (y++) * 8 - x, str);
 }
 
@@ -1740,6 +1740,7 @@ Returns true if format contains any variables
 static qboolean SCR_ExpandVariables (const char *fmt, char *dst, size_t maxchars)
 {
 	time_t		now;
+	struct tm	now_tm;
 	struct tm	*lt;
 	char		var[256];
 	size_t		i, j, k, numvars;
@@ -1749,7 +1750,13 @@ static qboolean SCR_ExpandVariables (const char *fmt, char *dst, size_t maxchars
 	--maxchars;
 
 	time (&now);
+#if defined(_WIN32)
+	if (localtime_s (&now_tm, &now) != 0)
+		return false;
+	lt = &now_tm;
+#else
 	lt = localtime (&now);
+#endif
 
 	for (i = j = numvars = 0; j < maxchars && fmt[i]; /**/)
 	{
@@ -1879,7 +1886,7 @@ void SCR_ScreenShot_f (void)
 	}
 
 //get data
-	if (!(buffer = (byte *) malloc(glwidth*glheight*3)))
+	if (!(buffer = (byte *) q_malloc(glwidth*glheight*3)))
 	{
 		Con_Printf ("SCR_ScreenShot_f: Couldn't allocate memory\n");
 		return;
@@ -1937,7 +1944,7 @@ void SCR_ScreenShot_f (void)
 			if (i == 10000)
 			{
 				Con_Printf ("SCR_ScreenShot_f: Couldn't find an unused filename\n");
-				free (buffer);
+				q_free(buffer);
 				return;
 			}
 		}
@@ -1962,7 +1969,7 @@ void SCR_ScreenShot_f (void)
 			Con_Printf ("SCR_ScreenShot_f: Couldn't create %s\n", basename);
 	}
 
-	free (buffer);
+	q_free(buffer);
 }
 
 

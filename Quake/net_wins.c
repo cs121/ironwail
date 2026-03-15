@@ -108,7 +108,7 @@ static void WINS_GetLocalAddress (void)
 	myAddr = *(in_addr_t *)local->h_addr_list[0];
 
 	addr = ntohl(myAddr);
-	sprintf(my_tcpip_address, "%ld.%ld.%ld.%ld", (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
+	q_snprintf (my_tcpip_address, sizeof (my_tcpip_address), "%ld.%ld.%ld.%ld", (addr >> 24) & 0xff, (addr >> 16) & 0xff, (addr >> 8) & 0xff, addr & 0xff);
 }
 
 
@@ -151,7 +151,7 @@ sys_socket_t WINS_Init (void)
 			myAddr = inet_addr(com_argv[i + 1]);
 			if (myAddr == INADDR_NONE)
 				Sys_Error ("%s is not a valid IP address", com_argv[i + 1]);
-			strcpy(my_tcpip_address, com_argv[i + 1]);
+			q_strlcpy (my_tcpip_address, com_argv[i + 1], sizeof (my_tcpip_address));
 		}
 		else
 		{
@@ -161,7 +161,7 @@ sys_socket_t WINS_Init (void)
 	else
 	{
 		myAddr = INADDR_ANY;
-		strcpy(my_tcpip_address, "INADDR_ANY");
+		q_strlcpy (my_tcpip_address, "INADDR_ANY", sizeof (my_tcpip_address));
 	}
 
 	if ((net_controlsocket = WINS_OpenSocket(0)) == INVALID_SOCKET)
@@ -284,7 +284,7 @@ static int PartialIPAddress (const char *in, struct qsockaddr *hostaddr)
 
 	buff[0] = '.';
 	b = buff;
-	strcpy(buff+1, in);
+	q_strlcpy (buff + 1, in, sizeof (buff) - 1);
 	if (buff[1] == '.')
 		b++;
 
@@ -431,7 +431,7 @@ const char *WINS_AddrToString (struct qsockaddr *addr)
 	int		haddr;
 
 	haddr = ntohl(((struct sockaddr_in *)addr)->sin_addr.s_addr);
-	sprintf(buffer, "%d.%d.%d.%d:%d", (haddr >> 24) & 0xff,
+	q_snprintf (buffer, sizeof (buffer), "%d.%d.%d.%d:%d", (haddr >> 24) & 0xff,
 			  (haddr >> 16) & 0xff, (haddr >> 8) & 0xff, haddr & 0xff,
 			  ntohs(((struct sockaddr_in *)addr)->sin_port));
 	return buffer;
@@ -541,4 +541,3 @@ int WINS_SetSocketPort (struct qsockaddr *addr, int port)
 }
 
 //=============================================================================
-
