@@ -41,6 +41,7 @@ extern	int glx, gly, glwidth, glheight;
 #define BACKFACE_EPSILON	0.01
 
 typedef struct dlight_s dlight_t;
+typedef struct render_graph_resource_handle_s RenderGraphResourceHandle;
 
 extern vec3_t *r_pointfile;
 
@@ -887,7 +888,7 @@ void GL_AddGarbageBuffer (GLuint handle);
 
 qboolean GL_NeedsSceneEffects (void);
 qboolean GL_NeedsPostprocess (void);
-void GL_PostProcess (void);
+void GL_PostProcess (const RenderGraphResourceHandle *resources);
 
 float GL_WaterAlphaForTextureType (textype_t type);
 

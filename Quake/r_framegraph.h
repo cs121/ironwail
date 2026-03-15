@@ -24,14 +24,25 @@ typedef enum render_graph_resource_bits_e
 	RENDER_RES_COMPOSITE_COLOR = 1u << 2,
 	RENDER_RES_SHADOW_SUN_DEPTH = 1u << 3,
 	RENDER_RES_FOGVOL_HISTORY = 1u << 4,
-	RENDER_RES_VELOCITY = 1u << 5
+	RENDER_RES_VELOCITY = 1u << 5,
+	RENDER_RES_DECALS = 1u << 6,
+	RENDER_RES_FOGVOL_INPUTS = 1u << 7,
+	RENDER_RES_SSAO_FOG_STATE = 1u << 8
 } render_graph_resource_bits_t;
 
 typedef struct render_graph_resource_handle_s
 {
 	unsigned scene_fbo;
-	unsigned composite_fbo;
+	unsigned scene_color_tex;
+	unsigned scene_velocity_tex;
 	unsigned scene_depth_tex;
+	int scene_samples;
+	unsigned resolved_scene_fbo;
+	unsigned resolved_scene_color_tex;
+	unsigned resolved_scene_velocity_tex;
+	unsigned composite_fbo;
+	unsigned composite_color_tex;
+	unsigned composite_depth_tex;
 	unsigned shadow_sun_depth_tex;
 	unsigned fogvol_history_tex;
 	unsigned velocity_tex;

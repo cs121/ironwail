@@ -2853,7 +2853,7 @@ static qboolean GL_PostFXBloomBoostActive (void)
 	return state.bloom_boost > 0.f;
 }
 
-void GL_PostProcess (void)
+void GL_PostProcess (const RenderGraphResourceHandle *resources)
 {
 	int palidx, variant;
 	float saturation;
@@ -2913,17 +2913,24 @@ void GL_PostProcess (void)
 	float dv_quality;
 	float dv_debug;
 	float dv_time;
+	GLuint scene_fbo = (resources && resources->scene_fbo) ? resources->scene_fbo : framebufs.scene.fbo;
+	GLuint scene_velocity_tex = (resources && resources->scene_velocity_tex) ? resources->scene_velocity_tex : framebufs.scene.velocity_tex;
+	GLuint resolved_scene_velocity_tex = (resources && resources->resolved_scene_velocity_tex) ? resources->resolved_scene_velocity_tex : framebufs.resolved_scene.velocity_tex;
+	GLuint composite_fbo = (resources && resources->composite_fbo) ? resources->composite_fbo : framebufs.composite.fbo;
+	GLuint composite_color_tex = (resources && resources->composite_color_tex) ? resources->composite_color_tex : framebufs.composite.color_tex;
+	GLuint composite_depth_tex = (resources && resources->composite_depth_tex) ? resources->composite_depth_tex : framebufs.composite.depth_stencil_tex;
+	int scene_samples = (resources && resources->scene_samples > 0) ? resources->scene_samples : framebufs.scene.samples;
 	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	R_GetFramePlanDecisions (NULL, &needs_postprocess);
 	if (!needs_postprocess)
 		return;
-	if (framebufs.composite.fbo == 0 || framebufs.composite.color_tex == 0)
+	if (composite_fbo == 0 || composite_color_tex == 0)
 		return;
 	if (!framesetup.composite_ready)
 	{
 		GL_BeginGroup ("Postprocess backbuffer copy");
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, 0);
-		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, composite_fbo);
 		glReadBuffer (GL_BACK);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, vid.width, vid.height, 0, 0, vid.width, vid.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -3051,7 +3058,7 @@ void GL_PostProcess (void)
 	ssao_fog_strength = CLAMP (0.f, r_ssao_fog_strength.value, 1.f);
 	ssao_fog_power = q_max (0.01f, r_ssao_fog_power.value);
 
-	msaa = framebufs.scene.samples > 1;
+	msaa = scene_samples > 1;
 	motion_strength = q_max (0.f, r_motionblur.value);
 	if (!GL_ShouldApplyMotionBlur ())
 		motion_strength = 0.f;
@@ -3077,10 +3084,10 @@ void GL_PostProcess (void)
 	if (motion_max_samples > 64)
 		motion_max_samples = 64;
 	velocity_texture = 0;
-	if (framebufs.scene.velocity_tex)
+	if (scene_velocity_tex)
 	{
-		velocity_texture = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
-		if (framesetup.scene_fbo != framebufs.scene.fbo)
+		velocity_texture = msaa ? resolved_scene_velocity_tex : scene_velocity_tex;
+		if (framesetup.scene_fbo != scene_fbo)
 		{
 			// The scene FBO was not used this frame, so the velocity attachment still holds stale data.
 			velocity_texture = 0;
@@ -3106,7 +3113,7 @@ void GL_PostProcess (void)
 	}
 	GL_UseProgram (glprogs.postprocess[variant]);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, composite_color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
 	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
 	GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, velocity_texture);
@@ -3205,8 +3212,8 @@ void GL_PostProcess (void)
 	{
 		qboolean ssao_needs_depth = (ssao_texture != 0
 			&& (r_ssao_halfres.value > 0.f || ssao_debug_mode == 8.f || ssao_fog_strength > 0.f));
-		if (framebufs.composite.depth_stencil_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_needs_depth))
-			depth_texture = framebufs.composite.depth_stencil_tex;
+		if (composite_depth_tex && (dof_enabled || (motion_enabled && motion_depth_threshold > 0.f) || ssao_needs_depth))
+			depth_texture = composite_depth_tex;
 	}
 	GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_texture);
 
@@ -6063,8 +6070,9 @@ static void R_DrawDLightPass (void)
 R_RenderScene
 ================
 */
-void R_RenderScene (void)
+void R_RenderScene (const RenderGraphResourceHandle *resources)
 {
+	(void)resources;
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_Clear ();
 	
@@ -6099,11 +6107,19 @@ r_refdef.vrect. This is for emulating a low-resolution pixellated look,
 or possibly as a perforance boost on slow graphics cards.
 ================
 */
-void R_WarpScaleView (void)
+void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 {
 	int srcx, srcy, srcw, srch;
 	float smax, tmax;
-	qboolean msaa = framebufs.scene.samples > 1;
+	GLuint scene_fbo = (resources && resources->scene_fbo) ? resources->scene_fbo : framebufs.scene.fbo;
+	GLuint scene_color_tex = (resources && resources->scene_color_tex) ? resources->scene_color_tex : framebufs.scene.color_tex;
+	GLuint scene_velocity_tex = (resources && resources->scene_velocity_tex) ? resources->scene_velocity_tex : framebufs.scene.velocity_tex;
+	GLuint resolved_scene_fbo = (resources && resources->resolved_scene_fbo) ? resources->resolved_scene_fbo : framebufs.resolved_scene.fbo;
+	GLuint resolved_scene_color_tex = (resources && resources->resolved_scene_color_tex) ? resources->resolved_scene_color_tex : framebufs.resolved_scene.color_tex;
+	GLuint resolved_scene_velocity_tex = (resources && resources->resolved_scene_velocity_tex) ? resources->resolved_scene_velocity_tex : framebufs.resolved_scene.velocity_tex;
+	GLuint composite_fbo = (resources && resources->composite_fbo) ? resources->composite_fbo : framebufs.composite.fbo;
+	int scene_samples = (resources && resources->scene_samples > 0) ? resources->scene_samples : framebufs.scene.samples;
+	qboolean msaa = scene_samples > 1;
 	qboolean needwarpscale;
 	qboolean need_depth_resolve;
 	qboolean needs_scene_effects = false;
@@ -6121,8 +6137,8 @@ void R_WarpScaleView (void)
 	srch = r_refdef.vrect.height / r_refdef.scale;
 
 	needwarpscale = r_refdef.scale != 1 || water_warp;
-	fbodest = needs_postprocess ? framebufs.composite.fbo : 0;
-	need_depth_resolve = (fbodest == framebufs.composite.fbo)
+	fbodest = needs_postprocess ? composite_fbo : 0;
+	need_depth_resolve = (fbodest == composite_fbo)
 		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || R_FogVol_ShouldAffectPostFX ()
 			|| (R_Godrays_IsReady (cl.worldmodel, r_framecount) && (r_godrays.value > 0.f || r_godrays_debug.value > 0.f || r_godrays_debug_source.value > 0.f)));
 
@@ -6130,14 +6146,14 @@ void R_WarpScaleView (void)
 	{
 		GL_BeginGroup ("MSAA resolve");
 
-		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
-		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.resolved_scene.fbo);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, scene_fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, resolved_scene_fbo);
 
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-		if (framebufs.scene.velocity_tex && framebufs.resolved_scene.velocity_tex)
+		if (scene_velocity_tex && resolved_scene_velocity_tex)
 		{
 			glReadBuffer (GL_COLOR_ATTACHMENT1);
 			glDrawBuffer (GL_COLOR_ATTACHMENT1);
@@ -6148,7 +6164,7 @@ void R_WarpScaleView (void)
 
 		if (!needwarpscale)
 		{
-			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.resolved_scene.fbo);
+			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved_scene_fbo);
 			glReadBuffer (GL_COLOR_ATTACHMENT0);
 			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
 			if (fbodest)
@@ -6169,16 +6185,16 @@ void R_WarpScaleView (void)
 		int dstw = (r_refdef.scale != 1) ? r_refdef.vrect.width : srcw;
 		int dsth = (r_refdef.scale != 1) ? r_refdef.vrect.height : srch;
 
-		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, scene_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, composite_fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	}
 
 	if (!msaa && !needwarpscale)
 	{
-		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.scene.fbo);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, scene_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
 		if (fbodest)
@@ -6213,7 +6229,7 @@ void R_WarpScaleView (void)
 
 	if (!needwarpscale)
 	{
-		if (fbodest == framebufs.composite.fbo)
+		if (fbodest == composite_fbo)
 			framesetup.composite_ready = true;
 		return;
 	}
@@ -6230,7 +6246,7 @@ void R_WarpScaleView (void)
 	GL_Uniform4fFunc (0, smax, tmax, water_warp ? 1.f / 256.f : 0.f, (float)t);
 	// View blends are applied after postprocess/UI to avoid AO/tone-map affecting overlays.
 	GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, msaa ? framebufs.resolved_scene.color_tex : framebufs.scene.color_tex);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, msaa ? resolved_scene_color_tex : scene_color_tex);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
 	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
 
@@ -6238,7 +6254,7 @@ void R_WarpScaleView (void)
 
 	GL_EndGroup ();
 
-	if (fbodest == framebufs.composite.fbo)
+	if (fbodest == composite_fbo)
 		framesetup.composite_ready = true;
 }
 
