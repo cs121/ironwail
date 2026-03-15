@@ -44,7 +44,7 @@
 #endif
 
 #define MAX_FOGVOLUMES 64
-#define MAX_FOGLIGHTS 31 // keep FogLightsUBO under 64KB std140 limit on some drivers
+#define MAX_FOGLIGHTS 256 // SSBO-backed; no std140 UBO 64KB ceiling
 
 layout(binding=0) uniform sampler2D SceneColor;
 layout(binding=1) uniform sampler2D SceneDepth;
@@ -67,7 +67,7 @@ struct FogVolume
 	vec4 params2;
 };
 
-layout(std140, binding=2) uniform FogVolumeUBO
+layout(std430, binding=2) readonly buffer FogVolumeBuffer
 {
 	FogVolume FogVolumes[MAX_FOGVOLUMES];
 };
@@ -83,10 +83,10 @@ struct FogLightList
 	ivec4 offset_count; // x = global light offset, y = per-volume light count
 };
 
-layout(std140, binding=4) uniform FogLightsUBO
+layout(std430, binding=4) readonly buffer FogLightsBuffer
 {
 	FogLightList FogLightLists[MAX_FOGVOLUMES];
-	FogLight FogLights[MAX_FOGVOLUMES * MAX_FOGLIGHTS];
+	FogLight FogLights[];
 };
 
 layout(std140, binding=5) uniform FogLightgridUBO
@@ -1227,9 +1227,8 @@ void main()
 						if (transmittance < 0.15)
 							detailCap = min(detailCap, 4);
 					}
-					for (int l = 0; l < MAX_FOGLIGHTS; ++l)
+					for (int l = 0; l < detailCap; ++l)
 					{
-						if (l >= detailCap) break;
 						int lightIndex = lightOffset + l;
 						if (lightIndex >= MAX_FOGVOLUMES * MAX_FOGLIGHTS) break;
 						vec3 lightVec = FogLights[lightIndex].pos_rad.xyz - p;

@@ -2,7 +2,7 @@
 #define R_FOGVOL_H
 
 #define MAX_FOGVOLUMES 64
-#define MAX_FOGLIGHTS 31 /* keep FogLightsUBO under 64KB std140 limit on NVIDIA */
+#define MAX_FOGLIGHTS 256 /* SSBO-backed light lists; no std140 UBO 64KB ceiling */
 
 /* Fog volume shape encoding used by CPU logic, entity parsing, and GPU UBOs.
  * 0 = axis-aligned box (mins/maxs)
