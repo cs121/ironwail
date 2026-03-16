@@ -2063,11 +2063,7 @@ static qboolean R_GodraysMediumEnabled (void)
 {
 	/* Godrays are a volumetric effect and should only run when a volumetric
 	 * fog medium path is active (fog volumes and/or froxel fog). */
-	if (R_FogVol_ShouldAffectPostFX ())
-		return true;
-	if (r_fogvol.value > 0.f)
-		return true;
-	return false;
+	return R_FogVol_ShouldAffectPostFX ();
 }
 
 static void R_GetGodraysLightPos_Current (float *out_x, float *out_y)

@@ -44,6 +44,7 @@ typedef struct froxel_debug_state_s
 {
 	double next_refresh_time;
 	int random_light_count;
+	int phase;
 	float dlight_scale;
 	float sun_scale;
 	float emissive_scale;
@@ -51,12 +52,11 @@ typedef struct froxel_debug_state_s
 	vec3_t sun_dir;
 	vec3_t sun_color;
 	froxel_gpu_light_t random_lights[MAX_FROXEL_DEBUG_LIGHTS];
-	float *random_grid_data;
-	int random_grid_capacity;
 	qboolean active;
 } froxel_debug_state_t;
 
 static froxel_debug_state_t r_froxel_debug;
+static float r_froxel_debug_random_slice[192 * 128 * 4];
 
 static qboolean R_Froxel_DebugEnabled (void)
 {
@@ -96,54 +96,48 @@ static void R_Froxel_DebugRandomUnitVector (vec3_t out)
 	VectorScale (out, 1.f / sqrtf (len2), out);
 }
 
-static qboolean R_Froxel_DebugEnsureGridCapacity (int voxels)
-{
-	int needed_floats;
-
-	if (voxels <= 0)
-		return false;
-
-	needed_floats = voxels * 4;
-	if (r_froxel_debug.random_grid_capacity < needed_floats)
-	{
-		if (r_froxel_debug.random_grid_data)
-			Z_Free (r_froxel_debug.random_grid_data);
-		r_froxel_debug.random_grid_data = (float *)Z_Malloc (needed_floats * (int)sizeof (float));
-		r_froxel_debug.random_grid_capacity = needed_floats;
-	}
-
-	return (r_froxel_debug.random_grid_data != NULL);
-}
-
 static void R_Froxel_DebugUploadRandomGrid (void)
 {
 	const int nx = r_froxel.dims[0];
 	const int ny = r_froxel.dims[1];
 	const int nz = r_froxel.dims[2];
-	const int voxels = nx * ny * nz;
-	float *grid;
+	const int slice_pixels = nx * ny;
+	float *slice = r_froxel_debug_random_slice;
 
 	if (!r_froxel.valid || !r_froxel.light_tex || !r_froxel.history_tex)
 		return;
-	if (nx <= 0 || ny <= 0 || nz <= 0 || voxels <= 0)
+	if (nx <= 0 || ny <= 0 || nz <= 0 || slice_pixels <= 0)
 		return;
-	if (!R_Froxel_DebugEnsureGridCapacity (voxels))
+	if (nx > 192 || ny > 128)
 		return;
-
-	grid = r_froxel_debug.random_grid_data;
-	for (int i = 0; i < voxels; ++i)
-	{
-		const float base = R_Froxel_DebugRandRange (0.05f, 1.10f);
-		grid[i * 4 + 0] = base * R_Froxel_DebugRandRange (0.4f, 1.6f);
-		grid[i * 4 + 1] = base * R_Froxel_DebugRandRange (0.4f, 1.6f);
-		grid[i * 4 + 2] = base * R_Froxel_DebugRandRange (0.4f, 1.6f);
-		grid[i * 4 + 3] = 1.f;
-	}
 
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.light_tex);
-	GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, 0, nx, ny, nz, GL_RGBA, GL_FLOAT, grid);
+	for (int z = 0; z < nz; ++z)
+	{
+		for (int i = 0; i < slice_pixels; ++i)
+		{
+			const float base = R_Froxel_DebugRandRange (0.02f, 1.35f);
+			slice[i * 4 + 0] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
+			slice[i * 4 + 1] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
+			slice[i * 4 + 2] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
+			slice[i * 4 + 3] = 1.f;
+		}
+		GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, z, nx, ny, 1, GL_RGBA, GL_FLOAT, slice);
+	}
+
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.history_tex);
-	GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, 0, nx, ny, nz, GL_RGBA, GL_FLOAT, grid);
+	for (int z = 0; z < nz; ++z)
+	{
+		for (int i = 0; i < slice_pixels; ++i)
+		{
+			const float base = R_Froxel_DebugRandRange (0.02f, 1.35f);
+			slice[i * 4 + 0] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
+			slice[i * 4 + 1] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
+			slice[i * 4 + 2] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
+			slice[i * 4 + 3] = 1.f;
+		}
+		GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, z, nx, ny, 1, GL_RGBA, GL_FLOAT, slice);
+	}
 }
 
 static void R_Froxel_DebugBuildRandomLights (void)
@@ -188,10 +182,32 @@ static void R_Froxel_DebugRefreshState (void)
 
 	r_froxel_debug.active = true;
 	r_froxel_debug.next_refresh_time = realtime + 2.0;
-	r_froxel_debug.dlight_scale = R_Froxel_DebugRandRange (0.8f, 2.5f);
-	r_froxel_debug.sun_scale = R_Froxel_DebugRandRange (0.25f, 1.5f);
-	r_froxel_debug.emissive_scale = R_Froxel_DebugRandRange (0.25f, 1.25f);
-	r_froxel_debug.sun_intensity = R_Froxel_DebugRandRange (0.6f, 2.2f);
+	r_froxel_debug.phase = rand () & 3;
+	switch (r_froxel_debug.phase)
+	{
+	default:
+	case 0: /* dlight focus */
+		r_froxel_debug.dlight_scale = R_Froxel_DebugRandRange (2.4f, 5.6f);
+		r_froxel_debug.sun_scale = R_Froxel_DebugRandRange (0.35f, 0.9f);
+		r_froxel_debug.emissive_scale = R_Froxel_DebugRandRange (0.10f, 0.45f);
+		break;
+	case 1: /* sun/shadow focus */
+		r_froxel_debug.dlight_scale = R_Froxel_DebugRandRange (0.8f, 1.7f);
+		r_froxel_debug.sun_scale = R_Froxel_DebugRandRange (1.9f, 3.8f);
+		r_froxel_debug.emissive_scale = R_Froxel_DebugRandRange (0.10f, 0.40f);
+		break;
+	case 2: /* emissive focus */
+		r_froxel_debug.dlight_scale = R_Froxel_DebugRandRange (0.7f, 1.5f);
+		r_froxel_debug.sun_scale = R_Froxel_DebugRandRange (0.3f, 0.9f);
+		r_froxel_debug.emissive_scale = R_Froxel_DebugRandRange (0.9f, 2.4f);
+		break;
+	case 3: /* mixed stress test */
+		r_froxel_debug.dlight_scale = R_Froxel_DebugRandRange (1.8f, 4.2f);
+		r_froxel_debug.sun_scale = R_Froxel_DebugRandRange (1.0f, 2.6f);
+		r_froxel_debug.emissive_scale = R_Froxel_DebugRandRange (0.5f, 1.6f);
+		break;
+	}
+	r_froxel_debug.sun_intensity = R_Froxel_DebugRandRange (0.9f, 3.2f);
 	R_Froxel_DebugRandomUnitVector (r_froxel_debug.sun_dir);
 	r_froxel_debug.sun_dir[2] = -fabsf (r_froxel_debug.sun_dir[2]);
 	VectorNormalize (r_froxel_debug.sun_dir);
@@ -200,6 +216,12 @@ static void R_Froxel_DebugRefreshState (void)
 	r_froxel_debug.sun_color[2] = R_Froxel_DebugRandRange (0.3f, 1.6f);
 	R_Froxel_DebugBuildRandomLights ();
 	R_Froxel_DebugUploadRandomGrid ();
+	if (r_fogvol_stats.value > 0.f || r_fogvol_debug.value >= 8.f)
+	{
+		Con_DPrintf ("fogvol_debug_froxel: phase=%d d=%.2f sun=%.2f em=%.2f lights=%d\n",
+			r_froxel_debug.phase, r_froxel_debug.dlight_scale, r_froxel_debug.sun_scale,
+			r_froxel_debug.emissive_scale, r_froxel_debug.random_light_count);
+	}
 }
 
 static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)
@@ -287,7 +309,7 @@ static void R_Froxel_InjectSun (void)
 		radius = q_max (384.f, r_froxel.far_clip * 0.55f);
 		VectorMA (r_refdef.vieworg, r_froxel.far_clip * 0.62f, r_froxel_debug.sun_dir, inject_origin);
 		R_Froxel_AddLight (inject_origin, radius, r_froxel_debug.sun_color,
-			q_max (0.1f, r_froxel_debug.sun_intensity), (uint32_t)DLIGHT_DEFAULT);
+			q_max (0.1f, r_froxel_debug.sun_intensity * q_max (0.f, r_froxel_debug.sun_scale)), (uint32_t)DLIGHT_DEFAULT);
 		return;
 	}
 	if (r_fogvol_froxel_sun.value <= 0.f)
@@ -321,8 +343,6 @@ void R_Froxel_ResetResources (void)
 		GL_DeleteBuffersFunc (1, &r_froxel.light_ssbo);
 	memset (&r_froxel, 0, sizeof (r_froxel));
 	r_froxel.prev_mode = -1;
-	if (r_froxel_debug.random_grid_data)
-		Z_Free (r_froxel_debug.random_grid_data);
 	memset (&r_froxel_debug, 0, sizeof (r_froxel_debug));
 }
 
@@ -371,9 +391,11 @@ void R_Froxel_InjectDlights (void)
 		{
 			const froxel_gpu_light_t *light = &r_froxel_debug.random_lights[i];
 			vec3_t color;
+			float radius_scale = CLAMP (0.8f, 0.7f + r_froxel_debug.dlight_scale * 0.2f, 2.2f);
+			float intensity = light->color_intensity[3] * q_max (0.f, r_froxel_debug.dlight_scale);
 
 			VectorSet (color, light->color_intensity[0], light->color_intensity[1], light->color_intensity[2]);
-			R_Froxel_AddLight (light->pos_rad, light->pos_rad[3], color, light->color_intensity[3], light->type);
+			R_Froxel_AddLight (light->pos_rad, light->pos_rad[3] * radius_scale, color, intensity, light->type);
 		}
 		return;
 	}

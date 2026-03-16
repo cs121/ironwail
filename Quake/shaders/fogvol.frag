@@ -335,6 +335,8 @@ vec3 SampleSunScatter(vec3 p, vec3 viewDir)
 {
 	if (FogShadowEnabled == 0 || FogShadowSamples <= 0)
 		return vec3(0.0);
+	if (FogLightSourceScales.y <= 0.0)
+		return vec3(0.0);
 
 	float sunLenSq = dot(FogShadowDir, FogShadowDir);
 	if (sunLenSq <= 1e-6)
@@ -342,8 +344,11 @@ vec3 SampleSunScatter(vec3 p, vec3 viewDir)
 
 	vec3 sunDir = FogShadowDir * inversesqrt(sunLenSq);
 	float vis = SampleSunShadowMapVisibility(p);
+	float shadowContrast = max(FogClusterParams.y, 0.5);
+	vis = pow(clamp(vis, 0.0, 1.0), shadowContrast);
+	vis = clamp(vis * (1.0 + max(shadowContrast - 1.0, 0.0) * 0.25), 0.0, 1.0);
 	float phase = AnisotropicPhase(clamp(dot(viewDir, sunDir), -1.0, 1.0), 0.45);
-	vec3 sunColor = max(SunColorIntensity.rgb * SunColorIntensity.w, vec3(0.0)) * 0.03;
+	vec3 sunColor = max(SunColorIntensity.rgb * SunColorIntensity.w, vec3(0.0)) * (0.03 * FogLightSourceScales.y);
 	return sunColor * (phase * vis * max(FogShadowStrength, 0.0));
 }
 
@@ -451,30 +456,35 @@ void main()
 		if (sigma <= 1e-6)
 			continue;
 
-		float opticalDepth = min(sigma * stepLen, max(FogDensityParams.y, 0.001));
-		float att = exp(-opticalDepth);
-		float mediumWeight = 1.0 - att;
+			float opticalDepth = min(sigma * stepLen, max(FogDensityParams.y, 0.001));
+			float att = exp(-opticalDepth);
+			float mediumWeight = 1.0 - att;
+			float ambientWeight = clamp(FogClusterParams.x, 0.0, 1.0);
+			float lightContrast = clamp(FogLightSourceScales.w, 0.5, 4.0);
 
-		vec3 scattering = vec3(0.0);
-		// World-stable baseline in-scattering (no SceneColor coupling).
-		scattering += volume.color_density.rgb * 0.16;
-		scattering += SampleFroxelLight(p) * max(FogLightSourceScales.x, 0.0);
-		{
-			vec3 sunScatter = SampleSunScatter(p, viewDir);
-			if (FogLightSourceScales.y > 0.0)
-				sunScatter += vec3(1.0, 0.92, 0.78) * (FogLightSourceScales.y * 0.04);
-			scattering += sunScatter;
-		}
-		if (FogGodrayCoupling != 0)
-			scattering += godrayEnergy * volume.color_density.rgb * 0.25;
-		if (FogEmissiveEnabled != 0)
-		{
-			float emissiveStrength = max(volume.misc.w, 0.0);
-			if (FogLightSourceScales.z > 0.0)
-				emissiveStrength = max(emissiveStrength, FogLightSourceScales.z);
-			if (emissiveStrength > 0.0)
-				scattering += volume.color_density.rgb * emissiveStrength;
-		}
+			vec3 scattering = vec3(0.0);
+			// Keep only a small unlit baseline so lighting and shadows dominate.
+			scattering += volume.color_density.rgb * ambientWeight;
+			{
+				vec3 froxelScatter = SampleFroxelLight(p) * max(FogLightSourceScales.x, 0.0);
+				froxelScatter = pow(max(froxelScatter, vec3(0.0)), vec3(lightContrast));
+				scattering += froxelScatter;
+			}
+			{
+				vec3 sunScatter = SampleSunScatter(p, viewDir);
+				if (FogClusterParams.w > 0.5)
+					sunScatter += vec3(1.0, 0.92, 0.78) * (FogLightSourceScales.y * 0.05);
+				scattering += sunScatter;
+			}
+			if (FogGodrayCoupling != 0)
+				scattering += godrayEnergy * volume.color_density.rgb * 0.25;
+			if (FogEmissiveEnabled != 0)
+			{
+				float emissiveStrength = max(volume.misc.w, 0.0) * max(FogLightSourceScales.z, 0.0);
+				emissiveStrength = max(emissiveStrength, max(FogClusterParams.z, 0.0));
+				if (emissiveStrength > 0.0)
+					scattering += volume.color_density.rgb * emissiveStrength;
+			}
 
 		accum += transmittance * scattering * mediumWeight;
 		transmittance *= att;

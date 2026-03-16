@@ -58,6 +58,12 @@ cvar_t r_fogvol_lava_emissive = { "r_fogvol_lava_emissive", "2.0", CVAR_ARCHIVE 
 cvar_t r_fogvol_light = { "r_fogvol_light", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_dlightscale = { "r_fogvol_dlightscale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_sun = { "r_fogvol_froxel_sun", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_light_dlight_boost = { "r_fogvol_light_dlight_boost", "1.8", CVAR_ARCHIVE };
+cvar_t r_fogvol_light_sun_boost = { "r_fogvol_light_sun_boost", "1.35", CVAR_ARCHIVE };
+cvar_t r_fogvol_light_emissive_boost = { "r_fogvol_light_emissive_boost", "1.25", CVAR_ARCHIVE };
+cvar_t r_fogvol_light_ambient = { "r_fogvol_light_ambient", "0.055", CVAR_ARCHIVE };
+cvar_t r_fogvol_light_contrast = { "r_fogvol_light_contrast", "1.65", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow_contrast = { "r_fogvol_shadow_contrast", "1.45", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
@@ -100,6 +106,12 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_light},
 	{&r_fogvol_dlightscale},
 	{&r_fogvol_froxel_sun},
+	{&r_fogvol_light_dlight_boost},
+	{&r_fogvol_light_sun_boost},
+	{&r_fogvol_light_emissive_boost},
+	{&r_fogvol_light_ambient},
+	{&r_fogvol_light_contrast},
+	{&r_fogvol_shadow_contrast},
 	{&r_fogvol_shadow},
 	{&r_fogvol_shadow_strength},
 	{&r_fogvol_density_scale},
@@ -525,13 +537,38 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float sun_shadow_viewproj[16];
 	float sun_shadow_bias = 0.f;
 	float sun_shadow_pcf = 0.f;
-	float light_scale_dlight = q_max (0.f, r_fogvol_dlightscale.value);
-	float light_scale_sun = 0.f;
-	float light_scale_emissive = 0.f;
+	float light_scale_dlight = q_max (0.f, r_fogvol_dlightscale.value) * q_max (0.f, r_fogvol_light_dlight_boost.value);
+	float light_scale_sun = q_max (0.f, r_fogvol_froxel_sun.value) * q_max (0.f, r_fogvol_light_sun_boost.value);
+	float light_scale_emissive = q_max (0.f, r_fogvol_light_emissive_boost.value);
+	float light_contrast = CLAMP (0.5f, r_fogvol_light_contrast.value, 4.f);
+	float light_ambient = CLAMP (0.f, r_fogvol_light_ambient.value, 1.f);
+	float shadow_contrast = CLAMP (0.5f, r_fogvol_shadow_contrast.value, 4.f);
+	float emissive_floor = 0.f;
+	float debug_dlight_scale = 1.f;
+	float debug_sun_scale = 0.f;
+	float debug_emissive_scale = 0.f;
+	qboolean debug_scales_active = false;
 	qboolean sun_shadow_map_enabled = R_Shadow_GetSunOcclusionData (sun_shadow_viewproj, &sun_shadow_bias, &sun_shadow_pcf);
 
-	if (R_Froxel_GetDebugScales (&light_scale_dlight, &light_scale_sun, &light_scale_emissive))
+	if (R_Froxel_GetDebugScales (&debug_dlight_scale, &debug_sun_scale, &debug_emissive_scale))
+	{
+		debug_scales_active = true;
+		light_scale_dlight *= q_max (0.f, debug_dlight_scale);
+		light_scale_sun = q_max (light_scale_sun, q_max (0.f, debug_sun_scale));
+		emissive_floor = q_max (0.f, debug_emissive_scale);
+		light_contrast = q_max (light_contrast, 2.0f);
+		light_ambient = q_min (light_ambient, 0.03f);
+		shadow_contrast = q_max (shadow_contrast, 1.75f);
 		shadow_enabled = true;
+	}
+
+	if (r_fogvol_light.value <= 0.f)
+	{
+		light_scale_dlight = 0.f;
+		light_scale_sun = 0.f;
+		light_scale_emissive = 0.f;
+		emissive_floor = 0.f;
+	}
 
 	if (sun && R_WorldHasSun ())
 	{
@@ -569,7 +606,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1fFunc (FOGVOL_U_NOISE_DETAIL_STRENGTH, noise_amount);
 	GL_Uniform1fFunc (FOGVOL_U_DLIGHT_SCALE, light_scale_dlight);
 	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SCISSOR, 0.f, 0.f, 0.f, 0.f);
-	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES, light_scale_dlight, light_scale_sun, light_scale_emissive, 0.f);
+	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES, light_scale_dlight, light_scale_sun, light_scale_emissive, light_contrast);
 	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, lighting_mode);
 	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, (r_fogvol_godray_ready && mode > 0) ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, 0);
@@ -580,7 +617,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, 0);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_TEMPORAL_PARAMS, 0.f, 0.f, 0.f, 0.f);
 	GL_Uniform1iFunc (FOGVOL_U_CHECKERBOARD, 0);
-	GL_Uniform4fFunc (FOGVOL_U_CLUSTER_PARAMS, 0.f, 0.f, 0.f, 0.f);
+	GL_Uniform4fFunc (FOGVOL_U_CLUSTER_PARAMS, light_ambient, shadow_contrast, emissive_floor, debug_scales_active ? 1.f : 0.f);
 	GL_UniformMatrix4fvFunc (FOGVOL_U_SUN_SHADOW_VIEWPROJ, 1, GL_FALSE, sun_shadow_viewproj);
 	GL_Uniform4fFunc (FOGVOL_U_SUN_SHADOW_PARAMS,
 		(shadow_enabled && sun_shadow_map_enabled) ? 1.f : 0.f,
