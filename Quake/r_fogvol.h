@@ -64,6 +64,7 @@ extern cvar_t r_fogvol_jitter;
 extern cvar_t r_fogvol_blendmode;
 extern cvar_t r_fogvol_emissive;
 extern cvar_t r_fogvol_debug;
+extern cvar_t r_fogvol_debug_froxel_random;
 extern cvar_t r_fogvol_density_scale;
 extern cvar_t r_fogvol_global;
 extern cvar_t r_fogvol_global_color;

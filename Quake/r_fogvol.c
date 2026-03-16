@@ -76,6 +76,7 @@ cvar_t r_fogvol_global_height_scale = { "r_fogvol_global_height_scale", "0.0020"
 cvar_t r_fogvol_height_mist_strength = { "r_fogvol_height_mist_strength", "0.3", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_priority = { "r_fogvol_global_priority", "-1", CVAR_ARCHIVE };
 cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_debug_froxel_random = { "r_fogvol_debug_froxel_random", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_stats = { "r_fogvol_stats", "0", CVAR_NONE };
 
 typedef struct fogvol_cvar_reg_s
@@ -117,6 +118,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_height_mist_strength},
 	{&r_fogvol_global_priority},
 	{&r_fogvol_debug},
+	{&r_fogvol_debug_froxel_random},
 	{&r_fogvol_stats},
 };
 
@@ -523,7 +525,13 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float sun_shadow_viewproj[16];
 	float sun_shadow_bias = 0.f;
 	float sun_shadow_pcf = 0.f;
+	float light_scale_dlight = q_max (0.f, r_fogvol_dlightscale.value);
+	float light_scale_sun = 0.f;
+	float light_scale_emissive = 0.f;
 	qboolean sun_shadow_map_enabled = R_Shadow_GetSunOcclusionData (sun_shadow_viewproj, &sun_shadow_bias, &sun_shadow_pcf);
+
+	if (R_Froxel_GetDebugScales (&light_scale_dlight, &light_scale_sun, &light_scale_emissive))
+		shadow_enabled = true;
 
 	if (sun && R_WorldHasSun ())
 	{
@@ -559,9 +567,9 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1fFunc (FOGVOL_U_NOISE_LOD_SWITCH, 64.f);
 	GL_Uniform1fFunc (FOGVOL_U_DOMAINWARP_DIST, 128.f);
 	GL_Uniform1fFunc (FOGVOL_U_NOISE_DETAIL_STRENGTH, noise_amount);
-	GL_Uniform1fFunc (FOGVOL_U_DLIGHT_SCALE, q_max (0.f, r_fogvol_dlightscale.value));
+	GL_Uniform1fFunc (FOGVOL_U_DLIGHT_SCALE, light_scale_dlight);
 	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SCISSOR, 0.f, 0.f, 0.f, 0.f);
-	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES, q_max (0.f, r_fogvol_dlightscale.value), 0.f, 0.f, 0.f);
+	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES, light_scale_dlight, light_scale_sun, light_scale_emissive, 0.f);
 	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, lighting_mode);
 	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, (r_fogvol_godray_ready && mode > 0) ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, 0);

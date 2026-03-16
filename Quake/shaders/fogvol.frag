@@ -459,11 +459,22 @@ void main()
 		// World-stable baseline in-scattering (no SceneColor coupling).
 		scattering += volume.color_density.rgb * 0.16;
 		scattering += SampleFroxelLight(p) * max(FogLightSourceScales.x, 0.0);
-		scattering += SampleSunScatter(p, viewDir);
+		{
+			vec3 sunScatter = SampleSunScatter(p, viewDir);
+			if (FogLightSourceScales.y > 0.0)
+				sunScatter += vec3(1.0, 0.92, 0.78) * (FogLightSourceScales.y * 0.04);
+			scattering += sunScatter;
+		}
 		if (FogGodrayCoupling != 0)
 			scattering += godrayEnergy * volume.color_density.rgb * 0.25;
-		if (FogEmissiveEnabled != 0 && volume.misc.w > 0.0)
-			scattering += volume.color_density.rgb * volume.misc.w;
+		if (FogEmissiveEnabled != 0)
+		{
+			float emissiveStrength = max(volume.misc.w, 0.0);
+			if (FogLightSourceScales.z > 0.0)
+				emissiveStrength = max(emissiveStrength, FogLightSourceScales.z);
+			if (emissiveStrength > 0.0)
+				scattering += volume.color_density.rgb * emissiveStrength;
+		}
 
 		accum += transmittance * scattering * mediumWeight;
 		transmittance *= att;
