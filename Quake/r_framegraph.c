@@ -850,7 +850,7 @@ void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan)
 	out_plan->needs_scene_effects = GL_NeedsSceneEffects ();
 	out_plan->needs_postprocess = GL_NeedsPostprocess ();
 	out_plan->run_shadowmaps = (r_shadow.value > 0.f);
-	out_plan->run_fogvol = R_FogVol_IsEnabledForFrame () && R_FogVol_HasRenderableContent ();
+	out_plan->run_fogvol = R_FogVol_IsEnabledForFrame ();
 	out_plan->run_postprocess = out_plan->needs_postprocess;
 	out_plan->run_viewmodel = true;
 	out_plan->run_polyblend = true;

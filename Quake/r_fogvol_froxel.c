@@ -84,7 +84,7 @@ void R_FogVol_InjectIntoGrid (froxel_grid_t *grid, const fog_volume_t *vols, int
 		const fog_volume_t *vol = &vols[i];
 		vec3_t bmins, bmaxs;
 		int min_i[3], max_i[3];
-		const float vol_density = q_max (0.f, vol->density) * q_max (0.f, r_fogvol_density_scale.value);
+		const float vol_density = q_max (0.f, vol->density);
 		const int blend_mode = (vol->blendMode >= 0) ? vol->blendMode : (int)Q_rint (r_fogvol_blendmode.value);
 
 		if (!vol->enabled || vol_density <= 0.f)

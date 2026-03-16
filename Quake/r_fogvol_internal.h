@@ -16,5 +16,6 @@ qboolean R_FogVol_StaticFieldNeedsBuildContinuation (void);
 int R_FogVol_GetStaticFieldTotalSamples (void);
 int R_FogVol_GetStaticLightCount (void);
 qboolean R_FogVol_GetStaticLight (int idx, vec4_t pos_rad, vec4_t col_int);
+qboolean R_Froxel_GetShaderState (GLuint *out_light_tex, int *out_light_count, float params0[4], float params1[4]);
 
 #endif /* R_FOGVOL_INTERNAL_H */

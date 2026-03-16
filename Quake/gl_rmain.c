@@ -2065,7 +2065,7 @@ static qboolean R_GodraysMediumEnabled (void)
 	 * fog medium path is active (fog volumes and/or froxel fog). */
 	if (R_FogVol_ShouldAffectPostFX ())
 		return true;
-	if (r_fogvol.value > 0.f && r_fogvol_froxel.value > 0.f)
+	if (r_fogvol.value > 0.f)
 		return true;
 	return false;
 }
@@ -3852,7 +3852,7 @@ static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
 {
 	float saturation;
 	qboolean godrays_medium;
-	qboolean fogvol_configured = R_FogVol_HasRenderableContent ();
+	qboolean fogvol_requested = R_FogVol_IsEnabledForFrame ();
 
 	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
@@ -3868,7 +3868,7 @@ static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
 	godrays_medium = R_GodraysMediumEnabled ();
 	if (r_godrays.value > 0.f && godrays_medium)
 		return true;
-	if (include_fogvol && fogvol_configured)
+	if (include_fogvol && fogvol_requested)
 		return true;
 	return false;
 }
@@ -3876,7 +3876,6 @@ static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
 qboolean GL_NeedsSceneEffects (void)
 {
 	qboolean fogvol_active = R_FogVol_IsEnabledForFrame ();
-	qboolean fogvol_configured = fogvol_active && R_FogVol_HasRenderableContent ();
 
         if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
 		return true;
@@ -3891,7 +3890,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (R_DoFEnabled ())
 		return true;
 
-	if (fogvol_configured)
+	if (fogvol_active)
 		return true;
 
 	return false;

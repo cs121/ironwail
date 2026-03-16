@@ -1,36 +1,15 @@
-/*
-Copyright (C) 1996-2001 Id Software, Inc.
-Copyright (C) 2002-2009 John Fitzgibbons and others
-Copyright (C) 2007-2008 Kristian Duske
-Copyright (C) 2010-2014 QuakeSpasm developers
-
-This program is free software; you can redistribute it and/or
-modify it under the terms of the GNU General Public License
-as published by the Free Software Foundation; either version 2
-of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-
-See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program; if not, write to the Free Software
-Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
-*/
-
 #include "quakedef.h"
 #include "draw.h"
-#include "gl_lightgrid.h"
 #include "r_fogvol.h"
 #include "r_fogvol_internal.h"
 #include "r_dlight_pool.h"
 #include "r_godrays.h"
-#include <assert.h>
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
+
+extern cvar_t gl_farclip;
 
 typedef struct fog_volume_gpu_s
 {
@@ -45,8 +24,6 @@ typedef struct fog_volume_gpu_s
 	float extra[4];
 	float params2[4];
 } fog_volume_gpu_t;
-
-COMPILE_TIME_ASSERT (fog_volume_gpu_align16, (sizeof (fog_volume_gpu_t) % 16) == 0);
 
 typedef struct fog_light_gpu_s
 {
@@ -65,213 +42,30 @@ typedef struct fog_light_lists_gpu_s
 	fog_light_gpu_t lights[MAX_FOGVOLUMES * MAX_FOGLIGHTS];
 } fog_light_lists_gpu_t;
 
-typedef struct fog_lightgrid_gpu_s
-{
-	float probe_rgb[8][4];
-} fog_lightgrid_gpu_t;
-
-COMPILE_TIME_ASSERT (fog_light_gpu_align16, (sizeof (fog_light_gpu_t) % 16) == 0);
-COMPILE_TIME_ASSERT (fog_light_list_gpu_align16, (sizeof (fog_light_list_gpu_t) % 16) == 0);
-COMPILE_TIME_ASSERT (fog_light_lists_gpu_align16, (sizeof (fog_light_lists_gpu_t) % 16) == 0);
-COMPILE_TIME_ASSERT (fog_lightgrid_gpu_align16, (sizeof (fog_lightgrid_gpu_t) % 16) == 0);
-
-typedef struct fogvol_light_candidate_s
-{
-	int index;
-	float score;
-	fog_light_gpu_t light;
-	vec3_t bounds_mins;
-	vec3_t bounds_maxs;
-} fogvol_light_candidate_t;
-
-typedef struct fogvol_visible_volume_s
-{
-	const fog_volume_t *volume;
-	float screen_weight;
-} fogvol_visible_volume_t;
-
-typedef struct fogvol_light_stats_s
-{
-	int broadphase_candidates;
-	int narrowphase_candidates;
-	int narrowphase_accepted;
-	int lightgrid_probes;
-	double broadphase_seconds;
-	double narrowphase_seconds;
-	double lightgrid_seconds;
-	double lightgrid_upload_seconds;
-} fogvol_light_stats_t;
-
-typedef struct fogvol_perf_stats_s
-{
-	int frame;
-	int preset;
-	int passes;
-	int blits;
-	int global_passes;
-	int local_passes;
-	int clustered_passes;
-	int clustered_tiles;
-	int clustered_indices;
-	int local_volumes;
-	int steps;
-	int shadow_samples;
-	qboolean global_active;
-	double gpu_ms;
-} fogvol_perf_stats_t;
-
-typedef struct fogvol_shader_setup_s
-{
-	int steps;
-	int mode;
-	int glwidth;
-	int glheight;
-	int fog_width;
-	int fog_height;
-	float depth_scale_x;
-	float depth_scale_y;
-	float inv_viewproj[16];
-	float view_x;
-	float view_y;
-	float view_w;
-	float view_h;
-	float depth_near;
-	float depth_far;
-	float depth_sky_cutoff;
-	qboolean use_halfres;
-} fogvol_shader_setup_t;
-
-typedef struct fogvol_runtime_config_s
-{
-	int preset;
-	int effective_steps;
-	int shadow_samples;
-	int lighting_mode;
-	int local_occlusion_mode;
-	qboolean shadow_enabled;
-	qboolean godray_coupling;
-	qboolean light_enabled;
-	qboolean lightgrid_enabled;
-	qboolean froxel_enabled;
-	float froxel_scale;
-	float lightlist_scale;
-	float lightgrid_scale;
-} fogvol_runtime_config_t;
-
-typedef struct fogvol_render_context_s
-{
-	int mode;
-	int fog_width;
-	int fog_height;
-	float view_x;
-	float view_y;
-	float view_w;
-	float view_h;
-	float depth_scale_x;
-	float depth_scale_y;
-	qboolean use_halfres;
-	GLuint depth_tex;
-	GLuint composite_src_tex;
-	GLuint composite_src_fbo;
-	GLuint fog_tex[2];
-	GLuint fog_fbo[2];
-	int fog_src;
-	GLuint final_tex;
-	qboolean has_drawn;
-	int scissor_x0[MAX_FOGVOLUMES];
-	int scissor_y0[MAX_FOGVOLUMES];
-	int scissor_x1[MAX_FOGVOLUMES];
-	int scissor_y1[MAX_FOGVOLUMES];
-	qboolean scissor_valid[MAX_FOGVOLUMES];
-} fogvol_render_context_t;
-
-typedef struct fogvol_cluster_header_gpu_s
-{
-	int offset_count[4];
-} fogvol_cluster_header_gpu_t;
-
-#define FOGVOL_CLUSTER_MAX_TILES 8192
-#define FOGVOL_CLUSTER_MAX_INDICES (FOGVOL_CLUSTER_MAX_TILES * MAX_FOGVOLUMES)
-
-static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
-static int r_fogvolume_count = 0;
-static fog_volume_t r_fogvolume_entities[MAX_FOGVOLUMES];
-static int r_fogvolume_entity_count = 0;
-static fog_volume_t r_fogvol_global_volume;
-static qboolean r_fogvol_global_active = false;
-static fogvol_perf_stats_t r_fogvol_perf_stats;
-static fogvol_cluster_header_gpu_t r_fogvol_cluster_headers[FOGVOL_CLUSTER_MAX_TILES];
-static int r_fogvol_cluster_tile_lists[FOGVOL_CLUSTER_MAX_TILES][MAX_FOGVOLUMES];
-static int r_fogvol_cluster_indices[FOGVOL_CLUSTER_MAX_INDICES];
-
-#define MAX_FOG_DLIGHTS 64
-#define MAX_FOG_STATIC_LIGHTS 192
-
-/* Variant C split: these lights are fog-only and must never enter the normal
- * geometry/cluster/shadow dlight pipelines. */
-static int r_num_fog_dlights = 0;
-static dlight_t r_fog_dlights[MAX_FOG_DLIGHTS];
-typedef struct fogvol_static_build_config_s
-{
-	const qmodel_t *worldmodel;
-	int probe_mode;
-	int probe_grid;
-	float probe_density;
-	float lava_emissive;
-	int emissive_enabled;
-	int lightmap_srgb;
-	int gpu_static_build;
-} fogvol_static_build_config_t;
-
-cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_preset = { "r_fogvol_preset", "2", CVAR_ARCHIVE };
-cvar_t r_fogvol_clustered = { "r_fogvol_clustered", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_cluster_tile_size = { "r_fogvol_cluster_tile_size", "16", CVAR_ARCHIVE };
-cvar_t r_fogvol_steps = { "r_fogvol_steps", "24", CVAR_ARCHIVE };
-cvar_t r_fogvol_maxsteps = { "r_fogvol_maxsteps", "128", CVAR_ARCHIVE };
-cvar_t r_fogvol_stepsize = { "r_fogvol_stepsize", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_steps_scale_halfres = { "r_fogvol_steps_scale_halfres", "0.5", CVAR_ARCHIVE };
+/* Public CVars (simplified 0/1/2 dispatch + shared controls). */
+cvar_t r_fogvol = { "r_fogvol", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
+cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_noise_subsample = { "r_fogvol_noise_subsample", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_noise_lod_switch_dist = { "r_fogvol_noise_lod_switch_dist", "64", CVAR_ARCHIVE };
-cvar_t r_fogvol_domainwarp_dist = { "r_fogvol_domainwarp_dist", "128", CVAR_ARCHIVE };
-cvar_t r_fogvol_noise_detail_strength = { "r_fogvol_noise_detail_strength", "0.20", CVAR_ARCHIVE };
-cvar_t r_fogvol_quality = { "r_fogvol_quality", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_atmosphere = { "r_fogvol_atmosphere", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_noisemode = { "r_fogvol_noisemode", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_physblend = { "r_fogvol_physblend", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_noise_scale = { "r_fogvol_noise_scale", "0.05", CVAR_ARCHIVE };
+cvar_t r_fogvol_noise_amount = { "r_fogvol_noise_amount", "0.5", CVAR_ARCHIVE };
+cvar_t r_fogvol_noise_bias = { "r_fogvol_noise_bias", "0.0", CVAR_ARCHIVE };
+cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_blendmode = { "r_fogvol_blendmode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_emissive = { "r_fogvol_emissive", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_temporal_alpha = { "r_fogvol_temporal_alpha", "0.9", CVAR_ARCHIVE };
-cvar_t r_fogvol_temporal_depth_reject = { "r_fogvol_temporal_depth_reject", "0.01", CVAR_ARCHIVE };
-cvar_t r_fogvol_temporal_confidence_min_alpha = { "r_fogvol_temporal_confidence_min_alpha", "0.05", CVAR_ARCHIVE };
-cvar_t r_fogvol_temporal_disocclusion_bias = { "r_fogvol_temporal_disocclusion_bias", "0.5", CVAR_ARCHIVE };
-cvar_t r_fogvol_temporal_clamp_strength = { "r_fogvol_temporal_clamp_strength", "1.5", CVAR_ARCHIVE };
-cvar_t r_fogvol_checkerboard = { "r_fogvol_checkerboard", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_light_subsample = { "r_fogvol_light_subsample", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_jitter = { "r_fogvol_jitter", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_lava_emissive = { "r_fogvol_lava_emissive", "2.0", CVAR_ARCHIVE };
+cvar_t r_fogvol_light = { "r_fogvol_light", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_dlightscale = { "r_fogvol_dlightscale", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_froxel_sun = { "r_fogvol_froxel_sun", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
-/* r_fogvol_sigma_max: maximum optical depth *per raymarching step*.
- * exp(-4) â‰ˆ 0.018, so 4.0 is already near-black in one step.
- * Previous default of "2" was applied as a per-unit extinction cap, which
- * saturated instantly at any stepLen > ~1 unit.  Now treated as an optical
- * depth cap (sigma*stepLen), making the value scale-independent. */
-cvar_t r_fogvol_sigma_max = { "r_fogvol_sigma_max", "4", CVAR_ARCHIVE };
 cvar_t r_fogvol_global = { "r_fogvol_global", "1", CVAR_ARCHIVE };
-/* r_fogvol_global_color: direct RGB tint for the global volumetric baseline.
- * This replaces the legacy GL fog/worldspawn fog color path entirely. */
 cvar_t r_fogvol_global_color = { "r_fogvol_global_color", "0.3 0.3 0.3", CVAR_ARCHIVE };
-/* r_fogvol_global_density_scale: direct density for the global volumetric
- * baseline. The historic name is kept for config compatibility, but it is no
- * longer derived from classic GL fog state. */
 cvar_t r_fogvol_global_density_scale = { "r_fogvol_global_density_scale", "0.06", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_falloff = { "r_fogvol_global_falloff", "64", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_noise_scale = { "r_fogvol_global_noise_scale", "0.014", CVAR_ARCHIVE };
-/* r_fogvol_global_noise_amount: 0=uniform fog, 1=fully noise-modulated.
- * Was 0 (disabled) by default, making global fog always uniform regardless of
- * other noise settings. Default 0.78 gives stronger cloud breakup. */
 cvar_t r_fogvol_global_noise_amount = { "r_fogvol_global_noise_amount", "0.78", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_noise_bias = { "r_fogvol_global_noise_bias", "0.0", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_velocity_x = { "r_fogvol_global_velocity_x", "1.25", CVAR_ARCHIVE };
@@ -279,138 +73,53 @@ cvar_t r_fogvol_global_velocity_y = { "r_fogvol_global_velocity_y", "0.65", CVAR
 cvar_t r_fogvol_global_velocity_z = { "r_fogvol_global_velocity_z", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_height = { "r_fogvol_global_height", "56", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_height_scale = { "r_fogvol_global_height_scale", "0.0020", CVAR_ARCHIVE };
-cvar_t r_fogvol_global_shadow = { "r_fogvol_global_shadow", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_height_mist_strength = { "r_fogvol_height_mist_strength", "0.3", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_priority = { "r_fogvol_global_priority", "-1", CVAR_ARCHIVE };
+cvar_t r_fogvol_debug = { "r_fogvol_debug", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_stats = { "r_fogvol_stats", "0", CVAR_NONE };
-cvar_t r_fogvol_light = { "r_fogvol_light", "0", CVAR_ARCHIVE };
-/* Central volumetric lighting path selector:
- * 0=off, 1=raymarch lights, 2=froxel lights, 3=froxel base + raymarch detail.
- * Default 2 keeps historical behavior where enabling froxel disabled full
- * raymarch local lights to avoid double-lighting. */
-cvar_t r_fogvol_lighting_mode = { "r_fogvol_lighting_mode", "2", CVAR_ARCHIVE };
-cvar_t r_fogvol_lightgrid = { "r_fogvol_lightgrid", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_light_max = { "r_fogvol_light_max", "16", CVAR_ARCHIVE };
-cvar_t r_fogvol_dlightscale = { "r_fogvol_dlightscale", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_light_stats = { "r_fogvol_light_stats", "0", CVAR_NONE };
-cvar_t r_fogvol_gpu_light_select = { "r_fogvol_gpu_light_select", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_gpu_static_build = { "r_fogvol_gpu_static_build", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_shadow_samples = { "r_fogvol_shadow_samples", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
-cvar_t r_fogvol_shadow_jitter = { "r_fogvol_shadow_jitter", "1", CVAR_ARCHIVE };
-/* Per-local-light occlusion term in fogvol.frag:
- * 0=off, 1=cheap signed depth test along light ray, 2=multi-tap depth cone trace.
- * Mode 2 is automatically downgraded to mode 1 when shadow marching is disabled
- * because there is no additional shadow context to justify the extra taps. */
-cvar_t r_fogvol_local_occlusion = { "r_fogvol_local_occlusion", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_froxel = { "r_fogvol_froxel", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_froxel_parity = { "r_fogvol_froxel_parity", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_froxel_sun = { "r_fogvol_froxel_sun", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_froxel_sun_legacy = { "r_fogvol_froxel_sun_legacy", "0", CVAR_ARCHIVE };
-cvar_t r_fogvol_static_probe_budget_load = { "r_fogvol_static_probe_budget_load", "12000", CVAR_ARCHIVE };
-cvar_t r_fogvol_static_probe_budget_frame = { "r_fogvol_static_probe_budget_frame", "2000", CVAR_ARCHIVE };
-cvar_t r_fogvol_froxel_temporal_alpha = { "r_fogvol_froxel_temporal_alpha", "0.85", CVAR_ARCHIVE };
-cvar_t r_fogvol_froxel_temporal_reject_threshold = { "r_fogvol_froxel_temporal_reject_threshold", "24", CVAR_ARCHIVE };
-/* Source weighting policy for local fog lighting contributions.
- * - r_fogvol_froxel_scale controls FogFroxelLightTex contribution when enabled.
- * - r_fogvol_lightlist_scale controls per-volume FogLights list contribution.
- * - r_fogvol_lightgrid_scale controls baked/static FogLightgrid contribution.
- *
- * Default policy keeps baked/static lighting fully visible even with froxel enabled,
- * while splitting local-light energy evenly between froxel and explicit local lists
- * to avoid double-counting when both carry overlapping lights. */
-cvar_t r_fogvol_froxel_scale = { "r_fogvol_froxel_scale", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_lightlist_scale = { "r_fogvol_lightlist_scale", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_lightgrid_scale = { "r_fogvol_lightgrid_scale", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_lava_emissive = { "r_fogvol_lava_emissive", "2.0", CVAR_ARCHIVE };
-/* r_froxel_debug: 0=off, 1=froxel rgb at first hit, 2=max-energy heat, 3=temporal history weight, 4=directional sun intensity */
-cvar_t r_froxel_debug = { "r_froxel_debug", "0", CVAR_ARCHIVE };
 
 typedef struct fogvol_cvar_reg_s
 {
 	cvar_t *var;
-	const char *category;
-	const char *default_value;
 } fogvol_cvar_reg_t;
 
 static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
-	{&r_fogvol, "core", "0"},
-	{&r_fogvol_preset, "quality", "2"},
-	{&r_fogvol_clustered, "quality", "0"},
-	{&r_fogvol_cluster_tile_size, "quality", "16"},
-	{&r_fogvol_steps, "quality", "24"},
-	{&r_fogvol_maxsteps, "quality", "128"},
-	{&r_fogvol_stepsize, "quality", "0"},
-	{&r_fogvol_halfres, "quality", "1"},
-	{&r_fogvol_steps_scale_halfres, "quality", "0.5"},
-	{&r_fogvol_noise, "noise", "1"},
-	{&r_fogvol_noise_subsample, "noise", "1"},
-	{&r_fogvol_noise_lod_switch_dist, "noise", "64"},
-	{&r_fogvol_domainwarp_dist, "noise", "128"},
-	{&r_fogvol_noise_detail_strength, "noise", "0.20"},
-	{&r_fogvol_quality, "quality", "1"},
-	{&r_fogvol_atmosphere, "quality", "0.8"},
-	{&r_fogvol_noisemode, "noise", "0"},
-	{&r_fogvol_physblend, "core", "1"},
-	{&r_fogvol_blendmode, "core", "0"},
-	{&r_fogvol_emissive, "lighting", "1"},
-	{&r_fogvol_temporal_alpha, "temporal", "0.9"},
-	{&r_fogvol_temporal_depth_reject, "temporal", "0.01"},
-	{&r_fogvol_temporal_confidence_min_alpha, "temporal", "0.05"},
-	{&r_fogvol_temporal_disocclusion_bias, "temporal", "0.5"},
-	{&r_fogvol_temporal_clamp_strength, "temporal", "1.5"},
-	{&r_fogvol_checkerboard, "quality", "0"},
-	{&r_fogvol_light_subsample, "lighting", "1"},
-	{&r_fogvol_jitter, "quality", "1"},
-	{&r_fogvol_debug, "debug", "0"},
-	{&r_fogvol_density_scale, "core", "1"},
-	{&r_fogvol_sigma_max, "core", "4"},
-	{&r_fogvol_global, "global", "1"},
-	{&r_fogvol_global_color, "global", "0.3 0.3 0.3"},
-	{&r_fogvol_global_density_scale, "global", "0.06"},
-	{&r_fogvol_global_falloff, "global", "64"},
-	{&r_fogvol_global_noise_scale, "global", "0.014"},
-	{&r_fogvol_global_noise_amount, "global", "0.78"},
-	{&r_fogvol_global_noise_bias, "global", "0.0"},
-	{&r_fogvol_global_velocity_x, "global", "1.25"},
-	{&r_fogvol_global_velocity_y, "global", "0.65"},
-	{&r_fogvol_global_velocity_z, "global", "0"},
-	{&r_fogvol_global_height, "global", "56"},
-	{&r_fogvol_global_height_scale, "global", "0.0020"},
-	{&r_fogvol_global_shadow, "global", "0"},
-	{&r_fogvol_height_mist_strength, "global", "0.3"},
-	{&r_fogvol_global_priority, "global", "-1"},
-	{&r_fogvol_stats, "debug", "0"},
-	{&r_fogvol_light, "lighting", "0"},
-	{&r_fogvol_lighting_mode, "lighting", "2"},
-	{&r_fogvol_lightgrid, "lighting", "1"},
-	{&r_fogvol_light_max, "lighting", "16"},
-	{&r_fogvol_dlightscale, "lighting", "1"},
-	{&r_fogvol_light_stats, "debug", "0"},
-	{&r_fogvol_gpu_light_select, "lighting", "0"},
-	{&r_fogvol_gpu_static_build, "lighting", "0"},
-	{&r_fogvol_shadow, "lighting", "1"},
-	{&r_fogvol_shadow_samples, "lighting", "1"},
-	{&r_fogvol_shadow_strength, "lighting", "0.8"},
-	{&r_fogvol_shadow_jitter, "lighting", "1"},
-	{&r_fogvol_local_occlusion, "lighting", "0"},
-	{&r_fogvol_froxel, "lighting", "0"},
-	{&r_fogvol_froxel_parity, "lighting", "0"},
-	{&r_fogvol_froxel_sun, "lighting", "1"},
-	{&r_fogvol_froxel_sun_legacy, "lighting", "0"},
-	{&r_fogvol_static_probe_budget_load, "lighting", "12000"},
-	{&r_fogvol_static_probe_budget_frame, "lighting", "2000"},
-	{&r_fogvol_froxel_temporal_alpha, "temporal", "0.85"},
-	{&r_fogvol_froxel_temporal_reject_threshold, "temporal", "24"},
-	{&r_fogvol_froxel_scale, "lighting", "1"},
-	{&r_fogvol_lightlist_scale, "lighting", "1"},
-	{&r_fogvol_lightgrid_scale, "lighting", "1"},
-	{&r_fogvol_lava_emissive, "lighting", "2.0"},
-	{&r_froxel_debug, "debug", "0"},
+	{&r_fogvol},
+	{&r_fogvol_steps},
+	{&r_fogvol_halfres},
+	{&r_fogvol_noise},
+	{&r_fogvol_noisemode},
+	{&r_fogvol_noise_scale},
+	{&r_fogvol_noise_amount},
+	{&r_fogvol_noise_bias},
+	{&r_fogvol_jitter},
+	{&r_fogvol_blendmode},
+	{&r_fogvol_emissive},
+	{&r_fogvol_lava_emissive},
+	{&r_fogvol_light},
+	{&r_fogvol_dlightscale},
+	{&r_fogvol_froxel_sun},
+	{&r_fogvol_shadow},
+	{&r_fogvol_shadow_strength},
+	{&r_fogvol_density_scale},
+	{&r_fogvol_global},
+	{&r_fogvol_global_color},
+	{&r_fogvol_global_density_scale},
+	{&r_fogvol_global_falloff},
+	{&r_fogvol_global_noise_scale},
+	{&r_fogvol_global_noise_amount},
+	{&r_fogvol_global_noise_bias},
+	{&r_fogvol_global_velocity_x},
+	{&r_fogvol_global_velocity_y},
+	{&r_fogvol_global_velocity_z},
+	{&r_fogvol_global_height},
+	{&r_fogvol_global_height_scale},
+	{&r_fogvol_height_mist_strength},
+	{&r_fogvol_global_priority},
+	{&r_fogvol_debug},
+	{&r_fogvol_stats},
 };
 
-/* NOTE: Keep this mapping synchronized with shaders/fogvol.frag layout(location=...). */
 enum
 {
 	FOGVOL_U_STEPS = 0,
@@ -438,2028 +147,52 @@ enum
 	FOGVOL_U_LIGHTGRID_ENABLED = 22,
 	FOGVOL_U_FRAME_INDEX = 23,
 	FOGVOL_U_NOISE_SUBSAMPLE = 24,
-	FOGVOL_U_NOISE_LOD_SWITCH_DIST = 25,
-	FOGVOL_U_DOMAIN_WARP_MAX_DIST = 26,
-	FOGVOL_U_CHECKERBOARD = 27,
-	FOGVOL_U_HALFRES = 28,
-	FOGVOL_U_LIGHT_SUBSAMPLE = 29,
-	FOGVOL_U_SUN_SCATTER = 30,
-	FOGVOL_U_SUN_COLOR = 31,
-	FOGVOL_U_SUN_ANISOTROPY = 32,
-	FOGVOL_U_DLIGHT_SCALE = 33,
+	FOGVOL_U_NOISE_LOD_SWITCH = 25,
+	FOGVOL_U_DOMAINWARP_DIST = 26,
+	FOGVOL_U_NOISE_DETAIL_STRENGTH = 27,
+	FOGVOL_U_DLIGHT_SCALE = 28,
+	FOGVOL_U_LIGHT_SCISSOR = 29,
+	FOGVOL_U_LIGHT_SOURCE_SCALES = 39,
+	FOGVOL_U_LIGHTING_MODE = 40,
+	FOGVOL_U_GODRAY_COUPLING = 41,
+	FOGVOL_U_LOCAL_OCCLUSION_MODE = 42,
+	FOGVOL_U_CHECKERBOARD = 47,
 	FOGVOL_U_FROXEL_ENABLED = 34,
 	FOGVOL_U_FROXEL_PARAMS0 = 35,
 	FOGVOL_U_FROXEL_PARAMS1 = 36,
 	FOGVOL_U_FROXEL_DEBUG = 37,
 	FOGVOL_U_FROXEL_PARITY_MODE = 38,
-	FOGVOL_U_LIGHT_SOURCE_SCALES = 39,
-	FOGVOL_U_LIGHTING_MODE = 40,
-	FOGVOL_U_GODRAY_COUPLING = 41,
-	FOGVOL_U_GODRAY_SHAFTS_PARAMS = 42,
 	FOGVOL_U_FROXEL_TEMPORAL_PARAMS = 43,
-	FOGVOL_U_LOCAL_OCCLUSION_MODE = 44,
-	FOGVOL_U_LOCAL_OCCLUSION_PARAMS = 45,
-	FOGVOL_U_NOISE_DETAIL_STRENGTH = 46,
-	FOGVOL_U_HEIGHT_MIST_STRENGTH = 47,
-	FOGVOL_U_ATMOSPHERE_BOOST = 48,
 	FOGVOL_U_CLUSTER_PARAMS = 49,
 	FOGVOL_U_SUN_SHADOW_VIEWPROJ = 50,
-	FOGVOL_U_SUN_SHADOW_PARAMS = 54,
-	FOGVOL_U_COUNT = 55
+	FOGVOL_U_SUN_SHADOW_PARAMS = 54
 };
 
-COMPILE_TIME_ASSERT (fogvol_uniform_location_max, FOGVOL_U_CLUSTER_PARAMS == 49);
-COMPILE_TIME_ASSERT (fogvol_uniform_location_sunshadow_params, FOGVOL_U_SUN_SHADOW_PARAMS == 54);
-
-typedef struct froxel_state_s
-{
-	GLuint light_tex;
-	GLuint history_tex;
-	GLuint light_ssbo;
-	int dims[3];
-	float near_clip;
-	float far_clip;
-	float tan_half_fov_x;
-	float tan_half_fov_y;
-	float log_far_near;
-	vec3_t prev_vieworg;
-	int prev_frame;
-	int prev_lighting_mode;
-	int prev_parity_mode;
-	qboolean prev_froxel_enabled;
-	qboolean prev_mode_valid;
-	qboolean prev_valid;
-	qboolean valid;
-	int light_count;
-} froxel_state_t;
-
-static froxel_state_t r_froxel;
-
-#define MAX_FROXEL_GPU_LIGHTS 32
-typedef struct froxel_gpu_light_s
-{
-	float pos_rad[4];
-	float color_intensity[4];
-	uint32_t type;
-	uint32_t _pad[3];
-} froxel_gpu_light_t;
-
-static froxel_gpu_light_t r_froxel_gpu_lights[MAX_FROXEL_GPU_LIGHTS];
-
-#define FOGVOL_GPU_LOCAL_SIZE 64
-#define FOGVOL_GPU_DLIGHT_MAX_CANDIDATES 256
-typedef struct fogvol_dlight_score_gpu_s
-{
-	float pos_rad[4];
-	float color_bias[4];   /* rgb color, w score bias */
-	uint32_t meta[4];      /* x flags(bit0 inject), y stable id */
-} fogvol_dlight_score_gpu_t;
-
-typedef struct fogvol_sort_entry_gpu_s
-{
-	uint32_t key0;
-	uint32_t key1;
-	uint32_t index;
-	uint32_t _pad;
-} fogvol_sort_entry_gpu_t;
-
-typedef struct fogvol_gpu_light_select_state_s
-{
-	GLuint candidate_ssbo;
-	GLuint sort_ssbo;
-	int sort_capacity;
-	fogvol_dlight_score_gpu_t staging_candidates[FOGVOL_GPU_DLIGHT_MAX_CANDIDATES];
-	fogvol_sort_entry_gpu_t staging_sorted[FOGVOL_GPU_DLIGHT_MAX_CANDIDATES];
-	int gpu_frames;
-	int gpu_fallbacks;
-	int last_candidates;
-	int last_selected;
-} fogvol_gpu_light_select_state_t;
-
-static fogvol_gpu_light_select_state_t r_fogvol_gpu_light_select_state;
-static void R_FogVol_GPUSelectReset (void);
+static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
+static int r_fogvolume_count = 0;
+static fog_volume_t r_fogvolume_entities[MAX_FOGVOLUMES];
+static int r_fogvolume_entity_count = 0;
+static fog_volume_t r_fogvol_global_volume;
+static qboolean r_fogvol_global_active = false;
+static qboolean r_fogvol_composite_valid = false;
+static GLuint r_fogvol_composite_tex = 0;
+static fog_light_lists_gpu_t r_fogvol_empty_lights;
 
 static GLuint r_fogvol_godray_shafts_tex = 0;
 static GLuint r_fogvol_godray_mask_tex = 0;
 static GLuint r_fogvol_godray_source_tex = 0;
 static qboolean r_fogvol_godray_ready = false;
-static float *r_fogvol_godray_mask_cpu = NULL;
-static float *r_fogvol_godray_source_cpu = NULL;
-static int r_fogvol_godray_mask_w = 0;
-static int r_fogvol_godray_mask_h = 0;
-static int r_fogvol_godray_source_w = 0;
-static int r_fogvol_godray_source_h = 0;
 
-extern cvar_t gl_farclip;
-extern cvar_t r_lightmap_colorspace;
-
-static int r_fogvol_history_index = 0;
-static int r_fogvol_history_width = 0;
-static int r_fogvol_history_height = 0;
-static qboolean r_fogvol_composite_valid = false;
-static int r_fogvol_alpha_extreme_streak = 0;
-static int r_fogvol_alpha_extreme_last_frame = -1;
-static qboolean r_fogvol_resource_warned = false;
-static fogvol_static_build_config_t r_fogvol_static_build_cached;
-static qboolean r_fogvol_static_build_cached_valid = false;
-
-static const int fogvol_static_probe_mode_fixed = 1;
-static const int fogvol_static_probe_grid_fixed = 24;
-static const float fogvol_static_probe_density_fixed = 1.f;
-
-static const vec3_t r_fogvol_corner_lut[8] = {
-	{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f, 0.f},
-	{0.f, 0.f, 1.f}, {1.f, 0.f, 1.f}, {0.f, 1.f, 1.f}, {1.f, 1.f, 1.f}
-};
-
-static void R_FogVol_CaptureStaticBuildConfig (fogvol_static_build_config_t *cfg)
-{
-	if (!cfg)
-		return;
-
-	cfg->worldmodel = cl.worldmodel;
-	cfg->probe_mode = fogvol_static_probe_mode_fixed;
-	cfg->probe_grid = CLAMP (8, fogvol_static_probe_grid_fixed, 64);
-	cfg->probe_density = q_max (0.25f, fogvol_static_probe_density_fixed);
-	cfg->lava_emissive = CLAMP (0.f, r_fogvol_lava_emissive.value, 8.f);
-	cfg->emissive_enabled = (r_fogvol_emissive.value > 0.f) ? 1 : 0;
-	cfg->lightmap_srgb = !q_strcasecmp (r_lightmap_colorspace.string, "srgb") ? 1 : 0;
-	cfg->gpu_static_build = (r_fogvol_gpu_static_build.value > 0.f) ? 1 : 0;
-}
-
-static qboolean R_FogVol_StaticBuildConfigEqual (const fogvol_static_build_config_t *a, const fogvol_static_build_config_t *b)
-{
-	if (!a || !b)
-		return false;
-	if (a->worldmodel != b->worldmodel)
-		return false;
-	if (a->probe_mode != b->probe_mode)
-		return false;
-	if (a->probe_grid != b->probe_grid)
-		return false;
-	if (a->emissive_enabled != b->emissive_enabled)
-		return false;
-	if (a->lightmap_srgb != b->lightmap_srgb)
-		return false;
-	if (a->gpu_static_build != b->gpu_static_build)
-		return false;
-	if (fabsf (a->probe_density - b->probe_density) > 1e-6f)
-		return false;
-	if (fabsf (a->lava_emissive - b->lava_emissive) > 1e-6f)
-		return false;
-	return true;
-}
-
-void R_FogVol_CommitStaticBuildConfig (void)
-{
-	R_FogVol_CaptureStaticBuildConfig (&r_fogvol_static_build_cached);
-	r_fogvol_static_build_cached_valid = true;
-}
-
-static qboolean R_FogVol_StaticBuildNeedsRebuild (void)
-{
-	fogvol_static_build_config_t current;
-
-	R_FogVol_CaptureStaticBuildConfig (&current);
-	if (!r_fogvol_static_build_cached_valid)
-		return true;
-	return !R_FogVol_StaticBuildConfigEqual (&current, &r_fogvol_static_build_cached);
-}
-
-
-void R_FogVol_ClearHistory (void)
-{
-	r_fogvol_history_index = 0;
-	r_fogvol_history_width = 0;
-	r_fogvol_history_height = 0;
-	r_fogvol_composite_valid = false;
-	r_fogvol_godray_shafts_tex = 0;
-	r_fogvol_godray_mask_tex = 0;
-	r_fogvol_godray_source_tex = 0;
-	r_fogvol_godray_ready = false;
-	R_Froxel_ResetResources ();
-
-	if (!framebufs.fogvol.history_fbo[0] || !framebufs.fogvol.history_fbo[1])
-		return;
-
-	/* BUG FIX (C-04): Save the previously bound draw FBO so we can restore it
-	 * after clearing.  R_FogVol_ClearHistory() may be called during map loading
-	 * or from contexts where a different FBO is active â€” unconditionally leaving
-	 * composite.fbo bound corrupts the GL state for the caller. */
-	{
-		const float zero[4] = {0.f, 0.f, 0.f, 0.f};
-		GLint prev_draw_fbo = 0;
-		GLint prev_read_fbo = 0;
-		glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &prev_draw_fbo);
-		glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &prev_read_fbo);
-
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[0]);
-		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.fogvol.history_fbo[1]);
-		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
-
-		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, (GLuint)prev_draw_fbo);
-		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, (GLuint)prev_read_fbo);
-	}
-}
-
-void R_FogVol_SetGodrayCouplingTextures (GLuint shafts_tex, GLuint mask_tex, GLuint source_tex, qboolean ready)
-{
-	r_fogvol_godray_shafts_tex = shafts_tex;
-	r_fogvol_godray_mask_tex = mask_tex;
-	r_fogvol_godray_source_tex = source_tex;
-	r_fogvol_godray_ready = ready && shafts_tex != 0;
-}
-
-typedef struct fogvol_test_state_s
-{
-	unsigned statebits;
-	unsigned cache_statebits;
-	GLint viewport[4];
-	GLint scissor_box[4];
-	GLint draw_fbo;
-	GLint read_fbo;
-	GLint draw_buffer;
-	GLint read_buffer;
-	GLint draw_buffers[8];
-	GLint num_draw_buffers;
-	GLint draw_status;
-	GLint read_status;
-	GLint draw_color_type[2];
-	GLint draw_color_name[2];
-	GLint draw_depth_type;
-	GLint draw_depth_name;
-	GLint read_color_type;
-	GLint read_color_name;
-	GLint read_depth_type;
-	GLint read_depth_name;
-	GLint program;
-	GLint vao;
-	GLint blend_src_rgb;
-	GLint blend_dst_rgb;
-	GLint blend_equation_rgb;
-	GLint polygon_mode[2];
-	GLboolean scissor_test;
-	GLboolean blend;
-	GLboolean depth_test;
-	GLboolean depth_writemask;
-	GLboolean color_writemask[4];
-	GLboolean cull_face;
-	GLfloat color_clear_value[4];
-	GLboolean framebuffer_srgb;
-	GLboolean dither;
-	GLboolean multisample;
-	GLint cache_draw_fbo;
-	GLint cache_read_fbo;
-	GLint cache_program;
-	GLint cache_vao;
-} fogvol_test_state_t;
-
-typedef struct fogvol_state_cache_s
-{
-	GLint draw_fbo;
-	GLint read_fbo;
-	GLint program;
-	GLint vao;
-} fogvol_state_cache_t;
-
-typedef struct fogvol_restore_state_s
-{
-	GLint viewport[4];
-	GLint scissor_box[4];
-	GLint draw_fbo;
-	GLint read_fbo;
-	GLint draw_buffer;
-	GLint read_buffer;
-	GLint program;
-	GLint vao;
-	GLint active_texture;
-	unsigned int glstate_bits;
-	GLboolean scissor_test;
-	GLboolean framebuffer_srgb;
-} fogvol_restore_state_t;
-
-static fogvol_state_cache_t r_fogvol_state_cache = { 0, 0, 0, 0 };
-
-static void R_FogVol_BindFramebuffer (GLenum target, GLuint fbo)
-{
-	GL_BindFramebufferFunc (target, fbo);
-	/* BEST PRACTICE #10: GL_FRAMEBUFFER is an alias that binds both draw and
-	 * read targets simultaneously (GL 3.0+).  Reflect that in the cache so
-	 * that subsequent GL_DRAW/READ_FRAMEBUFFER queries against the cache are
-	 * correct even if they weren't set individually. */
-	if (target == GL_FRAMEBUFFER)
-	{
-		r_fogvol_state_cache.draw_fbo = (GLint)fbo;
-		r_fogvol_state_cache.read_fbo = (GLint)fbo;
-	}
-	else if (target == GL_DRAW_FRAMEBUFFER)
-		r_fogvol_state_cache.draw_fbo = (GLint)fbo;
-	else if (target == GL_READ_FRAMEBUFFER)
-		r_fogvol_state_cache.read_fbo = (GLint)fbo;
-}
-
-static void R_FogVol_UseProgram (GLuint prog)
-{
-	GL_UseProgram (prog);
-	r_fogvol_state_cache.program = (GLint)prog;
-}
-
-static void R_FogVol_BindVertexArray (GLuint vao)
-{
-	GL_BindVertexArrayFunc (vao);
-	r_fogvol_state_cache.vao = (GLint)vao;
-}
-
-static void R_FogVol_SetDepthMask (qboolean enabled)
-{
-	if (enabled)
-		GL_SetState (glstate & ~GLS_NO_ZWRITE);
-	else
-		GL_SetState (glstate | GLS_NO_ZWRITE);
-}
-
-static qboolean R_FogVol_StateDebugEnabled (void)
-{
-	/* Keep heavy fogvol state instrumentation opt-in only.
-	 * Coupling this to developer spammed per-frame logs in mods with active fog volumes. */
-	return r_fogvol_debug.value > 0.f;
-}
-
-static void R_FogVol_LogStateSnapshot (const char *marker)
-{
-	GLint viewport[4] = {0};
-	GLint scissor_box[4] = {0};
-	GLint draw_fbo = 0, read_fbo = 0;
-	GLint draw_buffer = 0, read_buffer = 0;
-	GLint program = 0;
-	GLint active_texture = 0;
-	GLboolean scissor_enabled = GL_FALSE;
-
-	if (!R_FogVol_StateDebugEnabled ())
-		return;
-
-	glGetIntegerv (GL_VIEWPORT, viewport);
-	scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
-	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
-	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
-	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
-	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
-	glGetIntegerv (GL_ACTIVE_TEXTURE, &active_texture);
-
-	Con_DPrintf (
-		"FOGVOL_STATE %s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) scissor=%d box=(%d %d %d %d) drawbuf=0x%04x readbuf=0x%04x prog=%d active_tex=%d\n",
-		marker,
-		draw_fbo, read_fbo,
-		viewport[0], viewport[1], viewport[2], viewport[3],
-		scissor_enabled,
-		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
-		(unsigned)draw_buffer, (unsigned)read_buffer,
-		program, active_texture - GL_TEXTURE0);
-}
-
-static void R_FogVol_LogBufferMarker (const char *marker)
-{
-	GLint draw_fbo = 0, read_fbo = 0;
-	GLint draw_buffer = 0, read_buffer = 0;
-
-	if (!R_FogVol_StateDebugEnabled ())
-		return;
-
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
-	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
-	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
-	Con_Printf ("FOGVOL_TEST marker=%s draw_fbo=%d read_fbo=%d draw_buffer=0x%04x read_buffer=0x%04x\n",
-		marker, draw_fbo, read_fbo, (unsigned)draw_buffer, (unsigned)read_buffer);
-}
-
-static void R_FogVol_SetDrawBufferDebug (GLenum buf, const char *marker)
-{
-	glDrawBuffer (buf);
-	R_FogVol_LogBufferMarker (marker);
-}
-
-static void R_FogVol_SetReadBufferDebug (GLenum buf, const char *marker)
-{
-	glReadBuffer (buf);
-	R_FogVol_LogBufferMarker (marker);
-}
-
-static void R_FogVol_DebugCheckCompositeAlphaDynamics (int fog_width, int fog_height)
-{
-	float alpha_sample = 0.f;
-	int px;
-	int py;
-	GLint prev_read_fbo = 0;
-	GLint prev_read_buf = 0;
-
-	/* PERF: This readback is only for explicit fogvol debugging. */
-	if (r_fogvol_debug.value <= 0.f)
-		return;
-
-	if (!r_fogvol_composite_valid || fog_width <= 0 || fog_height <= 0)
-	{
-		r_fogvol_alpha_extreme_streak = 0;
-		return;
-	}
-
-	if (r_fogvol_alpha_extreme_last_frame >= 0 && r_framecount != r_fogvol_alpha_extreme_last_frame + 1)
-		r_fogvol_alpha_extreme_streak = 0;
-	r_fogvol_alpha_extreme_last_frame = r_framecount;
-
-	px = fog_width / 2;
-	py = fog_height / 2;
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &prev_read_fbo);
-	glGetIntegerv (GL_READ_BUFFER, &prev_read_buf);
-	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
-	glReadBuffer (GL_COLOR_ATTACHMENT0);
-	glReadPixels (px, py, 1, 1, GL_ALPHA, GL_FLOAT, &alpha_sample);
-	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, (GLuint)prev_read_fbo);
-	glReadBuffer ((GLenum)prev_read_buf);
-
-	if (alpha_sample <= 0.001f || alpha_sample >= 0.999f)
-		++r_fogvol_alpha_extreme_streak;
-	else
-		r_fogvol_alpha_extreme_streak = 0;
-
-	if (r_fogvol_alpha_extreme_streak >= 8 && (r_fogvol_alpha_extreme_streak % 32) == 8)
-	{
-		Con_DPrintf (
-			"FOGVOL_WARN composite alpha appears static/extreme for %d frames (sample=%.3f at center). Contract expects dynamic A=1-transmittance where fog is present.\n",
-			r_fogvol_alpha_extreme_streak, alpha_sample);
-	}
-}
-
-static void R_FogVol_LogPipelineState (const char *marker)
-{
-	GLint viewport[4] = {0};
-	GLint scissor_box[4] = {0};
-	GLint draw_fbo = 0, read_fbo = 0;
-	GLint draw_buffer = 0, read_buffer = 0;
-	GLint program = 0;
-	GLboolean scissor_enabled = GL_FALSE;
-
-	if (!R_FogVol_StateDebugEnabled ())
-		return;
-
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
-	glGetIntegerv (GL_VIEWPORT, viewport);
-	scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
-	glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
-	glGetIntegerv (GL_CURRENT_PROGRAM, &program);
-	glGetIntegerv (GL_DRAW_BUFFER, &draw_buffer);
-	glGetIntegerv (GL_READ_BUFFER, &read_buffer);
-
-	Con_Printf (
-		"FOGVOL_TEST marker=%s draw_fbo=%d read_fbo=%d viewport=(%d %d %d %d) "
-		"scissor=%d scissor_box=(%d %d %d %d) prog=%d draw_buffer=0x%04x read_buffer=0x%04x\n",
-		marker,
-		draw_fbo,
-		read_fbo,
-		viewport[0], viewport[1], viewport[2], viewport[3],
-		scissor_enabled,
-		scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
-		program,
-		(unsigned)draw_buffer,
-		(unsigned)read_buffer);
-}
-
-static void R_FogDlights_Clear (void)
-{
-	r_num_fog_dlights = 0;
-}
-
-static void R_FogDlights_Add (const vec3_t origin, float radius, const vec3_t color)
-{
-	dlight_t *dl;
-
-	if (r_num_fog_dlights >= MAX_FOG_DLIGHTS)
-		return;
-	if (radius <= 0.f)
-		return;
-
-	dl = &r_fog_dlights[r_num_fog_dlights++];
-	memset (dl, 0, sizeof (*dl));
-	VectorCopy (origin, dl->origin);
-	dl->radius = q_max (0.f, radius);
-	dl->color[0] = CLAMP (0.f, color[0], 1.f);
-	dl->color[1] = CLAMP (0.f, color[1], 1.f);
-	dl->color[2] = CLAMP (0.f, color[2], 1.f);
-	dl->active = true;
-	dl->spawn = cl.time;
-	dl->die = cl.time + 0.1;
-	dl->baseradius = dl->radius;
-}
-
-static qboolean R_FogVol_DlightIsInjectable (const dlight_t *dl)
-{
-	if (!dl || !dl->active || dl->radius <= 0.f)
-		return false;
-	if (dl->spawn > cl.time)
-		return false;
-	if (dl->die > 0.0 && dl->die < cl.time)
-		return false;
-	return true;
-}
-
-static float R_FogVol_DlightScoreBias (const dlight_t *dl)
-{
-	if (!dl)
-		return 1.f;
-	switch (dl->type)
-	{
-	case DLIGHT_LAVA:
-		return 1.25f;
-	case DLIGHT_ROCKET:
-		return 1.9f;
-	case DLIGHT_EXPLOSION:
-		return 1.6f;
-	case DLIGHT_PLASMA:
-		return 1.5f;
-	case DLIGHT_TORCH:
-		return 0.9f;
-	default:
-		return 1.f;
-	}
-}
-
-static GLuint R_FogVol_GetFramebufferColorAttachmentTexture (GLenum target)
-{
-	GLint object_type = GL_NONE;
-	GLint object_name = 0;
-
-	GL_GetFramebufferAttachmentParameterivFunc (target, GL_COLOR_ATTACHMENT0,
-		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &object_type);
-	if (object_type == GL_TEXTURE)
-	{
-		GL_GetFramebufferAttachmentParameterivFunc (target, GL_COLOR_ATTACHMENT0,
-			GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &object_name);
-		return (GLuint)object_name;
-	}
-
-	return 0;
-}
-
-static void R_FogVol_LogHazardPass (const char *pass,
-	GLuint main_tex,
-	GLuint history_tex,
-	GLuint fog_tex)
-{
-	GLint draw_fbo = 0;
-	GLint read_fbo = 0;
-	GLuint draw_tex = 0;
-	GLuint read_tex = 0;
-
-	if (!R_FogVol_StateDebugEnabled ())
-		return;
-
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
-	draw_tex = R_FogVol_GetFramebufferColorAttachmentTexture (GL_DRAW_FRAMEBUFFER);
-	read_tex = R_FogVol_GetFramebufferColorAttachmentTexture (GL_READ_FRAMEBUFFER);
-
-	Con_Printf (
-		"FOGVOL_HAZARD pass=%s draw_fbo=%d read_fbo=%d draw_tex=%u read_tex=%u input_main=%u input_history=%u input_fog=%u\n",
-		pass,
-		draw_fbo,
-		read_fbo,
-		draw_tex,
-		read_tex,
-		main_tex,
-		history_tex,
-		fog_tex);
-
-	if (draw_tex && (main_tex == draw_tex || history_tex == draw_tex || fog_tex == draw_tex))
-	{
-		Con_Printf ("FOGVOL_HAZARD pass=%s hazard=feedback_loop draw_tex=%u\n", pass, draw_tex);
-	}
-
-	if (!q_strcasecmp (pass, "FINAL_COPY") && draw_tex && read_tex && draw_tex == read_tex)
-	{
-		Con_Printf ("FOGVOL_HAZARD pass=%s hazard=inplace_copy tex=%u\n", pass, draw_tex);
-	}
-}
-
-static void R_FogVol_AssertNoFeedbackHazard (const char *pass_name, GLuint draw_tex, GLuint read_tex)
-{
-#if !defined(NDEBUG)
-	if (draw_tex && read_tex && draw_tex == read_tex)
-		Sys_Error ("Fogvol feedback hazard in pass %s", pass_name);
-#else
-	(void)pass_name;
-	(void)draw_tex;
-	(void)read_tex;
-#endif
-}
-
-static void R_FogVol_AssertNoBoundFeedbackHazard (const char *pass_name)
-{
-#if !defined(NDEBUG)
-	const GLuint draw_tex = R_FogVol_GetFramebufferColorAttachmentTexture (GL_DRAW_FRAMEBUFFER);
-	const GLuint read_tex = R_FogVol_GetFramebufferColorAttachmentTexture (GL_READ_FRAMEBUFFER);
-	R_FogVol_AssertNoFeedbackHazard (pass_name, draw_tex, read_tex);
-#else
-	(void)pass_name;
-#endif
-}
-
-static void R_FogVol_TestState_Capture (fogvol_test_state_t *state)
-{
-	GLenum draw_color_attachment = GL_BACK_LEFT;
-	GLenum read_color_attachment = GL_BACK_LEFT;
-
-	state->statebits = glstate;
-	/* BEST PRACTICE #9: cache_statebits mirrors glstate at capture time.
-	 * Both fields currently hold identical values; if the engine ever
-	 * separates its internal cache bitfield from the applied bitfield,
-	 * record the cache-side value here independently. */
-	state->cache_statebits = glstate;
-	glGetIntegerv (GL_VIEWPORT, state->viewport);
-	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
-	glGetIntegerv (GL_SCISSOR_BOX, state->scissor_box);
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &state->draw_fbo);
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &state->read_fbo);
-	glGetIntegerv (GL_DRAW_BUFFER, &state->draw_buffer);
-	glGetIntegerv (GL_READ_BUFFER, &state->read_buffer);
-	state->num_draw_buffers = 0;
-	for (int i = 0; i < (int)countof (state->draw_buffers); ++i)
-		state->draw_buffers[i] = GL_NONE;
-	{
-		GLint max_draw_buffers = 0;
-		glGetIntegerv (GL_MAX_DRAW_BUFFERS, &max_draw_buffers);
-		state->num_draw_buffers = q_min (max_draw_buffers, (int)countof (state->draw_buffers));
-		for (int i = 0; i < state->num_draw_buffers; ++i)
-			glGetIntegerv (GL_DRAW_BUFFER0 + i, &state->draw_buffers[i]);
-	}
-	state->draw_status = (GLint)GL_CheckFramebufferStatusFunc (GL_DRAW_FRAMEBUFFER);
-	state->read_status = (GLint)GL_CheckFramebufferStatusFunc (GL_READ_FRAMEBUFFER);
-	if (state->draw_fbo)
-		draw_color_attachment = GL_COLOR_ATTACHMENT0;
-	if (state->read_fbo)
-		read_color_attachment = GL_COLOR_ATTACHMENT0;
-	GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, draw_color_attachment,
-		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_color_type[0]);
-	GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, draw_color_attachment,
-		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->draw_color_name[0]);
-	if (state->draw_fbo)
-	{
-		GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-			GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_color_type[1]);
-		GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT1,
-			GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->draw_color_name[1]);
-	}
-	else
-	{
-		state->draw_color_type[1] = GL_NONE;
-		state->draw_color_name[1] = 0;
-	}
-	GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->draw_depth_type);
-	GL_GetFramebufferAttachmentParameterivFunc (GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->draw_depth_name);
-	GL_GetFramebufferAttachmentParameterivFunc (GL_READ_FRAMEBUFFER, read_color_attachment,
-		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->read_color_type);
-	GL_GetFramebufferAttachmentParameterivFunc (GL_READ_FRAMEBUFFER, read_color_attachment,
-		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->read_color_name);
-	GL_GetFramebufferAttachmentParameterivFunc (GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE, &state->read_depth_type);
-	GL_GetFramebufferAttachmentParameterivFunc (GL_READ_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-		GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &state->read_depth_name);
-	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program);
-	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao);
-	state->blend = glIsEnabled (GL_BLEND);
-	glGetIntegerv (GL_BLEND_SRC_RGB, &state->blend_src_rgb);
-	glGetIntegerv (GL_BLEND_DST_RGB, &state->blend_dst_rgb);
-	glGetIntegerv (GL_BLEND_EQUATION_RGB, &state->blend_equation_rgb);
-	state->depth_test = glIsEnabled (GL_DEPTH_TEST);
-	glGetBooleanv (GL_DEPTH_WRITEMASK, &state->depth_writemask);
-	glGetBooleanv (GL_COLOR_WRITEMASK, state->color_writemask);
-	state->cull_face = glIsEnabled (GL_CULL_FACE);
-	glGetIntegerv (GL_POLYGON_MODE, state->polygon_mode);
-	glGetFloatv (GL_COLOR_CLEAR_VALUE, state->color_clear_value);
-	state->framebuffer_srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB);
-	state->dither = glIsEnabled (GL_DITHER);
-	state->multisample = glIsEnabled (GL_MULTISAMPLE);
-	state->cache_draw_fbo = r_fogvol_state_cache.draw_fbo;
-	state->cache_read_fbo = r_fogvol_state_cache.read_fbo;
-	state->cache_program = r_fogvol_state_cache.program;
-	state->cache_vao = r_fogvol_state_cache.vao;
-}
-
-
-static void R_FogVol_TestState_Log (const char *phase, const fogvol_test_state_t *state)
-{
-	Con_Printf (
-		"FOGVOL_TEST %s viewport=(%d %d %d %d) scissor_test=%d scissor_box=(%d %d %d %d) "
-		"draw_fbo=%d read_fbo=%d draw_buffer=0x%04x read_buffer=0x%04x "
-		"draw_buffers=[0x%04x 0x%04x 0x%04x 0x%04x 0x%04x 0x%04x 0x%04x 0x%04x] "
-		"draw_status=0x%04x read_status=0x%04x "
-		"draw_att0=(type=0x%04x,name=%d) draw_att1=(type=0x%04x,name=%d) draw_depth=(type=0x%04x,name=%d) "
-		"read_att0=(type=0x%04x,name=%d) read_depth=(type=0x%04x,name=%d) "
-		"prog=%d vao=%d blend=%d blend_func=(%d,%d) blend_eq=%d "
-		"depth_test=%d depth_writemask=%d color_writemask=(%d %d %d %d) cull=%d poly=(%d,%d) "
-		"clear_color=(%.3f %.3f %.3f %.3f) srgb=%d dither=%d multisample=%d glstate=0x%08x "
-		"cache(glstate=0x%08x draw_fbo=%d read_fbo=%d prog=%d vao=%d)\n",
-		phase,
-		state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3],
-		state->scissor_test,
-		state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3],
-		state->draw_fbo, state->read_fbo,
-		(unsigned)state->draw_buffer, (unsigned)state->read_buffer,
-		(unsigned)state->draw_buffers[0], (unsigned)state->draw_buffers[1],
-		(unsigned)state->draw_buffers[2], (unsigned)state->draw_buffers[3],
-		(unsigned)state->draw_buffers[4], (unsigned)state->draw_buffers[5],
-		(unsigned)state->draw_buffers[6], (unsigned)state->draw_buffers[7],
-		(unsigned)state->draw_status, (unsigned)state->read_status,
-		(unsigned)state->draw_color_type[0], state->draw_color_name[0],
-		(unsigned)state->draw_color_type[1], state->draw_color_name[1],
-		(unsigned)state->draw_depth_type, state->draw_depth_name,
-		(unsigned)state->read_color_type, state->read_color_name,
-		(unsigned)state->read_depth_type, state->read_depth_name,
-		state->program,
-		state->vao,
-		state->blend,
-		state->blend_src_rgb, state->blend_dst_rgb,
-		state->blend_equation_rgb,
-		state->depth_test,
-		state->depth_writemask,
-		state->color_writemask[0], state->color_writemask[1], state->color_writemask[2], state->color_writemask[3],
-		state->cull_face,
-		state->polygon_mode[0], state->polygon_mode[1],
-		state->color_clear_value[0], state->color_clear_value[1], state->color_clear_value[2], state->color_clear_value[3],
-		state->framebuffer_srgb,
-		state->dither,
-		state->multisample,
-		state->statebits,
-		state->cache_statebits,
-		state->cache_draw_fbo,
-		state->cache_read_fbo,
-		state->cache_program,
-		state->cache_vao);
-}
-
-
-static void R_FogVol_CaptureRestoreState (fogvol_restore_state_t *state)
-{
-	glGetIntegerv (GL_VIEWPORT, state->viewport);
-	state->scissor_test = glIsEnabled (GL_SCISSOR_TEST);
-	glGetIntegerv (GL_SCISSOR_BOX, state->scissor_box);
-	glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &state->draw_fbo);
-	glGetIntegerv (GL_READ_FRAMEBUFFER_BINDING, &state->read_fbo);
-	glGetIntegerv (GL_DRAW_BUFFER, &state->draw_buffer);
-	glGetIntegerv (GL_READ_BUFFER, &state->read_buffer);
-	glGetIntegerv (GL_CURRENT_PROGRAM, &state->program);
-	glGetIntegerv (GL_VERTEX_ARRAY_BINDING, &state->vao);
-	glGetIntegerv (GL_ACTIVE_TEXTURE, &state->active_texture);
-	state->glstate_bits = glstate;
-	state->framebuffer_srgb = glIsEnabled (GL_FRAMEBUFFER_SRGB);
-}
-
-static void R_FogVol_Restore3DRenderState (const fogvol_restore_state_t *state)
-{
-	R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, state->draw_fbo);
-	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, state->read_fbo);
-	glDrawBuffer ((GLenum)state->draw_buffer);
-	glReadBuffer ((GLenum)state->read_buffer);
-	glViewport (state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
-	if (state->scissor_test)
-		GL_SetScissorEnabled (true);
-	else
-		GL_SetScissorEnabled (false);
-	glScissor (state->scissor_box[0], state->scissor_box[1], state->scissor_box[2], state->scissor_box[3]);
-	R_FogVol_UseProgram ((GLuint)state->program);
-	R_FogVol_BindVertexArray ((GLuint)state->vao);
-	GL_ActiveTextureFunc ((GLenum)state->active_texture);
-
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	R_FogVol_SetDepthMask (true);
-	glPolygonMode (GL_FRONT_AND_BACK, GL_FILL);
-	GL_SetState (state->glstate_bits);
-	if (state->framebuffer_srgb)
-		glEnable (GL_FRAMEBUFFER_SRGB);
-	else
-		glDisable (GL_FRAMEBUFFER_SRGB);
-}
-
-static int R_FogVol_ComparePriority (const void *a, const void *b)
-{
-	const fog_volume_t *va = (const fog_volume_t *)a;
-	const fog_volume_t *vb = (const fog_volume_t *)b;
-
-	if (va->priority < vb->priority)
-		return -1;
-	if (va->priority > vb->priority)
-		return 1;
-	return 0;
-}
-
-static int R_FogVol_CompareLightCandidate (const void *a, const void *b)
-{
-	const fogvol_light_candidate_t *la = (const fogvol_light_candidate_t *)a;
-	const fogvol_light_candidate_t *lb = (const fogvol_light_candidate_t *)b;
-
-	if (la->score > lb->score)
-		return -1;
-	if (la->score < lb->score)
-		return 1;
-	if (la->index < lb->index)
-		return -1;
-	if (la->index > lb->index)
-		return 1;
-	return 0;
-}
-
-static float R_FogVol_DistanceToVolume (const fog_volume_t *volume, const vec3_t p)
-{
-	if (!volume)
-		return 999999.f;
-
-	if (volume->shape == FOGVOL_SHAPE_SPHERE)
-	{
-		vec3_t d;
-		VectorSubtract (p, volume->sphereCenter, d);
-		return q_max (0.f, VectorLength (d) - q_max (0.f, volume->sphereRadius));
-	}
-
-	{
-		float dx = q_max (q_max (volume->mins[0] - p[0], 0.f), p[0] - volume->maxs[0]);
-		float dy = q_max (q_max (volume->mins[1] - p[1], 0.f), p[1] - volume->maxs[1]);
-		float dz = q_max (q_max (volume->mins[2] - p[2], 0.f), p[2] - volume->maxs[2]);
-		return sqrtf (dx * dx + dy * dy + dz * dz);
-	}
-}
-
-static qboolean R_FogVol_LightOverlapsVolume (const fog_volume_t *volume, const vec3_t light_origin, float light_radius)
-{
-	float dist;
-
-	if (!volume || light_radius <= 0.f)
-		return false;
-
-	dist = R_FogVol_DistanceToVolume (volume, light_origin);
-	return dist <= light_radius;
-}
-
-static void R_FogVol_GetVolumeBounds (const fog_volume_t *vol, vec3_t bmins, vec3_t bmaxs)
-{
-	if (vol->shape == FOGVOL_SHAPE_SPHERE)
-	{
-		for (int a = 0; a < 3; ++a)
-		{
-			bmins[a] = vol->sphereCenter[a] - vol->sphereRadius;
-			bmaxs[a] = vol->sphereCenter[a] + vol->sphereRadius;
-		}
-	}
-	else
-	{
-		VectorCopy (vol->mins, bmins);
-		VectorCopy (vol->maxs, bmaxs);
-	}
-}
-
-static qboolean R_FogVol_LightOverlapsBounds (const vec3_t light_origin, float light_radius, const vec3_t bmins, const vec3_t bmaxs)
-{
-	float dist2 = 0.f;
-
-	for (int a = 0; a < 3; ++a)
-	{
-		if (light_origin[a] < bmins[a])
-		{
-			float d = bmins[a] - light_origin[a];
-			dist2 += d * d;
-		}
-		else if (light_origin[a] > bmaxs[a])
-		{
-			float d = light_origin[a] - bmaxs[a];
-			dist2 += d * d;
-		}
-	}
-
-	return dist2 <= light_radius * light_radius;
-}
-
-static qboolean R_FogVol_BoundsOverlap (const vec3_t mins0, const vec3_t maxs0, const vec3_t mins1, const vec3_t maxs1)
-{
-	for (int a = 0; a < 3; ++a)
-	{
-		if (maxs0[a] < mins1[a] || mins0[a] > maxs1[a])
-			return false;
-	}
-	return true;
-}
-
-static int R_FogVol_BuildVisibleVolumeCache (fogvol_visible_volume_t *visible, int max_visible, vec3_t fog_bounds_mins, vec3_t fog_bounds_maxs, qboolean *has_fog_bounds)
-{
-	int visible_count = 0;
-
-	*has_fog_bounds = false;
-	VectorSet (fog_bounds_mins, 0.f, 0.f, 0.f);
-	VectorSet (fog_bounds_maxs, 0.f, 0.f, 0.f);
-
-	for (int i = 0; i < r_fogvolume_count; ++i)
-	{
-		const fog_volume_t *vol = &r_fogvolumes[i];
-		vec3_t bmins, bmaxs;
-		int sx0, sy0, sx1, sy1;
-
-		R_FogVol_GetVolumeBounds (vol, bmins, bmaxs);
-
-		if (!*has_fog_bounds)
-		{
-			VectorCopy (bmins, fog_bounds_mins);
-			VectorCopy (bmaxs, fog_bounds_maxs);
-			*has_fog_bounds = true;
-		}
-		else
-		{
-			for (int a = 0; a < 3; ++a)
-			{
-				fog_bounds_mins[a] = q_min (fog_bounds_mins[a], bmins[a]);
-				fog_bounds_maxs[a] = q_max (fog_bounds_maxs[a], bmaxs[a]);
-			}
-		}
-
-		if (visible_count >= max_visible)
-			continue;
-
-		if (R_FogVol_ProjectAABBToScreenRect (vol, &sx0, &sy0, &sx1, &sy1, true))
-		{
-			const float view_area = (float)(q_max (1, r_refdef.vrect.width) * q_max (1, r_refdef.vrect.height));
-			const float rect_area = (float)q_max (1, (sx1 - sx0) * (sy1 - sy0));
-			visible[visible_count].volume = vol;
-			visible[visible_count].screen_weight = CLAMP (0.1f, rect_area / view_area, 1.f);
-			visible_count++;
-		}
-	}
-
-	return visible_count;
-}
-
-static int R_FogVol_BuildFrameLightBroadphase (const fogvol_visible_volume_t *visible_volumes, int visible_count, const vec3_t fog_bounds_mins, const vec3_t fog_bounds_maxs, qboolean has_fog_bounds, fogvol_light_candidate_t *out, int max_out)
-{
-	const dlight_t *const *active;
-	int active_count = 0;
-	int candidate_count = 0;
-
-	if (!out || max_out <= 0 || visible_count <= 0)
-		return 0;
-
-	active = DLightPool_GetActiveList (&active_count);
-	if (active && active_count > 0)
-	{
-		for (int i = 0; i < active_count && candidate_count < max_out; ++i)
-		{
-			const dlight_t *dl = active[i];
-			vec3_t to_light;
-			float overlap_score = 0.f;
-			float score;
-			float intensity;
-			float radius;
-
-			if (!R_FogVol_DlightIsInjectable (dl))
-				continue;
-
-			radius = dl->radius;
-			if (radius <= 0.f)
-				continue;
-
-			intensity = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
-			if (intensity <= 0.f)
-				continue;
-
-			if (active_count > 192 && has_fog_bounds)
-			{
-				if (!R_FogVol_LightOverlapsBounds (dl->origin, radius * 4.f, fog_bounds_mins, fog_bounds_maxs))
-					continue;
-			}
-
-			for (int v = 0; v < visible_count; ++v)
-			{
-				if (!R_FogVol_LightOverlapsVolume (visible_volumes[v].volume, dl->origin, radius))
-					continue;
-				overlap_score += visible_volumes[v].screen_weight;
-			}
-
-			if (overlap_score <= 0.f)
-				continue;
-
-			VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
-			score = overlap_score * intensity * radius;
-			score *= 1.f / (1.f + 0.0025f * sqrtf (DotProduct (to_light, to_light)));
-			if (score <= 0.f)
-				continue;
-
-			out[candidate_count].index = (dl->id != 0) ? dl->id : i;
-			out[candidate_count].score = score;
-			out[candidate_count].light.pos_rad[0] = dl->origin[0];
-			out[candidate_count].light.pos_rad[1] = dl->origin[1];
-			out[candidate_count].light.pos_rad[2] = dl->origin[2];
-			out[candidate_count].light.pos_rad[3] = radius;
-			out[candidate_count].light.col_int[0] = dl->color[0];
-			out[candidate_count].light.col_int[1] = dl->color[1];
-			out[candidate_count].light.col_int[2] = dl->color[2];
-			out[candidate_count].light.col_int[3] = 1.f;
-			out[candidate_count].bounds_mins[0] = dl->origin[0] - radius;
-			out[candidate_count].bounds_mins[1] = dl->origin[1] - radius;
-			out[candidate_count].bounds_mins[2] = dl->origin[2] - radius;
-			out[candidate_count].bounds_maxs[0] = dl->origin[0] + radius;
-			out[candidate_count].bounds_maxs[1] = dl->origin[1] + radius;
-			out[candidate_count].bounds_maxs[2] = dl->origin[2] + radius;
-			candidate_count++;
-		}
-	}
-
-	for (int i = 0; i < r_num_fog_dlights && candidate_count < max_out; ++i)
-	{
-		const dlight_t *dl = &r_fog_dlights[i];
-		float overlap_score = 0.f;
-
-		if (!R_FogVol_DlightIsInjectable (dl))
-			continue;
-
-		for (int v = 0; v < visible_count; ++v)
-		{
-			if (!R_FogVol_LightOverlapsVolume (visible_volumes[v].volume, dl->origin, dl->radius))
-				continue;
-			overlap_score += visible_volumes[v].screen_weight;
-		}
-
-		if (overlap_score <= 0.f)
-			continue;
-
-		out[candidate_count].index = 100000 + i;
-		out[candidate_count].score = overlap_score * dl->radius;
-		out[candidate_count].light.pos_rad[0] = dl->origin[0];
-		out[candidate_count].light.pos_rad[1] = dl->origin[1];
-		out[candidate_count].light.pos_rad[2] = dl->origin[2];
-		out[candidate_count].light.pos_rad[3] = dl->radius;
-		out[candidate_count].light.col_int[0] = dl->color[0];
-		out[candidate_count].light.col_int[1] = dl->color[1];
-		out[candidate_count].light.col_int[2] = dl->color[2];
-		out[candidate_count].light.col_int[3] = 1.f;
-		out[candidate_count].bounds_mins[0] = dl->origin[0] - dl->radius;
-		out[candidate_count].bounds_mins[1] = dl->origin[1] - dl->radius;
-		out[candidate_count].bounds_mins[2] = dl->origin[2] - dl->radius;
-		out[candidate_count].bounds_maxs[0] = dl->origin[0] + dl->radius;
-		out[candidate_count].bounds_maxs[1] = dl->origin[1] + dl->radius;
-		out[candidate_count].bounds_maxs[2] = dl->origin[2] + dl->radius;
-		candidate_count++;
-	}
-
-
-	{
-		const int static_light_count = R_FogVol_GetStaticLightCount ();
-		for (int i = 0; i < static_light_count && candidate_count < max_out; ++i)
-		{
-			vec4_t pos_rad;
-			vec4_t col_int;
-			float overlap_score = 0.f;
-			float radius;
-
-			if (!R_FogVol_GetStaticLight (i, pos_rad, col_int))
-				continue;
-
-			radius = pos_rad[3];
-			if (radius <= 0.f)
-				continue;
-
-			for (int v = 0; v < visible_count; ++v)
-			{
-				if (!R_FogVol_LightOverlapsVolume (visible_volumes[v].volume, pos_rad, radius))
-					continue;
-				overlap_score += visible_volumes[v].screen_weight;
-			}
-
-			if (overlap_score <= 0.f)
-				continue;
-
-			out[candidate_count].index = 200000 + i;
-			out[candidate_count].score = overlap_score * radius;
-			memcpy (out[candidate_count].light.pos_rad, pos_rad, sizeof (pos_rad));
-			memcpy (out[candidate_count].light.col_int, col_int, sizeof (col_int));
-			out[candidate_count].bounds_mins[0] = pos_rad[0] - radius;
-			out[candidate_count].bounds_mins[1] = pos_rad[1] - radius;
-			out[candidate_count].bounds_mins[2] = pos_rad[2] - radius;
-			out[candidate_count].bounds_maxs[0] = pos_rad[0] + radius;
-			out[candidate_count].bounds_maxs[1] = pos_rad[1] + radius;
-			out[candidate_count].bounds_maxs[2] = pos_rad[2] + radius;
-			candidate_count++;
-		}
-	}
-
-	if (candidate_count > 1)
-		qsort (out, candidate_count, sizeof (out[0]), R_FogVol_CompareLightCandidate);
-
-	return candidate_count;
-}
-
-static int R_FogVol_BuildLightListForVolume (const fog_volume_t *volume, const fogvol_light_candidate_t *prefiltered, int prefiltered_count, fog_light_gpu_t *out, int max_count, fogvol_light_stats_t *stats)
-{
-	vec3_t volume_mins;
-	vec3_t volume_maxs;
-	int copy_count = 0;
-
-	if (!volume || !out || max_count <= 0)
-		return 0;
-	if (!prefiltered || prefiltered_count <= 0)
-		return 0;
-
-	R_FogVol_GetVolumeBounds (volume, volume_mins, volume_maxs);
-	for (int i = 0; i < prefiltered_count && copy_count < max_count; ++i)
-	{
-		const fogvol_light_candidate_t *candidate = &prefiltered[i];
-		if (stats)
-			stats->narrowphase_candidates++;
-
-		if (!R_FogVol_BoundsOverlap (candidate->bounds_mins, candidate->bounds_maxs, volume_mins, volume_maxs))
-			continue;
-
-		out[copy_count++] = candidate->light;
-		if (stats)
-			stats->narrowphase_accepted++;
-	}
-
-	return copy_count;
-}
-
-void R_FogVol_RegisterCvars (void)
-{
-	for (size_t i = 0; i < countof (fogvol_cvar_table); ++i)
-	{
-		const fogvol_cvar_reg_t *reg = &fogvol_cvar_table[i];
-#if !defined(NDEBUG)
-		assert (reg->var != NULL);
-		assert (reg->category != NULL);
-		assert (reg->default_value != NULL);
-		assert (reg->var->name != NULL);
-		assert (reg->var->string != NULL);
-		assert (!q_strcasecmp (reg->var->string, reg->default_value));
-#endif
-		Cvar_RegisterVariable (reg->var);
-	}
-}
-
-static void R_FogVol_FreeGodrayReadbackBuffers (void)
-{
-	if (r_fogvol_godray_mask_cpu)
-	{
-		q_free(r_fogvol_godray_mask_cpu);
-		r_fogvol_godray_mask_cpu = NULL;
-	}
-	if (r_fogvol_godray_source_cpu)
-	{
-		q_free(r_fogvol_godray_source_cpu);
-		r_fogvol_godray_source_cpu = NULL;
-	}
-	r_fogvol_godray_mask_w = 0;
-	r_fogvol_godray_mask_h = 0;
-	r_fogvol_godray_source_w = 0;
-	r_fogvol_godray_source_h = 0;
-}
-
-void R_Froxel_ResetResources (void)
-{
-	if (r_froxel.light_tex)
-		glDeleteTextures (1, &r_froxel.light_tex);
-	if (r_froxel.history_tex)
-		glDeleteTextures (1, &r_froxel.history_tex);
-	if (r_froxel.light_ssbo)
-		GL_DeleteBuffersFunc (1, &r_froxel.light_ssbo);
-	r_froxel.light_tex = 0;
-	r_froxel.history_tex = 0;
-	r_froxel.light_ssbo = 0;
-	R_FogVol_FreeGodrayReadbackBuffers ();
-	r_froxel.dims[0] = 0;
-	r_froxel.dims[1] = 0;
-	r_froxel.dims[2] = 0;
-	r_froxel.light_count = 0;
-	r_froxel.prev_frame = 0;
-	r_froxel.prev_mode_valid = false;
-	r_froxel.prev_valid = false;
-	r_froxel.valid = false;
-	R_FogVol_GPUSelectReset ();
-	r_fogvol_gpu_light_select_state.gpu_frames = 0;
-	r_fogvol_gpu_light_select_state.gpu_fallbacks = 0;
-	r_fogvol_gpu_light_select_state.last_candidates = 0;
-	r_fogvol_gpu_light_select_state.last_selected = 0;
-}
-
-static qboolean R_Froxel_EnsureResources (int nx, int ny, int nz)
-{
-	if (nx <= 0 || ny <= 0 || nz <= 0)
-		return false;
-
-	if (r_froxel.dims[0] != nx || r_froxel.dims[1] != ny || r_froxel.dims[2] != nz)
-	{
-		if (r_froxel.light_tex)
-			glDeleteTextures (1, &r_froxel.light_tex);
-		if (r_froxel.history_tex)
-			glDeleteTextures (1, &r_froxel.history_tex);
-		r_froxel.light_tex = 0;
-		r_froxel.history_tex = 0;
-		r_froxel.dims[0] = nx;
-		r_froxel.dims[1] = ny;
-		r_froxel.dims[2] = nz;
-		r_froxel.prev_valid = false;
-	}
-
-	if (!r_froxel.light_tex)
-		glGenTextures (1, &r_froxel.light_tex);
-	if (!r_froxel.history_tex)
-		glGenTextures (1, &r_froxel.history_tex);
-	if (!r_froxel.light_ssbo)
-		GL_GenBuffersFunc (1, &r_froxel.light_ssbo);
-
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.light_tex);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_RGBA16F, nx, ny, nz, 0, GL_RGBA, GL_FLOAT, NULL);
-
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.history_tex);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_RGBA16F, nx, ny, nz, 0, GL_RGBA, GL_FLOAT, NULL);
-
-	return true;
-}
-
-void R_Froxel_BeginFrame (float near_clip, float far_clip)
-{
-	int nx, ny, nz;
-	const int lighting_mode = CLAMP (0, (int)Q_rint (r_fogvol_lighting_mode.value), 3);
-	const int parity_mode = CLAMP (0, (int)Q_rint (r_fogvol_froxel_parity.value), 1);
-	const qboolean froxel_enabled = (r_fogvol_froxel.value > 0.f);
-
-	r_froxel.valid = false;
-	if (!froxel_enabled)
-		return;
-
-	nx = CLAMP (16, (r_refdef.vrect.width + 15) / 16, 192);
-	ny = CLAMP (12, (r_refdef.vrect.height + 15) / 16, 128);
-	nz = 32;
-
-	r_froxel.near_clip = q_max (near_clip, 1.f);
-	r_froxel.far_clip = q_max (far_clip, r_froxel.near_clip + 1.f);
-	r_froxel.tan_half_fov_x = tanf (DEG2RAD (r_refdef.fov_x) * 0.5f);
-	r_froxel.tan_half_fov_y = tanf (DEG2RAD (r_refdef.fov_y) * 0.5f);
-	r_froxel.log_far_near = logf (r_froxel.far_clip / r_froxel.near_clip);
-
-	if (!R_Froxel_EnsureResources (nx, ny, nz))
-		return;
-
-	if (r_froxel.prev_mode_valid
-		&& (r_froxel.prev_froxel_enabled != froxel_enabled
-			|| r_froxel.prev_lighting_mode != lighting_mode
-			|| r_froxel.prev_parity_mode != parity_mode))
-		r_froxel.prev_valid = false;
-
-	r_froxel.prev_froxel_enabled = froxel_enabled;
-	r_froxel.prev_lighting_mode = lighting_mode;
-	r_froxel.prev_parity_mode = parity_mode;
-	r_froxel.prev_mode_valid = true;
-	r_froxel.light_count = 0;
-	r_froxel.valid = true;
-}
-
-static void R_Froxel_AddLight (const vec3_t origin, float radius, const vec3_t color, float intensity, uint32_t type)
-{
-	froxel_gpu_light_t *out;
-
-	if (!r_froxel.valid || r_froxel.light_count >= MAX_FROXEL_GPU_LIGHTS)
-		return;
-	if (radius <= 0.f || intensity <= 0.f)
-		return;
-	out = &r_froxel_gpu_lights[r_froxel.light_count++];
-	out->pos_rad[0] = origin[0];
-	out->pos_rad[1] = origin[1];
-	out->pos_rad[2] = origin[2];
-	out->pos_rad[3] = radius;
-	out->color_intensity[0] = q_max (0.f, color[0]);
-	out->color_intensity[1] = q_max (0.f, color[1]);
-	out->color_intensity[2] = q_max (0.f, color[2]);
-	out->color_intensity[3] = intensity;
-	out->type = type;
-	out->_pad[0] = out->_pad[1] = out->_pad[2] = 0u;
-}
-
-static void R_Froxel_InjectSun (void)
-{
-	const sun_t *sun;
-	vec3_t sun_color;
-	float sun_intensity;
-	float sun_scale;
-	vec3_t inject_origin;
-	vec3_t inject_dir;
-	float inject_radius;
-
-	if (!r_froxel.valid || r_fogvol_froxel_sun.value <= 0.f)
-		return;
-
-	sun = R_GetSun ();
-	if (!sun || !R_WorldHasSun ())
-		return;
-
-	sun_intensity = q_max (0.f, sun->intensity);
-	if (sun_intensity <= 0.f)
-		return;
-
-	VectorCopy (sun->color, sun_color);
-	if (sun_color[0] <= 0.f && sun_color[1] <= 0.f && sun_color[2] <= 0.f)
-		VectorSet (sun_color, 1.f, 1.f, 1.f);
-
-	sun_scale = q_max (0.f, r_fogvol_froxel_sun.value);
-	if (sun_scale <= 0.f)
-		return;
-
-	VectorScale (sun->dir, -1.f, inject_dir);
-	if (VectorNormalize (inject_dir) <= 0.f)
-		return;
-	inject_radius = q_max (384.f, r_froxel.far_clip * 0.40f);
-	VectorMA (r_refdef.vieworg, r_froxel.far_clip * 0.55f, inject_dir, inject_origin);
-	R_Froxel_AddLight (inject_origin, inject_radius, sun_color, sun_intensity * sun_scale, (uint32_t)DLIGHT_DEFAULT);
-}
-
-typedef struct froxel_dlight_candidate_s
-{
-	const dlight_t *dl;
-	float score;
-} froxel_dlight_candidate_t;
-
-typedef struct froxel_static_candidate_s
-{
-	fog_light_gpu_t light;
-	float score;
-	float dist2;
-	int index;
-} froxel_static_candidate_t;
-
-static int R_Froxel_CompareStaticCandidate (const void *lhs, const void *rhs)
-{
-	const froxel_static_candidate_t *a = (const froxel_static_candidate_t *)lhs;
-	const froxel_static_candidate_t *b = (const froxel_static_candidate_t *)rhs;
-
-	if (a->score > b->score)
-		return -1;
-	if (a->score < b->score)
-		return 1;
-	if (a->dist2 < b->dist2)
-		return -1;
-	if (a->dist2 > b->dist2)
-		return 1;
-	if (a->index < b->index)
-		return -1;
-	if (a->index > b->index)
-		return 1;
-	return 0;
-}
-
-static void R_Froxel_InjectStaticLights (void)
-{
-	float static_scale;
-	froxel_static_candidate_t candidates[MAX_FOG_STATIC_LIGHTS];
-	const int static_light_count = R_FogVol_GetStaticLightCount ();
-	int candidate_count = 0;
-	int capacity;
-
-	if (!r_froxel.valid)
-		return;
-
-	static_scale = 1.f;
-
-	if (static_light_count <= 0)
-		return;
-
-	capacity = MAX_FROXEL_GPU_LIGHTS - r_froxel.light_count;
-	if (capacity <= 0)
-		return;
-	capacity = q_min (capacity, MAX_FROXEL_GPU_LIGHTS);
-
-	for (int i = 0; i < static_light_count; ++i)
-	{
-		vec4_t pos_rad;
-		vec4_t col_int;
-		float intensity;
-		float color_peak;
-		float radius;
-		float dx;
-		float dy;
-		float dz;
-		float dist2;
-		float dist;
-		float distance_weight;
-		float score;
-
-		if (!R_FogVol_GetStaticLight (i, pos_rad, col_int))
-			continue;
-		intensity = q_max (0.f, col_int[3]);
-		color_peak = q_max (0.f, q_max (col_int[0], q_max (col_int[1], col_int[2])));
-		radius = q_max (0.f, pos_rad[3]);
-		dx = pos_rad[0] - r_refdef.vieworg[0];
-		dy = pos_rad[1] - r_refdef.vieworg[1];
-		dz = pos_rad[2] - r_refdef.vieworg[2];
-		dist2 = dx * dx + dy * dy + dz * dz;
-		dist = sqrtf (dist2);
-		distance_weight = 1.f / (1.f + 0.0025f * dist);
-		score = radius * color_peak * intensity * distance_weight;
-
-		if (radius <= 0.f || intensity <= 0.f || color_peak <= 0.f)
-			continue;
-		if (score <= 0.f)
-			continue;
-		if (candidate_count >= (int)countof (candidates))
-			break;
-
-		memcpy (candidates[candidate_count].light.pos_rad, pos_rad, sizeof (pos_rad));
-		memcpy (candidates[candidate_count].light.col_int, col_int, sizeof (col_int));
-		candidates[candidate_count].score = score;
-		candidates[candidate_count].dist2 = dist2;
-		candidates[candidate_count].index = i;
-		candidate_count++;
-	}
-
-	if (candidate_count <= 0)
-		return;
-
-	qsort (candidates, candidate_count, sizeof (candidates[0]), R_Froxel_CompareStaticCandidate);
-
-	for (int i = 0; i < candidate_count && i < capacity; ++i)
-	{
-		const fog_light_gpu_t *sl = &candidates[i].light;
-		vec3_t color;
-		float intensity;
-
-		if (!sl)
-			continue;
-		color[0] = q_max (0.f, sl->col_int[0]);
-		color[1] = q_max (0.f, sl->col_int[1]);
-		color[2] = q_max (0.f, sl->col_int[2]);
-		intensity = q_max (0.f, sl->col_int[3]) * static_scale;
-		if (color[0] <= 0.f && color[1] <= 0.f && color[2] <= 0.f)
-			continue;
-		if (intensity <= 0.f)
-			continue;
-
-		R_Froxel_AddLight (sl->pos_rad, sl->pos_rad[3], color, intensity, (uint32_t)DLIGHT_DEFAULT);
-	}
-}
-
-static int R_FogVol_NextPow2 (int value)
-{
-	int pow2 = 1;
-	while (pow2 < value && pow2 < (1 << 30))
-		pow2 <<= 1;
-	return q_max (1, pow2);
-}
-
-static qboolean R_FogVol_GPUSelectAvailable (void)
-{
-	return GL_DispatchComputeFunc
-		&& GL_MemoryBarrierFunc
-		&& GL_MapBufferRangeFunc
-		&& GL_UnmapBufferFunc
-		&& glprogs.fogvol_dlight_score
-		&& glprogs.gpu_bitonic_pairs;
-}
-
-static void R_FogVol_GPUSelectReset (void)
-{
-	if (GL_DeleteBuffersFunc)
-	{
-		if (r_fogvol_gpu_light_select_state.candidate_ssbo)
-			GL_DeleteBuffersFunc (1, &r_fogvol_gpu_light_select_state.candidate_ssbo);
-		if (r_fogvol_gpu_light_select_state.sort_ssbo)
-			GL_DeleteBuffersFunc (1, &r_fogvol_gpu_light_select_state.sort_ssbo);
-	}
-	r_fogvol_gpu_light_select_state.candidate_ssbo = 0;
-	r_fogvol_gpu_light_select_state.sort_ssbo = 0;
-	r_fogvol_gpu_light_select_state.sort_capacity = 0;
-}
-
-static qboolean R_FogVol_GPUSelectEnsureBuffers (int candidate_count)
-{
-	const int sort_count = R_FogVol_NextPow2 (candidate_count);
-
-	if (!R_FogVol_GPUSelectAvailable ())
-		return false;
-
-	if (!r_fogvol_gpu_light_select_state.candidate_ssbo)
-	{
-		GL_GenBuffersFunc (1, &r_fogvol_gpu_light_select_state.candidate_ssbo);
-		if (!r_fogvol_gpu_light_select_state.candidate_ssbo)
-			return false;
-		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_gpu_light_select_state.candidate_ssbo);
-		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER,
-			sizeof (fogvol_dlight_score_gpu_t) * FOGVOL_GPU_DLIGHT_MAX_CANDIDATES, NULL, GL_DYNAMIC_DRAW);
-	}
-
-	if (!r_fogvol_gpu_light_select_state.sort_ssbo
-		|| r_fogvol_gpu_light_select_state.sort_capacity < sort_count)
-	{
-		if (!r_fogvol_gpu_light_select_state.sort_ssbo)
-			GL_GenBuffersFunc (1, &r_fogvol_gpu_light_select_state.sort_ssbo);
-		if (!r_fogvol_gpu_light_select_state.sort_ssbo)
-			return false;
-
-		r_fogvol_gpu_light_select_state.sort_capacity = sort_count;
-		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_gpu_light_select_state.sort_ssbo);
-		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER,
-			sizeof (fogvol_sort_entry_gpu_t) * r_fogvol_gpu_light_select_state.sort_capacity, NULL, GL_DYNAMIC_DRAW);
-	}
-
-	return true;
-}
-
-static void R_FogVol_GPUBitonicSort (GLuint sort_buffer, int count)
-{
-	const int groups = (count + (FOGVOL_GPU_LOCAL_SIZE - 1)) / FOGVOL_GPU_LOCAL_SIZE;
-	int k;
-
-	GL_UseProgram (glprogs.gpu_bitonic_pairs);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, sort_buffer, 0, sizeof (fogvol_sort_entry_gpu_t) * count);
-
-	for (k = 2; k <= count; k <<= 1)
-	{
-		int j;
-		for (j = k >> 1; j > 0; j >>= 1)
-		{
-			GL_Uniform4fFunc (0, (float)count, (float)j, (float)k, 0.f);
-			GL_DispatchComputeFunc (groups, 1, 1);
-			GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
-		}
-	}
-}
-
-static qboolean R_FogVol_GPUReadBuffer (GLuint buffer, size_t size, void *dst)
-{
-	void *mapped;
-
-	if (!buffer || !dst || !size)
-		return false;
-
-	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, buffer);
-	mapped = GL_MapBufferRangeFunc (GL_SHADER_STORAGE_BUFFER, 0, (GLsizeiptr)size, GL_MAP_READ_BIT);
-	if (!mapped)
-		return false;
-	memcpy (dst, mapped, size);
-	if (!GL_UnmapBufferFunc (GL_SHADER_STORAGE_BUFFER))
-		return false;
-	return true;
-}
-
-static qboolean R_Froxel_InjectDlights_GPU (float dlight_scale, int selected_cap)
-{
-	const dlight_t *const *active;
-	const dlight_t *candidate_ptrs[FOGVOL_GPU_DLIGHT_MAX_CANDIDATES];
-	int active_count = 0;
-	int candidate_count = 0;
-	int sort_count;
-	int groups;
-	int selected_count = 0;
-
-	active = DLightPool_GetActiveList (&active_count);
-	if (active)
-	{
-		for (int i = 0; i < active_count && candidate_count < FOGVOL_GPU_DLIGHT_MAX_CANDIDATES; ++i)
-		{
-			const dlight_t *dl = active[i];
-			float intensity;
-			fogvol_dlight_score_gpu_t *gpu;
-
-			if (!R_FogVol_DlightIsInjectable (dl))
-				continue;
-			intensity = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
-			if (intensity <= 0.f || dl->radius <= 0.f)
-				continue;
-
-			candidate_ptrs[candidate_count] = dl;
-			gpu = &r_fogvol_gpu_light_select_state.staging_candidates[candidate_count];
-			gpu->pos_rad[0] = dl->origin[0];
-			gpu->pos_rad[1] = dl->origin[1];
-			gpu->pos_rad[2] = dl->origin[2];
-			gpu->pos_rad[3] = dl->radius;
-			gpu->color_bias[0] = dl->color[0];
-			gpu->color_bias[1] = dl->color[1];
-			gpu->color_bias[2] = dl->color[2];
-			gpu->color_bias[3] = R_FogVol_DlightScoreBias (dl);
-			gpu->meta[0] = 1u;
-			gpu->meta[1] = (uint32_t)((dl->id > 0) ? dl->id : (i + 1));
-			gpu->meta[2] = 0u;
-			gpu->meta[3] = 0u;
-			candidate_count++;
-		}
-	}
-
-	for (int i = 0; i < r_num_fog_dlights && candidate_count < FOGVOL_GPU_DLIGHT_MAX_CANDIDATES; ++i)
-	{
-		const dlight_t *dl = &r_fog_dlights[i];
-		float intensity;
-		fogvol_dlight_score_gpu_t *gpu;
-
-		if (!R_FogVol_DlightIsInjectable (dl))
-			continue;
-		intensity = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
-		if (intensity <= 0.f || dl->radius <= 0.f)
-			continue;
-
-		candidate_ptrs[candidate_count] = dl;
-		gpu = &r_fogvol_gpu_light_select_state.staging_candidates[candidate_count];
-		gpu->pos_rad[0] = dl->origin[0];
-		gpu->pos_rad[1] = dl->origin[1];
-		gpu->pos_rad[2] = dl->origin[2];
-		gpu->pos_rad[3] = dl->radius;
-		gpu->color_bias[0] = dl->color[0];
-		gpu->color_bias[1] = dl->color[1];
-		gpu->color_bias[2] = dl->color[2];
-		gpu->color_bias[3] = R_FogVol_DlightScoreBias (dl);
-		gpu->meta[0] = 1u;
-		gpu->meta[1] = 0x80000000u | (uint32_t)i;
-		gpu->meta[2] = 0u;
-		gpu->meta[3] = 0u;
-		candidate_count++;
-	}
-
-	r_fogvol_gpu_light_select_state.last_candidates = candidate_count;
-	r_fogvol_gpu_light_select_state.last_selected = 0;
-
-	if (candidate_count <= 0)
-		return true;
-	if (!R_FogVol_GPUSelectEnsureBuffers (candidate_count))
-		return false;
-
-	sort_count = R_FogVol_NextPow2 (candidate_count);
-	groups = (sort_count + (FOGVOL_GPU_LOCAL_SIZE - 1)) / FOGVOL_GPU_LOCAL_SIZE;
-
-	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_fogvol_gpu_light_select_state.candidate_ssbo);
-	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0,
-		sizeof (fogvol_dlight_score_gpu_t) * candidate_count,
-		r_fogvol_gpu_light_select_state.staging_candidates);
-
-	GL_UseProgram (glprogs.fogvol_dlight_score);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, r_fogvol_gpu_light_select_state.candidate_ssbo, 0,
-		sizeof (fogvol_dlight_score_gpu_t) * q_max (1, candidate_count));
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, r_fogvol_gpu_light_select_state.sort_ssbo, 0,
-		sizeof (fogvol_sort_entry_gpu_t) * q_max (1, sort_count));
-	GL_Uniform4fFunc (0, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2], (float)candidate_count);
-	GL_DispatchComputeFunc (groups, 1, 1);
-	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
-
-	R_FogVol_GPUBitonicSort (r_fogvol_gpu_light_select_state.sort_ssbo, sort_count);
-
-	if (!R_FogVol_GPUReadBuffer (r_fogvol_gpu_light_select_state.sort_ssbo,
-		sizeof (fogvol_sort_entry_gpu_t) * q_min (selected_cap, FOGVOL_GPU_DLIGHT_MAX_CANDIDATES),
-		r_fogvol_gpu_light_select_state.staging_sorted))
-		return false;
-
-	for (int i = 0; i < selected_cap; ++i)
-	{
-		const fogvol_sort_entry_gpu_t *entry = &r_fogvol_gpu_light_select_state.staging_sorted[i];
-		int candidate_index = (int)entry->index;
-		const dlight_t *dl;
-		float lum;
-		float energy;
-
-		if (entry->key0 == 0xffffffffu)
-			break;
-		if (candidate_index < 0 || candidate_index >= candidate_count)
-			continue;
-		dl = candidate_ptrs[candidate_index];
-		if (!dl)
-			continue;
-
-		lum = q_max (dl->color[0], q_max (dl->color[1], dl->color[2]));
-		energy = dlight_scale * (0.5f + lum) * R_FogVol_DlightScoreBias (dl);
-		if (dl->type == DLIGHT_ROCKET || dl->type == DLIGHT_EXPLOSION)
-			energy *= 1.35f;
-		R_Froxel_AddLight (dl->origin, dl->radius, dl->color, energy, (uint32_t)dl->type);
-		selected_count++;
-	}
-
-	r_fogvol_gpu_light_select_state.gpu_frames++;
-	r_fogvol_gpu_light_select_state.last_selected = selected_count;
-	return true;
-}
-
-void R_Froxel_InjectDlights (void)
-{
-	const dlight_t *const *active;
-	froxel_dlight_candidate_t selected[64];
-	int selected_count = 0;
-	int selected_cap;
-	int active_count = 0;
-	const float dlight_scale = q_max (0.f, r_fogvol_dlightscale.value);
-	const int froxel_dlight_cap = MAX_FROXEL_GPU_LIGHTS;
-
-	if (!r_froxel.valid || dlight_scale <= 0.f)
-		return;
-
-	selected_cap = CLAMP (1, (int)Q_rint (r_fogvol_light_max.value), froxel_dlight_cap);
-	selected_cap = CLAMP (1, selected_cap, (int)countof (selected));
-
-	if (r_fogvol_gpu_light_select.value > 0.f)
-	{
-		if (R_Froxel_InjectDlights_GPU (dlight_scale, selected_cap))
-			return;
-		r_fogvol_gpu_light_select_state.gpu_fallbacks++;
-	}
-
-	active = DLightPool_GetActiveList (&active_count);
-	if (active)
-	{
-		for (int i = 0; i < active_count; ++i)
-		{
-			const dlight_t *dl = active[i];
-			float score;
-			float intensity;
-			vec3_t to_light;
-			int min_index = 0;
-			float min_score;
-
-			if (!R_FogVol_DlightIsInjectable (dl))
-				continue;
-			intensity = q_max (0.f, q_max (dl->color[0], q_max (dl->color[1], dl->color[2])));
-			if (intensity <= 0.f)
-				continue;
-			VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
-			score = dl->radius * intensity * R_FogVol_DlightScoreBias (dl) * (1.f / (1.f + 0.0025f * sqrtf (DotProduct (to_light, to_light))));
-
-			if (selected_count < selected_cap)
-			{
-				selected[selected_count].dl = dl;
-				selected[selected_count].score = score;
-				selected_count++;
-				continue;
-			}
-
-			min_score = selected[0].score;
-			for (int k = 1; k < selected_count; ++k)
-			{
-				if (selected[k].score < min_score)
-				{
-					min_score = selected[k].score;
-					min_index = k;
-				}
-			}
-			if (score > min_score)
-			{
-				selected[min_index].dl = dl;
-				selected[min_index].score = score;
-			}
-		}
-	}
-
-	for (int i = 0; i < r_num_fog_dlights; ++i)
-	{
-		const dlight_t *dl = &r_fog_dlights[i];
-		float score;
-		float intensity;
-		vec3_t to_light;
-		int min_index = 0;
-		float min_score;
-
-		if (!R_FogVol_DlightIsInjectable (dl))
-			continue;
-		intensity = q_max (0.f, q_max (dl->color[0], q_max (dl->color[1], dl->color[2])));
-		if (intensity <= 0.f)
-			continue;
-		VectorSubtract (dl->origin, r_refdef.vieworg, to_light);
-		score = dl->radius * intensity * R_FogVol_DlightScoreBias (dl) * (1.f / (1.f + 0.0025f * sqrtf (DotProduct (to_light, to_light))));
-
-		if (selected_count < selected_cap)
-		{
-			selected[selected_count].dl = dl;
-			selected[selected_count].score = score;
-			selected_count++;
-			continue;
-		}
-
-		min_score = selected[0].score;
-		for (int k = 1; k < selected_count; ++k)
-		{
-			if (selected[k].score < min_score)
-			{
-				min_score = selected[k].score;
-				min_index = k;
-			}
-		}
-		if (score > min_score)
-		{
-			selected[min_index].dl = dl;
-			selected[min_index].score = score;
-		}
-	}
-
-	for (int i = 0; i < selected_count; ++i)
-	{
-		float lum;
-		float energy;
-		if (!selected[i].dl)
-			continue;
-		lum = q_max (selected[i].dl->color[0], q_max (selected[i].dl->color[1], selected[i].dl->color[2]));
-		energy = dlight_scale * (0.5f + lum) * R_FogVol_DlightScoreBias (selected[i].dl);
-		if (selected[i].dl->type == DLIGHT_ROCKET || selected[i].dl->type == DLIGHT_EXPLOSION)
-			energy *= 1.35f;
-		R_Froxel_AddLight (selected[i].dl->origin, selected[i].dl->radius, selected[i].dl->color, energy, (uint32_t)selected[i].dl->type);
-	}
-
-	if (r_fogvol_gpu_light_select.value > 0.f)
-	{
-		r_fogvol_gpu_light_select_state.last_candidates = active_count + r_num_fog_dlights;
-		r_fogvol_gpu_light_select_state.last_selected = selected_count;
-	}
-}
-
-typedef enum fogvol_lighting_mode_e
+static int FogVol_NormalizeShape (int shape)
 {
-	FOGVOL_LIGHTING_OFF = 0,
-	FOGVOL_LIGHTING_RAYMARCH = 1,
-	FOGVOL_LIGHTING_FROXEL = 2,
-	FOGVOL_LIGHTING_FROXEL_PLUS_DETAIL = 3
-} fogvol_lighting_mode_t;
-
-static fogvol_lighting_mode_t R_FogVol_LightingMode (void)
-{
-	return (fogvol_lighting_mode_t)CLAMP (0, (int)Q_rint (r_fogvol_lighting_mode.value), 3);
-}
-
-static qboolean R_FogVol_UseRaymarchLights (fogvol_lighting_mode_t mode)
-{
-	return (mode == FOGVOL_LIGHTING_RAYMARCH);
-}
-
-static qboolean R_FogVol_UseFroxelLights (fogvol_lighting_mode_t mode)
-{
-	return (mode == FOGVOL_LIGHTING_FROXEL || mode == FOGVOL_LIGHTING_FROXEL_PLUS_DETAIL);
-}
-
-static qboolean R_FogVol_UseRaymarchDetail (fogvol_lighting_mode_t mode)
-{
-	return (mode == FOGVOL_LIGHTING_FROXEL_PLUS_DETAIL);
-}
-
-static void R_FogVol_WarnFroxelLightingConfig (void)
-{
-	static qboolean warned = false;
-
-	if (warned)
-		return;
-	if (r_fogvol_froxel.value > 0.f && R_FogVol_UseFroxelLights (R_FogVol_LightingMode ()) && r_fogvol_light.value <= 0.f)
-	{
-		Con_Printf ("Note: r_fogvol_light<=0 disables raymarch light lists, but froxel dlight injection stays enabled.\n");
-		warned = true;
-	}
-}
-
-void R_Froxel_EndFrame (void)
-{
-	float inv_view[16];
-	float camera_delta = 0.f;
-	GLuint out_tex;
-	GLuint history_tex;
-	GLuint tmp_tex;
-	int groups_x;
-	int groups_y;
-	int groups_z;
-
-	if (!r_froxel.valid || !r_froxel.light_tex || !r_froxel.history_tex || !r_froxel.light_ssbo || !glprogs.fogvol_froxel_inject)
-		return;
-	if (!Mat4_Inverse (r_matview, inv_view))
-		return;
-	if (r_froxel.prev_valid)
-	{
-		vec3_t delta;
-		VectorSubtract (r_refdef.vieworg, r_froxel.prev_vieworg, delta);
-		camera_delta = sqrtf (DotProduct (delta, delta));
-	}
-
-	out_tex = r_froxel.light_tex;
-	history_tex = r_froxel.history_tex;
-	groups_x = (r_froxel.dims[0] + 3) / 4;
-	groups_y = (r_froxel.dims[1] + 3) / 4;
-	groups_z = (r_froxel.dims[2] + 3) / 4;
-
-	GL_UseProgram (glprogs.fogvol_froxel_inject);
-	glBindTexture (GL_TEXTURE_3D, 0);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, r_froxel.light_ssbo, 0, sizeof (froxel_gpu_light_t) * q_max (1, MAX_FROXEL_GPU_LIGHTS));
-	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (froxel_gpu_light_t) * q_max (1, MAX_FROXEL_GPU_LIGHTS), r_froxel_gpu_lights, GL_STREAM_DRAW);
-	GL_BindImageTextureFunc (0, out_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
-	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, history_tex);
-	GL_Uniform4fFunc (0,
-		(float)r_froxel.dims[0],
-		(float)r_froxel.dims[1],
-		(float)r_froxel.dims[2],
-		(float)CLAMP (0, r_froxel.light_count, MAX_FROXEL_GPU_LIGHTS));
-	GL_Uniform4fFunc (1, r_froxel.near_clip, r_froxel.far_clip, r_froxel.tan_half_fov_x, r_froxel.tan_half_fov_y);
-	GL_Uniform4fFunc (2, r_froxel.log_far_near, 0.f, 0.f, 0.f);
-	GL_UniformMatrix4fvFunc (3, 1, GL_FALSE, inv_view);
-	GL_Uniform4fFunc (7,
-		CLAMP (0.f, r_fogvol_froxel_temporal_alpha.value, 1.f),
-		q_max (1.f, r_fogvol_froxel_temporal_reject_threshold.value),
-		camera_delta,
-		r_froxel.prev_valid ? 1.f : 0.f);
-	GL_DispatchComputeFunc (groups_x, groups_y, groups_z);
-	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
-
-	tmp_tex = r_froxel.light_tex;
-	r_froxel.light_tex = r_froxel.history_tex;
-	r_froxel.history_tex = tmp_tex;
-	VectorCopy (r_refdef.vieworg, r_froxel.prev_vieworg);
-	r_froxel.prev_frame = r_framecount;
-	r_froxel.prev_valid = true;
-}
-
-void R_FogVol_Init (void)
-{
-	memset (&r_froxel, 0, sizeof (r_froxel));
-	memset (&r_fogvol_global_volume, 0, sizeof (r_fogvol_global_volume));
-	memset (&r_fogvol_perf_stats, 0, sizeof (r_fogvol_perf_stats));
-	r_fogvol_global_active = false;
-	r_fogvol_resource_warned = false;
-	r_fogvol_static_build_cached_valid = false;
-	R_FogVol_WarnFroxelLightingConfig ();
-}
-
-void R_FogVol_Clear (void)
-{
-	r_fogvolume_count = 0;
-	memset (&r_fogvol_global_volume, 0, sizeof (r_fogvol_global_volume));
-	r_fogvol_global_active = false;
-}
-
-void R_FogVol_ClearEntities (void)
-{
-	r_fogvolume_entity_count = 0;
-}
-
-static qboolean R_FogVol_IsSupportedShape (int shape)
-{
-	return shape == FOGVOL_SHAPE_BOX || shape == FOGVOL_SHAPE_SPHERE;
-}
-
-static int R_FogVol_NormalizeShape (int shape)
-{
-	if (shape == FOGVOL_SHAPE_SPHERE)
-		return FOGVOL_SHAPE_SPHERE;
-	return FOGVOL_SHAPE_BOX;
-}
-
-static void R_FogVol_ClampVolume (fog_volume_t *volume)
-{
-	volume->density = CLAMP (0.f, volume->density, 10.f);
-	volume->falloff = CLAMP (0.f, volume->falloff, 256.f);
-	volume->noiseAmount = CLAMP (0.f, volume->noiseAmount, 1.f);
-	volume->noiseScale = CLAMP (0.001f, volume->noiseScale, 0.5f);
-	volume->turbulence = CLAMP (0.f, volume->turbulence, 2.f);
-	volume->emissiveStrength = CLAMP (0.f, volume->emissiveStrength, 16.f);
-	volume->shape = R_FogVol_NormalizeShape (volume->shape);
-	volume->blendMode = CLAMP (-1, volume->blendMode, 1);
-	volume->edgeSoftness = CLAMP (0.f, volume->edgeSoftness, 1.f);
-}
-
-static void R_FogVol_AddVolume (const fog_volume_t *volume)
-{
-	fog_volume_t clamped;
-
-	if (r_fogvolume_count >= MAX_FOGVOLUMES)
-		return;
-	clamped = *volume;
-	R_FogVol_ClampVolume (&clamped);
-	r_fogvolumes[r_fogvolume_count++] = clamped;
-}
-
-void R_FogVol_AddEntityVolume (const fog_volume_t *volume)
-{
-	fog_volume_t clamped;
-
-	if (r_fogvolume_entity_count >= MAX_FOGVOLUMES)
-		return;
-	clamped = *volume;
-	R_FogVol_ClampVolume (&clamped);
-	r_fogvolume_entities[r_fogvolume_entity_count++] = clamped;
+	return (shape == FOGVOL_SHAPE_SPHERE) ? FOGVOL_SHAPE_SPHERE : FOGVOL_SHAPE_BOX;
 }
 
-static void R_FogVol_ParseColor (const char *value, vec3_t color)
+static void FogVol_ParseColor (const char *value, vec3_t color)
 {
 	float r = 1.f, g = 1.f, b = 1.f;
 	if (value && sscanf (value, "%f %f %f", &r, &g, &b) == 3)
 	{
-		/* BUG FIX #7a: Threshold was > 2.f which wrongly keeps values in
-		 * (1,2] as-is even though linear RGB is defined on [0,1].  Use > 1.f
-		 * so that any channel exceeding the linear range triggers the 0-255
-		 * normalisation path.
-		 * BUG FIX #7b: If sscanf returns < 3 we fall through to the defaults
-		 * (r=g=b=1), but the original code mixed partial results from sscanf
-		 * with the uninitialised defaults in the caller's stack frame.
-		 * The explicit == 3 guard above is correct; no change needed there. */
 		if (r > 1.f || g > 1.f || b > 1.f)
 		{
 			r *= 1.f / 255.f;
@@ -2467,502 +200,285 @@ static void R_FogVol_ParseColor (const char *value, vec3_t color)
 			b *= 1.f / 255.f;
 		}
 	}
-	color[0] = r;
-	color[1] = g;
-	color[2] = b;
+	color[0] = CLAMP (0.f, r, 8.f);
+	color[1] = CLAMP (0.f, g, 8.f);
+	color[2] = CLAMP (0.f, b, 8.f);
 }
 
-qboolean R_FogVol_GetGlobalFogState (vec3_t color, float *density)
+static void FogVol_ClampVolume (fog_volume_t *v)
 {
-	if (color)
-		VectorClear (color);
-	if (density)
-		*density = 0.f;
-
-	if (!r_fogvol_global_active || !r_fogvol_global_volume.enabled)
-		return false;
-
-	if (color)
-		VectorCopy (r_fogvol_global_volume.color, color);
-	if (density)
-		*density = q_max (0.f, r_fogvol_global_volume.density);
-
-	return true;
-}
-
-
-static float R_FogVol_PointDistance (const vec3_t point, const fog_volume_t *volume)
-{
-	/* BUG FIX (C-07): Declare all locals at the top of the function so this
-	 * code compiles cleanly under strict C89 (-std=c89 / /Za).  Mixed
-	 * declarations after statements are a C99 extension that some Quake-engine
-	 * toolchains reject. */
-	float dist2 = 0.f;
-	int i;
-
-	if (R_FogVol_NormalizeShape (volume->shape) == FOGVOL_SHAPE_SPHERE)
+	if (!v)
+		return;
+	v->shape = FogVol_NormalizeShape (v->shape);
+	for (int a = 0; a < 3; ++a)
 	{
-		vec3_t delta;
-		float dist;
-		VectorSubtract (point, volume->sphereCenter, delta);
-		dist = VectorLength (delta) - volume->sphereRadius;
-		return q_max (0.f, dist);
-	}
-
-	for (i = 0; i < 3; ++i)
-	{
-		if (point[i] < volume->mins[i])
+		if (v->mins[a] > v->maxs[a])
 		{
-			float d = volume->mins[i] - point[i];
-			dist2 += d * d;
+			float t = v->mins[a];
+			v->mins[a] = v->maxs[a];
+			v->maxs[a] = t;
 		}
-		else if (point[i] > volume->maxs[i])
-		{
-			float d = point[i] - volume->maxs[i];
-			dist2 += d * d;
-		}
+		v->color[a] = CLAMP (0.f, v->color[a], 8.f);
 	}
-	return sqrtf (dist2);
+	v->density = CLAMP (0.f, v->density, 8.f);
+	v->falloff = q_max (0.f, v->falloff);
+	v->noiseScale = q_max (0.f, v->noiseScale);
+	v->noiseAmount = CLAMP (0.f, v->noiseAmount, 2.f);
+	v->noiseBias = CLAMP (-2.f, v->noiseBias, 2.f);
+	v->turbulence = q_max (0.f, v->turbulence);
+	v->windSpeed = q_max (0.f, v->windSpeed);
+	v->maxDistance = q_max (1.f, v->maxDistance);
+	v->emissiveStrength = q_max (0.f, v->emissiveStrength);
+	v->heightScale = q_max (0.f, v->heightScale);
+	v->edgeSoftness = q_max (0.f, v->edgeSoftness);
+	v->blendMode = (v->blendMode < 0) ? -1 : CLAMP (0, v->blendMode, 1);
+	if (v->shape == FOGVOL_SHAPE_SPHERE)
+		v->sphereRadius = q_max (1.f, v->sphereRadius);
+	v->enabled = v->enabled ? 1 : 0;
 }
 
-static qboolean R_FogVol_BuildGlobalFog (fog_volume_t *out)
+static int FogVol_ComparePriority (const void *a, const void *b)
 {
-	fog_volume_t volume;
+	const fog_volume_t *va = (const fog_volume_t *)a;
+	const fog_volume_t *vb = (const fog_volume_t *)b;
+	return (vb->priority - va->priority);
+}
+
+static qboolean FogVol_BuildGlobalVolume (fog_volume_t *out)
+{
+	fog_volume_t v;
 	vec3_t color;
+	float radius;
+	float density;
 
-	if (!out)
-		return false;
-	if (r_fogvol_global.value <= 0.f)
-		return false;
-	if (r_fogvol.value <= 0.f)
+	if (!out || r_fogvol_global.value <= 0.f)
 		return false;
 
-	memset (&volume, 0, sizeof (volume));
-
-	VectorSet (volume.mins, -8192.f, -8192.f, -8192.f);
-	VectorSet (volume.maxs, 8192.f, 8192.f, 8192.f);
-
-	R_FogVol_ParseColor (r_fogvol_global_color.string, color);
-	VectorCopy (color, volume.color);
-
-	volume.density = q_max (0.f, r_fogvol_global_density_scale.value);
-	volume.falloff = q_max (0.f, r_fogvol_global_falloff.value);
-	volume.mode = 0;
-	volume.noiseScale = q_max (0.f, r_fogvol_global_noise_scale.value);
-	volume.noiseAmount = CLAMP (0.f, r_fogvol_global_noise_amount.value, 1.f);
-	volume.noiseBias = r_fogvol_global_noise_bias.value;
-	volume.velocity[0] = r_fogvol_global_velocity_x.value;
-	volume.velocity[1] = r_fogvol_global_velocity_y.value;
-	volume.velocity[2] = r_fogvol_global_velocity_z.value;
-	volume.maxDistance = 0.f;
-	volume.priority = (int)Q_rint (r_fogvol_global_priority.value);
-	volume.enabled = 1;
-	volume.height = r_fogvol_global_height.value;
-	volume.heightScale = r_fogvol_global_height_scale.value;
-	volume.edgeSoftness = 0.f;
-
-	if (volume.density <= 0.f)
+	density = q_max (0.f, r_fogvol_global_density_scale.value);
+	if (density <= 0.f)
 		return false;
 
-	*out = volume;
+	memset (&v, 0, sizeof (v));
+	FogVol_ParseColor (r_fogvol_global_color.string, color);
+	VectorCopy (color, v.color);
+	v.density = density;
+	v.falloff = q_max (0.f, r_fogvol_global_falloff.value);
+	v.noiseScale = q_max (0.f, r_fogvol_global_noise_scale.value);
+	v.noiseAmount = CLAMP (0.f, r_fogvol_global_noise_amount.value, 2.f);
+	v.noiseBias = CLAMP (-2.f, r_fogvol_global_noise_bias.value, 2.f);
+	VectorSet (v.velocity, r_fogvol_global_velocity_x.value, r_fogvol_global_velocity_y.value, r_fogvol_global_velocity_z.value);
+	v.height = r_fogvol_global_height.value;
+	v.heightScale = q_max (0.f, r_fogvol_global_height_scale.value);
+	v.maxDistance = 16384.f;
+	v.priority = (int)Q_rint (r_fogvol_global_priority.value);
+	v.blendMode = -1;
+	v.shape = FOGVOL_SHAPE_BOX;
+	v.enabled = 1;
+
+	radius = q_max (1024.f, q_max (gl_farclip.value, 2048.f));
+	for (int a = 0; a < 3; ++a)
+	{
+		v.mins[a] = r_refdef.vieworg[a] - radius;
+		v.maxs[a] = r_refdef.vieworg[a] + radius;
+	}
+
+	FogVol_ClampVolume (&v);
+	*out = v;
 	return true;
+}
+
+void R_FogVol_RegisterCvars (void)
+{
+	for (size_t i = 0; i < countof (fogvol_cvar_table); ++i)
+		Cvar_RegisterVariable (fogvol_cvar_table[i].var);
+}
+
+void R_FogVol_SetGodrayCouplingTextures (GLuint shafts_tex, GLuint mask_tex, GLuint source_tex, qboolean ready)
+{
+	r_fogvol_godray_shafts_tex = shafts_tex;
+	r_fogvol_godray_mask_tex = mask_tex;
+	r_fogvol_godray_source_tex = source_tex;
+	r_fogvol_godray_ready = ready;
+}
+
+void R_FogVol_ClearEntities (void)
+{
+	r_fogvolume_entity_count = 0;
+}
+
+void R_FogVol_AddEntityVolume (const fog_volume_t *volume)
+{
+	fog_volume_t v;
+
+	if (!volume || r_fogvolume_entity_count >= MAX_FOGVOLUMES)
+		return;
+	v = *volume;
+	FogVol_ClampVolume (&v);
+	r_fogvolume_entities[r_fogvolume_entity_count++] = v;
+}
+
+void R_FogVol_CommitStaticBuildConfig (void)
+{
+}
+
+void R_FogVol_Init (void)
+{
+	memset (&r_fogvol_empty_lights, 0, sizeof (r_fogvol_empty_lights));
+	R_FogVol_Clear (); 
+}
+
+void R_FogVol_Clear (void)
+{
+	r_fogvolume_count = 0;
+	r_fogvol_global_active = false;
+	r_fogvol_composite_valid = false;
+	r_fogvol_composite_tex = 0;
+}
+
+void R_FogVol_BuildList (void)
+{
+	const float local_density_scale = q_max (0.f, r_fogvol_density_scale.value);
+
+	r_fogvolume_count = 0;
+	r_fogvol_global_active = FogVol_BuildGlobalVolume (&r_fogvol_global_volume);
+
+	if (r_fogvol_global_active && r_fogvolume_count < MAX_FOGVOLUMES)
+		r_fogvolumes[r_fogvolume_count++] = r_fogvol_global_volume;
+
+	for (int i = 0; i < r_fogvolume_entity_count && r_fogvolume_count < MAX_FOGVOLUMES; ++i)
+	{
+		fog_volume_t v = r_fogvolume_entities[i];
+		v.density *= local_density_scale;
+		FogVol_ClampVolume (&v);
+		r_fogvolumes[r_fogvolume_count++] = v;
+	}
+
+	if (r_fogvolume_count > 1)
+		qsort (r_fogvolumes, r_fogvolume_count, sizeof (r_fogvolumes[0]), FogVol_ComparePriority);
+
+	if (r_fogvol_stats.value > 0.f)
+	{
+		Con_DPrintf ("fogvol_list: global=%d entity=%d total=%d\n",
+			r_fogvol_global_active ? 1 : 0, r_fogvolume_entity_count, r_fogvolume_count);
+	}
 }
 
 qboolean R_FogVol_IsEnabledForFrame (void)
 {
-	const qboolean has_program = (glprogs.fogvol != 0);
-	const qboolean has_scene = framebufs.composite.color_tex != 0
-		&& framebufs.composite.depth_stencil_tex != 0
-		&& framebufs.composite.fbo != 0;
-	const qboolean has_fog_pingpong = framebufs.fogvol.color_tex[0] != 0
-		&& framebufs.fogvol.color_tex[1] != 0
-		&& framebufs.fogvol.fbo[0] != 0
-		&& framebufs.fogvol.fbo[1] != 0;
-	const qboolean has_history = framebufs.fogvol.history_tex[0] != 0
-		&& framebufs.fogvol.history_tex[1] != 0
-		&& framebufs.fogvol.history_fbo[0] != 0
-		&& framebufs.fogvol.history_fbo[1] != 0;
-	const qboolean has_composite = framebufs.fogvol.composite_tex[0] != 0
-		&& framebufs.fogvol.composite_tex[1] != 0
-		&& framebufs.fogvol.composite_fbo[0] != 0
-		&& framebufs.fogvol.composite_fbo[1] != 0;
-	const qboolean has_finalcopy = framebufs.fogvol.finalcopy_tex != 0
-		&& framebufs.fogvol.finalcopy_fbo != 0;
-	const qboolean has_sizes = framebufs.fogvol.width > 0 && framebufs.fogvol.height > 0;
-
-	if (r_fogvol.value <= 0.f)
+	const int mode = CLAMP (0, (int)Q_rint (r_fogvol.value), 2);
+	if (mode <= 0)
 		return false;
-	if (!has_program || !has_scene || !has_fog_pingpong || !has_history || !has_composite || !has_finalcopy || !has_sizes)
-	{
-		if (developer.value > 0.f && !r_fogvol_resource_warned)
-		{
-			Con_DPrintf ("FogVol disabled for frame: prog=%d scene=%d pingpong=%d history=%d composite=%d finalcopy=%d size=%dx%d\n",
-				has_program ? 1 : 0,
-				has_scene ? 1 : 0,
-				has_fog_pingpong ? 1 : 0,
-				has_history ? 1 : 0,
-				has_composite ? 1 : 0,
-				has_finalcopy ? 1 : 0,
-				framebufs.fogvol.width, framebufs.fogvol.height);
-			r_fogvol_resource_warned = true;
-		}
-		return false;
-	}
-	r_fogvol_resource_warned = false;
-	return true;
+	return (glprogs.fogvol != 0);
 }
 
 qboolean R_FogVol_HasRenderableContent (void)
 {
-	if (r_fogvol.value <= 0.f)
-		return false;
-	if (r_fogvol_global.value > 0.f)
+	if (r_fogvolume_count > 0)
 		return true;
-	return (r_fogvolume_entity_count > 0);
+	if (r_fogvolume_entity_count > 0)
+		return true;
+	if (r_fogvol_global.value > 0.f)
+	{
+		float density = q_max (0.f, r_fogvol_global_density_scale.value);
+		if (density > 0.f)
+			return true;
+	}
+	return false;
 }
 
 qboolean R_FogVol_HasValidComposite (void)
 {
-	if (!R_FogVol_IsEnabledForFrame ())
-		return false;
-	if (!r_fogvol_composite_valid)
-		return false;
-	if (framebufs.fogvol.composite_tex[r_fogvol_history_index] == 0)
-		return false;
-	return true;
+	return r_fogvol_composite_valid;
 }
 
 qboolean R_FogVol_ShouldAffectPostFX (void)
 {
-	/* PostFX should reserve volumetric integration/composite paths whenever
-	 * fogvol rendering is available this frame, even if classic global fog
-	 * density is currently zero. */
 	return R_FogVol_IsEnabledForFrame () && R_FogVol_HasRenderableContent ();
 }
 
 qboolean R_FogVol_CanRenderGlobal (void)
 {
-	if (!R_FogVol_IsEnabledForFrame ())
-		return false;
+	if (r_fogvol_global_active)
+		return true;
 	if (r_fogvol_global.value <= 0.f)
 		return false;
-	if (q_max (0.f, r_fogvol_global_density_scale.value) <= 0.f)
-		return false;
+	return q_max (0.f, r_fogvol_global_density_scale.value) > 0.f;
+}
 
+qboolean R_FogVol_GetGlobalFogState (vec3_t color, float *density)
+{
+	if (!r_fogvol_global_active)
+	{
+		float fallback_density = q_max (0.f, r_fogvol_global_density_scale.value);
+		if (r_fogvol_global.value <= 0.f || fallback_density <= 0.f)
+			return false;
+		if (color)
+			FogVol_ParseColor (r_fogvol_global_color.string, color);
+		if (density)
+			*density = fallback_density;
+		return true;
+	}
+	if (color)
+		VectorCopy (r_fogvol_global_volume.color, color);
+	if (density)
+		*density = r_fogvol_global_volume.density;
 	return true;
 }
 
-/* Returns the fogvol composite texture that was rendered this frame.
- * After R_FogVol_Render(), r_fogvol_history_index points to the slot that
- * received the temporal composite output â€” that is the most recent result.
- * Returns 0 if fogvol did not render this frame (no active volumes).
- * Semantics: returns a non-zero texture only when output is valid this frame. */
 GLuint R_FogVol_GetCompositeTex (void)
 {
-	if (!R_FogVol_HasValidComposite ())
-		return 0;
-
-	return framebufs.fogvol.composite_tex[r_fogvol_history_index];
+	return r_fogvol_composite_valid ? r_fogvol_composite_tex : 0;
 }
 
-
-/* Legacy debug helper retained only as dead code block during cleanup migration. */
-static void R_FogVol_AddTestVolumes (void)
+void R_FogVol_ClearHistory (void)
 {
-	fog_volume_t volume;
-	vec3_t origin, forward, right, up;
-	int volume_count;
-	AngleVectors (r_refdef.viewangles, forward, right, up);
-	VectorCopy (r_refdef.vieworg, origin);
-
-	/* Single test volume: a fog patch placed 100 units ahead of the camera.
-	 * The player is OUTSIDE the volume looking in, so this cleanly tests
-	 * the compositing pipeline without camera-inside-volume complications.
-	 *
-	 * Expected result: a visible blue-grey fog patch floating in the scene.
-	 * If the scene outside the volume looks correct and the volume itself
-	 * shows fog colour, the pipeline is working.
-	 *
-	 * density=0.02 â†’ tauâ‰ˆ2.0 at 100 units â†’ transmittanceâ‰ˆ0.14 (clearly
-	 * visible, opaque-looking fog patch). */
-	memset (&volume, 0, sizeof (volume));
-	VectorSet (volume.color, 0.6f, 0.75f, 1.0f);
-	volume.density    = 0.02f;
-	volume.falloff    = 16.f;
-	volume.mode       = 0;
-	volume.shape      = FOGVOL_SHAPE_BOX;
-	volume.blendMode  = -1;
-	volume.noiseScale = 0.05f;
-	volume.noiseAmount = 0.6f;
-	volume.noiseBias  = 0.0f;
-	VectorSet (volume.velocity, 0.f, 0.f, 4.f);
-	volume.maxDistance = 0.f;
-	volume.priority   = 0;
-	volume.enabled    = 1;
-	volume.edgeSoftness = 0.f;
-	volume_count = 1;
-	for (int i = 0; i < volume_count; ++i)
-	{
-		fog_volume_t test_volume = volume;
-		vec3_t c0, c1, lateral_offset;
-		float offset_units = (float)(i - (volume_count - 1) * 0.5f) * 72.f;
-
-		VectorScale (right, offset_units, lateral_offset);
-		VectorMA (origin, 100.f + i * 18.f, forward, c0);
-		VectorMA (origin, 260.f + i * 18.f, forward, c1);
-		VectorAdd (c0, lateral_offset, c0);
-		VectorAdd (c1, lateral_offset, c1);
-		test_volume.color[0] = CLAMP (0.f, 0.55f + 0.06f * i, 1.f);
-		test_volume.color[1] = CLAMP (0.f, 0.72f - 0.03f * i, 1.f);
-		test_volume.color[2] = CLAMP (0.f, 1.0f - 0.05f * i, 1.f);
-		test_volume.density *= (i == 0) ? 1.f : 0.85f;
-		for (int a = 0; a < 3; ++a)
-		{
-			float span = fabsf (right[a]) * 96.f;
-			test_volume.mins[a] = q_min (c0[a], c1[a]) - span;
-			test_volume.maxs[a] = q_max (c0[a], c1[a]) + span;
-		}
-		test_volume.mins[2] = origin[2] - 40.f + i * 2.f;
-		test_volume.maxs[2] = origin[2] + 80.f + i * 2.f;
-		R_FogVol_AddVolume (&test_volume);
-	}
-}
-
-void R_FogVol_BuildList (void)
-{
-	R_FogVol_Clear ();
-	R_FogDlights_Clear ();
-
-	if (r_fogvol.value <= 0.f)
-		goto sort_and_done;
-
-	r_fogvol_global_active = R_FogVol_BuildGlobalFog (&r_fogvol_global_volume);
-
-	for (int i = 0; i < r_fogvolume_entity_count; ++i)
-	{
-		const fog_volume_t *volume = &r_fogvolume_entities[i];
-
-		if (!volume->enabled)
-			continue;
-		if (volume->maxDistance > 0.f)
-		{
-			float dist = R_FogVol_PointDistance (r_refdef.vieworg, volume);
-			if (dist > volume->maxDistance)
-				continue;
-		}
-		R_FogVol_AddVolume (volume);
-	}
-
-sort_and_done:
-	if (r_fogvolume_count > 1)
-		qsort (r_fogvolumes, r_fogvolume_count, sizeof (fog_volume_t), R_FogVol_ComparePriority);
+	r_fogvol_composite_valid = false;
+	r_fogvol_composite_tex = 0;
 }
 
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres)
 {
-	vec3_t corners[8];
-	vec3_t proj;
-	float minx = 1e30f;
-	float miny = 1e30f;
-	float maxx = -1e30f;
-	float maxy = -1e30f;
-	int view_x = 0;
-	int view_y = 0;
-	int view_w = r_refdef.vrect.width / q_max (1, r_refdef.scale);
-	int view_h = r_refdef.vrect.height / q_max (1, r_refdef.scale);
-	int valid = 0;
-
-	if (fullres || !GL_NeedsSceneEffects ())
-	{
-		view_x = glx + r_refdef.vrect.x;
-		view_y = gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height;
-		view_w = r_refdef.vrect.width;
-		view_h = r_refdef.vrect.height;
-	}
-
-	{
-		vec3_t bmins, bmaxs;
-		if (v->shape == FOGVOL_SHAPE_SPHERE)
-		{
-			for (int a = 0; a < 3; ++a)
-			{
-				bmins[a] = v->sphereCenter[a] - v->sphereRadius;
-				bmaxs[a] = v->sphereCenter[a] + v->sphereRadius;
-			}
-		}
-		else
-		{
-			VectorCopy (v->mins, bmins);
-			VectorCopy (v->maxs, bmaxs);
-		}
-
-		/* BUG FIX (C-SCISSOR-01): When the camera is inside the fog volume,
-		 * projecting the 8 AABB corners can produce a degenerate or zero-area
-		 * scissor rect (all corners behind near-plane â†’ behind==8 â†’ return false,
-		 * or clipped NDC rect that doesn't cover the screen centre).
-		 * This caused the fog to disappear entirely when looking away from the
-		 * volume's corners while standing inside it (Image 1 vs Image 2 bug).
-		 *
-		 * Fix: detect camera-inside early and return the full viewport immediately.
-		 * For sphere volumes use a radius check; for AABB volumes use component-wise
-		 * comparison against bmins/bmaxs (already computed above). */
-		{
-			qboolean cam_inside;
-			if (v->shape == FOGVOL_SHAPE_SPHERE)
-			{
-				vec3_t d;
-				VectorSubtract (r_refdef.vieworg, v->sphereCenter, d);
-				cam_inside = (DotProduct (d, d) < v->sphereRadius * v->sphereRadius);
-			}
-			else
-			{
-				cam_inside = (r_refdef.vieworg[0] >= bmins[0] && r_refdef.vieworg[0] <= bmaxs[0] &&
-				              r_refdef.vieworg[1] >= bmins[1] && r_refdef.vieworg[1] <= bmaxs[1] &&
-				              r_refdef.vieworg[2] >= bmins[2] && r_refdef.vieworg[2] <= bmaxs[2]);
-			}
-			if (cam_inside)
-			{
-				*x0 = view_x;
-				*y0 = view_y;
-				*x1 = view_x + view_w;
-				*y1 = view_y + view_h;
-				return true;
-			}
-		}
-
-		corners[0][0] = bmins[0]; corners[0][1] = bmins[1]; corners[0][2] = bmins[2];
-		corners[1][0] = bmaxs[0]; corners[1][1] = bmins[1]; corners[1][2] = bmins[2];
-		corners[2][0] = bmins[0]; corners[2][1] = bmaxs[1]; corners[2][2] = bmins[2];
-		corners[3][0] = bmaxs[0]; corners[3][1] = bmaxs[1]; corners[3][2] = bmins[2];
-		corners[4][0] = bmins[0]; corners[4][1] = bmins[1]; corners[4][2] = bmaxs[2];
-		corners[5][0] = bmaxs[0]; corners[5][1] = bmins[1]; corners[5][2] = bmaxs[2];
-		corners[6][0] = bmins[0]; corners[6][1] = bmaxs[1]; corners[6][2] = bmaxs[2];
-		corners[7][0] = bmaxs[0]; corners[7][1] = bmaxs[1]; corners[7][2] = bmaxs[2];
-	}
-
-	{
-		int behind = 0;
-		for (int i = 0; i < 8; ++i)
-		{
-			ProjectVector (corners[i], r_matviewproj, proj);
-			/* BUG FIX #2 / BUG-C-01: Track corners behind the near plane.
-			 * If ALL 8 corners are behind the camera the volume is fully
-			 * occluded and we return false.  If some are behind and some in
-			 * front, the AABB straddles the near plane â€” conservatively expand
-			 * to the full viewport so we never miss geometry near the edges.
-			 * The original code broke out of the loop on the first behind-corner,
-			 * which prevented detection of the all-behind case. */
-			if (proj[2] <= 0.f)
-			{
-				behind++;
-				/* Expand to full viewport and continue counting. */
-				minx = -1.f;
-				miny = -1.f;
-				maxx =  1.f;
-				maxy =  1.f;
-				valid = 1;
-				continue;
-			}
-			minx = q_min (minx, proj[0]);
-			miny = q_min (miny, proj[1]);
-			maxx = q_max (maxx, proj[0]);
-			maxy = q_max (maxy, proj[1]);
-			valid = 1;
-		}
-		/* All corners behind the near plane â€” volume is not visible. */
-		if (behind == 8)
-			return false;
-	}
-
-	if (!valid)
+	if (!v || !v->enabled || !x0 || !y0 || !x1 || !y1)
 		return false;
-
-	{
-		float fx0 = (minx * 0.5f + 0.5f) * (float)view_w + (float)view_x;
-		float fy0 = (miny * 0.5f + 0.5f) * (float)view_h + (float)view_y;
-		float fx1 = (maxx * 0.5f + 0.5f) * (float)view_w + (float)view_x;
-		float fy1 = (maxy * 0.5f + 0.5f) * (float)view_h + (float)view_y;
-
-		int ix0 = (int)floorf (fx0);
-		int iy0 = (int)floorf (fy0);
-		int ix1 = (int)ceilf (fx1);
-		int iy1 = (int)ceilf (fy1);
-
-		ix0 = CLAMP (view_x, ix0, view_x + view_w);
-		iy0 = CLAMP (view_y, iy0, view_y + view_h);
-		ix1 = CLAMP (view_x, ix1, view_x + view_w);
-		iy1 = CLAMP (view_y, iy1, view_y + view_h);
-
-		if (ix1 <= ix0 || iy1 <= iy0)
-			return false;
-
-		*x0 = ix0;
-		*y0 = iy0;
-		*x1 = ix1;
-		*y1 = iy1;
-	}
-
-	return true;
-}
-
-void R_FogVol_DrawDebug2D (void)
-{
+	*x0 = 0;
+	*y0 = 0;
+	*x1 = fullres ? glwidth : framebufs.fogvol.width;
+	*y1 = fullres ? glheight : framebufs.fogvol.height;
+	return (*x1 > *x0 && *y1 > *y0);
 }
 
 static void R_FogVol_FillGPUVolume (const fog_volume_t *v, fog_volume_gpu_t *gpu)
 {
 	if (!v || !gpu)
 		return;
-
-	gpu->mins[0] = v->mins[0];
-	gpu->mins[1] = v->mins[1];
-	gpu->mins[2] = v->mins[2];
-	gpu->mins[3] = 0.f;
-
-	gpu->maxs[0] = v->maxs[0];
-	gpu->maxs[1] = v->maxs[1];
-	gpu->maxs[2] = v->maxs[2];
-	gpu->maxs[3] = 0.f;
-
-	gpu->sphere[0] = v->sphereCenter[0];
-	gpu->sphere[1] = v->sphereCenter[1];
-	gpu->sphere[2] = v->sphereCenter[2];
-	gpu->sphere[3] = q_max (0.f, v->sphereRadius);
-
-	gpu->color_density[0] = q_max (0.f, v->color[0]);
-	gpu->color_density[1] = q_max (0.f, v->color[1]);
-	gpu->color_density[2] = q_max (0.f, v->color[2]);
-	gpu->color_density[3] = v->density;
-
-	gpu->noise_params[0] = CLAMP (0.005f, v->noiseScale, 0.5f);
-	gpu->noise_params[1] = CLAMP (0.f, v->noiseAmount, 1.f);
+	memset (gpu, 0, sizeof (*gpu));
+	gpu->mins[0] = v->mins[0]; gpu->mins[1] = v->mins[1]; gpu->mins[2] = v->mins[2];
+	gpu->maxs[0] = v->maxs[0]; gpu->maxs[1] = v->maxs[1]; gpu->maxs[2] = v->maxs[2];
+	gpu->sphere[0] = v->sphereCenter[0]; gpu->sphere[1] = v->sphereCenter[1]; gpu->sphere[2] = v->sphereCenter[2]; gpu->sphere[3] = v->sphereRadius;
+	gpu->color_density[0] = v->color[0]; gpu->color_density[1] = v->color[1]; gpu->color_density[2] = v->color[2]; gpu->color_density[3] = v->density;
+	gpu->noise_params[0] = v->noiseScale;
+	gpu->noise_params[1] = v->noiseAmount;
 	gpu->noise_params[2] = v->noiseBias;
-	gpu->noise_params[3] = v->maxDistance;
-
+	gpu->noise_params[3] = v->turbulence;
 	gpu->velocity_windspeed[0] = v->velocity[0];
 	gpu->velocity_windspeed[1] = v->velocity[1];
 	gpu->velocity_windspeed[2] = v->velocity[2];
 	gpu->velocity_windspeed[3] = v->windSpeed;
-
 	gpu->wind_turbulence[0] = v->windDir[0];
 	gpu->wind_turbulence[1] = v->windDir[1];
 	gpu->wind_turbulence[2] = v->windDir[2];
 	gpu->wind_turbulence[3] = v->turbulence;
-
-	gpu->misc[0] = (float)v->priority;
-	gpu->misc[1] = (float)v->enabled;
-	gpu->misc[2] = v->falloff;
-	gpu->misc[3] = v->height;
-
-	gpu->extra[0] = (float)R_FogVol_NormalizeShape (v->shape);
-	gpu->extra[1] = (float)((v->blendMode >= 0) ? v->blendMode : (int)Q_rint (r_fogvol_blendmode.value));
-	gpu->extra[2] = v->emissiveStrength;
-	gpu->extra[3] = v->heightScale;
-
+	gpu->misc[0] = (float)v->mode;
+	gpu->misc[1] = (float)v->shape;
+	gpu->misc[2] = (float)v->blendMode;
+	gpu->misc[3] = v->emissiveStrength;
+	gpu->extra[0] = v->maxDistance;
+	gpu->extra[1] = (float)v->priority;
+	gpu->extra[2] = (float)v->enabled;
+	gpu->extra[3] = v->height;
 	gpu->params2[0] = v->edgeSoftness;
-	gpu->params2[1] = 0.f;
-	gpu->params2[2] = 0.f;
-	gpu->params2[3] = 0.f;
+	gpu->params2[1] = v->heightScale;
+	gpu->params2[2] = v->falloff;
 }
 
 static void R_FogVol_UploadVolumeRange (const fog_volume_t *volumes, int count)
@@ -2973,7 +489,6 @@ static void R_FogVol_UploadVolumeRange (const fog_volume_t *volumes, int count)
 
 	if (!volumes || count <= 0)
 		return;
-
 	count = q_min (count, MAX_FOGVOLUMES);
 	memset (gpu_volumes, 0, sizeof (gpu_volumes));
 	for (int i = 0; i < count; ++i)
@@ -2983,1423 +498,270 @@ static void R_FogVol_UploadVolumeRange (const fog_volume_t *volumes, int count)
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof (fog_volume_gpu_t) * count);
 }
 
-static void R_FogVol_BuildRuntimeConfig (fogvol_runtime_config_t *cfg, int steps, qboolean global_simple, qboolean fog_light_enabled, qboolean fog_lightgrid_enabled)
-{
-	int preset;
-	int lighting_mode;
-	int shadow_samples;
-	int local_occlusion_mode;
-	float froxel_scale;
-	float lightlist_scale;
-	float lightgrid_scale;
-	qboolean shadow_enabled;
-	qboolean godray_coupling;
-	qboolean light_enabled;
-	qboolean froxel_enabled;
-
-	if (!cfg)
-		return;
-
-	memset (cfg, 0, sizeof (*cfg));
-	preset = CLAMP (0, (int)Q_rint (r_fogvol_preset.value), 3);
-	lighting_mode = CLAMP (0, (int)Q_rint (r_fogvol_lighting_mode.value), 3);
-	shadow_samples = CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
-	local_occlusion_mode = CLAMP (0, (int)Q_rint (r_fogvol_local_occlusion.value), 2);
-	froxel_scale = q_max (0.f, r_fogvol_froxel_scale.value);
-	lightlist_scale = q_max (0.f, r_fogvol_lightlist_scale.value);
-	lightgrid_scale = q_max (0.f, r_fogvol_lightgrid_scale.value);
-	shadow_enabled = global_simple ? (r_fogvol_global_shadow.value > 0.f) : (r_fogvol_shadow.value > 0.f);
-	godray_coupling = true;
-	light_enabled = fog_light_enabled;
-	froxel_enabled = (r_fogvol_froxel.value > 0.f);
-
-	if (preset == 0)
-	{
-		steps = global_simple ? 8 : 12;
-		shadow_enabled = false;
-		shadow_samples = 0;
-		godray_coupling = false;
-		local_occlusion_mode = 0;
-		if (froxel_enabled && froxel_scale > 0.f)
-		{
-			lighting_mode = 2;
-			lightlist_scale = 0.f;
-		}
-		else if (light_enabled && lightlist_scale > 0.f)
-		{
-			lighting_mode = 1;
-			froxel_scale = 0.f;
-		}
-		else
-			lighting_mode = 0;
-	}
-	else if (preset == 1)
-	{
-		steps = global_simple ? 12 : 18;
-		if (shadow_enabled)
-			shadow_samples = CLAMP (1, shadow_samples, 2);
-		else
-			shadow_samples = 0;
-		local_occlusion_mode = q_min (local_occlusion_mode, 1);
-		if (lighting_mode == 3)
-		{
-			if (froxel_enabled && froxel_scale > 0.f)
-			{
-				lighting_mode = 2;
-				lightlist_scale = 0.f;
-			}
-			else if (light_enabled && lightlist_scale > 0.f)
-			{
-				lighting_mode = 1;
-				froxel_scale = 0.f;
-			}
-			else
-				lighting_mode = 0;
-		}
-	}
-	else if (preset == 2)
-	{
-		steps = global_simple ? q_max (steps, 16) : q_max (steps, 24);
-	}
-	else if (preset == 3)
-	{
-		steps = q_min (q_max (steps, global_simple ? 20 : 32), q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
-	}
-
-	if (global_simple)
-	{
-		lighting_mode = 0;
-		light_enabled = false;
-		froxel_enabled = false;
-		fog_lightgrid_enabled = false;
-		froxel_scale = 0.f;
-		lightlist_scale = 0.f;
-		lightgrid_scale = 0.f;
-		godray_coupling = false;
-		local_occlusion_mode = 0;
-		if (!shadow_enabled)
-			shadow_samples = 0;
-		else
-			shadow_samples = q_min (shadow_samples, 1);
-	}
-	else
-	{
-		if (lighting_mode == 0)
-		{
-			light_enabled = false;
-			froxel_enabled = false;
-		}
-		else if (lighting_mode == 1)
-		{
-			froxel_enabled = false;
-			froxel_scale = 0.f;
-		}
-		else if (lighting_mode == 2)
-		{
-			light_enabled = false;
-			lightlist_scale = 0.f;
-		}
-	}
-
-	cfg->preset = preset;
-	cfg->effective_steps = q_max (8, steps);
-	cfg->shadow_samples = shadow_samples;
-	cfg->lighting_mode = lighting_mode;
-	cfg->local_occlusion_mode = local_occlusion_mode;
-	cfg->shadow_enabled = shadow_enabled;
-	cfg->godray_coupling = godray_coupling;
-	cfg->light_enabled = light_enabled && (lighting_mode == 1 || lighting_mode == 3);
-	cfg->lightgrid_enabled = fog_lightgrid_enabled && lightgrid_scale > 0.f;
-	cfg->froxel_enabled = froxel_enabled && (lighting_mode == 2 || lighting_mode == 3) && froxel_scale > 0.f;
-	cfg->froxel_scale = froxel_scale;
-	cfg->lightlist_scale = lightlist_scale;
-	cfg->lightgrid_scale = lightgrid_scale;
-}
-
-static qboolean R_FogVol_CanUseClusteredLocal (const fogvol_runtime_config_t *cfg)
-{
-	if (!cfg)
-		return false;
-	if (r_fogvol_clustered.value <= 0.f)
-		return false;
-	/* Keep high/cinematic on the legacy path until clustered local rendering
-	 * reaches feature parity for lighting and occlusion. */
-	if (cfg->preset > 1)
-		return false;
-	if (r_fogvolume_count <= 1)
-		return false;
-
-	for (int i = 0; i < r_fogvolume_count; ++i)
-	{
-		const fog_volume_t *v = &r_fogvolumes[i];
-		const int blend_mode = (v->blendMode >= 0) ? v->blendMode : (int)Q_rint (r_fogvol_blendmode.value);
-
-		if (!v->enabled)
-			continue;
-		if (blend_mode != 0)
-			return false;
-		if (v->emissiveStrength > 0.f)
-			return false;
-	}
-
-	return true;
-}
-
-static qboolean R_FogVol_BuildClusteredTiles (int fog_width, int fog_height, const qboolean *scissor_valid, const int *scissor_x0, const int *scissor_y0, const int *scissor_x1, const int *scissor_y1, int *tiles_x, int *tiles_y, int *tile_size, int *index_count)
-{
-	int local_tile_size;
-	int local_tiles_x;
-	int local_tiles_y;
-	int tile_count;
-	int write_offset;
-
-	if (!tiles_x || !tiles_y || !tile_size || !index_count)
-		return false;
-
-	local_tile_size = CLAMP (8, (int)Q_rint (r_fogvol_cluster_tile_size.value), 64);
-	local_tiles_x = (fog_width + local_tile_size - 1) / local_tile_size;
-	local_tiles_y = (fog_height + local_tile_size - 1) / local_tile_size;
-	tile_count = local_tiles_x * local_tiles_y;
-	if (tile_count <= 0 || tile_count > FOGVOL_CLUSTER_MAX_TILES)
-		return false;
-
-	memset (r_fogvol_cluster_headers, 0, sizeof (fogvol_cluster_header_gpu_t) * tile_count);
-	memset (r_fogvol_cluster_tile_lists, 0xff, sizeof (int) * tile_count * MAX_FOGVOLUMES);
-
-	for (int i = 0; i < r_fogvolume_count; ++i)
-	{
-		int min_tx, min_ty, max_tx, max_ty;
-
-		if (!scissor_valid[i])
-			continue;
-
-		min_tx = CLAMP (0, scissor_x0[i] / local_tile_size, local_tiles_x - 1);
-		min_ty = CLAMP (0, scissor_y0[i] / local_tile_size, local_tiles_y - 1);
-		max_tx = CLAMP (0, (scissor_x1[i] - 1) / local_tile_size, local_tiles_x - 1);
-		max_ty = CLAMP (0, (scissor_y1[i] - 1) / local_tile_size, local_tiles_y - 1);
-
-		for (int ty = min_ty; ty <= max_ty; ++ty)
-		{
-			for (int tx = min_tx; tx <= max_tx; ++tx)
-			{
-				const int tile_index = ty * local_tiles_x + tx;
-				int count = r_fogvol_cluster_headers[tile_index].offset_count[1];
-
-				if (count >= MAX_FOGVOLUMES)
-					return false;
-				r_fogvol_cluster_tile_lists[tile_index][count] = i;
-				r_fogvol_cluster_headers[tile_index].offset_count[1] = count + 1;
-			}
-		}
-	}
-
-	write_offset = 0;
-	for (int tile_index = 0; tile_index < tile_count; ++tile_index)
-	{
-		const int count = r_fogvol_cluster_headers[tile_index].offset_count[1];
-
-		r_fogvol_cluster_headers[tile_index].offset_count[0] = write_offset;
-		if (write_offset + count > FOGVOL_CLUSTER_MAX_INDICES)
-			return false;
-		for (int i = 0; i < count; ++i)
-			r_fogvol_cluster_indices[write_offset + i] = r_fogvol_cluster_tile_lists[tile_index][i];
-		write_offset += count;
-	}
-
-	*tiles_x = local_tiles_x;
-	*tiles_y = local_tiles_y;
-	*tile_size = local_tile_size;
-	*index_count = write_offset;
-	return true;
-}
-
 static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfres,
-	int glwidth, int glheight, float depth_scale_x, float depth_scale_y,
-	const float *inv_viewproj, float view_x, float view_y, float view_w, float view_h,
-	float depth_near, float depth_far, float depth_sky_cutoff,
-	const fogvol_runtime_config_t *runtime, qboolean global_simple)
+	int fog_width, int fog_height,
+	float depth_scale_x, float depth_scale_y,
+	const float inv_viewproj[16],
+	float view_x, float view_y, float view_w, float view_h,
+	float depth_near, float depth_far, float depth_sky_cutoff)
 {
-	vec3_t shadow_dir;
-	vec3_t sun_color;
-	float sun_intensity;
-	float sun_scatter;
-	float noise_detail_strength;
-	float height_mist_strength;
-	float atmosphere_boost;
+	vec3_t shadow_dir = { 0.f, 0.f, -1.f };
+	GLuint froxel_tex = 0;
+	int froxel_light_count = 0;
+	float froxel_params0[4] = {0.f, 0.f, 0.f, 0.f};
+	float froxel_params1[4] = {0.f, 1.f, 1.f, 1.f};
+	qboolean froxel_ready = R_Froxel_GetShaderState (&froxel_tex, &froxel_light_count, froxel_params0, froxel_params1);
+	qboolean shadow_enabled = (mode == 2 && r_fogvol_shadow.value > 0.f);
+	const sun_t *sun = R_GetSun ();
+	float fog_density = 1.f;
+	float sigma_max = 4.f;
+	float noise_scale = q_max (0.f, r_fogvol_noise_scale.value);
+	float noise_amount = CLAMP (0.f, r_fogvol_noise_amount.value, 2.f);
+	float noise_bias = CLAMP (-2.f, r_fogvol_noise_bias.value, 2.f);
+	float reverse_z_flag = gl_clipcontrol_able ? 1.f : 0.f;
+	int lighting_mode = (mode > 0) ? 2 : 0;
 	float sun_shadow_viewproj[16];
 	float sun_shadow_bias = 0.f;
-	float sun_shadow_pcf_uv = 0.f;
-	qboolean sun_shadow_enabled = false;
-	float quality_fx_scale;
-	float quality_step_scale;
-	int quality_mode;
-	int effective_steps;
-	int noise_subsample;
-	const fogvol_runtime_config_t *cfg = runtime;
-	const sun_t *sun = R_GetSun ();
-	int shadow_samples;
+	float sun_shadow_pcf = 0.f;
+	qboolean sun_shadow_map_enabled = R_Shadow_GetSunOcclusionData (sun_shadow_viewproj, &sun_shadow_bias, &sun_shadow_pcf);
 
-#if !defined(NDEBUG)
-	assert (FOGVOL_U_COUNT == 55);
-	assert (glwidth > 0);
-	assert (glheight > 0);
-	assert (view_w > 0.f);
-	assert (view_h > 0.f);
-#endif
-	quality_mode = CLAMP (0, (int)Q_rint (r_fogvol_quality.value), 2);
-	quality_step_scale = 1.f;
-	quality_fx_scale = 1.f;
-	if (quality_mode == 0)
+	if (sun && R_WorldHasSun ())
 	{
-		quality_step_scale = 0.62f;
-		quality_fx_scale = 0.68f;
+		VectorScale (sun->dir, -1.f, shadow_dir);
+		if (VectorNormalize (shadow_dir) <= 0.f)
+			VectorSet (shadow_dir, 0.f, 0.f, -1.f);
 	}
-	else if (quality_mode == 1)
-	{
-		/* Keep default quality visually rich but cheaper than legacy baseline. */
-		quality_step_scale = 0.82f;
-		quality_fx_scale = 0.9f;
-	}
-	else if (quality_mode == 2)
-	{
-		quality_step_scale = 1.12f;
-		quality_fx_scale = 1.15f;
-	}
-	effective_steps = (int)Q_rint ((float)(cfg ? cfg->effective_steps : steps) * quality_step_scale);
-	effective_steps = CLAMP (8, effective_steps, CLAMP (8, (int)Q_rint (r_fogvol_maxsteps.value), 256));
-	GL_Uniform1iFunc (FOGVOL_U_STEPS, effective_steps);
+
+	GL_Uniform1iFunc (FOGVOL_U_STEPS, q_max (8, steps));
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (FOGVOL_U_DEBUG_MODE, mode);
-	GL_Uniform1iFunc (FOGVOL_U_NOISE_MODE, (int)Q_rint (r_fogvol_noisemode.value));
-	GL_Uniform1iFunc (FOGVOL_U_PHYS_BLEND, r_fogvol_physblend.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (FOGVOL_U_JITTER_ENABLED, r_fogvol_jitter.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (FOGVOL_U_FRAME_INDEX, r_framecount);
-	noise_subsample = r_fogvol_noise_subsample.value > 0.f ? 1 : 0;
-	if (quality_mode == 0)
-		noise_subsample = 1;
-	GL_Uniform1iFunc (FOGVOL_U_NOISE_SUBSAMPLE, noise_subsample);
-	GL_Uniform1fFunc (FOGVOL_U_NOISE_LOD_SWITCH_DIST, q_max (1.f, r_fogvol_noise_lod_switch_dist.value));
-	GL_Uniform1fFunc (FOGVOL_U_DOMAIN_WARP_MAX_DIST, q_max (0.f, r_fogvol_domainwarp_dist.value));
-	GL_Uniform1iFunc (FOGVOL_U_CHECKERBOARD, r_fogvol_checkerboard.value > 0.f ? 1 : 0);
-	GL_Uniform1iFunc (FOGVOL_U_HALFRES, use_halfres ? 1 : 0);
-	GL_Uniform1iFunc (FOGVOL_U_LIGHT_SUBSAMPLE, r_fogvol_light_subsample.value > 0.f ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_DEBUG_MODE, CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 16));
 	GL_UniformMatrix4fvFunc (FOGVOL_U_INV_VIEWPROJ, 1, GL_FALSE, inv_viewproj);
+	GL_Uniform1iFunc (FOGVOL_U_NOISE_MODE, CLAMP (0, (int)Q_rint (r_fogvol_noisemode.value), 2));
+	GL_Uniform1iFunc (FOGVOL_U_PHYS_BLEND, 1);
+	GL_Uniform1iFunc (FOGVOL_U_JITTER_ENABLED, r_fogvol_jitter.value > 0.f ? 1 : 0);
 	GL_Uniform3fFunc (FOGVOL_U_CAMERA_POS_WS, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
-	GL_Uniform4fFunc (FOGVOL_U_VIEWPORT_PARAMS, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
+	GL_Uniform4fFunc (FOGVOL_U_VIEWPORT_PARAMS, (float)glwidth, (float)glheight, 1.f / q_max (1.f, (float)glwidth), 1.f / q_max (1.f, (float)glheight));
 	GL_Uniform2fFunc (FOGVOL_U_DEPTH_SCALE, depth_scale_x, depth_scale_y);
-	GL_Uniform4fFunc (FOGVOL_U_VIEW_PARAMS,
-		use_halfres ? 0.f : view_x,
-		use_halfres ? 0.f : view_y,
-		1.f / view_w, 1.f / view_h);
-	GL_Uniform4fFunc (FOGVOL_U_DEPTH_PARAMS, depth_near, depth_far, gl_clipcontrol_able ? 1.f : 0.f, depth_sky_cutoff);
-	GL_Uniform2fFunc (FOGVOL_U_DENSITY_PARAMS, q_max (0.f, r_fogvol_density_scale.value), q_max (0.001f, r_fogvol_sigma_max.value));
+	GL_Uniform4fFunc (FOGVOL_U_VIEW_PARAMS, view_x, view_y, 1.f / q_max (1.f, view_w), 1.f / q_max (1.f, view_h));
+	GL_Uniform4fFunc (FOGVOL_U_DEPTH_PARAMS, depth_near, depth_far, reverse_z_flag, depth_sky_cutoff);
+	GL_Uniform4fFunc (FOGVOL_U_DENSITY_PARAMS, fog_density, sigma_max, noise_scale, noise_bias);
 	GL_Uniform1iFunc (FOGVOL_U_EMISSIVE_ENABLED, r_fogvol_emissive.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_BLEND_MODE_DEFAULT, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
-	GL_Uniform1iFunc (FOGVOL_U_LIGHT_ENABLED, (cfg && cfg->light_enabled) ? 1 : 0);
-	shadow_samples = cfg ? cfg->shadow_samples : CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
-	if (quality_mode <= 1)
-		shadow_samples = q_min (shadow_samples, 1);
-	/* Convention: sun->dir points from scene toward the sun (light source).
-	 * Fog shadow marching moves from sample point toward the blocker, so use
-	 * the same direction without flipping to keep shader/CPU conventions aligned. */
-	VectorCopy (sun->dir, shadow_dir);
-	if (VectorLength (shadow_dir) < 0.001f)
-		VectorSet (shadow_dir, 0.f, 0.f, -1.f);
-	else
-		VectorNormalize (shadow_dir);
-	GL_Uniform1iFunc (FOGVOL_U_SHADOW_ENABLED, (cfg && cfg->shadow_enabled) ? 1 : 0);
-	GL_Uniform1iFunc (FOGVOL_U_SHADOW_SAMPLES, shadow_samples);
-	GL_Uniform1fFunc (FOGVOL_U_SHADOW_STRENGTH, sun->shadow_strength);
-	GL_Uniform1fFunc (FOGVOL_U_SHADOW_JITTER, r_fogvol_shadow_jitter.value > 0.f ? 1.f : 0.f);
+	GL_Uniform1iFunc (FOGVOL_U_LIGHT_ENABLED, 0);
+	GL_Uniform1iFunc (FOGVOL_U_SHADOW_ENABLED, shadow_enabled ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_SHADOW_SAMPLES, shadow_enabled ? 1 : 0);
+	GL_Uniform1fFunc (FOGVOL_U_SHADOW_STRENGTH, CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f));
+	GL_Uniform1fFunc (FOGVOL_U_SHADOW_JITTER, (shadow_enabled && r_fogvol_jitter.value > 0.f) ? 1.f : 0.f);
 	GL_Uniform3fFunc (FOGVOL_U_SHADOW_DIR, shadow_dir[0], shadow_dir[1], shadow_dir[2]);
-	sun_shadow_enabled = (cfg && cfg->shadow_enabled && shadow_samples > 0 && R_WorldHasSun ()
-		&& R_Shadow_GetSunOcclusionData (sun_shadow_viewproj, &sun_shadow_bias, &sun_shadow_pcf_uv));
+	GL_Uniform1iFunc (FOGVOL_U_LIGHTGRID_ENABLED, 0);
+	GL_Uniform1iFunc (FOGVOL_U_FRAME_INDEX, r_framecount);
+	GL_Uniform1fFunc (FOGVOL_U_NOISE_SUBSAMPLE, 1.f);
+	GL_Uniform1fFunc (FOGVOL_U_NOISE_LOD_SWITCH, 64.f);
+	GL_Uniform1fFunc (FOGVOL_U_DOMAINWARP_DIST, 128.f);
+	GL_Uniform1fFunc (FOGVOL_U_NOISE_DETAIL_STRENGTH, noise_amount);
+	GL_Uniform1fFunc (FOGVOL_U_DLIGHT_SCALE, q_max (0.f, r_fogvol_dlightscale.value));
+	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SCISSOR, 0.f, 0.f, 0.f, 0.f);
+	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES, q_max (0.f, r_fogvol_dlightscale.value), 0.f, 0.f, 0.f);
+	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, lighting_mode);
+	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, (r_fogvol_godray_ready && mode > 0) ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, 0);
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (mode > 0 && froxel_ready) ? 1 : 0);
+	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, froxel_params0[0], froxel_params0[1], froxel_params0[2], froxel_params0[3]);
+	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, froxel_params1[0], froxel_params1[1], froxel_params1[2], froxel_params1[3]);
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, 0);
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, 0);
+	GL_Uniform4fFunc (FOGVOL_U_FROXEL_TEMPORAL_PARAMS, 0.f, 0.f, 0.f, 0.f);
+	GL_Uniform1iFunc (FOGVOL_U_CHECKERBOARD, 0);
+	GL_Uniform4fFunc (FOGVOL_U_CLUSTER_PARAMS, 0.f, 0.f, 0.f, 0.f);
 	GL_UniformMatrix4fvFunc (FOGVOL_U_SUN_SHADOW_VIEWPROJ, 1, GL_FALSE, sun_shadow_viewproj);
 	GL_Uniform4fFunc (FOGVOL_U_SUN_SHADOW_PARAMS,
-		sun_shadow_enabled ? 1.f : 0.f,
-		q_max (0.f, sun_shadow_bias),
-		q_max (0.f, sun_shadow_pcf_uv),
-		0.f);
-	GL_Uniform1iFunc (FOGVOL_U_LIGHTGRID_ENABLED, (cfg && !global_simple && cfg->lightgrid_enabled) ? 1 : 0);
-	sun_scatter = q_max (0.f, sun->volumetric_intensity);
-	if (R_WorldHasSun ())
-	{
-		VectorCopy (sun->color, sun_color);
-		sun_intensity = sun->intensity;
-	}
-	else
-	{
-		VectorSet (sun_color, 0.f, 0.f, 0.f);
-		sun_intensity = 0.f;
-	}
-	GL_Uniform1fFunc (FOGVOL_U_SUN_SCATTER, sun_scatter * q_max (0.f, sun_intensity));
-	GL_Uniform3fFunc (FOGVOL_U_SUN_COLOR, q_max (0.f, sun_color[0]), q_max (0.f, sun_color[1]), q_max (0.f, sun_color[2]));
-	GL_Uniform1fFunc (FOGVOL_U_SUN_ANISOTROPY, sun->anisotropy);
-	GL_Uniform1fFunc (FOGVOL_U_DLIGHT_SCALE, q_max (0.f, r_fogvol_dlightscale.value));
-	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (cfg && !global_simple && cfg->froxel_enabled && r_froxel.valid && r_froxel.light_tex && r_froxel.light_count > 0) ? 1 : 0);
-	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, r_froxel.near_clip, r_froxel.far_clip, r_froxel.tan_half_fov_x, r_froxel.tan_half_fov_y);
-	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, r_froxel.log_far_near,
-		(float)q_max (1, r_froxel.dims[0]), (float)q_max (1, r_froxel.dims[1]), (float)q_max (1, r_froxel.dims[2]));
-	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, global_simple ? 0 : CLAMP (0, (int)Q_rint (r_froxel_debug.value), 4));
-	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, global_simple ? 0 : CLAMP (0, (int)Q_rint (r_fogvol_froxel_parity.value), 1));
-	GL_Uniform3fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES,
-		(global_simple || !cfg) ? 0.f : cfg->froxel_scale,
-		(global_simple || !cfg) ? 0.f : cfg->lightlist_scale,
-		(global_simple || !cfg) ? 0.f : cfg->lightgrid_scale);
-	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, (global_simple || !cfg) ? 0 : cfg->lighting_mode);
-	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, (cfg && !global_simple && cfg->godray_coupling) ? 1 : 0);
-	GL_Uniform4fFunc (FOGVOL_U_GODRAY_SHAFTS_PARAMS,
-		(float)q_max (1, framebufs.godrays.width),
-		(float)q_max (1, framebufs.godrays.height),
-		(cfg && !global_simple && cfg->godray_coupling) ? 1.f : 0.f,
-		1.f);
-	GL_Uniform4fFunc (FOGVOL_U_FROXEL_TEMPORAL_PARAMS,
-		CLAMP (0.f, r_fogvol_froxel_temporal_alpha.value, 1.f),
-		q_max (1.f, r_fogvol_froxel_temporal_reject_threshold.value),
-		(r_froxel.prev_valid ? sqrtf (
-			(r_refdef.vieworg[0] - r_froxel.prev_vieworg[0]) * (r_refdef.vieworg[0] - r_froxel.prev_vieworg[0]) +
-			(r_refdef.vieworg[1] - r_froxel.prev_vieworg[1]) * (r_refdef.vieworg[1] - r_froxel.prev_vieworg[1]) +
-			(r_refdef.vieworg[2] - r_froxel.prev_vieworg[2]) * (r_refdef.vieworg[2] - r_froxel.prev_vieworg[2])) : 0.f),
-		r_froxel.prev_valid ? 1.f : 0.f);
-	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, (cfg && !global_simple) ? cfg->local_occlusion_mode : 0);
-	GL_Uniform4fFunc (FOGVOL_U_LOCAL_OCCLUSION_PARAMS, 4.f, 0.02f, 1.f, 0.f);
-	noise_detail_strength = CLAMP (0.f, r_fogvol_noise_detail_strength.value, 1.f);
-	noise_detail_strength *= quality_mode == 1 ? 0.75f : quality_fx_scale;
-	if (global_simple)
-		noise_detail_strength *= 0.7f;
-	height_mist_strength = CLAMP (0.f, r_fogvol_height_mist_strength.value, 1.f);
-	height_mist_strength = CLAMP (0.f, height_mist_strength * quality_fx_scale, 1.f);
-	atmosphere_boost = CLAMP (0.f, r_fogvol_atmosphere.value * quality_fx_scale, 1.5f);
-	GL_Uniform1fFunc (FOGVOL_U_NOISE_DETAIL_STRENGTH, noise_detail_strength);
-	GL_Uniform1fFunc (FOGVOL_U_HEIGHT_MIST_STRENGTH, height_mist_strength);
-	GL_Uniform1fFunc (FOGVOL_U_ATMOSPHERE_BOOST, atmosphere_boost);
-	GL_Uniform4fFunc (FOGVOL_U_CLUSTER_PARAMS, 0.f, 0.f, 0.f, 0.f);
-}
-
-static void R_FogVol_LogPerfStats (const fogvol_perf_stats_t *stats)
-{
-	int interval;
-	int mode;
-
-	if (!stats)
-		return;
-
-	mode = CLAMP (0, (int)Q_rint (r_fogvol_stats.value), 2);
-	if (mode <= 0)
-		return;
-
-	interval = (mode >= 2) ? 1 : 30;
-	if ((stats->frame % interval) != 0)
-		return;
-
-	Con_Printf ("fogvol_stats: frame=%d preset=%d gpu_ms=%.3f passes=%d blits=%d global_passes=%d local_passes=%d clustered_passes=%d clustered_tiles=%d clustered_indices=%d global=%d locals=%d steps=%d shadow_samples=%d\n",
-		stats->frame,
-		stats->preset,
-		stats->gpu_ms,
-		stats->passes,
-		stats->blits,
-		stats->global_passes,
-		stats->local_passes,
-		stats->clustered_passes,
-		stats->clustered_tiles,
-		stats->clustered_indices,
-		stats->global_active ? 1 : 0,
-		stats->local_volumes,
-		stats->steps,
-		stats->shadow_samples);
-}
-
-static void R_FogVol_PrepareBaseSource (qboolean use_halfres, int fog_width, int fog_height, int *blit_count, GLuint *source_tex, GLuint *source_fbo)
-{
-	GLuint src_tex;
-	GLuint src_fbo;
-
-	src_tex = framebufs.composite.color_tex;
-	src_fbo = framebufs.composite.fbo;
-
-	if (use_halfres)
-	{
-		GL_SetScissorEnabled (false);
-		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, src_fbo);
-		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.finalcopy_fbo);
-		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY read=COLOR_ATTACHMENT0");
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "FINAL_COPY draw=COLOR_ATTACHMENT0");
-		R_FogVol_LogHazardPass ("FINAL_COPY", src_tex, 0, 0);
-		R_FogVol_AssertNoFeedbackHazard ("FINAL_COPY", framebufs.fogvol.finalcopy_tex, src_tex);
-		GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
-			0, 0, fog_width, fog_height,
-			GL_COLOR_BUFFER_BIT, GL_LINEAR);
-		src_tex = framebufs.fogvol.finalcopy_tex;
-		src_fbo = framebufs.fogvol.finalcopy_fbo;
-		if (blit_count)
-			(*blit_count)++;
-	}
-
-	if (source_tex)
-		*source_tex = src_tex;
-	if (source_fbo)
-		*source_fbo = src_fbo;
-}
-
-static qboolean R_FogVol_RenderGlobalSimple (const fogvol_shader_setup_t *setup,
-	GLuint source_tex, GLuint source_fbo, GLuint depth_tex, GLuint *fog_tex, GLuint *fog_fbo,
-	int *fog_src, GLuint *final_tex, qboolean *has_drawn, fogvol_perf_stats_t *stats)
-{
-	int x0, y0, x1, y1;
-	GLuint dst_tex;
-	GLuint dst_fbo;
-	fogvol_runtime_config_t runtime;
-
-	if (!setup || !fog_tex || !fog_fbo || !fog_src || !final_tex || !has_drawn)
-		return false;
-	if (!r_fogvol_global_active || !r_fogvol_global_volume.enabled)
-		return false;
-	if (!R_FogVol_ProjectAABBToScreenRect (&r_fogvol_global_volume, &x0, &y0, &x1, &y1, true))
-	{
-		x0 = (int)setup->view_x;
-		y0 = (int)setup->view_y;
-		x1 = (int)(setup->view_x + setup->view_w);
-		y1 = (int)(setup->view_y + setup->view_h);
-	}
-
-	if (setup->use_halfres)
-	{
-		float scale_x = (float)setup->fog_width / (float)glwidth;
-		float scale_y = (float)setup->fog_height / (float)glheight;
-		x0 = CLAMP (0, (int)floorf ((float)x0 * scale_x), setup->fog_width);
-		y0 = CLAMP (0, (int)floorf ((float)y0 * scale_y), setup->fog_height);
-		x1 = CLAMP (0, (int)ceilf ((float)x1 * scale_x), setup->fog_width);
-		y1 = CLAMP (0, (int)ceilf ((float)y1 * scale_y), setup->fog_height);
-	}
-
-	if (x1 <= x0 || y1 <= y0)
-		return false;
-
-	R_FogVol_UploadVolumeRange (&r_fogvol_global_volume, 1);
-	R_FogVol_BuildRuntimeConfig (&runtime, setup->steps, true, false, false);
-	R_FogVol_UseProgram (glprogs.fogvol_global ? glprogs.fogvol_global : glprogs.fogvol);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, 0);
-	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, 0);
-	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, framebufs.shadow.sun_depth_tex);
-	GL_SetScissorEnabled (false);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	R_FogVol_SetShaderUniforms (setup->steps, setup->mode, setup->use_halfres,
-		setup->glwidth, setup->glheight, setup->depth_scale_x, setup->depth_scale_y,
-		setup->inv_viewproj, setup->view_x, setup->view_y, setup->view_w, setup->view_h,
-		setup->depth_near, setup->depth_far, setup->depth_sky_cutoff,
-		&runtime, true);
-
-	if (setup->use_halfres)
-		glViewport (0, 0, setup->fog_width, setup->fog_height);
-	else
-		glViewport ((int)setup->view_x, (int)setup->view_y, (int)setup->view_w, (int)setup->view_h);
-
-	dst_tex = fog_tex[0];
-	dst_fbo = fog_fbo[0];
-	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, source_fbo);
-	R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, dst_fbo);
-	R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "GLOBAL read=COLOR_ATTACHMENT0");
-	R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "GLOBAL draw=COLOR_ATTACHMENT0");
-	R_FogVol_LogHazardPass ("GLOBAL", source_tex, 0, source_tex);
-	R_FogVol_AssertNoFeedbackHazard ("GLOBAL", dst_tex, source_tex);
-	R_FogVol_AssertNoBoundFeedbackHazard ("GLOBAL");
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, source_tex);
-	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
-	GL_SetScissorEnabled (true);
-	glScissor (x0, y0, x1 - x0, y1 - y0);
-	GL_Uniform1iFunc (FOGVOL_U_VOLUME_INDEX, 0);
-	glDrawArrays (GL_TRIANGLES, 0, 3);
-	GL_SetScissorEnabled (false);
-
-	*fog_src = 0;
-	*final_tex = dst_tex;
-	*has_drawn = true;
-	if (stats)
-	{
-		stats->passes++;
-		stats->global_passes++;
-	}
-	return true;
-}
-
-static qboolean R_FogVol_RenderClusteredLocal (const fogvol_shader_setup_t *setup, const fogvol_runtime_config_t *runtime,
-	fogvol_render_context_t *ctx, fogvol_perf_stats_t *stats)
-{
-	fogvol_runtime_config_t clustered_runtime;
-	GLuint buf;
-	GLbyte *ofs;
-	GLuint dst_tex;
-	GLuint dst_fbo;
-	GLuint src_fbo_local;
-	GLuint src_tex_local;
-	int tiles_x, tiles_y, tile_size, index_count;
-
-	if (!setup || !runtime || !ctx)
-		return false;
-	if (!R_FogVol_CanUseClusteredLocal (runtime))
-		return false;
-	if (!R_FogVol_BuildClusteredTiles (setup->fog_width, setup->fog_height,
-		ctx->scissor_valid, ctx->scissor_x0, ctx->scissor_y0, ctx->scissor_x1, ctx->scissor_y1,
-		&tiles_x, &tiles_y, &tile_size, &index_count))
-		return false;
-	if (index_count <= 0)
-		return false;
-
-	clustered_runtime = *runtime;
-	clustered_runtime.lighting_mode = 0;
-	clustered_runtime.light_enabled = false;
-	clustered_runtime.lightgrid_enabled = false;
-	clustered_runtime.froxel_enabled = false;
-	clustered_runtime.froxel_scale = 0.f;
-	clustered_runtime.lightlist_scale = 0.f;
-	clustered_runtime.lightgrid_scale = 0.f;
-	clustered_runtime.shadow_enabled = false;
-	clustered_runtime.shadow_samples = 0;
-	clustered_runtime.godray_coupling = false;
-	clustered_runtime.local_occlusion_mode = 0;
-
-	R_FogVol_UploadVolumeRange (r_fogvolumes, r_fogvolume_count);
-	GL_Upload (GL_SHADER_STORAGE_BUFFER, r_fogvol_cluster_headers, sizeof (fogvol_cluster_header_gpu_t) * tiles_x * tiles_y, &buf, &ofs);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 8, buf, (GLintptr)ofs, sizeof (fogvol_cluster_header_gpu_t) * tiles_x * tiles_y);
-	GL_Upload (GL_SHADER_STORAGE_BUFFER, r_fogvol_cluster_indices, sizeof (int) * index_count, &buf, &ofs);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 9, buf, (GLintptr)ofs, sizeof (int) * index_count);
-
-	dst_tex = ctx->fog_tex[ctx->has_drawn ? (1 - ctx->fog_src) : 0];
-	dst_fbo = ctx->fog_fbo[ctx->has_drawn ? (1 - ctx->fog_src) : 0];
-	src_tex_local = ctx->has_drawn ? ctx->fog_tex[ctx->fog_src] : ctx->composite_src_tex;
-	src_fbo_local = ctx->has_drawn ? ctx->fog_fbo[ctx->fog_src] : ctx->composite_src_fbo;
-
-	R_FogVol_UseProgram (glprogs.fogvol_clustered ? glprogs.fogvol_clustered : glprogs.fogvol);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, 0);
-	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, 0);
-	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, framebufs.shadow.sun_depth_tex);
-	GL_SetScissorEnabled (false);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	R_FogVol_SetShaderUniforms (setup->steps, setup->mode, setup->use_halfres,
-		setup->glwidth, setup->glheight, setup->depth_scale_x, setup->depth_scale_y,
-		setup->inv_viewproj, setup->view_x, setup->view_y, setup->view_w, setup->view_h,
-		setup->depth_near, setup->depth_far, setup->depth_sky_cutoff,
-		&clustered_runtime, false);
-	GL_Uniform4fFunc (FOGVOL_U_CLUSTER_PARAMS, (float)tile_size, (float)tiles_x, (float)tiles_y, 1.f);
-
-	if (setup->use_halfres)
-		glViewport (0, 0, setup->fog_width, setup->fog_height);
-	else
-		glViewport ((int)setup->view_x, (int)setup->view_y, (int)setup->view_w, (int)setup->view_h);
-
-	R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, src_fbo_local);
-	R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, dst_fbo);
-	R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "CLUSTER read=COLOR_ATTACHMENT0");
-	R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "CLUSTER draw=COLOR_ATTACHMENT0");
-	R_FogVol_LogHazardPass ("CLUSTER", src_tex_local, 0, src_tex_local);
-	R_FogVol_AssertNoFeedbackHazard ("CLUSTER", dst_tex, src_tex_local);
-	R_FogVol_AssertNoBoundFeedbackHazard ("CLUSTER");
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex_local);
-	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, ctx->depth_tex);
-	GL_Uniform1iFunc (FOGVOL_U_VOLUME_INDEX, 0);
-	glDrawArrays (GL_TRIANGLES, 0, 3);
-
-	ctx->fog_src = ctx->has_drawn ? (1 - ctx->fog_src) : 0;
-	ctx->final_tex = dst_tex;
-	ctx->has_drawn = true;
-	if (stats)
-	{
-		stats->passes++;
-		stats->local_passes++;
-		stats->clustered_passes++;
-		stats->clustered_tiles = tiles_x * tiles_y;
-		stats->clustered_indices = index_count;
-	}
-	return true;
-}
-
-static qboolean R_FogVol_ComputeViewAndDepthSetup (qboolean use_halfres,
-	int *fog_width, int *fog_height,
-	float *view_x, float *view_y, float *view_w, float *view_h,
-	float *depth_scale_x, float *depth_scale_y,
-	float *depth_near, float *depth_far, float *depth_sky_cutoff)
-{
-	*fog_width = use_halfres ? framebufs.fogvol.width : glwidth;
-	*fog_height = use_halfres ? framebufs.fogvol.height : glheight;
-	*view_x = (float)(glx + r_refdef.vrect.x);
-	*view_y = (float)(gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height);
-	*view_w = (float)r_refdef.vrect.width;
-	*view_h = (float)r_refdef.vrect.height;
-
-	if (glwidth <= 0 || glheight <= 0 || *fog_width <= 0 || *fog_height <= 0 || *view_w <= 0.f || *view_h <= 0.f)
-	{
-		Con_DPrintf ("R_FogVol_Render: rejected dimensions gl=%dx%d fog=%dx%d view=%.1fx%.1f\n",
-			glwidth, glheight, *fog_width, *fog_height, *view_w, *view_h);
-		return false;
-	}
-
-	*depth_scale_x = (float)glwidth / (float)(*fog_width);
-	*depth_scale_y = (float)glheight / (float)(*fog_height);
-	*depth_near = 0.5f;
-	*depth_far = gl_farclip.value > *depth_near ? gl_farclip.value : *depth_near + 1.f;
-	*depth_sky_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
-	return true;
-}
-
-static int R_FogVol_ComputeRaymarchSteps (qboolean use_halfres, float depth_far)
-{
-	int steps;
-
-	if (use_halfres && r_fogvol_steps_scale_halfres.value > 0.f)
-		steps = (int)Q_rint (r_fogvol_steps.value * r_fogvol_steps_scale_halfres.value);
-	else
-		steps = (int)Q_rint (r_fogvol_steps.value);
-
-	if (r_fogvol_stepsize.value > 0.f)
-	{
-		float step_size = q_max (1.f, r_fogvol_stepsize.value);
-		steps = (int)Q_rint (depth_far / step_size);
-	}
-
-	return CLAMP (8, steps, q_max (8, (int)Q_rint (r_fogvol_maxsteps.value)));
-}
-
-static void R_FogVol_RunFroxelLightingSetup (const fogvol_runtime_config_t *runtime_cfg,
-	float depth_near, float depth_far,
-	qboolean *raymarch_lighting_enabled,
-	qboolean *froxel_lighting_mode,
-	qboolean *raymarch_fallback_active)
-{
-	qboolean froxel_injection_enabled = runtime_cfg->froxel_enabled;
-	const int static_light_count = R_FogVol_GetStaticLightCount ();
-	qboolean want_froxel_dlights = froxel_injection_enabled && (r_fogvol_dlightscale.value > 0.f);
-	qboolean want_froxel_sun = froxel_injection_enabled && (r_fogvol_froxel_sun.value > 0.f);
-	qboolean want_froxel_static = froxel_injection_enabled && (static_light_count > 0);
-	qboolean run_froxel_injection = froxel_injection_enabled && (want_froxel_dlights || want_froxel_sun || want_froxel_static);
-
-	*raymarch_lighting_enabled = runtime_cfg->light_enabled;
-	*froxel_lighting_mode = runtime_cfg->froxel_enabled;
-	*raymarch_fallback_active = false;
-
-	if (run_froxel_injection)
-	{
-		R_Froxel_BeginFrame (depth_near, depth_far);
-		if (want_froxel_dlights)
-			R_Froxel_InjectDlights ();
-		if (want_froxel_sun)
-			R_Froxel_InjectSun ();
-		if (want_froxel_static)
-			R_Froxel_InjectStaticLights ();
-		R_Froxel_EndFrame ();
-	}
-	else
-	{
-		r_froxel.valid = false;
-		r_froxel.prev_valid = false;
-	}
-
-	if (!*raymarch_lighting_enabled && *froxel_lighting_mode && r_fogvol_light.value > 0.f && runtime_cfg->lightlist_scale > 0.f)
-	{
-		const qboolean froxel_ready = (r_froxel.valid && r_froxel.light_tex && r_froxel.light_count > 0);
-		if (!froxel_ready)
-		{
-			*raymarch_lighting_enabled = true;
-			*raymarch_fallback_active = true;
-		}
-	}
-}
-
-static void R_FogVol_BuildScissorRects (fogvol_render_context_t *ctx)
-{
-	qboolean use_halfres = ctx->use_halfres;
-	int fog_width = ctx->fog_width;
-	int fog_height = ctx->fog_height;
-
-	for (int i = 0; i < r_fogvolume_count; ++i)
-	{
-		fog_volume_t *v = &r_fogvolumes[i];
-		int x0, y0, x1, y1;
-
-		ctx->scissor_valid[i] = false;
-		if (!v->enabled)
-			continue;
-		if (!R_FogVol_ProjectAABBToScreenRect (v, &x0, &y0, &x1, &y1, true))
-			continue;
-		if (use_halfres)
-		{
-			float scale_x = (float)fog_width / (float)glwidth;
-			float scale_y = (float)fog_height / (float)glheight;
-			int hx0 = (int)floorf ((float)x0 * scale_x);
-			int hy0 = (int)floorf ((float)y0 * scale_y);
-			int hx1 = (int)ceilf ((float)x1 * scale_x);
-			int hy1 = (int)ceilf ((float)y1 * scale_y);
-			x0 = CLAMP (0, hx0, fog_width);
-			y0 = CLAMP (0, hy0, fog_height);
-			x1 = CLAMP (0, hx1, fog_width);
-			y1 = CLAMP (0, hy1, fog_height);
-			if (x1 <= x0 || y1 <= y0)
-				continue;
-		}
-		ctx->scissor_x0[i] = x0;
-		ctx->scissor_y0[i] = y0;
-		ctx->scissor_x1[i] = x1;
-		ctx->scissor_y1[i] = y1;
-		ctx->scissor_valid[i] = true;
-	}
-}
-
-static void R_FogVol_RenderLocalVolumesIterative (fogvol_render_context_t *ctx, fogvol_perf_stats_t *perf_stats)
-{
-	int mode = ctx->mode;
-
-	for (int i = 0; i < r_fogvolume_count; ++i)
-	{
-		fog_volume_t *v = &r_fogvolumes[i];
-		int x0, y0, x1, y1;
-		GLuint src_fbo;
-		GLuint src_tex;
-		GLuint dst_fbo;
-		GLuint dst_tex;
-		int fog_dst;
-
-		if (!ctx->scissor_valid[i])
-			continue;
-		x0 = ctx->scissor_x0[i];
-		y0 = ctx->scissor_y0[i];
-		x1 = ctx->scissor_x1[i];
-		y1 = ctx->scissor_y1[i];
-
-		if (mode == 1)
-		{
-			vec3_t color;
-			VectorCopy (v->color, color);
-			R_DebugDrawWireBox (v->mins, v->maxs, color, true);
-		}
-
-		fog_dst = ctx->has_drawn ? (1 - ctx->fog_src) : 0;
-		dst_tex = ctx->fog_tex[fog_dst];
-		dst_fbo = ctx->fog_fbo[fog_dst];
-
-		if (!ctx->has_drawn)
-		{
-			src_tex = ctx->composite_src_tex;
-			src_fbo = ctx->composite_src_fbo;
-		}
-		else
-		{
-			src_tex = ctx->fog_tex[ctx->fog_src];
-			src_fbo = ctx->fog_fbo[ctx->fog_src];
-		}
-
-		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, src_fbo);
-		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, dst_fbo);
-		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "ITER read=COLOR_ATTACHMENT0");
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "ITER draw=COLOR_ATTACHMENT0");
-		R_FogVol_LogHazardPass ("ITER", src_tex, 0, src_tex);
-		if (mode == 1)
-			Con_DPrintf ("FOGVOL debug ITER idx=%d src_tex=%u depth_tex=%u dst_tex=%u src_fbo=%u dst_fbo=%u scissor=(%d %d %d %d)\n",
-				i, src_tex, ctx->depth_tex, dst_tex, src_fbo, dst_fbo, x0, y0, x1 - x0, y1 - y0);
-		R_FogVol_AssertNoFeedbackHazard ("ITER", dst_tex, src_tex);
-		R_FogVol_AssertNoBoundFeedbackHazard ("ITER");
-		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
-		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, ctx->depth_tex);
-		GL_SetScissorEnabled (true);
-		glScissor (x0, y0, x1 - x0, y1 - y0);
-		GL_Uniform1iFunc (FOGVOL_U_VOLUME_INDEX, i);
-		glDrawArrays (GL_TRIANGLES, 0, 3);
-		GL_SetScissorEnabled (false);
-
-		ctx->fog_src = fog_dst;
-		ctx->final_tex = ctx->fog_tex[ctx->fog_src];
-		ctx->has_drawn = true;
-		perf_stats->passes++;
-		perf_stats->local_passes++;
-	}
+		(shadow_enabled && sun_shadow_map_enabled) ? 1.f : 0.f,
+		sun_shadow_bias, sun_shadow_pcf, 0.f);
 }
 
 void R_FogVol_Render (void)
 {
-	static const vec3_t fog_lightgrid_corner_lut[8] = {
-		{0.f, 0.f, 0.f}, {1.f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f, 0.f},
-		{0.f, 0.f, 1.f}, {1.f, 0.f, 1.f}, {0.f, 1.f, 1.f}, {1.f, 1.f, 1.f}
-	};
+	float inv_viewproj[16];
+	int mode;
+	qboolean use_halfres;
+	int fog_width, fog_height;
+	float view_x, view_y, view_w, view_h;
+	float depth_scale_x, depth_scale_y;
+	float depth_near, depth_far, depth_sky_cutoff;
 	int steps;
+	GLuint src_tex, src_fbo;
+	int fog_src = 0;
+	qboolean has_drawn = false;
+	GLuint final_tex, final_fbo;
+	GLuint froxel_tex = 0;
+	int froxel_light_count = 0;
+	float froxel_params0[4] = {0.f, 0.f, 0.f, 0.f};
+	float froxel_params1[4] = {0.f, 1.f, 1.f, 1.f};
 	GLuint buf;
 	GLbyte *ofs;
-	fog_light_lists_gpu_t fog_lights;
-	fog_lightgrid_gpu_t fog_lightgrid[MAX_FOGVOLUMES];
-	const int mode = CLAMP (0, (int)Q_rint (r_fogvol_debug.value), 9);
-	float inv_viewproj[16];
-	GLuint src_tex;
-	GLuint depth_tex;
-	GLuint velocity_tex;
-	GLuint fog_tex[2];
-	GLuint fog_fbo[2];
-	GLuint history_tex[2];
-	GLuint history_fbo[2];
-	qboolean has_drawn = false;
-	qboolean use_halfres;
-	int fog_width;
-	int fog_height;
-	float depth_scale_x;
-	float depth_scale_y;
-	float view_x;
-	float view_y;
-	float view_w;
-	float view_h;
-	float depth_near;
-	float depth_far;
-	float depth_sky_cutoff;
-	int fog_src = 0;
-	GLuint final_tex = 0;
-	GLuint composite_src_tex = 0;
-	GLuint composite_src_fbo = 0;
-	qboolean use_test_guard;
-	qboolean dumpstate_always;
-	fogvol_restore_state_t restore_state;
-	qboolean fog_light_enabled = false;
-	qboolean fog_lightgrid_enabled = false;
-	qboolean fog_lightgrid_has_data = false;
-	const lightgrid_t *lightgrid = NULL;
-	fogvol_visible_volume_t visible_volumes[MAX_FOGVOLUMES];
-	fogvol_light_candidate_t frame_candidates[256];
-	fogvol_light_stats_t light_stats;
-	vec3_t fog_bounds_mins;
-	vec3_t fog_bounds_maxs;
-	fogvol_render_context_t render_ctx;
-	int visible_count = 0;
-	int frame_candidate_count = 0;
-	qboolean has_fog_bounds = false;
-	const qboolean light_stats_enabled = r_fogvol_light_stats.value > 0.f;
-	qboolean raymarch_lighting_enabled = false;
-	qboolean froxel_lighting_mode = false;
-	qboolean raymarch_fallback_active = false;
-	int static_light_count = 0;
-	fogvol_shader_setup_t shader_setup;
-	fogvol_runtime_config_t runtime_cfg;
-	fogvol_perf_stats_t perf_stats;
-	GLuint query_id = 0;
-	GLuint64 gpu_time_ns = 0;
-	const qboolean global_active = r_fogvol_global_active;
 
-	/* Per-frame validity: only expose a fogvol composite texture after this
-	 * frame actually produced one. */
 	r_fogvol_composite_valid = false;
+	r_fogvol_composite_tex = 0;
 
 	if (!R_FogVol_IsEnabledForFrame ())
+	{
+		if (r_fogvol_stats.value > 0.f)
+			Con_DPrintf ("fogvol_render: skipped (disabled or shader missing)\n");
 		return;
-	if (r_fogvolume_count <= 0 && !global_active)
+	}
+	if (r_fogvolume_count <= 0)
+	{
+		if (r_fogvol_stats.value > 0.f)
+			Con_DPrintf ("fogvol_render: skipped (no volumes)\n");
 		return;
+	}
 	if (!Mat4_Inverse (r_matviewproj, inv_viewproj))
+	{
+		if (r_fogvol_stats.value > 0.f)
+			Con_DPrintf ("fogvol_render: skipped (inverse viewproj failed)\n");
+		return;
+	}
+
+	mode = CLAMP (0, (int)Q_rint (r_fogvol.value), 2);
+	use_halfres = (mode == 1) ? true : (r_fogvol_halfres.value > 0.f);
+	fog_width = use_halfres ? framebufs.fogvol.width : glwidth;
+	fog_height = use_halfres ? framebufs.fogvol.height : glheight;
+	view_x = (float)(glx + r_refdef.vrect.x);
+	view_y = (float)(gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height);
+	view_w = (float)r_refdef.vrect.width;
+	view_h = (float)r_refdef.vrect.height;
+
+	if (fog_width <= 0 || fog_height <= 0 || view_w <= 0.f || view_h <= 0.f)
 		return;
 
-	memset (&shader_setup, 0, sizeof (shader_setup));
-	memset (&render_ctx, 0, sizeof (render_ctx));
-	memset (&perf_stats, 0, sizeof (perf_stats));
-	perf_stats.frame = r_framecount;
-	perf_stats.local_volumes = r_fogvolume_count;
-	perf_stats.global_active = global_active;
+	depth_scale_x = (float)glwidth / (float)fog_width;
+	depth_scale_y = (float)glheight / (float)fog_height;
+	depth_near = 0.5f;
+	depth_far = gl_farclip.value > depth_near ? gl_farclip.value : depth_near + 1.f;
+	depth_sky_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
 
-	R_FogVol_WarnFroxelLightingConfig ();
-	if (R_FogVol_StaticBuildNeedsRebuild ())
-		R_FogVol_BuildStaticLightInjection ();
-	if (R_FogVol_StaticFieldNeedsBuildContinuation ())
-	{
-		R_FogVol_ContinueStaticFieldBuild (q_max (1, (int)Q_rint (r_fogvol_static_probe_budget_frame.value)));
-		if (R_FogVol_GetStaticFieldTotalSamples () > 0)
-			R_FogVol_SummarizeStaticLightsFromField ();
-	}
-	static_light_count = R_FogVol_GetStaticLightCount ();
-	dumpstate_always = false;
-	use_test_guard = false;
-	if (use_test_guard)
-		R_FogVol_CaptureRestoreState (&restore_state);
-	if (R_FogVol_StateDebugEnabled ())
-		R_FogVol_LogPipelineState ("FOGVOL_BEGIN");
-	R_FogVol_LogStateSnapshot ("before-pass");
-	if (use_test_guard)
-		R_FogVol_LogBufferMarker ("pre");
+	steps = CLAMP (8, (int)Q_rint (r_fogvol_steps.value), 128);
+	if (mode == 1)
+		steps = q_min (steps, 16);
+	if (use_halfres)
+		steps = q_max (8, steps / 2);
 
-	use_halfres = (r_fogvol_halfres.value > 0.f);
-	if (!R_FogVol_ComputeViewAndDepthSetup (use_halfres,
-		&fog_width, &fog_height,
-		&view_x, &view_y, &view_w, &view_h,
-		&depth_scale_x, &depth_scale_y,
-		&depth_near, &depth_far, &depth_sky_cutoff))
-		return;
+	R_Froxel_BeginFrame (depth_near, depth_far);
+	R_Froxel_InjectDlights ();
+	R_Froxel_EndFrame ();
+	R_Froxel_GetShaderState (&froxel_tex, &froxel_light_count, froxel_params0, froxel_params1);
 
-	steps = R_FogVol_ComputeRaymarchSteps (use_halfres, depth_far);
-	perf_stats.steps = steps;
-	perf_stats.shadow_samples = global_active
-		? (r_fogvol_global_shadow.value > 0.f ? q_min (CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8), 1) : 0)
-		: CLAMP (1, (int)Q_rint (r_fogvol_shadow_samples.value), 8);
-	shader_setup.steps = steps;
-	shader_setup.mode = mode;
-	shader_setup.glwidth = glwidth;
-	shader_setup.glheight = glheight;
-	shader_setup.fog_width = fog_width;
-	shader_setup.fog_height = fog_height;
-	shader_setup.depth_scale_x = depth_scale_x;
-	shader_setup.depth_scale_y = depth_scale_y;
-	memcpy (shader_setup.inv_viewproj, inv_viewproj, sizeof (shader_setup.inv_viewproj));
-	shader_setup.view_x = view_x;
-	shader_setup.view_y = view_y;
-	shader_setup.view_w = view_w;
-	shader_setup.view_h = view_h;
-	shader_setup.depth_near = depth_near;
-	shader_setup.depth_far = depth_far;
-	shader_setup.depth_sky_cutoff = depth_sky_cutoff;
-	shader_setup.use_halfres = use_halfres;
-	R_FogVol_BuildRuntimeConfig (&runtime_cfg, steps, false, r_fogvol_light.value > 0.f, r_fogvol_lightgrid.value > 0.f);
-	steps = runtime_cfg.effective_steps;
-	shader_setup.steps = steps;
-	perf_stats.preset = runtime_cfg.preset;
-	perf_stats.steps = steps;
-	perf_stats.shadow_samples = runtime_cfg.shadow_samples;
-	R_FogVol_RunFroxelLightingSetup (&runtime_cfg, depth_near, depth_far,
-		&raymarch_lighting_enabled, &froxel_lighting_mode, &raymarch_fallback_active);
+	R_FogVol_UploadVolumeRange (r_fogvolumes, r_fogvolume_count);
+	GL_Upload (GL_SHADER_STORAGE_BUFFER, &r_fogvol_empty_lights, sizeof (r_fogvol_empty_lights), &buf, &ofs);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 4, buf, (GLintptr)ofs, sizeof (r_fogvol_empty_lights));
 
-	if (raymarch_lighting_enabled)
-		memset (&fog_lights, 0, sizeof (fog_lights));
-	memset (&light_stats, 0, sizeof (light_stats));
-	lightgrid = Lightgrid_Get ();
-	fog_lightgrid_has_data = (lightgrid && lightgrid->octree && r_lightgrid.value > 0.f);
-	fog_lightgrid_enabled = runtime_cfg.lightgrid_enabled && (fog_lightgrid_has_data || static_light_count > 0);
-
-	if (raymarch_lighting_enabled)
-	{
-		const double broadphase_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
-		int max_lights = CLAMP (0, (int)Q_rint (r_fogvol_light_max.value), MAX_FOGLIGHTS);
-		int write_offset = 0;
-
-		visible_count = R_FogVol_BuildVisibleVolumeCache (visible_volumes, countof (visible_volumes), fog_bounds_mins, fog_bounds_maxs, &has_fog_bounds);
-		if (visible_count > 0 && max_lights > 0)
-		{
-			frame_candidate_count = R_FogVol_BuildFrameLightBroadphase (visible_volumes, visible_count, fog_bounds_mins, fog_bounds_maxs, has_fog_bounds, frame_candidates, countof (frame_candidates));
-			light_stats.broadphase_candidates = frame_candidate_count;
-		}
-		if (light_stats_enabled)
-			light_stats.broadphase_seconds = Sys_DoubleTime () - broadphase_start;
-
-		for (int i = 0; i < r_fogvolume_count; ++i)
-		{
-			int remaining = (int)countof (fog_lights.lights) - write_offset;
-			int count = 0;
-			if (remaining > 0 && max_lights > 0 && frame_candidate_count > 0)
-			{
-				const double narrowphase_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
-				int per_volume_cap = q_min (max_lights, remaining);
-				count = R_FogVol_BuildLightListForVolume (&r_fogvolumes[i], frame_candidates, frame_candidate_count, &fog_lights.lights[write_offset], per_volume_cap, light_stats_enabled ? &light_stats : NULL);
-				if (light_stats_enabled)
-					light_stats.narrowphase_seconds += Sys_DoubleTime () - narrowphase_start;
-			}
-
-			fog_lights.volumes[i].offset_count[0] = write_offset;
-			fog_lights.volumes[i].offset_count[1] = count;
-			write_offset += count;
-			fog_light_enabled = fog_light_enabled || (count > 0);
-		}
-
-	}
-	if (raymarch_fallback_active && developer.value > 0.f && (r_framecount % 120) == 0)
-		Con_DPrintf ("FogVol: froxel had no active lights; using raymarch light-list fallback for this frame.\n");
-
-	if (fog_lightgrid_enabled)
-	{
-		const double lightgrid_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
-		memset (&fog_lightgrid, 0, sizeof (fog_lightgrid));
-
-		for (int i = 0; i < r_fogvolume_count; ++i)
-		{
-			const fog_volume_t *v = &r_fogvolumes[i];
-
-			for (int c = 0; c < 8; ++c)
-			{
-				vec3_t probe_pos;
-				const lightgrid_probe_t *probe;
-
-				probe_pos[0] = v->mins[0] + (v->maxs[0] - v->mins[0]) * fog_lightgrid_corner_lut[c][0];
-				probe_pos[1] = v->mins[1] + (v->maxs[1] - v->mins[1]) * fog_lightgrid_corner_lut[c][1];
-				probe_pos[2] = v->mins[2] + (v->maxs[2] - v->mins[2]) * fog_lightgrid_corner_lut[c][2];
-				probe = R_GetLightgridSample (probe_pos);
-				if (probe)
-				{
-					fog_lightgrid[i].probe_rgb[c][0] = probe->rgb[0] * probe->ao;
-					fog_lightgrid[i].probe_rgb[c][1] = probe->rgb[1] * probe->ao;
-					fog_lightgrid[i].probe_rgb[c][2] = probe->rgb[2] * probe->ao;
-				}
-				else if (static_light_count > 0)
-				{
-					vec3_t static_rgb = {0.f, 0.f, 0.f};
-					R_FogVol_AccumulateStaticLightsAtPoint (probe_pos, static_rgb);
-					fog_lightgrid[i].probe_rgb[c][0] = static_rgb[0];
-					fog_lightgrid[i].probe_rgb[c][1] = static_rgb[1];
-					fog_lightgrid[i].probe_rgb[c][2] = static_rgb[2];
-				}
-				if (light_stats_enabled)
-					light_stats.lightgrid_probes++;
-			}
-		}
-
-		if (light_stats_enabled)
-			light_stats.lightgrid_seconds = Sys_DoubleTime () - lightgrid_start;
-	}
-
-	if (r_fogvolume_count > 0)
-		R_FogVol_UploadVolumeRange (r_fogvolumes, r_fogvolume_count);
-
-	/* PERF FIX (C-02): glGetError() forces a GPU-CPU pipeline flush and is
-	 * expensive in the per-frame hot path.  Guard with NDEBUG so release builds
-	 * skip the sync entirely.  The lights UBO upload failure path becomes a
-	 * no-op in release, which is acceptable: a failed UBO upload would simply
-	 * leave fog lights disabled for one frame rather than crashing. */
-#if !defined(NDEBUG)
-	/* Clear any stale GL errors before the lights UBO upload so glGetError()
-	 * below only catches errors from THIS call, not from earlier unrelated GL
-	 * operations â€” a stale error would silently disable all fog lights. */
-	while (glGetError () != GL_NO_ERROR) {}
-#endif
-	if (raymarch_lighting_enabled)
-	{
-		GL_Upload (GL_SHADER_STORAGE_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
-		GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
-#if !defined(NDEBUG)
-		if (glGetError () != GL_NO_ERROR)
-		{
-			fog_light_enabled = false;
-			memset (&fog_lights, 0, sizeof (fog_lights));
-			GL_Upload (GL_SHADER_STORAGE_BUFFER, &fog_lights, sizeof (fog_lights), &buf, &ofs);
-			GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 4, buf, (GLintptr)ofs, sizeof (fog_lights));
-		}
-#endif
-	}
-
-	if (fog_lightgrid_enabled && r_fogvolume_count > 0)
-	{
-		const double lightgrid_upload_start = light_stats_enabled ? Sys_DoubleTime () : 0.0;
-
-		/* Upload all per-volume 8-corner probes once per frame; shader indexes by FogVolumeIndex. */
-		GL_Upload (GL_UNIFORM_BUFFER, fog_lightgrid, sizeof (fog_lightgrid_gpu_t) * r_fogvolume_count, &buf, &ofs);
-		GL_BindBufferRange (GL_UNIFORM_BUFFER, 5, buf, (GLintptr)ofs, sizeof (fog_lightgrid_gpu_t) * r_fogvolume_count);
-
-		if (light_stats_enabled)
-			light_stats.lightgrid_upload_seconds = Sys_DoubleTime () - lightgrid_upload_start;
-	}
-	if (light_stats_enabled)
-	{
-		Con_DPrintf ("fogvol_light_stats: broadphase_candidates=%d narrowphase_candidates=%d accepted=%d broadphase_ms=%.3f narrowphase_ms=%.3f lightgrid_probe_ms=%.3f lightgrid_upload_ms=%.3f probes=%d gpu_dlight_sel_frames=%d gpu_dlight_sel_fallbacks=%d gpu_dlight_candidates=%d gpu_dlight_selected=%d\n",
-			light_stats.broadphase_candidates,
-			light_stats.narrowphase_candidates,
-			light_stats.narrowphase_accepted,
-			light_stats.broadphase_seconds * 1000.0,
-			light_stats.narrowphase_seconds * 1000.0,
-			light_stats.lightgrid_seconds * 1000.0,
-			light_stats.lightgrid_upload_seconds * 1000.0,
-			light_stats.lightgrid_probes,
-			r_fogvol_gpu_light_select_state.gpu_frames,
-			r_fogvol_gpu_light_select_state.gpu_fallbacks,
-			r_fogvol_gpu_light_select_state.last_candidates,
-			r_fogvol_gpu_light_select_state.last_selected);
-	}
-
-	GL_BeginGroup ("Fog volumes");
-	if (r_fogvol_stats.value > 0.f)
-	{
-		GL_GenQueriesFunc (1, &query_id);
-		GL_BeginQueryFunc (GL_TIME_ELAPSED, query_id);
-	}
-	R_FogVol_UseProgram (glprogs.fogvol);
+	GL_UseProgram (glprogs.fogvol);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, (r_froxel.valid ? r_froxel.light_tex : 0));
-	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, 0);
-	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, framebufs.shadow.sun_depth_tex);
 	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	R_FogVol_SetShaderUniforms (steps, mode, use_halfres,
-		glwidth, glheight, depth_scale_x, depth_scale_y,
-		inv_viewproj, view_x, view_y, view_w, view_h,
-		depth_near, depth_far, depth_sky_cutoff,
-		&runtime_cfg, false);
+	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
+	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, froxel_tex);
+	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, framebufs.shadow.sun_depth_tex);
+	R_FogVol_SetShaderUniforms (steps, mode, use_halfres, fog_width, fog_height,
+		depth_scale_x, depth_scale_y, inv_viewproj, view_x, view_y, view_w, view_h,
+		depth_near, depth_far, depth_sky_cutoff);
 
-	if (use_halfres)
-		glViewport (0, 0, fog_width, fog_height);
-	else
-		glViewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
-	depth_tex = framebufs.composite.depth_stencil_tex;
-	velocity_tex = 0;
-	if (framebufs.scene.velocity_tex)
+	src_tex = framebufs.composite.color_tex;
+	src_fbo = framebufs.composite.fbo;
+
+	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
-		qboolean msaa = framebufs.scene.samples > 1;
-		velocity_tex = msaa ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
-		/* r_fogvol.c has no access to gl_rmain.c's internal framesetup state.
-		 * Keep the available velocity texture and let TAA/motion resolve handle
-		 * stale-history rejection through their normal confidence path. */
+		const fog_volume_t *v = &r_fogvolumes[i];
+		int fog_dst;
+		GLuint dst_tex;
+		GLuint dst_fbo;
+
+		if (!v->enabled)
+			continue;
+
+		fog_dst = has_drawn ? (1 - fog_src) : 0;
+		dst_tex = framebufs.fogvol.color_tex[fog_dst];
+		dst_fbo = framebufs.fogvol.fbo[fog_dst];
+
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, dst_fbo);
+		if (use_halfres)
+			glViewport (0, 0, fog_width, fog_height);
+		else
+			glViewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
+
+		GL_Uniform1iFunc (FOGVOL_U_VOLUME_INDEX, i);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
+
+		src_tex = dst_tex;
+		src_fbo = dst_fbo;
+		fog_src = fog_dst;
+		has_drawn = true;
 	}
-	fog_tex[0] = framebufs.fogvol.color_tex[0];
-	fog_tex[1] = framebufs.fogvol.color_tex[1];
-	fog_fbo[0] = framebufs.fogvol.fbo[0];
-	fog_fbo[1] = framebufs.fogvol.fbo[1];
-	history_tex[0] = framebufs.fogvol.history_tex[0];
-	history_tex[1] = framebufs.fogvol.history_tex[1];
-	history_fbo[0] = framebufs.fogvol.history_fbo[0];
-	history_fbo[1] = framebufs.fogvol.history_fbo[1];
-	final_tex = 0;
-	/* BUG FIX #3: fog_src must start at 0 and be maintained across iterations.
-	 * The original never initialised fog_src before the loop's first use in
-	 * `fog_dst = (i==0) ? 0 : (1 - fog_src)`, and never advanced fog_src after
-	 * the first iteration for the i==0 case.  fog_src is now explicitly set to
-	 * match fog_dst at the bottom of each iteration via `fog_src = fog_dst`
-	 * (which already existed at line 1181) â€” the missing piece was initialising
-	 * it consistently here so the first `(1 - fog_src)` is deterministic. */
-	fog_src = 0;
-	R_FogVol_PrepareBaseSource (use_halfres, fog_width, fog_height, &perf_stats.blits, &src_tex, &composite_src_fbo);
-	composite_src_tex = src_tex;
-	if (global_active)
-		R_FogVol_RenderGlobalSimple (&shader_setup, src_tex, composite_src_fbo, depth_tex, fog_tex, fog_fbo, &fog_src, &final_tex, &has_drawn, &perf_stats);
-
-	render_ctx.mode = mode;
-	render_ctx.fog_width = fog_width;
-	render_ctx.fog_height = fog_height;
-	render_ctx.view_x = view_x;
-	render_ctx.view_y = view_y;
-	render_ctx.view_w = view_w;
-	render_ctx.view_h = view_h;
-	render_ctx.depth_scale_x = depth_scale_x;
-	render_ctx.depth_scale_y = depth_scale_y;
-	render_ctx.use_halfres = use_halfres;
-	render_ctx.depth_tex = depth_tex;
-	render_ctx.composite_src_tex = composite_src_tex;
-	render_ctx.composite_src_fbo = composite_src_fbo;
-	render_ctx.fog_tex[0] = fog_tex[0];
-	render_ctx.fog_tex[1] = fog_tex[1];
-	render_ctx.fog_fbo[0] = fog_fbo[0];
-	render_ctx.fog_fbo[1] = fog_fbo[1];
-	render_ctx.fog_src = fog_src;
-	render_ctx.final_tex = final_tex;
-	render_ctx.has_drawn = has_drawn;
-
-	R_FogVol_BuildScissorRects (&render_ctx);
-
-	if (!R_FogVol_RenderClusteredLocal (&shader_setup, &runtime_cfg, &render_ctx, &perf_stats))
-		R_FogVol_RenderLocalVolumesIterative (&render_ctx, &perf_stats);
-
-	fog_src = render_ctx.fog_src;
-	final_tex = render_ctx.final_tex;
-	has_drawn = render_ctx.has_drawn;
-	GL_SetScissorEnabled (false);
-	/* BUG FIX (C-08): final_fbo is derived from fog_src which is 0 here only
-	 * when no iterations ran (has_drawn=false).  In that case the code jumps
-	 * to `done` via the has_drawn check below and final_fbo is never used â€”
-	 * but the declaration order made this non-obvious and fragile.  Declare
-	 * final_fbo only after confirming has_drawn so the value is always valid
-	 * when it reaches code that actually uses it.  This matches final_tex
-	 * which was already set correctly inside the loop via fog_src=fog_dst. */
-	{
-		GLuint final_fbo = framebufs.fogvol.fbo[fog_src];
 
 	if (!has_drawn)
 	{
-		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "temporal draw=COLOR_ATTACHMENT0");
-		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "temporal read=COLOR_ATTACHMENT0");
-		glViewport (glx, gly, glwidth, glheight);
-		goto done;
+		if (r_fogvol_stats.value > 0.f)
+			Con_DPrintf ("fogvol_render: skipped (all volumes disabled)\n");
+		return;
 	}
 
-	if (r_fogvol_temporal_alpha.value > 0.f && glprogs.fogvol_temporal && final_tex)
+	final_tex = src_tex;
+	final_fbo = src_fbo;
+
+	if (use_halfres)
 	{
-		int history_valid = (r_fogvol_history_width == fog_width && r_fogvol_history_height == fog_height);
-		int history_src = r_fogvol_history_index;
-		int history_dst = 1 - history_src;
-		int composite_src = history_src;
-		int composite_dst = 1 - composite_src;
-		if (!history_valid)
-		{
-			r_fogvol_history_width = fog_width;
-			r_fogvol_history_height = fog_height;
-			/* BUG FIX #4: Reset history_index to 0 on invalidation so we always
-			 * start from a known-clean slot after a resolution change, rather
-			 * than inheriting whatever index was live from a previous frame
-			 * size that no longer matches. */
-			r_fogvol_history_index = 0;
-			history_src = 0;
-			history_dst = 1;
-			composite_src = 0;
-			composite_dst = 1;
-		}
-
-		R_FogVol_UseProgram (glprogs.fogvol_temporal);
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-		/* history_src and history_dst are always opposite values after the init
-		 * block above; keep relying on that invariant. */
-		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, history_fbo[history_src]);
-		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);
-		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE read=COLOR_ATTACHMENT0");
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "COMPOSITE draw=COLOR_ATTACHMENT0");
-		glViewport (0, 0, fog_width, fog_height);
-		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], final_tex);
-		R_FogVol_AssertNoFeedbackHazard ("COMPOSITE", framebufs.fogvol.composite_tex[composite_dst], history_tex[history_src]);
-		R_FogVol_AssertNoBoundFeedbackHazard ("COMPOSITE");
-		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, final_tex);
-		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, history_tex[history_src]);
-		GL_BindNative (GL_TEXTURE2, GL_TEXTURE_2D, depth_tex);
-		GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, velocity_tex);
-		R_FogVol_LogHazardPass ("COMPOSITE", final_tex, history_tex[history_src], final_tex);
-		GL_Uniform1fFunc (0, r_fogvol_temporal_alpha.value);
-		GL_Uniform1fFunc (1, r_fogvol_temporal_depth_reject.value);
-		GL_Uniform1iFunc (2, mode);
-		GL_UniformMatrix4fvFunc (3, 1, GL_FALSE, inv_viewproj);
-		GL_Uniform4fFunc (4, (float)glwidth, (float)glheight, 1.f / (float)glwidth, 1.f / (float)glheight);
-		GL_Uniform2fFunc (5, depth_scale_x, depth_scale_y);
-		GL_Uniform1iFunc (6, history_valid ? 1 : 0);
-		/* BUG FIX (halfres distortion): temporal shader also runs at viewport
-		 * (0,0,fog_width,fog_height) in halfres, so view_x/view_y must not be
-		 * subtracted â€” pass (0,0) as the origin, same reasoning as FogViewParams
-		 * in the raymarcher pass above. */
-		GL_Uniform4fFunc (7,
-			use_halfres ? 0.f : view_x,
-			use_halfres ? 0.f : view_y,
-			1.f / view_w, 1.f / view_h);
-		GL_Uniform4fFunc (8,
-			CLAMP (0.f, r_fogvol_temporal_confidence_min_alpha.value, 1.f),
-			q_max (0.f, r_fogvol_temporal_disocclusion_bias.value),
-			q_max (0.1f, r_fogvol_temporal_clamp_strength.value),
-			0.f);
-		GL_Uniform1iFunc (9, velocity_tex != 0 ? 1 : 0);
-		GL_Uniform1iFunc (10, r_fogvol_checkerboard.value > 0.f ? 1 : 0);
-		if (mode == 1)
-			Con_DPrintf ("FOGVOL debug COMPOSITE final_tex=%u history_tex=%u depth_tex=%u velocity_tex=%u dst_tex=%u conf[min=%.3f disocc=%.3f clamp=%.3f]\n",
-				final_tex, history_tex[history_src], depth_tex, velocity_tex, framebufs.fogvol.composite_tex[composite_dst],
-				r_fogvol_temporal_confidence_min_alpha.value, r_fogvol_temporal_disocclusion_bias.value, r_fogvol_temporal_clamp_strength.value);
-		glDrawArrays (GL_TRIANGLES, 0, 3);
-
-		R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, framebufs.fogvol.composite_fbo[composite_dst]);
-		R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, history_fbo[history_dst]);
-		R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY read=COLOR_ATTACHMENT0");
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
-		R_FogVol_AssertNoFeedbackHazard ("HISTORY", history_tex[history_dst], framebufs.fogvol.composite_tex[composite_dst]);
-		R_FogVol_AssertNoBoundFeedbackHazard ("HISTORY");
-		R_FogVol_LogHazardPass ("HISTORY", framebufs.fogvol.composite_tex[composite_dst], 0, framebufs.fogvol.composite_tex[composite_dst]);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, final_fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.finalcopy_fbo);
 		GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
-			0, 0, fog_width, fog_height,
+			0, 0, glwidth, glheight,
+			GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		final_tex = framebufs.fogvol.finalcopy_tex;
+		final_fbo = framebufs.fogvol.finalcopy_fbo;
+	}
+
+	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, final_fbo);
+	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+	if (use_halfres)
+	{
+		GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
+			0, 0, glwidth, glheight,
+			GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	}
+	else
+	{
+		GL_BlitFramebufferFunc ((int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
+			(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
 			GL_COLOR_BUFFER_BIT, GL_NEAREST);
-		perf_stats.blits++;
-
-		composite_src_tex = framebufs.fogvol.composite_tex[composite_dst];
-		composite_src_fbo = framebufs.fogvol.composite_fbo[composite_dst];
-		final_tex = history_tex[history_dst];
-		final_fbo = history_fbo[history_dst];
-		r_fogvol_history_index = history_dst;
 	}
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	glViewport (glx, gly, glwidth, glheight);
 
-	if (has_drawn)
+	r_fogvol_composite_valid = true;
+	r_fogvol_composite_tex = final_tex;
+
+	if (r_fogvol_stats.value > 0.f)
 	{
-		R_FogVol_BindFramebuffer (GL_FRAMEBUFFER, framebufs.composite.fbo);
-		R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
-		glViewport (glx, gly, glwidth, glheight);
-		if (use_halfres)
-		{
-			if (composite_src_tex)
-			{
-				final_tex = composite_src_tex;
-				final_fbo = composite_src_fbo;
-			}
-			R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, final_fbo);
-			R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
-			R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY read=COLOR_ATTACHMENT0");
-			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
-			R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
-			R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
-			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-			GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
-				0, 0, glwidth, glheight,
-				GL_COLOR_BUFFER_BIT, GL_LINEAR);
-			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-			perf_stats.blits++;
-		}
-		else
-		{
-			R_FogVol_BindFramebuffer (GL_READ_FRAMEBUFFER, final_fbo);
-			R_FogVol_BindFramebuffer (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
-			R_FogVol_SetReadBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY read=COLOR_ATTACHMENT0");
-			R_FogVol_SetDrawBufferDebug (GL_COLOR_ATTACHMENT0, "HISTORY draw=COLOR_ATTACHMENT0");
-			R_FogVol_LogHazardPass ("HISTORY", final_tex, 0, final_tex);
-			R_FogVol_AssertNoFeedbackHazard ("HISTORY", framebufs.composite.color_tex, final_tex);
-			/* BUG FIX (white screen): Protect composite FBO alpha channel.
-			 * BUG FIX (grey washout): Only blit the viewrect region, not the
-			 * full glwidthÃ—glheight.  The fog FBO is cleared to (0,0,0,0)
-			 * outside the viewrect; blitting that area would overwrite HUD
-			 * and other non-fog pixels with black.  Blit only the view area
-			 * that was actually rendered by the fog shader. */
-			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-			GL_BlitFramebufferFunc (
-				(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
-				(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
-				GL_COLOR_BUFFER_BIT, GL_NEAREST);
-			glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-			perf_stats.blits++;
-		}
-
-		r_fogvol_composite_valid = true;
-		R_FogVol_DebugCheckCompositeAlphaDynamics (fog_width, fog_height);
+		Con_DPrintf ("fogvol_stats: mode=%d volumes=%d froxelLights=%d steps=%d halfres=%d\n",
+			mode, r_fogvolume_count, froxel_light_count, steps, use_halfres ? 1 : 0);
 	}
-
-	if (mode == 1)
-		R_DebugFlushGeometry ();
-
-	} /* end final_fbo block (BUG FIX C-08) */
-
-done:
-	R_FogVol_LogStateSnapshot ("after-pass");
-	if (use_halfres && (r_gl_state_validate.value > 0.f || R_FogVol_StateDebugEnabled ()))
-	{
-		GLint viewport[4] = {0};
-		GLint scissor_box[4] = {0};
-		GLboolean scissor_enabled = GL_FALSE;
-		const GLint expected_vp[4] = { glx, gly, glwidth, glheight };
-
-		glGetIntegerv (GL_VIEWPORT, viewport);
-		scissor_enabled = glIsEnabled (GL_SCISSOR_TEST);
-		glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
-
-		if (viewport[0] != expected_vp[0] || viewport[1] != expected_vp[1] || viewport[2] != expected_vp[2] || viewport[3] != expected_vp[3]
-			|| (scissor_enabled && (scissor_box[0] != expected_vp[0] || scissor_box[1] != expected_vp[1] || scissor_box[2] != expected_vp[2] || scissor_box[3] != expected_vp[3])))
-		{
-			Con_DPrintf ("FOGVOL_STATE defensive-restore viewport=(%d %d %d %d) scissor=%d box=(%d %d %d %d)\n",
-				viewport[0], viewport[1], viewport[2], viewport[3],
-				scissor_enabled,
-				scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3]);
-			glViewport (expected_vp[0], expected_vp[1], expected_vp[2], expected_vp[3]);
-			GL_SetScissorEnabled (false);
-			glScissor (expected_vp[0], expected_vp[1], expected_vp[2], expected_vp[3]);
-		}
-	}
-	if (R_FogVol_StateDebugEnabled ())
-		R_FogVol_LogPipelineState ("FOGVOL_END");
-	if (use_test_guard)
-	{
-		R_FogVol_Restore3DRenderState (&restore_state);
-		if (dumpstate_always)
-		{
-			fogvol_test_state_t restored_state;
-			R_FogVol_TestState_Capture (&restored_state);
-			R_FogVol_TestState_Log ("restored-baseline", &restored_state);
-		}
-	}
-	if (query_id)
-	{
-		GL_EndQueryFunc (GL_TIME_ELAPSED);
-		GL_GetQueryObjectui64vFunc (query_id, GL_QUERY_RESULT, &gpu_time_ns);
-		GL_DeleteQueriesFunc (1, &query_id);
-		perf_stats.gpu_ms = (double)gpu_time_ns / 1000000.0;
-	}
-	r_fogvol_perf_stats = perf_stats;
-	R_FogVol_LogPerfStats (&r_fogvol_perf_stats);
-
-	GL_EndGroup ();
 }
 
+void R_FogVol_DrawDebug2D (void)
+{
+	if (r_fogvol_debug.value <= 0.f)
+		return;
+	for (int i = 0; i < r_fogvolume_count; ++i)
+	{
+		const fog_volume_t *v = &r_fogvolumes[i];
+		if (!v->enabled)
+			continue;
+		R_DebugDrawWireBox (v->mins, v->maxs, v->color, true);
+	}
+	R_DebugFlushGeometry ();
+}
 
 void R_FogVol_LogEndFrameState (void)
 {
-	R_FogVol_LogPipelineState ("END_FRAME");
 }
-
-

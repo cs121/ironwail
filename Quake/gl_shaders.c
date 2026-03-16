@@ -830,10 +830,8 @@ void GL_CreateShaders (void)
 	glprogs.godrays_source = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("godrays_source.frag"), "world godrays|MODE 0; DITHER 0");
 	glprogs.godrays_source_sky = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays_source_sky.frag"), "godrays source sky");
 	glprogs.fogvol = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes");
-	glprogs.fogvol_global = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes global|FOGVOL_GLOBAL_SIMPLE 1");
-	glprogs.fogvol_clustered = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes clustered|FOGVOL_CLUSTERED_LOCAL 1");
-	glprogs.fogvol_temporal = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol_temporal.frag"), "fog volumes temporal");
-	glprogs.fogvol_froxel_inject = GL_CreateComputeProgram (GLSL_PATH("fogvol_froxel_inject.comp"), "fogvol froxel inject");
+	glprogs.fogvol_global = 0;
+	glprogs.fogvol_froxel_inject = GL_CreateComputeProgram (GLSL_PATH("froxel_inject.comp"), "fogvol froxel inject");
         for (mode = 0; mode < 2; mode++)
                 glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
 
@@ -882,8 +880,6 @@ void GL_CreateShaders (void)
         glprogs.q3p_sim = GL_CreateComputeProgram (GLSL_PATH("q3p_sim.comp"), "q3p simulate");
         glprogs.q3p_cull_key = GL_CreateComputeProgram (GLSL_PATH("q3p_cull_key.comp"), "q3p cull/key");
         glprogs.gpu_bitonic_pairs = GL_CreateComputeProgram (GLSL_PATH("gpu_bitonic_pairs.comp"), "gpu bitonic pairs");
-        glprogs.fogvol_dlight_score = GL_CreateComputeProgram (GLSL_PATH("fogvol_dlight_score.comp"), "fogvol dlight score");
-        glprogs.fogvol_static_build = GL_CreateComputeProgram (GLSL_PATH("fogvol_static_build.comp"), "fogvol static build");
         for (mode = 0; mode < 3; mode++)
                 glprogs.palette_init[mode] = GL_CreateComputeProgram (GLSL_PATH("palette_init.comp"), "palette init|MODE %d", mode);
         glprogs.palette_postprocess = GL_CreateComputeProgram (GLSL_PATH("palette_postprocess.comp"), "palette postprocess");
