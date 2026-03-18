@@ -90,6 +90,7 @@ extern cvar_t r_fogvol_light_emissive_boost;
 extern cvar_t r_fogvol_light_ambient;
 extern cvar_t r_fogvol_light_contrast;
 extern cvar_t r_fogvol_shadow_contrast;
+extern cvar_t r_fogvol_light_extinction_relief;
 extern cvar_t r_fogvol_shadow;
 extern cvar_t r_fogvol_shadow_strength;
 extern cvar_t r_fogvol_lava_emissive;

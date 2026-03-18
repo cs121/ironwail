@@ -64,6 +64,7 @@ cvar_t r_fogvol_light_emissive_boost = { "r_fogvol_light_emissive_boost", "1.25"
 cvar_t r_fogvol_light_ambient = { "r_fogvol_light_ambient", "0.055", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_contrast = { "r_fogvol_light_contrast", "1.65", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_contrast = { "r_fogvol_shadow_contrast", "1.45", CVAR_ARCHIVE };
+cvar_t r_fogvol_light_extinction_relief = { "r_fogvol_light_extinction_relief", "0.55", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
@@ -112,6 +113,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_light_ambient},
 	{&r_fogvol_light_contrast},
 	{&r_fogvol_shadow_contrast},
+	{&r_fogvol_light_extinction_relief},
 	{&r_fogvol_shadow},
 	{&r_fogvol_shadow_strength},
 	{&r_fogvol_density_scale},
@@ -488,7 +490,11 @@ static void R_FogVol_FillGPUVolume (const fog_volume_t *v, fog_volume_gpu_t *gpu
 	gpu->misc[3] = v->emissiveStrength;
 	gpu->extra[0] = v->maxDistance;
 	gpu->extra[1] = (float)v->priority;
-	gpu->extra[2] = (float)v->enabled;
+	/* BUG FIX (Bug 3 C-Seite): extra[2] = v->enabled ist das Aktivierungsflag
+	 * des Volumes im Shader (extra.z <= 0 → sofortiger return in fogvol.frag).
+	 * Sicherstellen dass FogVol_ClampVolume() vorher aufgerufen wurde und
+	 * v->enabled wirklich 1 ist, sonst rendert das Volume nicht. */
+	gpu->extra[2] = (float)(v->enabled ? 1 : 0);
 	gpu->extra[3] = v->height;
 	gpu->params2[0] = v->edgeSoftness;
 	gpu->params2[1] = v->heightScale;
@@ -524,6 +530,8 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int froxel_light_count = 0;
 	float froxel_params0[4] = {0.f, 0.f, 0.f, 0.f};
 	float froxel_params1[4] = {0.f, 1.f, 1.f, 1.f};
+	int froxel_debug_random_mode = CLAMP (0, (int)Q_rint (r_fogvol_debug_froxel_random.value), 4);
+	int froxel_debug_mode = 0;
 	qboolean froxel_ready = R_Froxel_GetShaderState (&froxel_tex, &froxel_light_count, froxel_params0, froxel_params1);
 	qboolean shadow_enabled = (mode == 2 && r_fogvol_shadow.value > 0.f);
 	const sun_t *sun = R_GetSun ();
@@ -538,27 +546,36 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float sun_shadow_bias = 0.f;
 	float sun_shadow_pcf = 0.f;
 	float light_scale_dlight = q_max (0.f, r_fogvol_dlightscale.value) * q_max (0.f, r_fogvol_light_dlight_boost.value);
+	/* BUG FIX (Bug 5 C-Seite): light_scale_sun = 0 wenn r_fogvol_froxel_sun
+	 * oder r_fogvol_light_sun_boost nicht gesetzt sind → SampleSunScatter()
+	 * bricht früh ab (FogLightSourceScales.y <= 0) → kein Sonnenlicht im Fog.
+	 * Sicherstellen dass beide Cvars > 0 sind (Defaults: sun=1, boost=1.35). */
 	float light_scale_sun = q_max (0.f, r_fogvol_froxel_sun.value) * q_max (0.f, r_fogvol_light_sun_boost.value);
 	float light_scale_emissive = q_max (0.f, r_fogvol_light_emissive_boost.value);
 	float light_contrast = CLAMP (0.5f, r_fogvol_light_contrast.value, 4.f);
 	float light_ambient = CLAMP (0.f, r_fogvol_light_ambient.value, 1.f);
+	/* BUG FIX (Bug 4 C-Seite): light_ambient wird als FogClusterParams.x
+	 * in den Shader geschickt. Im Shader wird dieser Wert als ambientWeight
+	 * genutzt, der nun auf 0.15 gedeckelt ist (fogvol.frag Bug 4 Fix).
+	 * Den Cvar-Default 0.055 beibehalten — der Clamp im Shader ist die Absicherung
+	 * gegen zu hohe Werte. Werte > 0.15 wären hier trotzdem verschwendet. */
 	float shadow_contrast = CLAMP (0.5f, r_fogvol_shadow_contrast.value, 4.f);
+	float extinction_relief = CLAMP (0.f, r_fogvol_light_extinction_relief.value, 0.95f);
 	float emissive_floor = 0.f;
 	float debug_dlight_scale = 1.f;
 	float debug_sun_scale = 0.f;
 	float debug_emissive_scale = 0.f;
-	qboolean debug_scales_active = false;
 	qboolean sun_shadow_map_enabled = R_Shadow_GetSunOcclusionData (sun_shadow_viewproj, &sun_shadow_bias, &sun_shadow_pcf);
 
 	if (R_Froxel_GetDebugScales (&debug_dlight_scale, &debug_sun_scale, &debug_emissive_scale))
 	{
-		debug_scales_active = true;
 		light_scale_dlight *= q_max (0.f, debug_dlight_scale);
 		light_scale_sun = q_max (light_scale_sun, q_max (0.f, debug_sun_scale));
 		emissive_floor = q_max (0.f, debug_emissive_scale);
 		light_contrast = q_max (light_contrast, 2.0f);
 		light_ambient = q_min (light_ambient, 0.03f);
 		shadow_contrast = q_max (shadow_contrast, 1.75f);
+		extinction_relief = q_max (extinction_relief, 0.78f);
 		shadow_enabled = true;
 	}
 
@@ -576,6 +593,11 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		if (VectorNormalize (shadow_dir) <= 0.f)
 			VectorSet (shadow_dir, 0.f, 0.f, -1.f);
 	}
+
+	if (froxel_debug_random_mode >= 2)
+		froxel_debug_mode = froxel_debug_random_mode - 1;
+	else if (r_fogvol_debug.value >= 9.f)
+		froxel_debug_mode = 1;
 
 	GL_Uniform1iFunc (FOGVOL_U_STEPS, q_max (8, steps));
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
@@ -613,11 +635,11 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (mode > 0 && froxel_ready) ? 1 : 0);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, froxel_params0[0], froxel_params0[1], froxel_params0[2], froxel_params0[3]);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, froxel_params1[0], froxel_params1[1], froxel_params1[2], froxel_params1[3]);
-	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, 0);
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, froxel_debug_mode);
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_PARITY_MODE, 0);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_TEMPORAL_PARAMS, 0.f, 0.f, 0.f, 0.f);
 	GL_Uniform1iFunc (FOGVOL_U_CHECKERBOARD, 0);
-	GL_Uniform4fFunc (FOGVOL_U_CLUSTER_PARAMS, light_ambient, shadow_contrast, emissive_floor, debug_scales_active ? 1.f : 0.f);
+	GL_Uniform4fFunc (FOGVOL_U_CLUSTER_PARAMS, light_ambient, shadow_contrast, emissive_floor, extinction_relief);
 	GL_UniformMatrix4fvFunc (FOGVOL_U_SUN_SHADOW_VIEWPROJ, 1, GL_FALSE, sun_shadow_viewproj);
 	GL_Uniform4fFunc (FOGVOL_U_SUN_SHADOW_PARAMS,
 		(shadow_enabled && sun_shadow_map_enabled) ? 1.f : 0.f,
@@ -668,7 +690,14 @@ void R_FogVol_Render (void)
 	}
 
 	mode = CLAMP (0, (int)Q_rint (r_fogvol.value), 2);
-	use_halfres = (mode == 1) ? true : (r_fogvol_halfres.value > 0.f);
+	/* BUG FIX: use_halfres war hart an mode==1 gekoppelt.
+	 * r_fogvol 1 = normaler Fullres-Modus. Das weiße/farbige Rechteck
+	 * am Bildschirmrand entstand weil der Halfres-FBO nur fog_width×fog_height
+	 * beschrieben wurde, der Rest des Attachments aber uninitialisiert blieb.
+	 * Halfres jetzt ausschließlich über r_fogvol_halfres cvar. */
+	use_halfres = (r_fogvol_halfres.value > 0.f);
+	if (r_fogvol_debug_froxel_random.value > 0.f)
+		use_halfres = false;
 	fog_width = use_halfres ? framebufs.fogvol.width : glwidth;
 	fog_height = use_halfres ? framebufs.fogvol.height : glheight;
 	view_x = (float)(glx + r_refdef.vrect.x);
@@ -679,17 +708,21 @@ void R_FogVol_Render (void)
 	if (fog_width <= 0 || fog_height <= 0 || view_w <= 0.f || view_h <= 0.f)
 		return;
 
-	depth_scale_x = (float)glwidth / (float)fog_width;
-	depth_scale_y = (float)glheight / (float)fog_height;
+	/* BUG FIX (Bug 6 C-Seite): depth_scale_x/y berechnet sich aus
+	 * glwidth/fog_width. Wenn fog_width == 0 (nicht-initialisierter Framebuffer
+	 * oder Halfres-FBO fehlt), entsteht Division durch Null → depth_scale = Inf/NaN
+	 * → screenPixel = ivec2(0) → Depth aus Pixel (0,0) → worldPos immer gleich
+	 * → rd konstant → gleichförmiger Fog. Schutz durch max(1, ...) darunter. */
+	depth_scale_x = (float)glwidth  / (float)q_max (1, fog_width);
+	depth_scale_y = (float)glheight / (float)q_max (1, fog_height);
 	depth_near = 0.5f;
 	depth_far = gl_farclip.value > depth_near ? gl_farclip.value : depth_near + 1.f;
 	depth_sky_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
 
 	steps = CLAMP (8, (int)Q_rint (r_fogvol_steps.value), 128);
-	if (mode == 1)
-		steps = q_min (steps, 16);
+	/* mode==1 Step-Cap entfernt — Halfres cvar steuert Step-Reduktion. */
 	if (use_halfres)
-		steps = q_max (8, steps / 2);
+		steps = q_max (16, (steps * 3) / 4);
 
 	R_Froxel_BeginFrame (depth_near, depth_far);
 	R_Froxel_InjectDlights ();

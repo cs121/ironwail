@@ -15,8 +15,14 @@ layout(std430, binding=0) readonly buffer FroxelLightsBuffer
 	FroxelLight lights[];
 };
 
-layout(rgba16f, binding=0) uniform image3D FogFroxelOutTex;
-layout(binding=1) uniform sampler3D FogFroxelHistoryTex;
+// BUG FIX (Bug 1): SSBO binding=0 und image3D binding=0 kollidierten.
+// Obwohl SSBO- und Image-Namespaces technisch getrennt sind, verweigert
+// NVIDIA hier das korrekte Schreiben → imageStore stumm fehlgeschlagen →
+// Froxel-Textur blieb komplett 0 → SampleFroxelLight() immer vec3(0).
+// C-Seite anpassen: glBindImageTexture(1, ...) statt Index 0.
+// History-Sampler entsprechend auf binding=2 → glBindTextureUnit(2, ...).
+layout(rgba16f, binding=1) uniform image3D FogFroxelOutTex;
+layout(binding=2) uniform sampler3D FogFroxelHistoryTex;
 
 layout(location=0) uniform vec4 FogFroxelDimsAndCount; // xyz dims, w light count
 layout(location=1) uniform vec4 FogFroxelParams0; // x near, y far, z tanHalfFovX, w tanHalfFovY

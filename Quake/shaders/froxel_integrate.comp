@@ -5,6 +5,11 @@ layout(rgba16f, binding=0) uniform image2D FogFroxelIntegratedTex;
 
 layout(location=0) uniform vec4 FogIntegrateSize; // xy = output size
 
+// BUG FIX (Bug 2): Vorher: simple sum/steps → konstanter gleichmäßiger
+// Mittelwert aller Z-Slices, ignoriert Tiefe und Transmittanz vollständig.
+// Fix: Beer-Lambert Front-to-back Integration.
+// extinctionPerSlice steuert Dichte; A-Kanal = (1 - transmittance)
+// für korrektes Compositing in froxel_apply.frag.
 void main()
 {
 	ivec2 outSize = max(ivec2(FogIntegrateSize.xy), ivec2(1));
@@ -14,12 +19,27 @@ void main()
 
 	vec2 uv = (vec2(coord) + vec2(0.5)) / vec2(outSize);
 	vec3 accum = vec3(0.0);
+	float transmittance = 1.0;
 	const int steps = 16;
+	// Extinktion pro Slice (sigma_t * deltaZ, deltaZ = 1/steps).
+	// Erhöhen für dichteren Fog, senken für dünnen Nebel.
+	const float extinctionPerSlice = 0.1 / float(steps);
+
 	for (int i = 0; i < steps; ++i)
 	{
 		float z = (float(i) + 0.5) / float(steps);
-		accum += texture(FogFroxelLightTex, vec3(uv, z)).rgb;
+		vec3 scatter = texture(FogFroxelLightTex, vec3(uv, z)).rgb;
+
+		float att = exp(-extinctionPerSlice);
+		float sliceWeight = transmittance * (1.0 - att);
+		accum += scatter * sliceWeight;
+		transmittance *= att;
+
+		if (transmittance < 0.01)
+			break;
 	}
-	accum *= (1.0 / float(steps));
-	imageStore(FogFroxelIntegratedTex, coord, vec4(accum, 1.0));
+
+	// A-Kanal = Opazität, wird in froxel_apply.frag für physikalisches
+	// Compositing (scene * transmittance + scatter) genutzt.
+	imageStore(FogFroxelIntegratedTex, coord, vec4(accum, 1.0 - transmittance));
 }

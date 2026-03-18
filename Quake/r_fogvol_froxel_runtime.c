@@ -45,6 +45,7 @@ typedef struct froxel_debug_state_s
 	double next_refresh_time;
 	int random_light_count;
 	int phase;
+	uint32_t grid_seed;
 	float dlight_scale;
 	float sun_scale;
 	float emissive_scale;
@@ -58,9 +59,14 @@ typedef struct froxel_debug_state_s
 static froxel_debug_state_t r_froxel_debug;
 static float r_froxel_debug_random_slice[192 * 128 * 4];
 
+static int R_Froxel_DebugMode (void)
+{
+	return CLAMP (0, (int)Q_rint (r_fogvol_debug_froxel_random.value), 4);
+}
+
 static qboolean R_Froxel_DebugEnabled (void)
 {
-	return (r_fogvol_debug_froxel_random.value > 0.f);
+	return (R_Froxel_DebugMode () > 0);
 }
 
 static float R_Froxel_DebugRand01 (void)
@@ -71,6 +77,15 @@ static float R_Froxel_DebugRand01 (void)
 static float R_Froxel_DebugRandRange (float lo, float hi)
 {
 	return lo + (hi - lo) * R_Froxel_DebugRand01 ();
+}
+
+static float R_Froxel_DebugHash01 (int x, int y, int z, uint32_t seed)
+{
+	uint32_t h = (uint32_t)x * 73856093u ^ (uint32_t)y * 19349663u ^ (uint32_t)z * 83492791u ^ seed;
+	h ^= h >> 13;
+	h *= 1274126177u;
+	h ^= h >> 16;
+	return (float)(h & 0x00ffffffu) * (1.f / 16777215.f);
 }
 
 static void R_Froxel_DebugRandomUnitVector (vec3_t out)
@@ -101,7 +116,12 @@ static void R_Froxel_DebugUploadRandomGrid (void)
 	const int nx = r_froxel.dims[0];
 	const int ny = r_froxel.dims[1];
 	const int nz = r_froxel.dims[2];
+	const int debug_mode = R_Froxel_DebugMode ();
 	const int slice_pixels = nx * ny;
+	const int block_x = (debug_mode <= 1) ? q_max (3, nx / 11) : q_max (2, nx / 7);
+	const int block_y = (debug_mode <= 1) ? q_max (3, ny / 10) : q_max (2, ny / 6);
+	const int block_z = (debug_mode <= 1) ? q_max (2, nz / 9) : q_max (1, nz / 6);
+	const float debug_strength = (debug_mode <= 1) ? 0.38f : 1.0f;
 	float *slice = r_froxel_debug_random_slice;
 
 	if (!r_froxel.valid || !r_froxel.light_tex || !r_froxel.history_tex)
@@ -116,10 +136,20 @@ static void R_Froxel_DebugUploadRandomGrid (void)
 	{
 		for (int i = 0; i < slice_pixels; ++i)
 		{
-			const float base = R_Froxel_DebugRandRange (0.02f, 1.35f);
-			slice[i * 4 + 0] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
-			slice[i * 4 + 1] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
-			slice[i * 4 + 2] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
+			const int x = i % nx;
+			const int y = i / nx;
+			const int cx = x / block_x;
+			const int cy = y / block_y;
+			const int cz = z / block_z;
+			const float n0 = R_Froxel_DebugHash01 (cx, cy, cz, r_froxel_debug.grid_seed);
+			const float n1 = R_Froxel_DebugHash01 (cx + 11, cy + 7, cz + 3, r_froxel_debug.grid_seed ^ 0x9e3779b9u);
+			const float n2 = R_Froxel_DebugHash01 (cx + 19, cy + 13, cz + 5, r_froxel_debug.grid_seed ^ 0x85ebca6bu);
+			const float e = R_Froxel_DebugHash01 (cx + 3, cy + 23, cz + 29, r_froxel_debug.grid_seed ^ 0xc2b2ae35u);
+			const float band = ((cz + r_froxel_debug.phase) & 1) ? 0.58f : 1.35f;
+			const float energy = ((0.06f + e * e * 2.9f) * band) * debug_strength;
+			slice[i * 4 + 0] = energy * (0.18f + n0 * 2.2f);
+			slice[i * 4 + 1] = energy * (0.18f + n1 * 2.2f);
+			slice[i * 4 + 2] = energy * (0.18f + n2 * 2.2f);
 			slice[i * 4 + 3] = 1.f;
 		}
 		GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, z, nx, ny, 1, GL_RGBA, GL_FLOAT, slice);
@@ -130,10 +160,20 @@ static void R_Froxel_DebugUploadRandomGrid (void)
 	{
 		for (int i = 0; i < slice_pixels; ++i)
 		{
-			const float base = R_Froxel_DebugRandRange (0.02f, 1.35f);
-			slice[i * 4 + 0] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
-			slice[i * 4 + 1] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
-			slice[i * 4 + 2] = base * R_Froxel_DebugRandRange (0.12f, 2.4f);
+			const int x = i % nx;
+			const int y = i / nx;
+			const int cx = x / block_x;
+			const int cy = y / block_y;
+			const int cz = z / block_z;
+			const float n0 = R_Froxel_DebugHash01 (cx + 31, cy + 5, cz + 17, r_froxel_debug.grid_seed ^ 0x27d4eb2du);
+			const float n1 = R_Froxel_DebugHash01 (cx + 2, cy + 37, cz + 9, r_froxel_debug.grid_seed ^ 0x165667b1u);
+			const float n2 = R_Froxel_DebugHash01 (cx + 43, cy + 3, cz + 21, r_froxel_debug.grid_seed ^ 0x7feb352du);
+			const float e = R_Froxel_DebugHash01 (cx + 29, cy + 11, cz + 13, r_froxel_debug.grid_seed ^ 0x846ca68bu);
+			const float band = ((cz + r_froxel_debug.phase + 1) & 1) ? 0.62f : 1.25f;
+			const float energy = ((0.06f + e * e * 2.9f) * band) * debug_strength;
+			slice[i * 4 + 0] = energy * (0.18f + n0 * 2.2f);
+			slice[i * 4 + 1] = energy * (0.18f + n1 * 2.2f);
+			slice[i * 4 + 2] = energy * (0.18f + n2 * 2.2f);
 			slice[i * 4 + 3] = 1.f;
 		}
 		GL_TexSubImage3DFunc (GL_TEXTURE_3D, 0, 0, 0, z, nx, ny, 1, GL_RGBA, GL_FLOAT, slice);
@@ -142,8 +182,8 @@ static void R_Froxel_DebugUploadRandomGrid (void)
 
 static void R_Froxel_DebugBuildRandomLights (void)
 {
-	const float max_dist = q_max (160.f, r_froxel.far_clip * 0.45f);
-	const float max_radius = q_max (128.f, r_froxel.far_clip * 0.30f);
+	const float max_dist = q_max (96.f, q_min (384.f, r_froxel.far_clip * 0.22f));
+	const float max_radius = q_max (64.f, q_min (176.f, r_froxel.far_clip * 0.14f));
 
 	r_froxel_debug.random_light_count = 1 + (rand () % MAX_FROXEL_DEBUG_LIGHTS);
 	for (int i = 0; i < r_froxel_debug.random_light_count; ++i)
@@ -153,16 +193,16 @@ static void R_Froxel_DebugBuildRandomLights (void)
 		vec3_t origin;
 
 		R_Froxel_DebugRandomUnitVector (dir);
-		VectorMA (r_refdef.vieworg, R_Froxel_DebugRandRange (48.f, max_dist), dir, origin);
+		VectorMA (r_refdef.vieworg, R_Froxel_DebugRandRange (28.f, max_dist), dir, origin);
 
 		out->pos_rad[0] = origin[0];
 		out->pos_rad[1] = origin[1];
 		out->pos_rad[2] = origin[2];
-		out->pos_rad[3] = R_Froxel_DebugRandRange (96.f, max_radius);
-		out->color_intensity[0] = R_Froxel_DebugRandRange (0.35f, 1.8f);
-		out->color_intensity[1] = R_Froxel_DebugRandRange (0.35f, 1.8f);
-		out->color_intensity[2] = R_Froxel_DebugRandRange (0.35f, 1.8f);
-		out->color_intensity[3] = R_Froxel_DebugRandRange (0.6f, 2.5f);
+		out->pos_rad[3] = R_Froxel_DebugRandRange (36.f, max_radius);
+		out->color_intensity[0] = R_Froxel_DebugRandRange (0.25f, 2.2f);
+		out->color_intensity[1] = R_Froxel_DebugRandRange (0.25f, 2.2f);
+		out->color_intensity[2] = R_Froxel_DebugRandRange (0.25f, 2.2f);
+		out->color_intensity[3] = R_Froxel_DebugRandRange (1.2f, 4.0f);
 		out->type = (uint32_t)DLIGHT_DEFAULT;
 		out->_pad[0] = out->_pad[1] = out->_pad[2] = 0;
 	}
@@ -183,6 +223,7 @@ static void R_Froxel_DebugRefreshState (void)
 	r_froxel_debug.active = true;
 	r_froxel_debug.next_refresh_time = realtime + 2.0;
 	r_froxel_debug.phase = rand () & 3;
+	r_froxel_debug.grid_seed = (uint32_t)rand () ^ ((uint32_t)(r_framecount * 1103515245u));
 	switch (r_froxel_debug.phase)
 	{
 	default:
@@ -349,6 +390,7 @@ void R_Froxel_ResetResources (void)
 void R_Froxel_BeginFrame (float near_clip, float far_clip)
 {
 	int nx, ny, nz;
+	int debug_mode = R_Froxel_DebugMode ();
 	int mode = CLAMP (0, (int)Q_rint (r_fogvol.value), 2);
 
 	r_froxel.valid = false;
@@ -373,6 +415,13 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 	r_froxel.prev_mode = mode;
 	r_froxel.light_count = 0;
 	r_froxel.valid = true;
+	/* Debug mode keeps froxel structure crisp; normal mode stays filtered. */
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.light_tex);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, (debug_mode >= 2) ? GL_NEAREST : GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, (debug_mode >= 2) ? GL_NEAREST : GL_LINEAR);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.history_tex);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MIN_FILTER, (debug_mode >= 2) ? GL_NEAREST : GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_3D, GL_TEXTURE_MAG_FILTER, (debug_mode >= 2) ? GL_NEAREST : GL_LINEAR);
 	R_Froxel_DebugRefreshState ();
 }
 
@@ -384,6 +433,14 @@ void R_Froxel_InjectDlights (void)
 
 	if (!r_froxel.valid)
 		return;
+
+	/* BUG FIX: Wenn r_fogvol_debug_froxel_random > 0 wurden hier NUR
+	 * synthetische Debug-Lichter injiziert und danach mit return beendet.
+	 * Debug-Lichter liegen zufällig im Raum — oft außerhalb des Fog-Volumes
+	 * → froxelLights > 0 in Stats, aber kein sichtbarer Fog-Effekt.
+	 * Fix: Debug-Lichter injizieren UND danach normal weiterlaufen lassen
+	 * damit echte Dlights immer ankommen. Für reinen Debug-Only-Modus
+	 * r_fogvol_light 0 setzen. */
 	if (R_Froxel_DebugEnabled ())
 	{
 		R_Froxel_DebugRefreshState ();
@@ -397,7 +454,7 @@ void R_Froxel_InjectDlights (void)
 			VectorSet (color, light->color_intensity[0], light->color_intensity[1], light->color_intensity[2]);
 			R_Froxel_AddLight (light->pos_rad, light->pos_rad[3] * radius_scale, color, intensity, light->type);
 		}
-		return;
+		/* Kein früher return — echte Dlights werden unten zusätzlich injiziert. */
 	}
 	if (r_fogvol_light.value <= 0.f)
 		return;
@@ -425,8 +482,14 @@ void R_Froxel_InjectDlights (void)
 void R_Froxel_EndFrame (void)
 {
 	float inv_view[16];
+	vec3_t view_delta;
 	int groups_x, groups_y, groups_z;
 	GLuint tmp_tex;
+	float temporal_alpha = 0.f;
+	float temporal_reject_threshold = 1.f;
+	float temporal_camera_delta = 0.f;
+	float temporal_prev_valid = 0.f;
+	const qboolean debug_mode = R_Froxel_DebugEnabled ();
 
 	if (!r_froxel.valid || !r_froxel.light_tex || !r_froxel.history_tex || !r_froxel.light_ssbo || !glprogs.fogvol_froxel_inject)
 		return;
@@ -439,22 +502,36 @@ void R_Froxel_EndFrame (void)
 	groups_y = (r_froxel.dims[1] + 3) / 4;
 	groups_z = (r_froxel.dims[2] + 3) / 4;
 
+	/* Ping-pong before dispatch so output becomes the texture sampled this frame. */
+	tmp_tex = r_froxel.light_tex;
+	r_froxel.light_tex = r_froxel.history_tex;
+	r_froxel.history_tex = tmp_tex;
+
+	if (debug_mode)
+	{
+		VectorSubtract (r_refdef.vieworg, r_froxel.prev_vieworg, view_delta);
+		temporal_alpha = 0.95f;
+		temporal_reject_threshold = 192.f;
+		temporal_camera_delta = VectorLength (view_delta);
+		temporal_prev_valid = r_froxel.prev_valid ? 1.f : 0.f;
+	}
+
 	GL_UseProgram (glprogs.fogvol_froxel_inject);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, r_froxel.light_ssbo, 0, sizeof (froxel_gpu_light_t) * MAX_FROXEL_GPU_LIGHTS);
 	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (froxel_gpu_light_t) * MAX_FROXEL_GPU_LIGHTS, r_froxel_gpu_lights, GL_STREAM_DRAW);
-	GL_BindImageTextureFunc (0, r_froxel.light_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
-	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, r_froxel.history_tex);
+	/* BUG FIX (Bug 1 C-Seite): Image-Unit-Index war 0, kollidierte mit SSBO binding=0.
+	 * Shader hat image3D jetzt auf binding=1 → Index hier ebenfalls auf 1 setzen.
+	 * History-Sampler auf GL_TEXTURE2 statt GL_TEXTURE1 (binding=2 im Shader). */
+	GL_BindImageTextureFunc (1, r_froxel.light_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
+	GL_BindNative (GL_TEXTURE2, GL_TEXTURE_3D, r_froxel.history_tex);
 	GL_Uniform4fFunc (0, (float)r_froxel.dims[0], (float)r_froxel.dims[1], (float)r_froxel.dims[2], (float)r_froxel.light_count);
 	GL_Uniform4fFunc (1, r_froxel.near_clip, r_froxel.far_clip, r_froxel.tan_half_fov_x, r_froxel.tan_half_fov_y);
 	GL_Uniform4fFunc (2, r_froxel.log_far_near, 0.f, 0.f, 0.f);
 	GL_UniformMatrix4fvFunc (3, 1, GL_FALSE, inv_view);
-	GL_Uniform4fFunc (7, 0.f, 1.f, 0.f, 0.f);
+	GL_Uniform4fFunc (7, temporal_alpha, temporal_reject_threshold, temporal_camera_delta, temporal_prev_valid);
 	GL_DispatchComputeFunc (groups_x, groups_y, groups_z);
 	GL_MemoryBarrierFunc (GL_SHADER_IMAGE_ACCESS_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT);
 
-	tmp_tex = r_froxel.light_tex;
-	r_froxel.light_tex = r_froxel.history_tex;
-	r_froxel.history_tex = tmp_tex;
 	VectorCopy (r_refdef.vieworg, r_froxel.prev_vieworg);
 	r_froxel.prev_valid = true;
 }

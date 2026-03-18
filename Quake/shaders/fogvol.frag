@@ -273,11 +273,8 @@ float AnisotropicPhase(float cosTheta, float g)
 	return (1.0 - gg) / (denom * sqrt(denom));
 }
 
-vec3 SampleFroxelLight(vec3 p)
+bool ComputeFroxelUv(vec3 p, out vec3 uvw, out float outside)
 {
-	if (FogFroxelEnabled == 0)
-		return vec3(0.0);
-
 	vec3 viewPos = (View * vec4(p, 1.0)).xyz;
 	float z = max(-viewPos.z, FogFroxelParams0.x);
 	float halfW = max(1e-4, z * FogFroxelParams0.z);
@@ -285,10 +282,28 @@ vec3 SampleFroxelLight(vec3 p)
 	float u = viewPos.x / (2.0 * halfW) + 0.5;
 	float v = viewPos.y / (2.0 * halfH) + 0.5;
 	float w = log(max(z, FogFroxelParams0.x) / max(FogFroxelParams0.x, 1e-4)) / max(FogFroxelParams1.x, 1e-4);
-	vec3 uvw = vec3(u, v, w);
-	if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0))))
+	uvw = vec3(u, v, w);
+	vec3 below = max(-uvw, vec3(0.0));
+	vec3 above = max(uvw - vec3(1.0), vec3(0.0));
+	vec3 extent = max(below, above);
+	outside = max(extent.x, max(extent.y, extent.z));
+	return (outside <= 0.75);
+}
+
+vec3 SampleFroxelLight(vec3 p)
+{
+	vec3 uvw;
+	float outside;
+	float edgeFade;
+
+	if (FogFroxelEnabled == 0)
 		return vec3(0.0);
-	return texture(FogFroxelLightTex, clamp(uvw, 0.0, 1.0)).rgb;
+	if (!ComputeFroxelUv(p, uvw, outside))
+		return vec3(0.0);
+
+	/* Avoid hard black cutoffs from minor UV mismatch between froxel inject/sample paths. */
+	edgeFade = 1.0 - smoothstep(0.0, 0.35, outside);
+	return texture(FogFroxelLightTex, clamp(uvw, 0.0, 1.0)).rgb * edgeFade;
 }
 
 float SampleSunShadowMapVisibility(vec3 worldPos)
@@ -376,6 +391,12 @@ void main()
 	}
 
 	FogVolume volume = FogVolumes[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
+	// BUG FIX (Bug 3): extra.z ist das Volume-Aktivierungsflag (= v->enabled
+	// aus fog_volume_gpu_t). Wenn die C-Seite gpu->extra[2] nicht auf 1.0
+	// setzt (z.B. uninitialisiertes Volume oder falscher Upload), bricht hier
+	// jedes Volume sofort ab → kein Fog. Prüfen: R_FogVol_FillGPUVolume()
+	// muss gpu->extra[2] = (float)v->enabled setzen (bereits korrekt in
+	// r_fogvol.c, aber enabled muss auf C-Seite auch wirklich 1 sein).
 	if (volume.extra.z <= 0.0)
 	{
 		FragColor = vec4(scene, 0.0);
@@ -440,6 +461,14 @@ void main()
 	vec3 godrayEnergy = (FogGodrayCoupling != 0) ? texture(FogGodrayShaftsTex, clamp(screenUv, 0.0, 1.0)).rgb : vec3(0.0);
 	float transmittance = 1.0;
 	float tau = 0.0;
+	float ambientWeight = clamp(FogClusterParams.x, 0.0, 1.0);
+	// BUG FIX (Bug 4): Wenn froxelScatter und sunScatter beide 0 sind
+	// (z.B. wegen Binding-Konflikt oder nicht gesetzter Uniforms), dominiert
+	// der ambient-Term den Scattering vollständig → gleichmäßig grauer Fog
+	// in Farbe color_density.rgb. Auf max 0.15 begrenzen damit Licht sichtbar
+	// bleibt. C-seitig: r_fogvol_light_ambient Cvar ≤ 0.15 empfohlen.
+	float lightContrast = clamp(FogLightSourceScales.w, 0.5, 4.0);
+	float extinctionRelief = clamp(FogClusterParams.w, 0.0, 0.95);
 
 	for (int i = 0; i < FogSteps; ++i)
 	{
@@ -451,40 +480,44 @@ void main()
 			break;
 
 		vec3 p = ro + rd * t;
-		int noiseLod = (t > FogNoiseLodSwitchDist || transmittance < 0.3) ? 1 : 0;
+		// BUG FIX (Bug 7): transmittance < 0.3 als zusätzlicher LOD-Trigger
+		// war kontraproduktiv — tief im Fog (wo Detail am meisten sichtbar ist)
+		// wurde auf Low-LOD gewechselt. LOD jetzt nur noch distanzbasiert.
+		int noiseLod = (t > FogNoiseLodSwitchDist) ? 1 : 0;
 		float sigma = EvaluateFogSigma(p, volume, flow, noiseLod);
 		if (sigma <= 1e-6)
 			continue;
 
-			float opticalDepth = min(sigma * stepLen, max(FogDensityParams.y, 0.001));
-			float att = exp(-opticalDepth);
-			float mediumWeight = 1.0 - att;
-			float ambientWeight = clamp(FogClusterParams.x, 0.0, 1.0);
-			float lightContrast = clamp(FogLightSourceScales.w, 0.5, 4.0);
+		vec3 froxelScatter = SampleFroxelLight(p) * max(FogLightSourceScales.x, 0.0);
+		froxelScatter = pow(max(froxelScatter, vec3(0.0)), vec3(1.0 / max(lightContrast, 0.5)));
+		froxelScatter *= lightContrast;
+		vec3 sunScatter = SampleSunScatter(p, viewDir);
+		vec3 emissiveScatter = vec3(0.0);
+		if (FogEmissiveEnabled != 0)
+		{
+			float emissiveStrength = max(volume.misc.w, 0.0) * max(FogLightSourceScales.z, 0.0);
+			emissiveStrength = max(emissiveStrength, max(FogClusterParams.z, 0.0));
+			if (emissiveStrength > 0.0)
+				emissiveScatter = volume.color_density.rgb * emissiveStrength;
+		}
 
-			vec3 scattering = vec3(0.0);
-			// Keep only a small unlit baseline so lighting and shadows dominate.
-			scattering += volume.color_density.rgb * ambientWeight;
-			{
-				vec3 froxelScatter = SampleFroxelLight(p) * max(FogLightSourceScales.x, 0.0);
-				froxelScatter = pow(max(froxelScatter, vec3(0.0)), vec3(lightContrast));
-				scattering += froxelScatter;
-			}
-			{
-				vec3 sunScatter = SampleSunScatter(p, viewDir);
-				if (FogClusterParams.w > 0.5)
-					sunScatter += vec3(1.0, 0.92, 0.78) * (FogLightSourceScales.y * 0.05);
-				scattering += sunScatter;
-			}
-			if (FogGodrayCoupling != 0)
-				scattering += godrayEnergy * volume.color_density.rgb * 0.25;
-			if (FogEmissiveEnabled != 0)
-			{
-				float emissiveStrength = max(volume.misc.w, 0.0) * max(FogLightSourceScales.z, 0.0);
-				emissiveStrength = max(emissiveStrength, max(FogClusterParams.z, 0.0));
-				if (emissiveStrength > 0.0)
-					scattering += volume.color_density.rgb * emissiveStrength;
-			}
+		vec3 scattering = vec3(0.0);
+		// Keep only a small unlit baseline so lighting and shadows dominate.
+		// BUG FIX (Bug 4): Gedeckelt auf 0.15 damit Licht- und Schatten-Terme
+		// sichtbar bleiben und den Fog nicht überlagern.
+		scattering += volume.color_density.rgb * min(ambientWeight, 0.15);
+		scattering += froxelScatter;
+		scattering += sunScatter;
+		scattering += emissiveScatter;
+		if (FogGodrayCoupling != 0)
+			scattering += godrayEnergy * volume.color_density.rgb * 0.25;
+
+		float lightLuma = dot(max(froxelScatter + sunScatter + emissiveScatter, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+		float relief = extinctionRelief * clamp(lightLuma * 0.75, 0.0, 1.0);
+		float sigmaLit = max(sigma * 0.15, sigma * (1.0 - relief));
+		float opticalDepth = min(sigmaLit * stepLen, max(FogDensityParams.y, 0.001));
+		float att = exp(-opticalDepth);
+		float mediumWeight = 1.0 - att;
 
 		accum += transmittance * scattering * mediumWeight;
 		transmittance *= att;
@@ -521,8 +554,31 @@ void main()
 	}
 	if (FogFroxelDebug != 0)
 	{
-		vec3 froxelViz = SampleFroxelLight(ro + rd * max(tEnter, 0.0));
-		FragColor = vec4(clamp(froxelViz * 0.5, 0.0, 1.0), 1.0);
+		vec3 uvw;
+		float outside;
+		vec3 p = ro + rd * max(tEnter, 0.0);
+		vec3 p2 = ro + rd * (max(tEnter, 0.0) + max(8.0, (tExit - tEnter) * 0.35));
+		vec3 f0 = SampleFroxelLight(p);
+		vec3 f1 = SampleFroxelLight(p2);
+		vec3 froxelViz = max(f0, f1);
+
+		ComputeFroxelUv(worldPos, uvw, outside);
+		if (FogFroxelDebug == 2)
+		{
+			FragColor = vec4(clamp(vec3(uvw.xy, 1.0 - outside * 0.75), 0.0, 1.0), 1.0);
+			return;
+		}
+
+		{
+			vec3 dims = max(FogFroxelParams1.yzw, vec3(1.0));
+			vec3 cell = fract(clamp(uvw, 0.0, 1.0) * dims);
+			float gx = 1.0 - smoothstep(0.00, 0.04, min(cell.x, 1.0 - cell.x));
+			float gy = 1.0 - smoothstep(0.00, 0.04, min(cell.y, 1.0 - cell.y));
+			float gz = 1.0 - smoothstep(0.00, 0.04, min(cell.z, 1.0 - cell.z));
+			float grid = clamp(max(gx, max(gy, gz)), 0.0, 1.0);
+			vec3 dbg = froxelViz * 1.25 + vec3(grid * 0.35, grid * 0.25, grid * 0.55);
+			FragColor = vec4(clamp(dbg, 0.0, 1.0), 1.0);
+		}
 		return;
 	}
 
