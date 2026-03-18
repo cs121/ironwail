@@ -35,4 +35,9 @@ void R_Shadow_UpdateSunMatrix (shadow_runtime_t *state);
 void R_Shadow_UpdateDlightMatrices (shadow_runtime_t *state);
 void R_Shadow_SetCasterState (shadow_runtime_t *state, const float viewproj[16], qboolean dlight, const vec3_t lightpos, float far_plane);
 
+void R_Shadow_CreateFrameBuffers (void);
+void R_Shadow_DeleteFrameBuffers (void);
+void R_Shadow_ReconcileResources (void);
+void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts);
+
 #endif
