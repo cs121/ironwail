@@ -181,7 +181,9 @@ enum
 	FOGVOL_U_FROXEL_TEMPORAL_PARAMS = 43,
 	FOGVOL_U_CLUSTER_PARAMS = 49,
 	FOGVOL_U_SUN_SHADOW_VIEWPROJ = 50,
-	FOGVOL_U_SUN_SHADOW_PARAMS = 54
+	FOGVOL_U_SUN_SHADOW_PARAMS = 54,
+	FOGVOL_U_SUN_SHADOW_SPLITS = 55,
+	FOGVOL_U_SUN_SHADOW_CASCADE_COUNT = 56
 };
 
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
@@ -542,7 +544,9 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float noise_bias = CLAMP (-2.f, r_fogvol_noise_bias.value, 2.f);
 	float reverse_z_flag = gl_clipcontrol_able ? 1.f : 0.f;
 	int lighting_mode = (mode > 0) ? 2 : 0;
-	float sun_shadow_viewproj[16];
+	float sun_shadow_viewproj[4][16];
+	float sun_shadow_splits[4] = { 0.f, 0.f, 0.f, 0.f };
+	int sun_shadow_cascades = 0;
 	float sun_shadow_bias = 0.f;
 	float sun_shadow_pcf = 0.f;
 	float light_scale_dlight = q_max (0.f, r_fogvol_dlightscale.value) * q_max (0.f, r_fogvol_light_dlight_boost.value);
@@ -565,7 +569,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float debug_dlight_scale = 1.f;
 	float debug_sun_scale = 0.f;
 	float debug_emissive_scale = 0.f;
-	qboolean sun_shadow_map_enabled = R_Shadow_GetSunOcclusionData (sun_shadow_viewproj, &sun_shadow_bias, &sun_shadow_pcf);
+	qboolean sun_shadow_map_enabled = R_Shadow_GetSunCascadeData (sun_shadow_viewproj, sun_shadow_splits, &sun_shadow_cascades, &sun_shadow_bias, &sun_shadow_pcf);
 
 	if (R_Froxel_GetDebugScales (&debug_dlight_scale, &debug_sun_scale, &debug_emissive_scale))
 	{
@@ -640,10 +644,12 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_TEMPORAL_PARAMS, 0.f, 0.f, 0.f, 0.f);
 	GL_Uniform1iFunc (FOGVOL_U_CHECKERBOARD, 0);
 	GL_Uniform4fFunc (FOGVOL_U_CLUSTER_PARAMS, light_ambient, shadow_contrast, emissive_floor, extinction_relief);
-	GL_UniformMatrix4fvFunc (FOGVOL_U_SUN_SHADOW_VIEWPROJ, 1, GL_FALSE, sun_shadow_viewproj);
+	GL_UniformMatrix4fvFunc (FOGVOL_U_SUN_SHADOW_VIEWPROJ, q_max (1, sun_shadow_cascades), GL_FALSE, &sun_shadow_viewproj[0][0]);
 	GL_Uniform4fFunc (FOGVOL_U_SUN_SHADOW_PARAMS,
 		(shadow_enabled && sun_shadow_map_enabled) ? 1.f : 0.f,
 		sun_shadow_bias, sun_shadow_pcf, 0.f);
+	GL_Uniform4fFunc (FOGVOL_U_SUN_SHADOW_SPLITS, sun_shadow_splits[0], sun_shadow_splits[1], sun_shadow_splits[2], sun_shadow_splits[3]);
+	GL_Uniform1iFunc (FOGVOL_U_SUN_SHADOW_CASCADE_COUNT, (shadow_enabled && sun_shadow_map_enabled) ? q_max (1, sun_shadow_cascades) : 0);
 }
 
 void R_FogVol_Render (void)
@@ -739,7 +745,7 @@ void R_FogVol_Render (void)
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, froxel_tex);
-	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, framebufs.shadow.sun_depth_tex);
+	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D_ARRAY, framebufs.shadow.sun_depth_tex);
 	R_FogVol_SetShaderUniforms (steps, mode, use_halfres, fog_width, fog_height,
 		depth_scale_x, depth_scale_y, inv_viewproj, view_x, view_y, view_w, view_h,
 		depth_near, depth_far, depth_sky_cutoff);

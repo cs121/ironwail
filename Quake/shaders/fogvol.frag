@@ -14,7 +14,7 @@ layout(binding=1) uniform sampler2D SceneDepth;
 layout(binding=3) uniform sampler3D FogNoiseTex;
 layout(binding=6) uniform sampler3D FogFroxelLightTex;
 layout(binding=7) uniform sampler2D FogGodrayShaftsTex;
-layout(binding=8) uniform sampler2D FogSunShadowTex;
+layout(binding=8) uniform sampler2DArray FogSunShadowTex;
 
 struct FogVolume
 {
@@ -77,8 +77,10 @@ layout(location=42) uniform int   FogLocalOcclusionMode;
 layout(location=43) uniform vec4  FogFroxelTemporalParams;
 layout(location=47) uniform int   FogCheckerboard;
 layout(location=49) uniform vec4  FogClusterParams;
-layout(location=50) uniform mat4  FogSunShadowViewProj;
+uniform mat4  FogSunShadowViewProj[4];
 layout(location=54) uniform vec4  FogSunShadowParams; // x enabled, y depthBias, z pcfUv, w reserved
+layout(location=55) uniform vec4  FogSunShadowSplits;
+layout(location=56) uniform int   FogSunShadowCascadeCount;
 
 layout(location=0) out vec4 FragColor;
 
@@ -311,7 +313,14 @@ float SampleSunShadowMapVisibility(vec3 worldPos)
 	if (FogSunShadowParams.x <= 0.5)
 		return 1.0;
 
-	vec4 clip = FogSunShadowViewProj * vec4(worldPos, 1.0);
+	int cascadeCount = clamp(FogSunShadowCascadeCount, 1, 4);
+	float dist = length(worldPos - FogCameraPosWS);
+	int cascade = 0;
+	if (cascadeCount > 1 && dist > FogSunShadowSplits.x) cascade = 1;
+	if (cascadeCount > 2 && dist > FogSunShadowSplits.y) cascade = 2;
+	if (cascadeCount > 3 && dist > FogSunShadowSplits.z) cascade = 3;
+
+	vec4 clip = FogSunShadowViewProj[cascade] * vec4(worldPos, 1.0);
 	if (abs(clip.w) <= 1e-6)
 		return 1.0;
 
@@ -328,7 +337,7 @@ float SampleSunShadowMapVisibility(vec3 worldPos)
 
 	if (pcf <= 1e-6)
 	{
-		float closest = texture(FogSunShadowTex, uv).r;
+		float closest = texture(FogSunShadowTex, vec3(uv, float(cascade))).r;
 		return (depth - bias <= closest) ? 1.0 : 0.0;
 	}
 
@@ -338,7 +347,7 @@ float SampleSunShadowMapVisibility(vec3 worldPos)
 	{
 		for (int x = -1; x <= 1; ++x)
 		{
-			float closest = texture(FogSunShadowTex, uv + vec2(float(x), float(y)) * pcf).r;
+			float closest = texture(FogSunShadowTex, vec3(uv + vec2(float(x), float(y)) * pcf, float(cascade))).r;
 			sum += (depth - bias <= closest) ? 1.0 : 0.0;
 			taps += 1.0;
 		}

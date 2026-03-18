@@ -5,7 +5,7 @@ layout(binding=0) uniform sampler2D Tex;
 #endif
 layout(binding=2) uniform sampler2D LMTex; // unused, kept for binding slot consistency
 layout(binding=3) uniform sampler2D LMTexDir; // unused
-layout(binding=7) uniform sampler2D SunShadowTex; // reserved for interface parity
+layout(binding=7) uniform sampler2DArray SunShadowTex; // reserved for interface parity
 layout(binding=8) uniform samplerCubeArray DLightShadowTex;
 
 #include "frame_uniforms.glsl"

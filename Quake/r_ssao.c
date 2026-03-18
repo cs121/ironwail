@@ -1,6 +1,7 @@
 #include "quakedef.h"
 
 #include "r_fogvol.h"
+#include "r_sanitize.h"
 #include "r_ssao.h"
 
 #include <math.h>
@@ -67,19 +68,7 @@ void R_SSAO_RegisterCvars (void)
 
 float R_SSAO_SanitizeValue (float value, float fallback, float minval, float maxval)
 {
-#if defined(_MSC_VER)
-	if (_finite (value) == 0)
-		return fallback;
-#else
-	if (!isfinite (value))
-		return fallback;
-#endif
-
-	if (value < minval)
-		return minval;
-	if (value > maxval)
-		return maxval;
-	return value;
+	return R_SanitizeFloatRange (value, fallback, minval, maxval);
 }
 
 void R_SSAO_CaptureFogState (const gpuframedata_t *framedata, r_ssao_fog_state_t *out_state)

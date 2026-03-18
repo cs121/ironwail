@@ -7,10 +7,12 @@
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
-layout(binding=7) uniform sampler2D SunShadowTex;
+layout(binding=7) uniform sampler2DArray SunShadowTex;
 layout(binding=8) uniform samplerCubeArray DLightShadowTex;
 
-layout(location=30) uniform mat4 ShadowSunViewProj;
+uniform mat4 ShadowSunViewProj[4];
+uniform vec4 ShadowSunSplits;
+uniform int ShadowSunCascadeCount;
 layout(location=34) uniform vec4 ShadowEnableDebug;   // x=enabled, y=sun, z=dlight, w=debug mode
 layout(location=35) uniform vec4 ShadowDLightIndices; // selected light indices (float encoded ints)
 layout(location=36) uniform vec4 ShadowBiasCounts;    // x=num dlight slots, y=sun bias, z=dlight bias, w=receiver bias scale
@@ -250,12 +252,24 @@ int ShadowSlotForLight(int lightIndex)
 	return -1;
 }
 
+int ShadowCascadeForWorldPos(vec3 worldPos)
+{
+	int cascades = clamp(ShadowSunCascadeCount, 1, 4);
+	float dist = length(worldPos - EyePos);
+	if (cascades <= 1) return 0;
+	if (dist <= ShadowSunSplits.x || cascades == 1) return 0;
+	if (dist <= ShadowSunSplits.y || cascades == 2) return 1;
+	if (dist <= ShadowSunSplits.z || cascades == 3) return 2;
+	return cascades - 1;
+}
+
 float SampleSunShadow(vec3 worldPos)
 {
 	if (ShadowEnableDebug.x < 0.5 || ShadowEnableDebug.y < 0.5)
 		return 1.0;
 
-	vec4 clip = ShadowSunViewProj * vec4(worldPos, 1.0);
+	int cascade = ShadowCascadeForWorldPos(worldPos);
+	vec4 clip = ShadowSunViewProj[cascade] * vec4(worldPos, 1.0);
 	if (abs(clip.w) <= 1e-6)
 		return 1.0;
 
@@ -277,7 +291,7 @@ float SampleSunShadow(vec3 worldPos)
 	{
 		for (int x = -1; x <= 1; ++x)
 		{
-			float closest = texture(SunShadowTex, uv + vec2(float(x), float(y)) * pcf).r;
+			float closest = texture(SunShadowTex, vec3(uv + vec2(float(x), float(y)) * pcf, float(cascade))).r;
 			// Standard map: receiver is lit when its depth (minus bias) is <= stored depth.
 			sum += (depth - bias <= closest) ? 1.0 : 0.0;
 			taps += 1.0;
@@ -291,7 +305,8 @@ float SampleSunShadowDepth(vec3 worldPos)
 	if (ShadowEnableDebug.x < 0.5 || ShadowEnableDebug.y < 0.5)
 		return 1.0;
 
-	vec4 clip = ShadowSunViewProj * vec4(worldPos, 1.0);
+	int cascade = ShadowCascadeForWorldPos(worldPos);
+	vec4 clip = ShadowSunViewProj[cascade] * vec4(worldPos, 1.0);
 	if (abs(clip.w) <= 1e-6)
 		return 1.0;
 
@@ -300,7 +315,7 @@ float SampleSunShadowDepth(vec3 worldPos)
 	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
 		return 1.0;
 
-	return texture(SunShadowTex, uv).r;
+	return texture(SunShadowTex, vec3(uv, float(cascade))).r;
 }
 
 float SampleDLightShadow(int lightIndex, vec3 worldPos, vec3 lightPos, float radius)
@@ -799,6 +814,16 @@ void main()
 			result.rgb = vec3(SampleSunShadowDepth(in_pos));
 		else if (smode == 4)
 			result.rgb = vec3(SampleFirstDLightDepth(in_pos));
+		else if (smode == 5)
+		{
+			int ci = ShadowCascadeForWorldPos(in_pos);
+			const vec3 cascade_colors[4] = vec3[4](
+				vec3(1.0, 0.25, 0.25),
+				vec3(0.25, 1.0, 0.25),
+				vec3(0.25, 0.5, 1.0),
+				vec3(1.0, 0.85, 0.25));
+			result.rgb = cascade_colors[clamp(ci, 0, 3)];
+		}
 	}
 
 	result.rgb   = ApplyFog(result.rgb, in_pos - EyePos);

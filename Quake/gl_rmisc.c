@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "mat_shader.h"
 #include "r_dlight_pool.h"
 #include "r_postfx.h"
+#include "r_quality.h"
 #include "r_ssao.h"
 #include "r_godrays.h"
 #include "r_fogvol.h"
@@ -63,6 +64,7 @@ extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
 extern cvar_t r_lightingdir;
 extern cvar_t r_dlight_entities;
+extern cvar_t r_quality;
 extern cvar_t r_model_light_multisample;
 extern cvar_t r_model_light_smooth;
 extern cvar_t r_dlight_models_directional;
@@ -141,6 +143,12 @@ extern cvar_t r_shadow_receiver_bias;
 extern cvar_t r_shadow_sun_pcf;
 extern cvar_t r_shadow_dlight_pcf;
 extern cvar_t r_shadow_sun_snap;
+extern cvar_t r_shadow_sun_cascades;
+extern cvar_t r_shadow_sun_split1;
+extern cvar_t r_shadow_sun_split2;
+extern cvar_t r_shadow_sun_split3;
+extern cvar_t r_shadow_sun_split_mode;
+extern cvar_t r_shadow_sun_split_lambda;
 extern cvar_t r_shadow_mark_mode;
 extern cvar_t r_shadow_profile;
 extern cvar_t r_shadow_cull_vis;
@@ -471,6 +479,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_litwater);
         Cvar_RegisterVariable (&r_dynamic);
         Cvar_RegisterVariable (&r_dlight_entities);
+	Cvar_RegisterVariable (&r_quality);
 	Cvar_RegisterVariable (&r_shadow);
 	Cvar_RegisterVariable (&r_shadow_sun);
 	Cvar_RegisterVariable (&r_shadow_dlight);
@@ -484,6 +493,12 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_shadow_sun_pcf);
 	Cvar_RegisterVariable (&r_shadow_dlight_pcf);
 	Cvar_RegisterVariable (&r_shadow_sun_snap);
+	Cvar_RegisterVariable (&r_shadow_sun_cascades);
+	Cvar_RegisterVariable (&r_shadow_sun_split1);
+	Cvar_RegisterVariable (&r_shadow_sun_split2);
+	Cvar_RegisterVariable (&r_shadow_sun_split3);
+	Cvar_RegisterVariable (&r_shadow_sun_split_mode);
+	Cvar_RegisterVariable (&r_shadow_sun_split_lambda);
 	Cvar_RegisterVariable (&r_shadow_mark_mode);
 	Cvar_RegisterVariable (&r_shadow_profile);
 	Cvar_RegisterVariable (&r_shadow_cull_vis);
@@ -622,6 +637,7 @@ Cvar_RegisterVariable (&r_vignette);
 
 	/* CVar owner: r_fogvol* in r_fogvol.c. */
 	R_FogVol_RegisterCvars ();
+	R_Quality_Init ();
 	R_PostFX_Init ();
 	R_FogVol_Init ();
 

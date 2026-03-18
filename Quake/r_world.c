@@ -68,10 +68,13 @@ static uint32_t r_gpumark_dispatch_serial = 0u;
 static byte *r_gpumark_last_vis = NULL;
 static GLuint r_gpumark_last_flags = 0u;
 static qboolean r_gpumark_last_oldskyleaf = false;
+static const qmodel_t *r_tex_table_validated_model = NULL;
+static qboolean r_tex_table_validated_ok = false;
 
 byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 
 static inline qboolean R_ValidPtr (const void *ptr);
+static qboolean R_ValidateTextureTables (const qmodel_t *model);
 
 static qboolean R_BrushModelHasTextureTables (const qmodel_t *model)
 {
@@ -87,22 +90,13 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 	int used_count;
 	int texnum;
 	static int last_warn_frame = -1;
-	static int last_bad_ptr_frame = -1;
 	static int last_bad_texnum_frame = -1;
 	texture_t *tex;
 
 	if (!model || !model->usedtextures || !model->textures)
 		return NULL;
-	if (!R_ValidPtr (model->usedtextures) || !R_ValidPtr (model->textures))
-	{
-		if (r_framecount != last_warn_frame)
-		{
-			last_warn_frame = r_framecount;
-			Con_DWarning ("R_GetUsedTexture: invalid texture table pointers on %s (used=%p textures=%p)\n",
-				model->name, (void *)model->usedtextures, (void *)model->textures);
-		}
+	if (!R_ValidateTextureTables (model))
 		return NULL;
-	}
 
 	used_count = model->texofs[TEXTYPE_COUNT];
 	if (model->numtextures <= 0 || used_count < 0 || used_count > model->numtextures)
@@ -134,21 +128,7 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 		*out_texnum = texnum;
 
 	tex = model->textures[texnum];
-	if (!tex)
-		return NULL;
-
-	if (!R_ValidPtr (tex))
-	{
-		if (r_framecount != last_bad_ptr_frame)
-		{
-			last_bad_ptr_frame = r_framecount;
-			Con_DWarning ("R_GetUsedTexture: invalid texture pointer on %s (used_index=%d texnum=%d ptr=%p)\n",
-				model->name, used_index, texnum, (void *)tex);
-		}
-		return NULL;
-	}
-
-	return tex;
+	return tex ? tex : NULL;
 }
 
 static inline qboolean R_ValidPtr (const void *ptr)
@@ -160,6 +140,61 @@ static inline qboolean R_ValidPtr (const void *ptr)
 	if (address < 0x10000)
 		return false;
 
+	return true;
+}
+
+static qboolean R_ValidateTextureTables (const qmodel_t *model)
+{
+	int i;
+	int used_count;
+	static int last_warn_frame = -1;
+
+	if (!model)
+		return false;
+	if (model == r_tex_table_validated_model)
+		return r_tex_table_validated_ok;
+
+	r_tex_table_validated_model = model;
+	r_tex_table_validated_ok = false;
+
+	if (!model->usedtextures || !model->textures)
+		return false;
+	if (!R_ValidPtr (model->usedtextures) || !R_ValidPtr (model->textures))
+	{
+		if (r_framecount != last_warn_frame)
+		{
+			last_warn_frame = r_framecount;
+			Con_DWarning ("R_ValidateTextureTables: invalid table pointers on %s (used=%p textures=%p)\n",
+				model->name, (void *)model->usedtextures, (void *)model->textures);
+		}
+		return false;
+	}
+
+	used_count = model->texofs[TEXTYPE_COUNT];
+	if (model->numtextures <= 0 || used_count < 0 || used_count > model->numtextures)
+		return false;
+
+	for (i = 0; i < used_count; ++i)
+	{
+		const int texnum = model->usedtextures[i];
+		texture_t *tex;
+
+		if (texnum < 0 || texnum >= model->numtextures)
+			return false;
+		tex = model->textures[texnum];
+		if (tex && !R_ValidPtr (tex))
+		{
+			if (r_framecount != last_warn_frame)
+			{
+				last_warn_frame = r_framecount;
+				Con_DWarning ("R_ValidateTextureTables: invalid texture pointer on %s (used_index=%d texnum=%d ptr=%p)\n",
+					model->name, i, texnum, (void *)tex);
+			}
+			return false;
+		}
+	}
+
+	r_tex_table_validated_ok = true;
 	return true;
 }
 
@@ -759,9 +794,6 @@ static unsigned R_StageOutputCallFlags (const mat_shader_stage_t *stage)
 qboolean R_TextureEmitsGodrays (texture_t *t)
 {
 	if (!t)
-		return false;
-
-	if (!R_ValidPtr (t))
 		return false;
 
 	if (r_shaders.value <= 0.f || !t->shader)

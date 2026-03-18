@@ -257,6 +257,10 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\gl_model.c" />
     <ClCompile Include="..\..\Quake\gl_refrag.c" />
     <ClCompile Include="..\..\Quake\gl_rlight.c" />
+    <ClCompile Include="..\..\Quake\gl_dlight.c" />
+    <ClCompile Include="..\..\Quake\gl_oit.c" />
+    <ClCompile Include="..\..\Quake\gl_shadow.c" />
+    <ClCompile Include="..\..\Quake\gl_shadow_runtime.c" />
     <ClCompile Include="..\..\Quake\gl_rmain.c" />
     <ClCompile Include="..\..\Quake\gl_rmisc.c" />
     <ClCompile Include="..\..\Quake\r_decals.c" />
@@ -325,6 +329,8 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\r_fogvol_froxel.c" />
     <ClCompile Include="..\..\Quake\r_fogvol_froxel_runtime.c" />
     <ClCompile Include="..\..\Quake\r_fogvol_static_stub.c" />
+    <ClCompile Include="..\..\Quake\r_quality.c" />
+    <ClCompile Include="..\..\Quake\r_sanitize.c" />
     <ClCompile Include="..\..\Quake\r_godrays.c" />
     <ClCompile Include="..\..\Quake\r_postfx.c" />
     <ClCompile Include="..\..\Quake\r_part.c" />
