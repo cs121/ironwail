@@ -62,10 +62,10 @@ void main()
 		// PERF: cheap squared-distance reject before any sqrt/normalization.
 		if (dist2 >= radius2)
 			continue;
-		float normDist2 = dist2 / max(radius2, 1e-6);
-		float window = smoothstep(1.0, 0.0, normDist2);
-		float invSq = 1.0 / (1.0 + normDist2 * 6.0);
-		float atten = window * invSq;
+		// Linear-quadratic attenuation avoids division by zero at dist=0
+		// and matches per-light raymarch attenuation for visual consistency.
+		float nd = clamp(sqrt(dist2) / radius, 0.0, 1.0);
+		float atten = (1.0 - nd) * (1.0 - nd);
 		if (atten <= 1e-5)
 			continue;
 		accum += max(lights[i].color_intensity.rgb, vec3(0.0)) * (max(lights[i].color_intensity.w, 0.0) * atten);

@@ -58,6 +58,7 @@ cvar_t r_fogvol_lava_emissive = { "r_fogvol_lava_emissive", "2.0", CVAR_ARCHIVE 
 cvar_t r_fogvol_light = { "r_fogvol_light", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_dlightscale = { "r_fogvol_dlightscale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_sun = { "r_fogvol_froxel_sun", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_froxel_sun_ref = { "r_fogvol_froxel_sun_ref", "200.0", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_dlight_boost = { "r_fogvol_light_dlight_boost", "1.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_sun_boost = { "r_fogvol_light_sun_boost", "1.35", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_emissive_boost = { "r_fogvol_light_emissive_boost", "1.25", CVAR_ARCHIVE };
@@ -107,6 +108,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_light},
 	{&r_fogvol_dlightscale},
 	{&r_fogvol_froxel_sun},
+	{&r_fogvol_froxel_sun_ref},
 	{&r_fogvol_light_dlight_boost},
 	{&r_fogvol_light_sun_boost},
 	{&r_fogvol_light_emissive_boost},
@@ -287,6 +289,7 @@ static qboolean FogVol_BuildGlobalVolume (fog_volume_t *out)
 	VectorSet (v.velocity, r_fogvol_global_velocity_x.value, r_fogvol_global_velocity_y.value, r_fogvol_global_velocity_z.value);
 	v.height = r_fogvol_global_height.value;
 	v.heightScale = q_max (0.f, r_fogvol_global_height_scale.value);
+	/* Keep global fog integration bounded to effective view distance. */
 	v.maxDistance = 16384.f;
 	v.priority = (int)Q_rint (r_fogvol_global_priority.value);
 	v.blendMode = -1;
@@ -849,3 +852,4 @@ void R_FogVol_DrawDebug2D (void)
 void R_FogVol_LogEndFrameState (void)
 {
 }
+

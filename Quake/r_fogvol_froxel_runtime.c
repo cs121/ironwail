@@ -339,6 +339,8 @@ static void R_Froxel_InjectSun (void)
 	vec3_t inject_origin;
 	float radius;
 	float intensity;
+	float sun_ref;
+	float normalized_intensity;
 
 	if (!r_froxel.valid)
 		return;
@@ -369,9 +371,12 @@ static void R_Froxel_InjectSun (void)
 	if (VectorNormalize (inject_dir) <= 0.f)
 		return;
 
-	radius = q_max (384.f, r_froxel.far_clip * 0.40f);
-	VectorMA (r_refdef.vieworg, r_froxel.far_clip * 0.55f, inject_dir, inject_origin);
-	R_Froxel_AddLight (inject_origin, radius, sun->color, intensity, (uint32_t)DLIGHT_DEFAULT);
+	radius = q_max (1024.f, r_froxel.far_clip * 1.20f);
+	VectorMA (r_refdef.vieworg, r_froxel.far_clip * 0.50f, inject_dir, inject_origin);
+	/* Normalize Quake sunlight intensity (typically 200-600) into froxel radiance space. */
+	sun_ref = q_max (1.f, r_fogvol_froxel_sun_ref.value);
+	normalized_intensity = intensity / sun_ref;
+	R_Froxel_AddLight (inject_origin, radius, sun->color, normalized_intensity, (uint32_t)DLIGHT_DEFAULT);
 }
 
 void R_Froxel_ResetResources (void)
