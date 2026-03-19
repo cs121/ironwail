@@ -364,6 +364,26 @@ vec3 LinearToSRGB(vec3 color)
 
 layout(location=0) out vec4 out_fragcolor;
 
+// Apply soft-emulation palette/dither after the rest of the postprocess chain so
+// effects such as motion blur, DoF, SSAO, bloom, godrays, tonemapping, and LUTs
+// all operate on the unquantized intermediate color first.
+vec4 ApplySoftEmulationPostFX(vec3 color, vec2 fragCoord, float scale, float dither)
+{
+        vec4 outColor = vec4(color, 1.0);
+#if PALETTIZE == 1
+        vec2 noiseuv = floor(fragCoord * scale) + 0.5;
+        outColor.rgb = sqrt(outColor.rgb);
+        outColor.rgb += DITHER_NOISE(noiseuv) * dither;
+        outColor.rgb *= outColor.rgb;
+#endif // PALETTIZE == 1
+#if PALETTIZE
+        ivec3 clr = ivec3(clamp(outColor.rgb, 0., 1.) * 127. + 0.5);
+        uint remap = Palette[texelFetch(PaletteLUT, clr, 0).x];
+        outColor.rgb = vec3(UnpackRGB8(remap)) * (1./255.);
+#endif // PALETTIZE
+        return outColor;
+}
+
 void main()
 {
         float postContrast = Params.y;
@@ -640,19 +660,7 @@ void main()
 
         } // end if (inView)
 
-        out_fragcolor = color;
-#if PALETTIZE == 1
-                vec2 noiseuv = floor(gl_FragCoord.xy * scale) + 0.5;
-                out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
-	out_fragcolor.rgb += DITHER_NOISE(noiseuv) * dither;
-	out_fragcolor.rgb *= out_fragcolor.rgb;
-#endif // PALETTIZE == 1
-#if PALETTIZE
-	ivec3 clr = ivec3(clamp(out_fragcolor.rgb, 0., 1.) * 127. + 0.5);
-	uint remap = Palette[texelFetch(PaletteLUT, clr, 0).x];
-	out_fragcolor.rgb = vec3(UnpackRGB8(remap)) * (1./255.);
-#else
-        vec3 hdrColor = out_fragcolor.rgb;
+        vec3 hdrColor = color.rgb;
         float emissiveBoost = 1.0 + max(PostFXParams3.z, 0.0);
         hdrColor *= emissiveBoost;
         float bloomIntensity = max(HDRParams.x + PostFXParams3.y, 0.0);
@@ -693,13 +701,14 @@ void main()
         mapped = clamp(mapped, 0.0, 1.0);
         if (debugMode == 2)
         {
-                out_fragcolor = vec4(mapped, 1.0);
+                out_fragcolor = ApplySoftEmulationPostFX(mapped, gl_FragCoord.xy, scale, dither);
                 return;
         }
         if (debugMode == 4)
         {
                 float maxHdr = max(max(combined.r, combined.g), combined.b);
-                out_fragcolor = vec4(maxHdr > 1.0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0), 1.0);
+                vec3 debugColor = maxHdr > 1.0 ? vec3(1.0, 0.0, 0.0) : vec3(0.0);
+                out_fragcolor = ApplySoftEmulationPostFX(debugColor, gl_FragCoord.xy, scale, dither);
                 return;
         }
         float midtone = max(u_midtone, 0.1);
@@ -727,6 +736,5 @@ void main()
         }
         if (outputSrgb > 0.5)
                 mapped = LinearToSRGB(mapped);
-        out_fragcolor = vec4(mapped, 1.0);
-#endif // PALETTIZE
+        out_fragcolor = ApplySoftEmulationPostFX(mapped, gl_FragCoord.xy, scale, dither);
 }
