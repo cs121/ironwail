@@ -180,7 +180,7 @@ enum
 	FOGVOL_U_FROXEL_PARITY_MODE = 38,
 	FOGVOL_U_FROXEL_TEMPORAL_PARAMS = 43,
 	FOGVOL_U_CLUSTER_PARAMS = 49,
-	FOGVOL_U_SUN_SHADOW_VIEWPROJ = 50,
+	FOGVOL_U_SUN_SHADOW_VIEWPROJ = 57,
 	FOGVOL_U_SUN_SHADOW_PARAMS = 54,
 	FOGVOL_U_SUN_SHADOW_SPLITS = 55,
 	FOGVOL_U_SUN_SHADOW_CASCADE_COUNT = 56
@@ -535,7 +535,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int froxel_debug_random_mode = CLAMP (0, (int)Q_rint (r_fogvol_debug_froxel_random.value), 4);
 	int froxel_debug_mode = 0;
 	qboolean froxel_ready = R_Froxel_GetShaderState (&froxel_tex, &froxel_light_count, froxel_params0, froxel_params1);
-	qboolean shadow_enabled = (mode == 2 && r_fogvol_shadow.value > 0.f);
+	qboolean shadow_enabled = (mode >= 1 && r_fogvol_shadow.value > 0.f);
 	const sun_t *sun = R_GetSun ();
 	float fog_density = 1.f;
 	float sigma_max = 4.f;
@@ -637,8 +637,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	/* Safety fallback: disable Godray->Fog coupling to avoid translucent band artifacts. */
 	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, 0);
 	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, 0);
-	/* Safety fallback: disable froxel injection path until artifact source is isolated. */
-	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, 0);
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (froxel_ready && froxel_light_count > 0) ? 1 : 0);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, froxel_params0[0], froxel_params0[1], froxel_params0[2], froxel_params0[3]);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, froxel_params1[0], froxel_params1[1], froxel_params1[2], froxel_params1[3]);
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, froxel_debug_mode);

@@ -77,7 +77,7 @@ layout(location=42) uniform int   FogLocalOcclusionMode;
 layout(location=43) uniform vec4  FogFroxelTemporalParams;
 layout(location=47) uniform int   FogCheckerboard;
 layout(location=49) uniform vec4  FogClusterParams;
-uniform mat4  FogSunShadowViewProj[4];
+layout(location=57) uniform mat4  FogSunShadowViewProj[4];
 layout(location=54) uniform vec4  FogSunShadowParams; // x enabled, y depthBias, z pcfUv, w reserved
 layout(location=55) uniform vec4  FogSunShadowSplits;
 layout(location=56) uniform int   FogSunShadowCascadeCount;
