@@ -10,7 +10,7 @@ Zweck:
   marks), die zur Laufzeit auf World-Surfaces gelegt werden.
 
 Begriffe:
-- `decal definition`: Ein `decal <name> { ... }` Block aus `decals.shader`.
+- `decal definition`: Ein `decal <name> { ... }` Block aus `decals.material`.
 - `category`: Logische Gruppe (z. B. `bullet`, `scorch`) fuer Spawn-Aufloesung.
 - `instance`: Konkretes Laufzeit-Decal mit Geometrie, Lifetime, Blend/Texture.
 - `pool`: Fester Instanz-Pool mit Eviction statt unkontrollierter Allokation.
@@ -115,8 +115,8 @@ Der effektive Manifest-Inhalt ist:
 - inkl. ihrer Kategorien, Texturen und Parameter
 
 Lade-Reihenfolge in der Runtime:
-1. `decals.shader`
-2. `scripts/decals.shader`
+1. `decals.material`
+2. `materials/decals.material`
 
 Praktische Konsequenzen:
 - Mehrere Definitionen mit gleicher `category` koennen gleichzeitig existieren.

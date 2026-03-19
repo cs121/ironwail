@@ -150,10 +150,10 @@
     <ClCompile Include="..\..\Quake\mathlib.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\mat_shader.c">
+    <ClCompile Include="..\..\Quake\mat_material.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\mat_shader_parse.c">
+    <ClCompile Include="..\..\Quake\mat_material_parse.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\menu.c">
@@ -413,10 +413,10 @@
     <ClInclude Include="..\..\Quake\mathlib.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\mat_shader.h">
+    <ClInclude Include="..\..\Quake\mat_material.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\mat_shader_parse.h">
+    <ClInclude Include="..\..\Quake\mat_material_parse.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\menu.h">

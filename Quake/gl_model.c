@@ -27,7 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "gl_lightgrid.h"
 #include "gl_ktx2.h"
-#include "mat_shader.h"
+#include "mat_material.h"
 #include "../common/lightgrid.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
@@ -348,7 +348,7 @@ void Mod_ClearAll (void)
 		}
 	}
 
-	Mat_Shader_Shutdown ();
+	Material_Shutdown ();
 }
 
 void Mod_ResetAll (void)
@@ -1399,9 +1399,9 @@ static void Mod_LoadTextures (lump_t *l)
 
 			tx->fullbright = NULL; //johnfitz
 			tx->emissive = NULL;
-			tx->shader = NULL;
-			tx->shader_map = NULL;
-			tx->shader_flags = 0u;
+			tx->material = NULL;
+			tx->material_map = NULL;
+			tx->material_flags = 0u;
 		tx->shift = 0;	// Q64 only
 		tx->type = Mod_TextureTypeFromName (tx->name);
 
@@ -1425,7 +1425,7 @@ static void Mod_LoadTextures (lump_t *l)
                                 COM_StripExtension (loadmodel->name + 5, mapname, sizeof (mapname));
                         else
                                 mapname[0] = '\0';
-                        Mat_Shader_ApplyToTexture (tx, mapname[0] ? mapname : NULL);
+                        Material_ApplyToTexture (tx, mapname[0] ? mapname : NULL);
 
                         if (tx->type == TEXTYPE_SKY)
                         {
@@ -1438,9 +1438,9 @@ static void Mod_LoadTextures (lump_t *l)
                         {
                                 //external textures -- first look in "textures/mapname/" then look in "textures/"
                                 mark = Hunk_LowMark();
-                                if (tx->shader_map && tx->shader_map[0])
+                                if (tx->material_map && tx->material_map[0])
                                 {
-                                        COM_StripExtension (tx->shader_map, filename, sizeof (filename));
+                                        COM_StripExtension (tx->material_map, filename, sizeof (filename));
                                         ktx2tex = Mod_LoadKTX2Texture (filename);
                                         data = ktx2tex ? NULL : Image_LoadImage (filename, &fwidth, &fheight, &fmt);
                                 }
@@ -1509,9 +1509,9 @@ static void Mod_LoadTextures (lump_t *l)
 
                                 //external textures -- first look in "textures/mapname/" then look in "textures/"
                                 mark = Hunk_LowMark ();
-                                if (tx->shader_map && tx->shader_map[0])
+                                if (tx->material_map && tx->material_map[0])
                                 {
-                                        COM_StripExtension (tx->shader_map, filename, sizeof (filename));
+                                        COM_StripExtension (tx->material_map, filename, sizeof (filename));
                                         ktx2tex = Mod_LoadKTX2Texture (filename);
                                         data = ktx2tex ? NULL : Image_LoadImage (filename, &fwidth, &fheight, &fmt);
                                 }

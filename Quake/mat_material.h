@@ -18,8 +18,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-#ifndef MAT_SHADER_H
-#define MAT_SHADER_H
+#ifndef MAT_MATERIAL_H
+#define MAT_MATERIAL_H
 
 #include "quakedef.h"
 
@@ -179,22 +179,22 @@ typedef struct mat_texmatrix_s
 
 typedef enum
 {
-	MAT_SHADERFLAG_NODRAW		= (1u << 0),
-	MAT_SHADERFLAG_SKY		= (1u << 1),
-	MAT_SHADERFLAG_TRANS		= (1u << 2),
-	MAT_SHADERFLAG_ALPHAOCCLUDE	= (1u << 3),
-	MAT_SHADERFLAG_FOG		= (1u << 4),
-	MAT_SHADERFLAG_SOLID		= (1u << 5),
-	MAT_SHADERFLAG_NONSOLID		= (1u << 6),
-	MAT_SHADERFLAG_PLAYERCLIP	= (1u << 7),
-	MAT_SHADERFLAG_MONSTERCLIP	= (1u << 8),
-	MAT_SHADERFLAG_STONE		= (1u << 9),
-	MAT_SHADERFLAG_EMISSIVE		= (1u << 10),
-	MAT_SHADERFLAG_BLOOM		= (1u << 11),
-	MAT_SHADERFLAG_GODRAY		= (1u << 12)
-} mat_shader_flags_t;
+	MATERIAL_FLAG_NODRAW		= (1u << 0),
+	MATERIAL_FLAG_SKY		= (1u << 1),
+	MATERIAL_FLAG_TRANS		= (1u << 2),
+	MATERIAL_FLAG_ALPHAOCCLUDE	= (1u << 3),
+	MATERIAL_FLAG_FOG		= (1u << 4),
+	MATERIAL_FLAG_SOLID		= (1u << 5),
+	MATERIAL_FLAG_NONSOLID		= (1u << 6),
+	MATERIAL_FLAG_PLAYERCLIP	= (1u << 7),
+	MATERIAL_FLAG_MONSTERCLIP	= (1u << 8),
+	MATERIAL_FLAG_STONE		= (1u << 9),
+	MATERIAL_FLAG_EMISSIVE		= (1u << 10),
+	MATERIAL_FLAG_BLOOM		= (1u << 11),
+	MATERIAL_FLAG_GODRAY		= (1u << 12)
+} material_flags_t;
 
-typedef struct mat_shader_stage_s
+typedef struct mat_material_stage_s
 {
 	unsigned int		outputs;
 	unsigned int		output_overrides;
@@ -226,7 +226,7 @@ typedef struct mat_shader_stage_s
 	int			anim_map_time_bucket;
 	int			anim_map_frame;
 	mat_texmatrix_t	texmatrix_cache;
-} mat_shader_stage_t;
+} material_stage_t;
 
 typedef enum
 {
@@ -236,7 +236,7 @@ typedef enum
 	MAT_STAGE_OUT_GODRAY_SOURCE	= (1u << 3)
 } mat_stage_output_flags_t;
 
-typedef struct shader_material_s
+typedef struct material_s
 {
 	char			*name;
 	char			*editor_image;
@@ -255,64 +255,64 @@ typedef struct shader_material_s
 	float			emissive_scale;
 	float			bloom_scale;
 	float			godray_scale;
-	mat_shader_stage_t	stage0;
-	mat_shader_stage_t	*stages;
-} shader_material_t;
+	material_stage_t	stage0;
+	material_stage_t	*stages;
+} material_t;
 
 // Developer note:
 // Supported directives: qer_editorimage, surfaceparm, emissive, bloom, godray, emissive_scale,
 // bloom_scale, godray_scale, emissiveScale, bloomScale, godrayScale, and a single stage block
 // with map + rgbGen identity.
-// To add new surfaceparms, extend mat_surfaceparm_table in mat_shader_parse.c and map to flags.
+// To add new surfaceparms, extend mat_surfaceparm_table in mat_material_parse.c and map to flags.
 
 typedef struct texture_s texture_t;
 
-extern cvar_t r_shaders;
-extern cvar_t r_shader_debug;
+extern cvar_t r_materials;
+extern cvar_t r_material_debug;
 extern cvar_t r_tcgen_debug;
 extern cvar_t r_sun_visibility;
-extern cvar_t r_matshader_debug_parse;
-extern cvar_t r_particles_shader_strict;
+extern cvar_t r_material_debug_parse;
+extern cvar_t r_particles_material_strict;
 
 #define MAT_PARTICLE_SHADER_PREFIX "particles/"
 
 typedef enum
 {
-	MAT_SHADER_KEYWORD_SCOPE_TOPLEVEL = 0,
-	MAT_SHADER_KEYWORD_SCOPE_STAGE,
-	MAT_SHADER_KEYWORD_SCOPE_SURFACEPARM
-} mat_shader_keyword_scope_t;
+	MATERIAL_KEYWORD_SCOPE_TOPLEVEL = 0,
+	MATERIAL_KEYWORD_SCOPE_STAGE,
+	MATERIAL_KEYWORD_SCOPE_SURFACEPARM
+} material_keyword_scope_t;
 
 typedef enum
 {
-	MAT_SHADER_KEYWORD_STATUS_IMPLEMENTED = 0,
-	MAT_SHADER_KEYWORD_STATUS_PARTIAL,
-	MAT_SHADER_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED
-} mat_shader_keyword_status_t;
+	MATERIAL_KEYWORD_STATUS_IMPLEMENTED = 0,
+	MATERIAL_KEYWORD_STATUS_PARTIAL,
+	MATERIAL_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED
+} material_keyword_status_t;
 
-void Mat_Shader_Init (void);
-void Mat_Shader_Shutdown (void);
-void Mat_Shader_Reload (void);
-size_t Mat_Shader_Count (void);
-const shader_material_t *Mat_Shader_GetByIndex (size_t index);
-void Mat_Shader_Canonicalize (const char *name, char *out, size_t out_size);
-const shader_material_t *Mat_Shader_Find (const char *name);
-const shader_material_t *Mat_Shader_FindForTextureName (const char *texname, const char *mapname);
-const char *Mat_Shader_GetStage0Map (const shader_material_t *material, const char *texname);
-unsigned int Mat_Shader_GetTextureFlags (const shader_material_t *material);
-void Mat_Shader_ApplyToTexture (texture_t *tex, const char *mapname);
-void Mat_Shader_Print (const shader_material_t *material);
-char *Mat_Shader_DupString (const char *value);
-const mat_texmatrix_t *MatStage_EvalTexMatrix (mat_shader_stage_t *stage, float time);
-int MatStage_EvalAnimMapFrame (mat_shader_stage_t *stage, float time);
-const char *MatStage_GetAnimMapPath (mat_shader_stage_t *stage, float time);
-float Mat_Shader_EvalWaveValue (const mat_wave_t *wave, float time);
-void Mat_Shader_Insert (shader_material_t *material);
-void Mat_Shader_Remove (const shader_material_t *material);
-void Mat_Shader_MarkKeywordSeen (const char *keyword, mat_shader_keyword_scope_t scope);
-void Mat_Shader_ReportUnknownToken (const char *token, mat_shader_keyword_scope_t scope, const char *context, const char *source_file, unsigned int line);
-qboolean Mat_Shader_StageSupportsParticleMVP (const mat_shader_stage_t *stage, char *reason, size_t reason_size);
-mat_particle_stage_support_t Mat_Shader_ClassifyParticleStage (const mat_shader_stage_t *stage,
+void Material_Init (void);
+void Material_Shutdown (void);
+void Material_Reload (void);
+size_t Material_Count (void);
+const material_t *Material_GetByIndex (size_t index);
+void Material_Canonicalize (const char *name, char *out, size_t out_size);
+const material_t *Material_Find (const char *name);
+const material_t *Material_FindForTextureName (const char *texname, const char *mapname);
+const char *Material_GetStage0Map (const material_t *material, const char *texname);
+unsigned int Material_GetTextureFlags (const material_t *material);
+void Material_ApplyToTexture (texture_t *tex, const char *mapname);
+void Material_Print (const material_t *material);
+char *Material_DupString (const char *value);
+const mat_texmatrix_t *MaterialStage_EvalTexMatrix (material_stage_t *stage, float time);
+int MaterialStage_EvalAnimMapFrame (material_stage_t *stage, float time);
+const char *MaterialStage_GetAnimMapPath (material_stage_t *stage, float time);
+float Material_EvalWaveValue (const mat_wave_t *wave, float time);
+void Material_Insert (material_t *material);
+void Material_Remove (const material_t *material);
+void Material_MarkKeywordSeen (const char *keyword, material_keyword_scope_t scope);
+void Material_ReportUnknownToken (const char *token, material_keyword_scope_t scope, const char *context, const char *source_file, unsigned int line);
+qboolean Material_StageSupportsParticleMVP (const material_stage_t *stage, char *reason, size_t reason_size);
+mat_particle_stage_support_t Material_ClassifyParticleStage (const material_stage_t *stage,
 	mat_particle_policy_t policy, char *reason, size_t reason_size);
 
-#endif // MAT_SHADER_H
+#endif // MAT_MATERIAL_H

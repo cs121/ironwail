@@ -366,8 +366,7 @@ layout(location=0) out vec4 out_fragcolor;
 
 // Apply soft-emulation palette/dither after the rest of the postprocess chain so
 // effects such as motion blur, DoF, SSAO, bloom, godrays, tonemapping, and LUTs
-// all operate on the unquantized intermediate color first. The scale parameter
-// keeps the dither grid aligned with r_scale-expanded pixels.
+// all operate on the unquantized intermediate color first.
 vec4 ApplySoftEmulationPostFX(vec3 color, vec2 fragCoord, float scale, float dither)
 {
         vec4 outColor = vec4(color, 1.0);

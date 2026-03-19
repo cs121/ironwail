@@ -85,7 +85,7 @@ typedef enum {
 	TEXTYPE_NUMLIQUIDS = TEXTYPE_LASTLIQUID + 1 - TEXTYPE_FIRSTLIQUID,
 } textype_t;
 
-struct shader_material_s;
+struct material_s;
 
 #define TEXTYPE_ISLIQUID(x) ((unsigned)((x) - TEXTYPE_FIRSTLIQUID) < (unsigned)TEXTYPE_NUMLIQUIDS)
 
@@ -98,9 +98,9 @@ typedef struct texture_s
 	struct gltexture_s	*gltexture; //johnfitz -- pointer to gltexture
 	struct gltexture_s	*fullbright; //johnfitz -- fullbright mask texture
 	struct gltexture_s	*emissive; // emissive map texture
-	const struct shader_material_s *shader;
-	const char			*shader_map;
-	unsigned int		shader_flags;
+	const struct material_s *material;
+	const char			*material_map;
+	unsigned int		material_flags;
 	int					anim_total;				// total tenths in sequence ( 0 = no)
 	int					anim_min, anim_max;		// time for this frame min <=time< max
 	struct texture_s	*anim_next;		// in the animation sequence
