@@ -523,7 +523,9 @@ void main()
 
 		float lightLuma = dot(max(froxelScatter + sunScatter + emissiveScatter, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
 		float relief = extinctionRelief * clamp(lightLuma * 0.75, 0.0, 1.0);
-		float sigmaLit = max(sigma * 0.15, sigma * (1.0 - relief));
+		/* Avoid near-black fog in low-light scenes: when there is no meaningful
+		 * in-scattering, fall back to a softer extinction baseline. */
+		float sigmaLit = (lightLuma > 1e-4) ? max(sigma * 0.15, sigma * (1.0 - relief)) : (sigma * 0.2);
 		float opticalDepth = min(sigmaLit * stepLen, max(FogDensityParams.y, 0.001));
 		float att = exp(-opticalDepth);
 		float mediumWeight = 1.0 - att;

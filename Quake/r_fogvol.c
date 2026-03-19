@@ -70,6 +70,7 @@ cvar_t r_fogvol_shadow = { "r_fogvol_shadow", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_global = { "r_fogvol_global", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol_entities = { "r_fogvol_entities", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_color = { "r_fogvol_global_color", "0.3 0.3 0.3", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_density_scale = { "r_fogvol_global_density_scale", "0.06", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_falloff = { "r_fogvol_global_falloff", "64", CVAR_ARCHIVE };
@@ -120,6 +121,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_shadow_strength},
 	{&r_fogvol_density_scale},
 	{&r_fogvol_global},
+	{&r_fogvol_entities},
 	{&r_fogvol_global_color},
 	{&r_fogvol_global_density_scale},
 	{&r_fogvol_global_falloff},
@@ -203,10 +205,15 @@ static GLuint r_fogvol_godray_mask_tex = 0;
 static GLuint r_fogvol_godray_source_tex = 0;
 static qboolean r_fogvol_godray_ready = false;
 
+static float FogVol_DensityToExtinction (float density)
+{
+	return q_max (0.f, density) * (1.f / 64.f);
+}
+
 static float FogVol_GlobalDensityExtinction (void)
 {
 	/* Keep global fog density in world-unit extinction space. */
-	return q_max (0.f, r_fogvol_global_density_scale.value) * (1.f / 64.f);
+	return FogVol_DensityToExtinction (r_fogvol_global_density_scale.value);
 }
 
 static int FogVol_NormalizeShape (int shape)
@@ -280,10 +287,7 @@ static qboolean FogVol_BuildGlobalVolume (fog_volume_t *out)
 	if (!out || r_fogvol_global.value <= 0.f)
 		return false;
 
-	/* Convert legacy "art scale" density to world-unit extinction.
-	 * Without this, default global density quickly drives transmittance
-	 * to ~0 over common Quake sight distances (scene appears almost black). */
-	density = FogVol_GlobalDensityExtinction ();
+	density = q_max (0.f, r_fogvol_global_density_scale.value);
 	if (density <= 0.f)
 		return false;
 
@@ -375,7 +379,7 @@ void R_FogVol_BuildList (void)
 	if (r_fogvol_global_active && r_fogvolume_count < MAX_FOGVOLUMES)
 		r_fogvolumes[r_fogvolume_count++] = r_fogvol_global_volume;
 
-	for (int i = 0; i < r_fogvolume_entity_count && r_fogvolume_count < MAX_FOGVOLUMES; ++i)
+	for (int i = 0; r_fogvol_entities.value > 0.f && i < r_fogvolume_entity_count && r_fogvolume_count < MAX_FOGVOLUMES; ++i)
 	{
 		fog_volume_t v = r_fogvolume_entities[i];
 		v.density *= local_density_scale;
@@ -485,7 +489,7 @@ static void R_FogVol_FillGPUVolume (const fog_volume_t *v, fog_volume_gpu_t *gpu
 	gpu->mins[0] = v->mins[0]; gpu->mins[1] = v->mins[1]; gpu->mins[2] = v->mins[2];
 	gpu->maxs[0] = v->maxs[0]; gpu->maxs[1] = v->maxs[1]; gpu->maxs[2] = v->maxs[2];
 	gpu->sphere[0] = v->sphereCenter[0]; gpu->sphere[1] = v->sphereCenter[1]; gpu->sphere[2] = v->sphereCenter[2]; gpu->sphere[3] = v->sphereRadius;
-	gpu->color_density[0] = v->color[0]; gpu->color_density[1] = v->color[1]; gpu->color_density[2] = v->color[2]; gpu->color_density[3] = v->density;
+	gpu->color_density[0] = v->color[0]; gpu->color_density[1] = v->color[1]; gpu->color_density[2] = v->color[2]; gpu->color_density[3] = FogVol_DensityToExtinction (v->density);
 	gpu->noise_params[0] = v->noiseScale;
 	gpu->noise_params[1] = v->noiseAmount;
 	gpu->noise_params[2] = v->noiseBias;
@@ -581,6 +585,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float debug_dlight_scale = 1.f;
 	float debug_sun_scale = 0.f;
 	float debug_emissive_scale = 0.f;
+	qboolean godray_coupling_ready = (r_fogvol_godray_ready && r_fogvol_godray_shafts_tex != 0);
 	qboolean sun_shadow_map_enabled = R_Shadow_GetSunCascadeData (sun_shadow_viewproj, sun_shadow_splits, &sun_shadow_cascades, &sun_shadow_bias, &sun_shadow_pcf);
 
 	if (R_Froxel_GetDebugScales (&debug_dlight_scale, &debug_sun_scale, &debug_emissive_scale))
@@ -646,7 +651,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SCISSOR, 0.f, 0.f, 0.f, 0.f);
 	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES, light_scale_dlight, light_scale_sun, light_scale_emissive, light_contrast);
 	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, lighting_mode);
-	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, (r_fogvol_godray_ready && mode > 0) ? 1 : 0);
+	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, (godray_coupling_ready && mode > 0) ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, 0);
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (mode > 0 && froxel_ready) ? 1 : 0);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, froxel_params0[0], froxel_params0[1], froxel_params0[2], froxel_params0[3]);
@@ -757,6 +762,7 @@ void R_FogVol_Render (void)
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, froxel_tex);
+	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, r_fogvol_godray_shafts_tex);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D_ARRAY, framebufs.shadow.sun_depth_tex);
 	R_FogVol_SetShaderUniforms (steps, mode, use_halfres, fog_width, fog_height,
 		depth_scale_x, depth_scale_y, inv_viewproj, view_x, view_y, view_w, view_h,

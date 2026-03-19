@@ -218,7 +218,10 @@ void R_FogVol_ParseEntities (void)
 
 		memset (&volume, 0, sizeof (volume));
 		VectorSet (volume.color, 1.f, 1.f, 1.f);
-		volume.density = 0.1f;
+		/* Default to disabled density. Many maps contain trigger/brush entities
+		 * without explicit fog tuning; a non-zero default creates large white
+		 * volume artifacts from unintended boxes. */
+		volume.density = 0.0f;
 		volume.falloff = 16.f;
 		volume.mode = 0;
 		volume.shape = FOGVOL_SHAPE_BOX;
