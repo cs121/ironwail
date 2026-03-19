@@ -2505,7 +2505,6 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	 * GL_GetMediumScatterSource(), preserving validity gating and stale-handle safety. */
 	GL_PostProcess_SetMediumScatterUniforms ();
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
-	if (variant != 2) // some AMD drivers optimize out the uniform in variant #2
 	{
 		float post_contrast = CLAMP (0.8f, r_color_contrast.value, 1.2f);
 		GL_Uniform4fFunc (0, 1.f, post_contrast, 1.f / r_refdef.scale, dither);
