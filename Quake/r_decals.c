@@ -392,8 +392,8 @@ static void R_Decals_LoadScripts (void)
 {
 	num_decal_defs = 0;
 	memset (decal_defs, 0, sizeof (decal_defs));
-	R_Decals_LoadScript ("decals.shader");
-	R_Decals_LoadScript ("scripts/decals.shader");
+	R_Decals_LoadScript ("decals.material");
+	R_Decals_LoadScript ("materials/decals.material");
 }
 
 static decaldef_t *R_FindDecalDefByCategory (const char *category)

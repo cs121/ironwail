@@ -18,22 +18,22 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 */
 
-#ifndef MAT_SHADER_PARSE_H
-#define MAT_SHADER_PARSE_H
+#ifndef MAT_MATERIAL_PARSE_H
+#define MAT_MATERIAL_PARSE_H
 
-#include "mat_shader.h"
+#include "mat_material.h"
 
-#define MAT_SHADER_MAX_STAGES 128
-#define MAT_SHADER_MAX_ANIM_FRAMES 64
-#define MAT_SHADER_MAX_TOKENS 4096
-#define MAT_SHADER_MAX_BRACE_DEPTH 64
+#define MATERIAL_MAX_STAGES 128
+#define MATERIAL_MAX_ANIM_FRAMES 64
+#define MATERIAL_MAX_TOKENS 4096
+#define MATERIAL_MAX_BRACE_DEPTH 64
 
-int Mat_Shader_ParseFile (const char *path, const char *data, const char *source_file);
-void Mat_Shader_ParseResetStats (void);
-void Mat_Shader_ParseAddWarning (void);
-void Mat_Shader_ParseAddError (void);
-size_t Mat_Shader_ParseGetWarnings (void);
-size_t Mat_Shader_ParseGetErrors (void);
-void Mat_Shader_DebugFuzzParse (void);
+int Material_ParseFile (const char *path, const char *data, const char *source_file);
+void Material_ParseResetStats (void);
+void Material_ParseAddWarning (void);
+void Material_ParseAddError (void);
+size_t Material_ParseGetWarnings (void);
+size_t Material_ParseGetErrors (void);
+void Material_DebugFuzzParse (void);
 
-#endif // MAT_SHADER_PARSE_H
+#endif // MAT_MATERIAL_PARSE_H

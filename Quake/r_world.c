@@ -23,7 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_world.c: world model rendering
 
 #include "quakedef.h"
-#include "mat_shader.h"
+#include "mat_material.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t r_godrays;
@@ -441,7 +441,7 @@ static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
 static GLuint						bmodel_batch_program;
 
-static void R_GetPolygonOffsetValues (const shader_material_t *material, qboolean use_offset,
+static void R_GetPolygonOffsetValues (const material_t *material, qboolean use_offset,
 	float *factor, float *units)
 {
 	if (!factor || !units)
@@ -775,7 +775,7 @@ static void R_FlushBModelCalls (void)
 #define CALLFLAG_MAT_SKY         (1u << 11)
 #define CALLFLAG_MAT_HAS_SHADER  (1u << 12)
 
-static unsigned R_StageOutputCallFlags (const mat_shader_stage_t *stage)
+static unsigned R_StageOutputCallFlags (const material_stage_t *stage)
 {
 	unsigned flags = 0u;
 
@@ -796,16 +796,16 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 	if (!t)
 		return false;
 
-	if (r_shaders.value <= 0.f || !t->shader)
+	if (r_materials.value <= 0.f || !t->material)
 		return false;
 
-	if (t->shader->stages)
+	if (t->material->stages)
 	{
-		size_t stage_count = VEC_SIZE (t->shader->stages);
+		size_t stage_count = VEC_SIZE (t->material->stages);
 
 		for (size_t i = 0; i < stage_count; ++i)
 		{
-			const mat_shader_stage_t *stage = &t->shader->stages[i];
+			const material_stage_t *stage = &t->material->stages[i];
 			if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
 				return true;
 		}
@@ -1048,7 +1048,7 @@ static float R_Clamp01 (float value)
 	return value;
 }
 
-static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, vec4_t out)
+static void R_EvalStageColorAlpha (const material_stage_t *stage, float time, vec4_t out)
 {
 	static qboolean warned_vertex_color = false;
 	float wave_value;
@@ -1066,7 +1066,7 @@ static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, 
 	case MAT_RGBGEN_VERTEX:
 		if (!warned_vertex_color)
 		{
-			Con_Warning ("MatShader: rgbGen/alphaGen vertex requested but vertex colors are unavailable; using identity.\n");
+			Con_Warning ("Material: rgbGen/alphaGen vertex requested but vertex colors are unavailable; using identity.\n");
 			warned_vertex_color = true;
 		}
 		break;
@@ -1076,7 +1076,7 @@ static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, 
 		out[2] = stage->const_color[2];
 		break;
 	case MAT_RGBGEN_WAVE:
-		wave_value = R_Clamp01 (Mat_Shader_EvalWaveValue (&stage->rgb_wave, time));
+		wave_value = R_Clamp01 (Material_EvalWaveValue (&stage->rgb_wave, time));
 		out[0] = wave_value;
 		out[1] = wave_value;
 		out[2] = wave_value;
@@ -1091,7 +1091,7 @@ static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, 
 	case MAT_ALPHAGEN_VERTEX:
 		if (!warned_vertex_color)
 		{
-			Con_Warning ("MatShader: rgbGen/alphaGen vertex requested but vertex colors are unavailable; using identity.\n");
+			Con_Warning ("Material: rgbGen/alphaGen vertex requested but vertex colors are unavailable; using identity.\n");
 			warned_vertex_color = true;
 		}
 		break;
@@ -1099,7 +1099,7 @@ static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, 
 		out[3] = stage->const_alpha;
 		break;
 	case MAT_ALPHAGEN_WAVE:
-		out[3] = R_Clamp01 (Mat_Shader_EvalWaveValue (&stage->alpha_wave, time));
+		out[3] = R_Clamp01 (Material_EvalWaveValue (&stage->alpha_wave, time));
 		break;
 	case MAT_ALPHAGEN_IDENTITY:
 	default:
@@ -1107,7 +1107,7 @@ static void R_EvalStageColorAlpha (const mat_shader_stage_t *stage, float time, 
 	}
 }
 
-static unsigned R_MapBlendMode (const mat_shader_stage_t *stage)
+static unsigned R_MapBlendMode (const material_stage_t *stage)
 {
 	if (!stage)
 		return GLS_BLEND_OPAQUE;
@@ -1142,7 +1142,7 @@ static unsigned R_MapCullMode (mat_cull_mode_t cull_mode)
 	}
 }
 
-static gltexture_t *R_FindStageTexture (const qmodel_t *model, const mat_shader_stage_t *stage, float time)
+static gltexture_t *R_FindStageTexture (const qmodel_t *model, const material_stage_t *stage, float time)
 {
 	const char *path = NULL;
 
@@ -1163,7 +1163,7 @@ static gltexture_t *R_FindStageTexture (const qmodel_t *model, const mat_shader_
 		break;
 	}
 
-	path = MatStage_GetAnimMapPath ((mat_shader_stage_t *)stage, time);
+	path = MaterialStage_GetAnimMapPath ((material_stage_t *)stage, time);
 	if (!path || !path[0])
 		path = stage->map_path;
 	if (!path || !path[0])
@@ -1172,7 +1172,7 @@ static gltexture_t *R_FindStageTexture (const qmodel_t *model, const mat_shader_
 	return TexMgr_FindTexture ((qmodel_t *)model, path);
 }
 
-static qboolean R_StageUsesLightmap (const mat_shader_stage_t *stage, size_t stage_index)
+static qboolean R_StageUsesLightmap (const material_stage_t *stage, size_t stage_index)
 {
 	if (!stage)
 		return false;
@@ -1183,7 +1183,7 @@ static qboolean R_StageUsesLightmap (const mat_shader_stage_t *stage, size_t sta
 	return false;
 }
 
-static tcgen_mode_t R_ResolveStageTcGen (const mat_shader_stage_t *stage)
+static tcgen_mode_t R_ResolveStageTcGen (const material_stage_t *stage)
 {
 	if (!stage)
 		return TCGEN_BASE;
@@ -1205,9 +1205,9 @@ static tcgen_mode_t R_ResolveStageTcGen (const mat_shader_stage_t *stage)
 	return TCGEN_BASE;
 }
 
-static qboolean R_StageIsOpaqueBase (const shader_material_t *material)
+static qboolean R_StageIsOpaqueBase (const material_t *material)
 {
-	const mat_shader_stage_t *stage;
+	const material_stage_t *stage;
 
 	if (!material || !material->stages)
 		return false;
@@ -1279,7 +1279,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	textype_t texbegin, texend;
 	qboolean oit;
 
-	if (!count || r_shaders.value <= 0.f)
+	if (!count || r_materials.value <= 0.f)
 		return;
 
 	if (pass != BP_SOLID && pass != BP_ALPHATEST)
@@ -1353,7 +1353,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
 		{
 			texture_t *t = R_GetUsedTexture (model, j, NULL);
-			const shader_material_t *material;
+			const material_t *material;
 			unsigned mat_flags = 0u;
 			unsigned mat_call_flags = 0u;
 			size_t stage_count;
@@ -1362,14 +1362,14 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 			if (!t || !R_ValidPtr (t))
 				continue;
 
-			if (!t->shader)
+			if (!t->material)
 				continue;
 
-			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
-			if (mat_flags & MAT_SHADERFLAG_NODRAW)
+			mat_flags = (r_materials.value > 0.f) ? t->material_flags : 0u;
+			if (mat_flags & MATERIAL_FLAG_NODRAW)
 				continue;
 
-			material = t->shader;
+			material = t->material;
 			if (material->sort_key != sort_key)
 				continue;
 
@@ -1377,15 +1377,15 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 			if (!stage_count)
 				continue;
 
-			if (mat_flags & MAT_SHADERFLAG_TRANS)
+			if (mat_flags & MATERIAL_FLAG_TRANS)
 				mat_call_flags |= CALLFLAG_MAT_TRANS;
-			if (mat_flags & MAT_SHADERFLAG_SKY)
+			if (mat_flags & MATERIAL_FLAG_SKY)
 				mat_call_flags |= CALLFLAG_MAT_SKY;
 			mat_call_flags |= CALLFLAG_MAT_HAS_SHADER;
 
 			for (stage_index = 0; stage_index < stage_count; stage_index++)
 			{
-				const mat_shader_stage_t *stage = &material->stages[stage_index];
+				const material_stage_t *stage = &material->stages[stage_index];
 				gltexture_t *stage_tex;
 				gltexture_t *fb = NULL;
 				gltexture_t *em = NULL;
@@ -1489,7 +1489,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 	GLbyte *ofs;
 	textype_t texbegin, texend;
 
-	if (!count || r_shaders.value <= 0.f || !glprogs.godrays_source)
+	if (!count || r_materials.value <= 0.f || !glprogs.godrays_source)
 		return;
 
 	if (count > countof (bmodel_instances))
@@ -1561,28 +1561,28 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
 		{
 			texture_t *t = R_GetUsedTexture (model, j, NULL);
-			const shader_material_t *material;
+			const material_t *material;
 			unsigned mat_flags = 0u;
 			size_t stage_count;
 
 			if (!t || !R_ValidPtr (t))
 				continue;
 
-			if (!t->shader || !t->shader->stages)
+			if (!t->material || !t->material->stages)
 				continue;
 
-			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
-			if (mat_flags & MAT_SHADERFLAG_NODRAW)
+			mat_flags = (r_materials.value > 0.f) ? t->material_flags : 0u;
+			if (mat_flags & MATERIAL_FLAG_NODRAW)
 				continue;
 
-			material = t->shader;
+			material = t->material;
 			stage_count = material->stages ? VEC_SIZE (material->stages) : 0;
 			if (!stage_count)
 				continue;
 
 			for (size_t stage_index = 0; stage_index < stage_count; stage_index++)
 			{
-				const mat_shader_stage_t *stage = &material->stages[stage_index];
+				const material_stage_t *stage = &material->stages[stage_index];
 				gltexture_t *stage_tex;
 				gltexture_t *fb = NULL;
 				gltexture_t *em = NULL;
@@ -1838,35 +1838,35 @@ else if (pass == BP_SKYCUBEMAP)
 			if (!t || !R_ValidPtr (t))
 				continue;
 
-			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
-			if (mat_flags & MAT_SHADERFLAG_NODRAW)
+			mat_flags = (r_materials.value > 0.f) ? t->material_flags : 0u;
+			if (mat_flags & MATERIAL_FLAG_NODRAW)
 				continue;
 
 			if (pass == BP_GODRAYS)
 			{
-				if (r_shaders.value <= 0.f || !t->shader || !t->shader->stages)
+				if (r_materials.value <= 0.f || !t->material || !t->material->stages)
 					continue;
 				continue;
 			}
 
-			if (r_shaders.value > 0.f && t->shader)
+			if (r_materials.value > 0.f && t->material)
 			{
 				mat_call_flags |= CALLFLAG_MAT_HAS_SHADER;
-				if (t->shader->stages)
-					mat_call_flags |= R_StageOutputCallFlags (&t->shader->stages[0]);
+				if (t->material->stages)
+					mat_call_flags |= R_StageOutputCallFlags (&t->material->stages[0]);
 			}
-			if (mat_flags & MAT_SHADERFLAG_TRANS)
+			if (mat_flags & MATERIAL_FLAG_TRANS)
 				mat_call_flags |= CALLFLAG_MAT_TRANS;
-			if (mat_flags & MAT_SHADERFLAG_SKY)
+			if (mat_flags & MATERIAL_FLAG_SKY)
 				mat_call_flags |= CALLFLAG_MAT_SKY;
 
-			if ((pass == BP_SOLID || pass == BP_ALPHATEST) && r_shaders.value > 0.f && t->shader && t->shader->stages)
+			if ((pass == BP_SOLID || pass == BP_ALPHATEST) && r_materials.value > 0.f && t->material && t->material->stages)
 			{
-				if (!R_StageIsOpaqueBase (t->shader))
+				if (!R_StageIsOpaqueBase (t->material))
 					continue;
 			}
 
-			if (r_shaders.value > 0.f && t->shader && t->shader->polygon_offset)
+			if (r_materials.value > 0.f && t->material && t->material->polygon_offset)
 				zfix = true;
 
 			extra_flags |= mat_call_flags;
@@ -1875,7 +1875,7 @@ else if (pass == BP_SKYCUBEMAP)
 			{
 				float polygon_offset_factor;
 				float polygon_offset_units;
-				const shader_material_t *material = (r_shaders.value > 0.f) ? t->shader : NULL;
+				const material_t *material = (r_materials.value > 0.f) ? t->material : NULL;
 
 				R_GetPolygonOffsetValues (material, zfix, &polygon_offset_factor, &polygon_offset_units);
 				R_AddBModelCall (model->firstcmd + j, baseinst, numinst,
@@ -2050,17 +2050,17 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 
 			if (!t)
 				continue;
-			if (r_shaders.value > 0.f && (t->shader_flags & MAT_SHADERFLAG_NODRAW))
+			if (r_materials.value > 0.f && (t->material_flags & MATERIAL_FLAG_NODRAW))
 				continue;
 
-			mat_flags = (r_shaders.value > 0.f) ? t->shader_flags : 0u;
-			if (r_shaders.value > 0.f && t->shader)
+			mat_flags = (r_materials.value > 0.f) ? t->material_flags : 0u;
+			if (r_materials.value > 0.f && t->material)
 				extra_flags |= CALLFLAG_MAT_HAS_SHADER;
-			if (r_shaders.value > 0.f && t->shader && t->shader->stages)
-				extra_flags |= R_StageOutputCallFlags (&t->shader->stages[0]);
-			if (mat_flags & MAT_SHADERFLAG_TRANS)
+			if (r_materials.value > 0.f && t->material && t->material->stages)
+				extra_flags |= R_StageOutputCallFlags (&t->material->stages[0]);
+			if (mat_flags & MATERIAL_FLAG_TRANS)
 				extra_flags |= CALLFLAG_MAT_TRANS;
-			if (mat_flags & MAT_SHADERFLAG_SKY)
+			if (mat_flags & MATERIAL_FLAG_SKY)
 				extra_flags |= CALLFLAG_MAT_SKY;
 
 			float alpha = GL_WaterAlphaForEntityTextureType (e, t->type);
@@ -2080,7 +2080,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 				float polygon_offset_factor;
 				float polygon_offset_units;
 				qboolean zfix = !isworld;
-				const shader_material_t *material = (r_shaders.value > 0.f) ? t->shader : NULL;
+				const material_t *material = (r_materials.value > 0.f) ? t->material : NULL;
 
 				R_GetPolygonOffsetValues (material, zfix, &polygon_offset_factor, &polygon_offset_units);
 				R_AddBModelCall (model->firstcmd + j, baseinst, numinst,

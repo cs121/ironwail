@@ -1,6 +1,6 @@
 # Particle Shader Contract (MVP)
 
-Diese Spezifikation beschreibt den **MVP-Partikel-Shader-Vertrag** auf Basis von `mat_shader.h/.c`.
+Diese Spezifikation beschreibt den **MVP-Partikel-Shader-Vertrag** auf Basis von `mat_material.h/.c`.
 
 ## 1) Vertragsumfang pro Stage
 
@@ -10,7 +10,7 @@ Eine Stage ist für den Partikelpfad klassifiziert als:
 - `MAT_PARTICLE_STAGE_SKIPPED`
 - `MAT_PARTICLE_STAGE_HARD_FAIL`
 
-Die Bewertung erfolgt mit `Mat_Shader_ClassifyParticleStage(stage, policy, reason, reason_size)`.
+Die Bewertung erfolgt mit `Material_ClassifyParticleStage(stage, policy, reason, reason_size)`.
 
 ### Erlaubte `map`-Typen
 
@@ -71,12 +71,12 @@ Bewusst außerhalb des MVP (deferred):
 
 ## 3) Policy: tolerant vs. strict
 
-`r_particles_shader_strict` steuert das Verhalten für **nicht unterstützte, aber syntaktisch valide** Stage-Features:
+`r_particles_material_strict` steuert das Verhalten für **nicht unterstützte, aber syntaktisch valide** Stage-Features:
 
-- `r_particles_shader_strict 0` (tolerant):
+- `r_particles_material_strict 0` (tolerant):
   - Ergebnis: `MAT_PARTICLE_STAGE_SKIPPED`
   - Fallback: Stage wird verworfen, Renderer nutzt sichere Standard-Partikelpfade.
-- `r_particles_shader_strict 1` (strict):
+- `r_particles_material_strict 1` (strict):
   - Ergebnis: `MAT_PARTICLE_STAGE_HARD_FAIL`
   - Fallback: Shader-/Stage-Kandidat gilt als nicht nutzbar für den Partikelpfad.
 

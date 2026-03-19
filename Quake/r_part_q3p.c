@@ -1,10 +1,10 @@
 #include "quakedef.h"
-#include "mat_shader.h"
+#include "mat_material.h"
 #include "r_part_q3p.h"
 
 extern cvar_t r_particles_max;
 extern cvar_t r_particles_sort;
-extern cvar_t r_particles_shader_strict;
+extern cvar_t r_particles_material_strict;
 extern cvar_t r_particles_cull_dist;
 extern cvar_t r_particles_collision;
 extern cvar_t r_particles_spawn_max;
@@ -49,7 +49,7 @@ typedef struct q3p_material_cache_entry_s {
 	unsigned material_id;
 	char resolved_key[64];
 	unsigned resolved_material_id;
-	const shader_material_t *material;
+	const material_t *material;
 	unsigned flags;
 	unsigned warned_flags;
 	int supported_stage_count;
@@ -675,7 +675,7 @@ static void Q3P_SetStageTexMatrixUniform (const mat_texmatrix_t *matrix)
 	GL_Uniform3fvFunc (1, 3, m);
 }
 
-static void Q3P_EvalStageColorMul (const mat_shader_stage_t *stage, float particle_alpha, vec4_t out)
+static void Q3P_EvalStageColorMul (const material_stage_t *stage, float particle_alpha, vec4_t out)
 {
 	out[0] = 1.f;
 	out[1] = 1.f;
@@ -693,7 +693,7 @@ static void Q3P_EvalStageColorMul (const mat_shader_stage_t *stage, float partic
 		out[2] = stage->const_color[2];
 		break;
 	case MAT_RGBGEN_WAVE:
-		out[0] = out[1] = out[2] = Q3P_Clamp01 (Mat_Shader_EvalWaveValue (&stage->rgb_wave, cl.time));
+		out[0] = out[1] = out[2] = Q3P_Clamp01 (Material_EvalWaveValue (&stage->rgb_wave, cl.time));
 		break;
 	case MAT_RGBGEN_VERTEX:
 	case MAT_RGBGEN_IDENTITY:
@@ -707,7 +707,7 @@ static void Q3P_EvalStageColorMul (const mat_shader_stage_t *stage, float partic
 		out[3] *= Q3P_Clamp01 (stage->const_alpha);
 		break;
 	case MAT_ALPHAGEN_WAVE:
-		out[3] *= Q3P_Clamp01 (Mat_Shader_EvalWaveValue (&stage->alpha_wave, cl.time));
+		out[3] *= Q3P_Clamp01 (Material_EvalWaveValue (&stage->alpha_wave, cl.time));
 		break;
 	case MAT_ALPHAGEN_VERTEX:
 	case MAT_ALPHAGEN_IDENTITY:
@@ -716,7 +716,7 @@ static void Q3P_EvalStageColorMul (const mat_shader_stage_t *stage, float partic
 	}
 }
 
-static gltexture_t *Q3P_ResolveStageTexture (const mat_shader_stage_t *stage)
+static gltexture_t *Q3P_ResolveStageTexture (const material_stage_t *stage)
 {
 	const char *path = NULL;
 
@@ -735,7 +735,7 @@ static gltexture_t *Q3P_ResolveStageTexture (const mat_shader_stage_t *stage)
 		break;
 	}
 
-	path = MatStage_GetAnimMapPath ((mat_shader_stage_t *)stage, cl.time);
+	path = MaterialStage_GetAnimMapPath ((material_stage_t *)stage, cl.time);
 	if (!path || !path[0])
 		path = stage->map_path;
 	if (!path || !path[0])
@@ -775,7 +775,7 @@ static void Q3P_NormalizeMaterialRef (const char *name, char *out, size_t out_si
 		return;
 	}
 
-	Mat_Shader_Canonicalize (name, canonical, sizeof (canonical));
+	Material_Canonicalize (name, canonical, sizeof (canonical));
 	if (!canonical[0])
 	{
 		q_strlcpy (out, Q3P_MATERIAL_DEFAULT_REF, out_size);
@@ -794,7 +794,7 @@ static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *
 	unsigned i;
 	char normalized[64];
 	char fallback_reason[128];
-	const shader_material_t *material;
+	const material_t *material;
 	qboolean stage0_ok;
 
 	Q3P_NormalizeMaterialRef (name, normalized, sizeof (normalized));
@@ -824,13 +824,13 @@ static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *
 		q_strlcpy (entry->resolved_key, entry->key, sizeof (entry->resolved_key));
 		entry->resolved_material_id = entry->material_id;
 
-		material = Mat_Shader_Find (entry->key);
+		material = Material_Find (entry->key);
 		if (!material)
 		{
 			const char *texname = entry->key;
 			if (!q_strncasecmp (texname, Q3P_PARTICLE_SHADER_PREFIX, strlen (Q3P_PARTICLE_SHADER_PREFIX)))
 				texname += strlen (Q3P_PARTICLE_SHADER_PREFIX);
-			material = Mat_Shader_FindForTextureName (texname, NULL);
+			material = Material_FindForTextureName (texname, NULL);
 		}
 
 		stage0_ok = false;
@@ -839,21 +839,21 @@ static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *
 		{
 			int stage_count = (int)VEC_SIZE (material->stages);
 			int si;
-			mat_particle_policy_t policy = r_particles_shader_strict.value > 0.f
+			mat_particle_policy_t policy = r_particles_material_strict.value > 0.f
 				? MAT_PARTICLE_POLICY_STRICT
 				: MAT_PARTICLE_POLICY_TOLERANT;
 
 			entry->flags |= Q3P_MATFLAG_RESOLVED;
-			stage0_ok = Mat_Shader_StageSupportsParticleMVP (&material->stage0, fallback_reason, sizeof (fallback_reason));
+			stage0_ok = Material_StageSupportsParticleMVP (&material->stage0, fallback_reason, sizeof (fallback_reason));
 			if (stage0_ok)
 				entry->flags |= Q3P_MATFLAG_STAGE0_VALID;
 
 			for (si = 0; si < stage_count; ++si)
 			{
-				const mat_shader_stage_t *stage = &material->stages[si];
-				if (Mat_Shader_ClassifyParticleStage (stage, policy, fallback_reason, sizeof (fallback_reason)) == MAT_PARTICLE_STAGE_SUPPORTED)
+				const material_stage_t *stage = &material->stages[si];
+				if (Material_ClassifyParticleStage (stage, policy, fallback_reason, sizeof (fallback_reason)) == MAT_PARTICLE_STAGE_SUPPORTED)
 					entry->supported_stage_count = si + 1;
-				else if (r_particles_shader_strict.value > 0.f)
+				else if (r_particles_material_strict.value > 0.f)
 					break;
 			}
 
@@ -861,7 +861,7 @@ static const q3p_material_cache_entry_t *Q3P_ResolveMaterialCached (const char *
 				entry->supported_stage_count = 1;
 		}
 
-		if (!material || (!stage0_ok && r_particles_shader_strict.value > 0.f))
+		if (!material || (!stage0_ok && r_particles_material_strict.value > 0.f))
 		{
 			if (material && !stage0_ok && !(entry->warned_flags & Q3P_MATWARN_STRICT_SKIP))
 			{
@@ -1719,7 +1719,7 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 	{
 		unsigned current_material = 0;
 		const q3p_material_cache_entry_t *current_entry = NULL;
-		const mat_shader_stage_t *current_stage = NULL;
+		const material_stage_t *current_stage = NULL;
 		vec4_t stage_mul;
 
 		q3p_numpartverts = 0;
@@ -1746,7 +1746,7 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 					Q3P_FlushParticleBatch ();
 
 				GL_Bind (GL_TEXTURE0, current_stage ? Q3P_ResolveStageTexture (current_stage) : notexture);
-				Q3P_SetStageTexMatrixUniform (current_stage ? MatStage_EvalTexMatrix ((mat_shader_stage_t *)current_stage, cl.time) : NULL);
+				Q3P_SetStageTexMatrixUniform (current_stage ? MaterialStage_EvalTexMatrix ((material_stage_t *)current_stage, cl.time) : NULL);
 				Q3P_EvalStageColorMul (current_stage, 1.f, stage_mul);
 				GL_Uniform4fFunc (2, stage_mul[0], stage_mul[1], stage_mul[2], stage_mul[3]);
 			}

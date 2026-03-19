@@ -6,8 +6,8 @@ This directory tracks engine-facing implementation notes and feature references.
 - `EMISSIVE_MAPS.md` - emissive/glow map naming and behavior.
 - `async_threading.md` - async worker model and controlling CVars.
 - `bspx_lumps.md` - BSPX lump handling status.
-- `decal_shader_manual.md` - Decal workflow, shader syntax, keywords, manifest model, and debug usage.
-- `how2use-q3-shaders.md` - current material shader workflow/API (legacy filename).
+- `decal_material_manual.md` - Decal workflow, material syntax, keywords, manifest model, and debug usage.
+- `how2use-materials.md` - current material workflow/API.
 - `model_lighting_guidelines.md` - mapper/modder best practices and legacy-safe model-lighting cvar profiles.
 - `shadow_mapping.md` - shadow mapping runtime behavior and tuning CVars.
 - `ssao.md` - SSAO conventions, debug modes, and controls.
@@ -15,7 +15,7 @@ This directory tracks engine-facing implementation notes and feature references.
 ## Design/debug notes
 - `fogvol_debug_notes.md`
 - `particle_debug_mvp.md`
-- `particle_shader_contract.md`
+- `particle_material_contract.md`
 - `q3p_phase0_particle_mapping.md`
 
 The design/debug notes are intentionally implementation-oriented snapshots. They

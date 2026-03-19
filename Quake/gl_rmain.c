@@ -35,7 +35,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_shadow.h"
 #include "gl_shadow_runtime.h"
 #include "gl_lightgrid.h"
-#include "mat_shader.h"
+#include "mat_material.h"
 #include <float.h>
 #include <math.h>
 
@@ -3575,7 +3575,7 @@ void R_SetupView (void)
         r_framedata.colorspace_params[1] = 0.f;
         r_framedata.colorspace_params[2] = 0.f;
         r_framedata.colorspace_params[3] = 0.f;
-        r_framedata.shader_params[0] = r_shader_debug.value;
+        r_framedata.shader_params[0] = r_material_debug.value;
         r_framedata.shader_params[1] = r_tcgen_debug.value;
         r_framedata.shader_params[2] = CLAMP (0.f, r_sun_visibility.value, 1.f);
         r_framedata.shader_params[3] = 0.f;
@@ -5249,7 +5249,6 @@ void R_RenderView (void)
 			rs_dynamiclightmaps);
 	//johnfitz
 }
-
 
 
 
