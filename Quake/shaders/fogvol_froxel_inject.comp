@@ -63,7 +63,10 @@ void main()
 		if (dist2 >= radius2)
 			continue;
 		float normDist2 = dist2 / max(radius2, 1e-6);
-		float window = smoothstep(1.0, 0.0, normDist2);
+		/* NOTE: smoothstep(edge0, edge1, x) is undefined for edge0 >= edge1.
+		 * The previous smoothstep(1.0, 0.0, normDist2) caused driver-dependent
+		 * attenuation artifacts. Use an explicit reversed smoothstep profile. */
+		float window = 1.0 - smoothstep(0.0, 1.0, normDist2);
 		float invSq = 1.0 / (1.0 + normDist2 * 6.0);
 		float atten = window * invSq;
 		if (atten <= 1e-5)

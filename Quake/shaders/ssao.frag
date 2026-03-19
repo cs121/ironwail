@@ -530,28 +530,8 @@ void main()
 	// using u_fogParams.y (saved scene density) so they reflect the real fog state.
 	float fogFactor = FogFactorFromViewPos(viewPos);
 
-	// Volumetric fog SSAO damping:
-	// The fog volume composite texture contains the rendered volumetric fog for this pixel.
-	// Where fog is dense (bright fogvol output), SSAO should be suppressed because:
-	//   1. The fog visually hides the AO darkening — darkening fog-filled regions is wrong.
-	//   2. SSAO samples behind the fog boundary produce incorrect occlusion.
-	// We use the fogvol RGB luminance as a proxy for (1 - transmittance):
-	//   fogLum ≈ 0 → no fog → full AO  
-	//   fogLum ≈ 1 → dense fog → AO suppressed
-	// This is an approximation but avoids needing a separate transmittance buffer.
-	if (u_fogvolParams.y > 0.5)
-	{
-		// Sample fogvol at screen UV. fogvol renders at halfres then upsamples to full,
-		// so the composite tex is full-res at this point.
-		vec2 screenUv = ApplyYFlip((gl_FragCoord.xy + 0.5) * u_screenParams.xy);
-		vec3 fogColor = texture(FogVolTexture, screenUv).rgb;
-		// Luminance of the fog contribution — high where fog is dense.
-		float fogLum  = dot(fogColor, vec3(0.299, 0.587, 0.114));
-		// Clamp to [0,1] and treat as fog density proxy.
-		float fogDamp = clamp(fogLum * u_fogvolParams.x * 4.0, 0.0, 1.0);
-		// Blend AO toward 1.0 (no occlusion) proportionally to fog density.
-		ao = mix(ao, 1.0, fogDamp);
-	}
+	/* Volumetric fog damping is applied in postprocess.frag only. Keep SSAO pass
+	 * output as raw AO to avoid double damping. */
 
 	if (debugMode == 3)
 	{

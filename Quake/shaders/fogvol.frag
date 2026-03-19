@@ -278,17 +278,25 @@ float AnisotropicPhase(float cosTheta, float g)
 bool ComputeFroxelUv(vec3 p, out vec3 uvw, out float outside)
 {
 	vec3 viewPos = (View * vec4(p, 1.0)).xyz;
-	float z = max(-viewPos.z, FogFroxelParams0.x);
+	float nearClip = max(FogFroxelParams0.x, 1e-4);
+	float viewDepth = -viewPos.z;
+	float z = max(viewDepth, nearClip);
 	float halfW = max(1e-4, z * FogFroxelParams0.z);
 	float halfH = max(1e-4, z * FogFroxelParams0.w);
 	float u = viewPos.x / (2.0 * halfW) + 0.5;
 	float v = viewPos.y / (2.0 * halfH) + 0.5;
-	float w = log(max(z, FogFroxelParams0.x) / max(FogFroxelParams0.x, 1e-4)) / max(FogFroxelParams1.x, 1e-4);
+	float w = log(max(z, nearClip) / nearClip) / max(FogFroxelParams1.x, 1e-4);
 	uvw = vec3(u, v, w);
 	vec3 below = max(-uvw, vec3(0.0));
 	vec3 above = max(uvw - vec3(1.0), vec3(0.0));
 	vec3 extent = max(below, above);
-	outside = max(extent.x, max(extent.y, extent.z));
+	/* Points in front of the froxel near plane are out-of-domain; clamping them
+	 * to slice 0 creates a camera-centered rectangular artifact. Treat near-plane
+	 * violation as additional outside distance so edgeFade can suppress it. */
+	{
+		float nearOutside = max((nearClip - viewDepth) / nearClip, 0.0);
+		outside = max(max(extent.x, max(extent.y, extent.z)), nearOutside);
+	}
 	return (outside <= 0.75);
 }
 

@@ -290,7 +290,9 @@ static qboolean FogVol_BuildGlobalVolume (fog_volume_t *out)
 	v.maxDistance = 16384.f;
 	v.priority = (int)Q_rint (r_fogvol_global_priority.value);
 	v.blendMode = -1;
-	v.shape = FOGVOL_SHAPE_BOX;
+	/* Use a sphere for camera-following global fog to avoid visible box-shaped
+	 * boundaries/artifacts around the player when the fallback volume moves. */
+	v.shape = FOGVOL_SHAPE_SPHERE;
 	v.enabled = 1;
 
 	radius = q_max (1024.f, q_max (gl_farclip.value, 2048.f));
@@ -298,7 +300,9 @@ static qboolean FogVol_BuildGlobalVolume (fog_volume_t *out)
 	{
 		v.mins[a] = r_refdef.vieworg[a] - radius;
 		v.maxs[a] = r_refdef.vieworg[a] + radius;
+		v.sphereCenter[a] = r_refdef.vieworg[a];
 	}
+	v.sphereRadius = radius;
 
 	FogVol_ClampVolume (&v);
 	*out = v;

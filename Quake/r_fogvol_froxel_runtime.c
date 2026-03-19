@@ -458,8 +458,11 @@ void R_Froxel_InjectDlights (void)
 	}
 	if (r_fogvol_light.value <= 0.f)
 		return;
-	intensity_scale = q_max (0.f, r_fogvol_dlightscale.value);
-	if (intensity_scale <= 0.f)
+	/* r_fogvol_dlightscale is applied in fogvol.frag via FogLightSourceScales.x.
+	 * Do not bake it into froxel injection as well, otherwise dlights are scaled
+	 * twice (effectively squared). */
+	intensity_scale = 1.f;
+	if (q_max (0.f, r_fogvol_dlightscale.value) <= 0.f)
 		return;
 
 	active = DLightPool_GetActiveList (&active_count);

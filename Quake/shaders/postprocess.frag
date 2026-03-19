@@ -574,7 +574,13 @@ void main()
                                         float underwaterTransmittance = 1.0;
                                         if (fogStrength > 0.0)
                                                 underwaterTransmittance = FogTransmittanceFromDepth(ssaoCenterDepth, fogStrength);
-                                        float globalTransmittance = FogTransmittanceFromGlobalFog(ssaoCenterDepth);
+					/* When volumetric fog is active, use the fogvol transmittance
+					 * buffer as the authoritative medium signal. Mixing the
+					 * legacy global-fog transmittance here over-suppresses SSAO
+					 * because fogvol density uses different units. */
+					float globalTransmittance = (FogVolParams.x < 0.5)
+						? FogTransmittanceFromGlobalFog(ssaoCenterDepth)
+						: 1.0;
                                         // Volumetric fog transmittance: sample the fogvol composite buffer
                                         // directly. This correctly handles spatial noise variation and
                                         // color variation that FogTransmittanceFromGlobalFog cannot model.
