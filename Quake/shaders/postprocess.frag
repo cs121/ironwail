@@ -407,10 +407,8 @@ void main()
         if (GodraysParams.z > 0.5)
         {
                 vec4 source = texture(GodraysSourceTexture, uv);
-                if (GodraysParams.z < 1.5)
-                        out_fragcolor = vec4(source.rgb, 1.0);
-                else
-                        out_fragcolor = vec4(vec3(source.a), 1.0);
+                vec3 debugColor = (GodraysParams.z < 1.5) ? source.rgb : vec3(source.a);
+                out_fragcolor = ApplySoftEmulationPostFX(debugColor, gl_FragCoord.xy, scale, dither);
                 return;
         }
         if (GodraysParams.y > 0.5)
@@ -419,7 +417,7 @@ void main()
                 vec3 shaftsColor = vec3(0.0);
                 if (GodraysParams.x > 0.5)
                         shaftsColor = texture(GodraysTexture, uv).rgb;
-                out_fragcolor = vec4(max(maskColor, shaftsColor), 1.0);
+                out_fragcolor = ApplySoftEmulationPostFX(max(maskColor, shaftsColor), gl_FragCoord.xy, scale, dither);
                 return;
         }
 
