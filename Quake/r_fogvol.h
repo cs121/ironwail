@@ -67,6 +67,8 @@ extern cvar_t r_fogvol_debug;
 extern cvar_t r_fogvol_debug_froxel_random;
 extern cvar_t r_fogvol_density_scale;
 extern cvar_t r_fogvol_global;
+extern cvar_t r_fogvol_entities;
+extern cvar_t r_fogvol_godray_coupling;
 extern cvar_t r_fogvol_global_color;
 extern cvar_t r_fogvol_global_density_scale;
 extern cvar_t r_fogvol_global_falloff;

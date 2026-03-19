@@ -71,6 +71,7 @@ cvar_t r_fogvol_shadow_strength = { "r_fogvol_shadow_strength", "0.8", CVAR_ARCH
 cvar_t r_fogvol_density_scale = { "r_fogvol_density_scale", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_global = { "r_fogvol_global", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_entities = { "r_fogvol_entities", "0", CVAR_ARCHIVE };
+cvar_t r_fogvol_godray_coupling = { "r_fogvol_godray_coupling", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_color = { "r_fogvol_global_color", "0.3 0.3 0.3", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_density_scale = { "r_fogvol_global_density_scale", "0.06", CVAR_ARCHIVE };
 cvar_t r_fogvol_global_falloff = { "r_fogvol_global_falloff", "64", CVAR_ARCHIVE };
@@ -122,6 +123,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_density_scale},
 	{&r_fogvol_global},
 	{&r_fogvol_entities},
+	{&r_fogvol_godray_coupling},
 	{&r_fogvol_global_color},
 	{&r_fogvol_global_density_scale},
 	{&r_fogvol_global_falloff},
@@ -585,7 +587,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float debug_dlight_scale = 1.f;
 	float debug_sun_scale = 0.f;
 	float debug_emissive_scale = 0.f;
-	qboolean godray_coupling_ready = (r_fogvol_godray_ready && r_fogvol_godray_shafts_tex != 0);
+	qboolean godray_coupling_ready = (r_fogvol_godray_coupling.value > 0.f && r_fogvol_godray_ready && r_fogvol_godray_shafts_tex != 0);
 	qboolean sun_shadow_map_enabled = R_Shadow_GetSunCascadeData (sun_shadow_viewproj, sun_shadow_splits, &sun_shadow_cascades, &sun_shadow_bias, &sun_shadow_pcf);
 
 	if (R_Froxel_GetDebugScales (&debug_dlight_scale, &debug_sun_scale, &debug_emissive_scale))
