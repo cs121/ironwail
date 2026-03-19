@@ -534,6 +534,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float froxel_params1[4] = {0.f, 1.f, 1.f, 1.f};
 	int froxel_debug_random_mode = CLAMP (0, (int)Q_rint (r_fogvol_debug_froxel_random.value), 4);
 	int froxel_debug_mode = 0;
+	qboolean force_froxel_debug = false;
 	qboolean froxel_ready = R_Froxel_GetShaderState (&froxel_tex, &froxel_light_count, froxel_params0, froxel_params1);
 	qboolean shadow_enabled = (mode == 2 && r_fogvol_shadow.value > 0.f);
 	const sun_t *sun = R_GetSun ();
@@ -585,10 +586,13 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 
 	if (r_fogvol_light.value <= 0.f)
 	{
-		light_scale_dlight = 0.f;
-		light_scale_sun = 0.f;
-		light_scale_emissive = 0.f;
-		emissive_floor = 0.f;
+		if (froxel_debug_random_mode <= 0)
+		{
+			light_scale_dlight = 0.f;
+			light_scale_sun = 0.f;
+			light_scale_emissive = 0.f;
+			emissive_floor = 0.f;
+		}
 	}
 
 	if (sun && R_WorldHasSun ())
@@ -598,10 +602,27 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 			VectorSet (shadow_dir, 0.f, 0.f, -1.f);
 	}
 
-	if (froxel_debug_random_mode >= 2)
-		froxel_debug_mode = froxel_debug_random_mode - 1;
+	if (froxel_debug_random_mode > 0)
+	{
+		force_froxel_debug = true;
+		if (froxel_debug_random_mode >= 2)
+			froxel_debug_mode = froxel_debug_random_mode - 1;
+		else
+			froxel_debug_mode = 1;
+	}
 	else if (r_fogvol_debug.value >= 9.f)
+	{
 		froxel_debug_mode = 1;
+		force_froxel_debug = true;
+	}
+
+	if (force_froxel_debug)
+	{
+		/* Make injected random froxel colors clearly visible in final fog shading. */
+		light_ambient = 0.f;
+		light_scale_dlight = q_max (light_scale_dlight, 3.0f);
+		light_contrast = q_max (light_contrast, 1.0f);
+	}
 
 	GL_Uniform1iFunc (FOGVOL_U_STEPS, q_max (8, steps));
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
@@ -637,8 +658,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	/* Safety fallback: disable Godray->Fog coupling to avoid translucent band artifacts. */
 	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, 0);
 	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, 0);
-	/* Safety fallback: disable froxel injection path until artifact source is isolated. */
-	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, 0);
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (mode > 0 && (froxel_ready || force_froxel_debug)) ? 1 : 0);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, froxel_params0[0], froxel_params0[1], froxel_params0[2], froxel_params0[3]);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, froxel_params1[0], froxel_params1[1], froxel_params1[2], froxel_params1[3]);
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, froxel_debug_mode);
