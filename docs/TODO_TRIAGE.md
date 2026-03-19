@@ -33,7 +33,7 @@ Total findings: **83**
 | `Quake/host.c` | 1631 | FIXME | this is a callback from Sys_Quit and Sys_Error.  It would be better |
 | `Quake/image.c` | 171 | TODO | support BGRA and BGR formats (since opengl can return them, and we don't have to swap) |
 | `Quake/keys.c` | 665 | FIXME | handle quote special (general escape sequence?) |
-| `Quake/mat_shader.c` | 1376 | TODO | blend path)\n", tex->name); |
+| `Quake/mat_material.c` | 1376 | TODO | blend path)\n", tex->name); |
 | `Quake/mathlib.c` | 227 | TODO | take right and up vectors to properly set yaw and roll |
 | `Quake/menu.c` | 307 | TODO | smooth scrolling |
 | `Quake/menu.c` | 1219 | TODO | (maybe): inform the user about the missing option |

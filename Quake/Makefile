@@ -272,9 +272,8 @@ OBJS = strlcat.o \
 	cmd.o \
 	common.o \
 	../common/lightgrid.o \
-	q3shader.o \
-	mat_shader.o \
-	mat_shader_parse.o \
+	mat_material.o \
+	mat_material_parse.o \
         steam.o \
 	json.o \
 	miniz.o \
