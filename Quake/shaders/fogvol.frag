@@ -384,6 +384,8 @@ float InterleavedGradientNoise(vec2 p)
 void main()
 {
 	ivec2 screenPixel = ivec2(floor(gl_FragCoord.xy * FogDepthScale));
+	ivec2 depthSize = textureSize(SceneDepth, 0);
+	screenPixel = clamp(screenPixel, ivec2(0), max(depthSize - ivec2(1), ivec2(0)));
 	vec2 screenPos = vec2(screenPixel) + vec2(0.5);
 	vec2 screenUv = screenPos * FogViewportParams.zw;
 	vec2 viewUv = (screenPos - FogViewParams.xy) * FogViewParams.zw;

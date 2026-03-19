@@ -634,9 +634,11 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SCISSOR, 0.f, 0.f, 0.f, 0.f);
 	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES, light_scale_dlight, light_scale_sun, light_scale_emissive, light_contrast);
 	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, lighting_mode);
-	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, (r_fogvol_godray_ready && mode > 0) ? 1 : 0);
+	/* Safety fallback: disable Godray->Fog coupling to avoid translucent band artifacts. */
+	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, 0);
 	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, 0);
-	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (mode > 0 && froxel_ready) ? 1 : 0);
+	/* Safety fallback: disable froxel injection path until artifact source is isolated. */
+	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, 0);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, froxel_params0[0], froxel_params0[1], froxel_params0[2], froxel_params0[3]);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS1, froxel_params1[0], froxel_params1[1], froxel_params1[2], froxel_params1[3]);
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_DEBUG, froxel_debug_mode);
@@ -821,6 +823,14 @@ void R_FogVol_Render (void)
 	}
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glViewport (glx, gly, glwidth, glheight);
+	/* Keep subsequent passes deterministic: fogvol uses custom FBO/read targets
+	 * and fullscreen state, so restore a sane default baseline afterwards. */
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.composite.fbo);
+	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
+	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+	GL_SetState (GLS_DEFAULT_STATE);
+	GL_SetScissorEnabled (false);
+	GL_UseProgram (0);
 
 	r_fogvol_composite_valid = true;
 	r_fogvol_composite_tex = final_tex;
