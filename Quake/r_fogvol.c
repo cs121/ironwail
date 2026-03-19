@@ -203,6 +203,12 @@ static GLuint r_fogvol_godray_mask_tex = 0;
 static GLuint r_fogvol_godray_source_tex = 0;
 static qboolean r_fogvol_godray_ready = false;
 
+static float FogVol_GlobalDensityExtinction (void)
+{
+	/* Keep global fog density in world-unit extinction space. */
+	return q_max (0.f, r_fogvol_global_density_scale.value) * (1.f / 64.f);
+}
+
 static int FogVol_NormalizeShape (int shape)
 {
 	return (shape == FOGVOL_SHAPE_SPHERE) ? FOGVOL_SHAPE_SPHERE : FOGVOL_SHAPE_BOX;
@@ -274,7 +280,10 @@ static qboolean FogVol_BuildGlobalVolume (fog_volume_t *out)
 	if (!out || r_fogvol_global.value <= 0.f)
 		return false;
 
-	density = q_max (0.f, r_fogvol_global_density_scale.value);
+	/* Convert legacy "art scale" density to world-unit extinction.
+	 * Without this, default global density quickly drives transmittance
+	 * to ~0 over common Quake sight distances (scene appears almost black). */
+	density = FogVol_GlobalDensityExtinction ();
 	if (density <= 0.f)
 		return false;
 
@@ -400,7 +409,7 @@ qboolean R_FogVol_HasRenderableContent (void)
 		return true;
 	if (r_fogvol_global.value > 0.f)
 	{
-		float density = q_max (0.f, r_fogvol_global_density_scale.value);
+		float density = FogVol_GlobalDensityExtinction ();
 		if (density > 0.f)
 			return true;
 	}
@@ -423,14 +432,14 @@ qboolean R_FogVol_CanRenderGlobal (void)
 		return true;
 	if (r_fogvol_global.value <= 0.f)
 		return false;
-	return q_max (0.f, r_fogvol_global_density_scale.value) > 0.f;
+	return FogVol_GlobalDensityExtinction () > 0.f;
 }
 
 qboolean R_FogVol_GetGlobalFogState (vec3_t color, float *density)
 {
 	if (!r_fogvol_global_active)
 	{
-		float fallback_density = q_max (0.f, r_fogvol_global_density_scale.value);
+		float fallback_density = FogVol_GlobalDensityExtinction ();
 		if (r_fogvol_global.value <= 0.f || fallback_density <= 0.f)
 			return false;
 		if (color)
