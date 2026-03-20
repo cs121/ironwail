@@ -1988,6 +1988,17 @@ int Material_ParseFile (const char *path, const char *data, const char *source_f
 	{
 		if (!com_token[0])
 			continue;
+		if (!q_strcasecmp (com_token, "decal") || !q_strcasecmp (com_token, "decaldef"))
+		{
+			const char *ignored_name = NULL;
+
+			if (!ParseIdent (&cursor, &ignored_name, &file_state))
+				continue;
+			if (!ExpectToken (&cursor, "{", &file_state))
+				continue;
+			cursor = SkipUnknownBlockOrLine (cursor, true, &file_state);
+			continue;
+		}
 		if (!strcmp (com_token, "{"))
 		{
 			cursor = SkipUnknownBlockOrLine (cursor, true, &file_state);

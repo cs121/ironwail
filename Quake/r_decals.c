@@ -232,6 +232,19 @@ static decalblend_t R_DecalParseBlend (const char *s)
 	return DECAL_BLEND_ALPHA;
 }
 
+static const char *R_DecalSkipUTF8BOM (const char *data)
+{
+	if (!data)
+		return data;
+
+	if ((unsigned char)data[0] == 0xEF
+		&& (unsigned char)data[1] == 0xBB
+		&& (unsigned char)data[2] == 0xBF)
+		return data + 3;
+
+	return data;
+}
+
 static qboolean R_DecalLoadTexture (decaldef_t *def)
 {
 	int w, h;
@@ -290,13 +303,13 @@ static void R_Decals_LoadScript (const char *path)
 	if (!data)
 		return;
 
-	c = data;
+	c = R_DecalSkipUTF8BOM (data);
 	while ((c = COM_Parse (c)))
 	{
 		if (!com_token[0])
 			break;
 
-		if (!q_strcasecmp (com_token, "decal"))
+		if (!q_strcasecmp (com_token, "decal") || !q_strcasecmp (com_token, "decaldef"))
 		{
 			if (!(c = COM_Parse (c)) || !com_token[0] || num_decal_defs >= MAX_DECAL_DEFS)
 				break;
@@ -412,6 +425,60 @@ static decaldef_t *R_FindDecalDefByCategory (const char *category)
 	if (match_count == 0)
 		return NULL;
 	return matches[rand () % match_count];
+}
+
+static decaldef_t *R_FindAnyValidDecalDef (void)
+{
+	int i;
+
+	for (i = 0; i < num_decal_defs; ++i)
+	{
+		if (!decal_defs[i].valid)
+			continue;
+		return &decal_defs[i];
+	}
+
+	return NULL;
+}
+
+static decaldef_t *R_FindDecalDefWithFallback (const char *category, qboolean *used_fallback)
+{
+	decaldef_t *def;
+
+	if (used_fallback)
+		*used_fallback = false;
+
+	if (!category || !category[0])
+		return NULL;
+
+	def = R_FindDecalDefByCategory (category);
+	if (def)
+		return def;
+
+	if (!q_strcasecmp (category, "bullet"))
+	{
+		def = R_FindDecalDefByCategory ("scorch");
+		if (!def)
+			def = R_FindDecalDefByCategory ("dirt");
+	}
+	else if (!q_strcasecmp (category, "scorch") || !q_strcasecmp (category, "dirt"))
+	{
+		def = R_FindDecalDefByCategory ("bullet");
+	}
+	else if (!q_strcasecmp (category, "blood_impact")
+		|| !q_strcasecmp (category, "blood_streak")
+		|| !q_strcasecmp (category, "blood_pool"))
+	{
+		def = R_FindDecalDefByCategory ("blood");
+	}
+
+	if (!def)
+		def = R_FindAnyValidDecalDef ();
+
+	if (def && used_fallback)
+		*used_fallback = true;
+
+	return def;
 }
 
 static qboolean R_DecalHasCategory (const char *category)
@@ -877,6 +944,7 @@ static void R_SpawnImpactDecalSingle (const char *category, const vec3_t origin,
 	int surfaces_skip_dist = 0;
 	int surfaces_capacity_break = 0;
 	int projected_surfaces = 0;
+	qboolean used_category_fallback = false;
 
 	def = NULL;
 	leaf = NULL;
@@ -913,7 +981,7 @@ static void R_SpawnImpactDecalSingle (const char *category, const vec3_t origin,
 		goto done;
 	}
 
-	def = R_FindDecalDefByCategory (lookup_category);
+	def = R_FindDecalDefWithFallback (lookup_category, &used_category_fallback);
 	if (!def)
 	{
 		fail_reason = "decaldef_missing";
@@ -1034,7 +1102,7 @@ static void R_SpawnImpactDecalSingle (const char *category, const vec3_t origin,
 	decal_vert_cursor = first_vert + temp_count;
 	decal_inst_count++;
 	spawned = true;
-	fail_reason = "ok";
+	fail_reason = used_category_fallback ? "ok_fallback" : "ok";
 
 done:
 	R_DecalDebugLogSpawn (spawned, fail_reason, debug_category, def, origin, normal, radius, alpha,

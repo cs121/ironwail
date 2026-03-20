@@ -7,6 +7,7 @@
 #include <string.h>
 
 extern cvar_t gl_farclip;
+extern cvar_t r_dlight_entities;
 
 typedef struct froxel_gpu_light_s
 {
@@ -434,13 +435,7 @@ void R_Froxel_InjectDlights (void)
 	if (!r_froxel.valid)
 		return;
 
-	/* BUG FIX: Wenn r_fogvol_debug_froxel_random > 0 wurden hier NUR
-	 * synthetische Debug-Lichter injiziert und danach mit return beendet.
-	 * Debug-Lichter liegen zufällig im Raum — oft außerhalb des Fog-Volumes
-	 * → froxelLights > 0 in Stats, aber kein sichtbarer Fog-Effekt.
-	 * Fix: Debug-Lichter injizieren UND danach normal weiterlaufen lassen
-	 * damit echte Dlights immer ankommen. Für reinen Debug-Only-Modus
-	 * r_fogvol_light 0 setzen. */
+	/* Debug lights are additive and do not replace real dlights. */
 	if (R_Froxel_DebugEnabled ())
 	{
 		R_Froxel_DebugRefreshState ();
@@ -454,7 +449,7 @@ void R_Froxel_InjectDlights (void)
 			VectorSet (color, light->color_intensity[0], light->color_intensity[1], light->color_intensity[2]);
 			R_Froxel_AddLight (light->pos_rad, light->pos_rad[3] * radius_scale, color, intensity, light->type);
 		}
-		/* Kein früher return — echte Dlights werden unten zusätzlich injiziert. */
+		/* No early return here: real dlights are injected below as well. */
 	}
 	if (r_fogvol_light.value <= 0.f)
 		return;
@@ -472,13 +467,25 @@ void R_Froxel_InjectDlights (void)
 	for (int i = 0; i < active_count && r_froxel.light_count < MAX_FROXEL_GPU_LIGHTS; ++i)
 	{
 		const dlight_t *dl = active[i];
-		if (!dl || !dl->active)
+		float eval_radius = 0.f;
+		vec3_t eval_color;
+
+		if (!dl)
 			continue;
-		if (dl->die > 0.f && dl->die < cl.time)
+		if (!CL_DlightIsActive (dl))
 			continue;
-		if (dl->radius <= 1.f)
+		if (dl->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
 			continue;
-		R_Froxel_AddLight (dl->origin, dl->radius, dl->color, intensity_scale, (uint32_t)dl->type);
+		if (!CL_DlightTransientIsLiveAtTime (dl, cl.time, NULL))
+			continue;
+
+		R_EvaluateDLightForRender (dl, &eval_radius, eval_color);
+		if (eval_radius <= 1.f)
+			continue;
+		if (eval_color[0] <= 0.f && eval_color[1] <= 0.f && eval_color[2] <= 0.f)
+			continue;
+
+		R_Froxel_AddLight (dl->origin, eval_radius, eval_color, intensity_scale, (uint32_t)dl->type);
 	}
 }
 
@@ -488,6 +495,8 @@ void R_Froxel_EndFrame (void)
 	vec3_t view_delta;
 	int groups_x, groups_y, groups_z;
 	GLuint tmp_tex;
+	int upload_count;
+	GLsizeiptr upload_bytes;
 	float temporal_alpha = 0.f;
 	float temporal_reject_threshold = 1.f;
 	float temporal_camera_delta = 0.f;
@@ -500,6 +509,11 @@ void R_Froxel_EndFrame (void)
 		return;
 
 	R_Froxel_InjectSun ();
+	if (r_froxel.light_count <= 0 && !r_froxel.prev_valid)
+	{
+		VectorCopy (r_refdef.vieworg, r_froxel.prev_vieworg);
+		return;
+	}
 
 	groups_x = (r_froxel.dims[0] + 3) / 4;
 	groups_y = (r_froxel.dims[1] + 3) / 4;
@@ -519,12 +533,12 @@ void R_Froxel_EndFrame (void)
 		temporal_prev_valid = r_froxel.prev_valid ? 1.f : 0.f;
 	}
 
+	upload_count = q_max (r_froxel.light_count, 1);
+	upload_bytes = (GLsizeiptr)(sizeof (froxel_gpu_light_t) * upload_count);
 	GL_UseProgram (glprogs.fogvol_froxel_inject);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, r_froxel.light_ssbo, 0, sizeof (froxel_gpu_light_t) * MAX_FROXEL_GPU_LIGHTS);
-	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (froxel_gpu_light_t) * MAX_FROXEL_GPU_LIGHTS, r_froxel_gpu_lights, GL_STREAM_DRAW);
-	/* BUG FIX (Bug 1 C-Seite): Image-Unit-Index war 0, kollidierte mit SSBO binding=0.
-	 * Shader hat image3D jetzt auf binding=1 → Index hier ebenfalls auf 1 setzen.
-	 * History-Sampler auf GL_TEXTURE2 statt GL_TEXTURE1 (binding=2 im Shader). */
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, r_froxel.light_ssbo, 0, upload_bytes);
+	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, upload_bytes, r_froxel_gpu_lights, GL_STREAM_DRAW);
+	/* image3D uses binding=1 and history sampler uses binding=2. */
 	GL_BindImageTextureFunc (1, r_froxel.light_tex, 0, GL_TRUE, 0, GL_WRITE_ONLY, GL_RGBA16F);
 	GL_BindNative (GL_TEXTURE2, GL_TEXTURE_3D, r_froxel.history_tex);
 	GL_Uniform4fFunc (0, (float)r_froxel.dims[0], (float)r_froxel.dims[1], (float)r_froxel.dims[2], (float)r_froxel.light_count);

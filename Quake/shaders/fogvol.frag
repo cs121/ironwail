@@ -1,4 +1,5 @@
 #include "frame_uniforms.glsl"
+#include "fogvol_froxel_shared.glsl"
 
 #define MAX_FOGVOLUMES 64
 
@@ -8,6 +9,8 @@
 #define NOISE_SCALE_MIN 0.001
 #define NOISE_SCALE_MAX 1.0
 #define NOISE_PERIOD 64
+#define FOG_RAY_MIN_LEN2 1e-10
+#define FOG_RAY_MAX_LEN2 1e30
 
 layout(binding=0) uniform sampler2D SceneColor;
 layout(binding=1) uniform sampler2D SceneDepth;
@@ -278,26 +281,8 @@ float AnisotropicPhase(float cosTheta, float g)
 bool ComputeFroxelUv(vec3 p, out vec3 uvw, out float outside)
 {
 	vec3 viewPos = (View * vec4(p, 1.0)).xyz;
-	float nearClip = max(FogFroxelParams0.x, 1e-4);
-	float viewDepth = -viewPos.z;
-	float z = max(viewDepth, nearClip);
-	float halfW = max(1e-4, z * FogFroxelParams0.z);
-	float halfH = max(1e-4, z * FogFroxelParams0.w);
-	float u = viewPos.x / (2.0 * halfW) + 0.5;
-	float v = viewPos.y / (2.0 * halfH) + 0.5;
-	float w = log(max(z, nearClip) / nearClip) / max(FogFroxelParams1.x, 1e-4);
-	uvw = vec3(u, v, w);
-	vec3 below = max(-uvw, vec3(0.0));
-	vec3 above = max(uvw - vec3(1.0), vec3(0.0));
-	vec3 extent = max(below, above);
-	/* Points in front of the froxel near plane are out-of-domain; clamping them
-	 * to slice 0 creates a camera-centered rectangular artifact. Treat near-plane
-	 * violation as additional outside distance so edgeFade can suppress it. */
-	{
-		float nearOutside = max((nearClip - viewDepth) / nearClip, 0.0);
-		outside = max(max(extent.x, max(extent.y, extent.z)), nearOutside);
-	}
-	return (outside <= 0.75);
+	FogFroxel_UVWFromViewPos(viewPos, FogFroxelParams0, FogFroxelParams1, uvw, outside);
+	return (outside <= FOGFROXEL_OUTSIDE_ACCEPT);
 }
 
 vec3 SampleFroxelLight(vec3 p)
@@ -311,8 +296,7 @@ vec3 SampleFroxelLight(vec3 p)
 	if (!ComputeFroxelUv(p, uvw, outside))
 		return vec3(0.0);
 
-	/* Avoid hard black cutoffs from minor UV mismatch between froxel inject/sample paths. */
-	edgeFade = 1.0 - smoothstep(0.0, 0.35, outside);
+	edgeFade = 1.0 - smoothstep(0.0, FOGFROXEL_EDGE_FADE_WIDTH, outside);
 	return texture(FogFroxelLightTex, clamp(uvw, 0.0, 1.0)).rgb * edgeFade;
 }
 
@@ -410,12 +394,7 @@ void main()
 	}
 
 	FogVolume volume = FogVolumes[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
-	// BUG FIX (Bug 3): extra.z ist das Volume-Aktivierungsflag (= v->enabled
-	// aus fog_volume_gpu_t). Wenn die C-Seite gpu->extra[2] nicht auf 1.0
-	// setzt (z.B. uninitialisiertes Volume oder falscher Upload), bricht hier
-	// jedes Volume sofort ab → kein Fog. Prüfen: R_FogVol_FillGPUVolume()
-	// muss gpu->extra[2] = (float)v->enabled setzen (bereits korrekt in
-	// r_fogvol.c, aber enabled muss auf C-Seite auch wirklich 1 sein).
+	// extra.z mirrors the CPU-side enabled flag for this volume.
 	if (volume.extra.z <= 0.0)
 	{
 		FragColor = vec4(scene, 0.0);
@@ -431,9 +410,16 @@ void main()
 	}
 
 	vec3 ro = FogCameraPosWS;
-	vec3 rd = normalize(worldPos - ro);
+	vec3 rayDelta = worldPos - ro;
+	float rayLen2 = dot(rayDelta, rayDelta);
+	if (!(rayLen2 > FOG_RAY_MIN_LEN2) || rayLen2 > FOG_RAY_MAX_LEN2)
+	{
+		FragColor = vec4(scene, 0.0);
+		return;
+	}
+	vec3 rd = rayDelta * inversesqrt(rayLen2);
 	vec3 viewDir = -rd;
-	float tScene = IsSkyDepth(depth) ? FogDepthParams.y : length(worldPos - ro);
+	float tScene = IsSkyDepth(depth) ? FogDepthParams.y : sqrt(rayLen2);
 
 	float tEnter;
 	float tExit;
@@ -481,11 +467,7 @@ void main()
 	float transmittance = 1.0;
 	float tau = 0.0;
 	float ambientWeight = clamp(FogClusterParams.x, 0.0, 1.0);
-	// BUG FIX (Bug 4): Wenn froxelScatter und sunScatter beide 0 sind
-	// (z.B. wegen Binding-Konflikt oder nicht gesetzter Uniforms), dominiert
-	// der ambient-Term den Scattering vollständig → gleichmäßig grauer Fog
-	// in Farbe color_density.rgb. Auf max 0.15 begrenzen damit Licht sichtbar
-	// bleibt. C-seitig: r_fogvol_light_ambient Cvar ≤ 0.15 empfohlen.
+	// Keep ambient contribution capped so lit scattering remains dominant.
 	float lightContrast = clamp(FogLightSourceScales.w, 0.5, 4.0);
 	float extinctionRelief = clamp(FogClusterParams.w, 0.0, 0.95);
 
@@ -499,9 +481,7 @@ void main()
 			break;
 
 		vec3 p = ro + rd * t;
-		// BUG FIX (Bug 7): transmittance < 0.3 als zusätzlicher LOD-Trigger
-		// war kontraproduktiv — tief im Fog (wo Detail am meisten sichtbar ist)
-		// wurde auf Low-LOD gewechselt. LOD jetzt nur noch distanzbasiert.
+		// Use distance-only noise LOD so dense fog keeps detail.
 		int noiseLod = (t > FogNoiseLodSwitchDist) ? 1 : 0;
 		float sigma = EvaluateFogSigma(p, volume, flow, noiseLod);
 		if (sigma <= 1e-6)
@@ -522,8 +502,6 @@ void main()
 
 		vec3 scattering = vec3(0.0);
 		// Keep only a small unlit baseline so lighting and shadows dominate.
-		// BUG FIX (Bug 4): Gedeckelt auf 0.15 damit Licht- und Schatten-Terme
-		// sichtbar bleiben und den Fog nicht überlagern.
 		scattering += volume.color_density.rgb * min(ambientWeight, 0.15);
 		scattering += froxelScatter;
 		scattering += sunScatter;
@@ -615,3 +593,4 @@ void main()
 
 	FragColor = vec4(outColor, 1.0 - transmittance);
 }
+

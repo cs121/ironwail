@@ -458,15 +458,167 @@ void R_FogVol_ClearHistory (void)
 	r_fogvol_composite_tex = 0;
 }
 
+static qboolean FogVol_ContainsViewOrigin (const fog_volume_t *v)
+{
+	if (!v)
+		return false;
+
+	if (v->shape == FOGVOL_SHAPE_SPHERE)
+	{
+		vec3_t delta;
+		float radius = q_max (v->sphereRadius, 1.f);
+		VectorSubtract (r_refdef.vieworg, v->sphereCenter, delta);
+		return DotProduct (delta, delta) <= radius * radius;
+	}
+
+	for (int a = 0; a < 3; ++a)
+	{
+		if (r_refdef.vieworg[a] < v->mins[a] || r_refdef.vieworg[a] > v->maxs[a])
+			return false;
+	}
+	return true;
+}
+
+static qboolean FogVol_ProjectPointToScreen (const vec3_t p,
+	float view_x, float view_y, float view_w, float view_h,
+	float *out_x, float *out_y, qboolean *out_behind)
+{
+	float clip_x = r_matviewproj[0] * p[0] + r_matviewproj[4] * p[1] + r_matviewproj[8] * p[2] + r_matviewproj[12];
+	float clip_y = r_matviewproj[1] * p[0] + r_matviewproj[5] * p[1] + r_matviewproj[9] * p[2] + r_matviewproj[13];
+	float clip_w = r_matviewproj[3] * p[0] + r_matviewproj[7] * p[1] + r_matviewproj[11] * p[2] + r_matviewproj[15];
+	float inv_w;
+	float ndc_x;
+	float ndc_y;
+
+	if (clip_w <= 1e-5f)
+	{
+		if (out_behind)
+			*out_behind = true;
+		return false;
+	}
+
+	inv_w = 1.f / clip_w;
+	ndc_x = clip_x * inv_w;
+	ndc_y = clip_y * inv_w;
+	if (out_x)
+		*out_x = view_x + (ndc_x * 0.5f + 0.5f) * view_w;
+	if (out_y)
+		*out_y = view_y + (ndc_y * 0.5f + 0.5f) * view_h;
+	return true;
+}
+
 qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *y0, int *x1, int *y1, qboolean fullres)
 {
+	vec3_t bmin;
+	vec3_t bmax;
+	float view_x;
+	float view_y;
+	float view_w;
+	float view_h;
+	float min_x = 1e30f;
+	float min_y = 1e30f;
+	float max_x = -1e30f;
+	float max_y = -1e30f;
+	qboolean any_projected = false;
+	qboolean any_behind = false;
+	int target_w = fullres ? glwidth : framebufs.fogvol.width;
+	int target_h = fullres ? glheight : framebufs.fogvol.height;
+	int out_x0;
+	int out_y0;
+	int out_x1;
+	int out_y1;
+
 	if (!v || !v->enabled || !x0 || !y0 || !x1 || !y1)
 		return false;
-	*x0 = 0;
-	*y0 = 0;
-	*x1 = fullres ? glwidth : framebufs.fogvol.width;
-	*y1 = fullres ? glheight : framebufs.fogvol.height;
-	return (*x1 > *x0 && *y1 > *y0);
+	if (target_w <= 0 || target_h <= 0)
+		return false;
+
+	if (FogVol_ContainsViewOrigin (v))
+	{
+		*x0 = 0;
+		*y0 = 0;
+		*x1 = target_w;
+		*y1 = target_h;
+		return true;
+	}
+
+	if (v->shape == FOGVOL_SHAPE_SPHERE)
+	{
+		for (int a = 0; a < 3; ++a)
+		{
+			bmin[a] = v->sphereCenter[a] - v->sphereRadius;
+			bmax[a] = v->sphereCenter[a] + v->sphereRadius;
+		}
+	}
+	else
+	{
+		VectorCopy (v->mins, bmin);
+		VectorCopy (v->maxs, bmax);
+	}
+
+	view_x = (float)(glx + r_refdef.vrect.x);
+	view_y = (float)(gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height);
+	view_w = (float)q_max (1, r_refdef.vrect.width);
+	view_h = (float)q_max (1, r_refdef.vrect.height);
+
+	for (int i = 0; i < 8; ++i)
+	{
+		vec3_t corner;
+		float sx;
+		float sy;
+
+		corner[0] = (i & 1) ? bmax[0] : bmin[0];
+		corner[1] = (i & 2) ? bmax[1] : bmin[1];
+		corner[2] = (i & 4) ? bmax[2] : bmin[2];
+
+		if (!FogVol_ProjectPointToScreen (corner, view_x, view_y, view_w, view_h, &sx, &sy, &any_behind))
+			continue;
+
+		any_projected = true;
+		min_x = q_min (min_x, sx);
+		min_y = q_min (min_y, sy);
+		max_x = q_max (max_x, sx);
+		max_y = q_max (max_y, sy);
+	}
+
+	if (!any_projected)
+		return false;
+	if (any_behind)
+	{
+		*x0 = 0;
+		*y0 = 0;
+		*x1 = target_w;
+		*y1 = target_h;
+		return true;
+	}
+
+	out_x0 = (int)floorf (CLAMP (view_x, min_x, view_x + view_w));
+	out_y0 = (int)floorf (CLAMP (view_y, min_y, view_y + view_h));
+	out_x1 = (int)ceilf (CLAMP (view_x, max_x, view_x + view_w));
+	out_y1 = (int)ceilf (CLAMP (view_y, max_y, view_y + view_h));
+
+	if (!fullres)
+	{
+		float scale_x = (float)target_w / q_max ((float)glwidth, 1.f);
+		float scale_y = (float)target_h / q_max ((float)glheight, 1.f);
+		out_x0 = (int)floorf ((float)out_x0 * scale_x);
+		out_y0 = (int)floorf ((float)out_y0 * scale_y);
+		out_x1 = (int)ceilf ((float)out_x1 * scale_x);
+		out_y1 = (int)ceilf ((float)out_y1 * scale_y);
+	}
+
+	out_x0 = CLAMP (0, out_x0, target_w);
+	out_y0 = CLAMP (0, out_y0, target_h);
+	out_x1 = CLAMP (0, out_x1, target_w);
+	out_y1 = CLAMP (0, out_y1, target_h);
+	if (out_x1 <= out_x0 || out_y1 <= out_y0)
+		return false;
+
+	*x0 = out_x0;
+	*y0 = out_y0;
+	*x1 = out_x1;
+	*y1 = out_y1;
+	return true;
 }
 
 static void R_FogVol_FillGPUVolume (const fog_volume_t *v, fog_volume_gpu_t *gpu)
@@ -496,10 +648,7 @@ static void R_FogVol_FillGPUVolume (const fog_volume_t *v, fog_volume_gpu_t *gpu
 	gpu->misc[3] = v->emissiveStrength;
 	gpu->extra[0] = v->maxDistance;
 	gpu->extra[1] = (float)v->priority;
-	/* BUG FIX (Bug 3 C-Seite): extra[2] = v->enabled ist das Aktivierungsflag
-	 * des Volumes im Shader (extra.z <= 0 → sofortiger return in fogvol.frag).
-	 * Sicherstellen dass FogVol_ClampVolume() vorher aufgerufen wurde und
-	 * v->enabled wirklich 1 ist, sonst rendert das Volume nicht. */
+	/* extra[2] is consumed as enabled-flag in fogvol.frag. */
 	gpu->extra[2] = (float)(v->enabled ? 1 : 0);
 	gpu->extra[3] = v->height;
 	gpu->params2[0] = v->edgeSoftness;
@@ -555,19 +704,12 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float sun_shadow_bias = 0.f;
 	float sun_shadow_pcf = 0.f;
 	float light_scale_dlight = q_max (0.f, r_fogvol_dlightscale.value) * q_max (0.f, r_fogvol_light_dlight_boost.value);
-	/* BUG FIX (Bug 5 C-Seite): light_scale_sun = 0 wenn r_fogvol_froxel_sun
-	 * oder r_fogvol_light_sun_boost nicht gesetzt sind → SampleSunScatter()
-	 * bricht früh ab (FogLightSourceScales.y <= 0) → kein Sonnenlicht im Fog.
-	 * Sicherstellen dass beide Cvars > 0 sind (Defaults: sun=1, boost=1.35). */
+	/* Sun scatter scale stays tied to both sun controls. */
 	float light_scale_sun = q_max (0.f, r_fogvol_froxel_sun.value) * q_max (0.f, r_fogvol_light_sun_boost.value);
 	float light_scale_emissive = q_max (0.f, r_fogvol_light_emissive_boost.value);
 	float light_contrast = CLAMP (0.5f, r_fogvol_light_contrast.value, 4.f);
 	float light_ambient = CLAMP (0.f, r_fogvol_light_ambient.value, 1.f);
-	/* BUG FIX (Bug 4 C-Seite): light_ambient wird als FogClusterParams.x
-	 * in den Shader geschickt. Im Shader wird dieser Wert als ambientWeight
-	 * genutzt, der nun auf 0.15 gedeckelt ist (fogvol.frag Bug 4 Fix).
-	 * Den Cvar-Default 0.055 beibehalten — der Clamp im Shader ist die Absicherung
-	 * gegen zu hohe Werte. Werte > 0.15 wären hier trotzdem verschwendet. */
+	/* Ambient is additionally clamped in shader to keep lit terms visible. */
 	float shadow_contrast = CLAMP (0.5f, r_fogvol_shadow_contrast.value, 4.f);
 	float extinction_relief = CLAMP (0.f, r_fogvol_light_extinction_relief.value, 0.95f);
 	float emissive_floor = 0.f;
@@ -698,6 +840,11 @@ void R_FogVol_Render (void)
 	float froxel_params1[4] = {0.f, 1.f, 1.f, 1.f};
 	GLuint buf;
 	GLbyte *ofs;
+	int scissor_x0[MAX_FOGVOLUMES];
+	int scissor_y0[MAX_FOGVOLUMES];
+	int scissor_x1[MAX_FOGVOLUMES];
+	int scissor_y1[MAX_FOGVOLUMES];
+	qboolean scissor_valid[MAX_FOGVOLUMES];
 
 	r_fogvol_composite_valid = false;
 	r_fogvol_composite_tex = 0;
@@ -722,11 +869,7 @@ void R_FogVol_Render (void)
 	}
 
 	mode = CLAMP (0, (int)Q_rint (r_fogvol.value), 2);
-	/* BUG FIX: use_halfres war hart an mode==1 gekoppelt.
-	 * r_fogvol 1 = normaler Fullres-Modus. Das weiße/farbige Rechteck
-	 * am Bildschirmrand entstand weil der Halfres-FBO nur fog_width×fog_height
-	 * beschrieben wurde, der Rest des Attachments aber uninitialisiert blieb.
-	 * Halfres jetzt ausschließlich über r_fogvol_halfres cvar. */
+	/* Halfres is controlled exclusively by r_fogvol_halfres. */
 	use_halfres = (r_fogvol_halfres.value > 0.f);
 	if (r_fogvol_debug_froxel_random.value > 0.f)
 		use_halfres = false;
@@ -740,11 +883,7 @@ void R_FogVol_Render (void)
 	if (fog_width <= 0 || fog_height <= 0 || view_w <= 0.f || view_h <= 0.f)
 		return;
 
-	/* BUG FIX (Bug 6 C-Seite): depth_scale_x/y berechnet sich aus
-	 * glwidth/fog_width. Wenn fog_width == 0 (nicht-initialisierter Framebuffer
-	 * oder Halfres-FBO fehlt), entsteht Division durch Null → depth_scale = Inf/NaN
-	 * → screenPixel = ivec2(0) → Depth aus Pixel (0,0) → worldPos immer gleich
-	 * → rd konstant → gleichförmiger Fog. Schutz durch max(1, ...) darunter. */
+	/* Protect against division by zero when fog render targets are unavailable. */
 	depth_scale_x = (float)glwidth  / (float)q_max (1, fog_width);
 	depth_scale_y = (float)glheight / (float)q_max (1, fog_height);
 	depth_near = 0.5f;
@@ -752,7 +891,7 @@ void R_FogVol_Render (void)
 	depth_sky_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
 
 	steps = CLAMP (8, (int)Q_rint (r_fogvol_steps.value), 128);
-	/* mode==1 Step-Cap entfernt — Halfres cvar steuert Step-Reduktion. */
+	/* Halfres mode controls step reduction; keep full-res step budget unchanged. */
 	if (use_halfres)
 		steps = q_max (16, (steps * 3) / 4);
 
@@ -778,16 +917,30 @@ void R_FogVol_Render (void)
 
 	src_tex = framebufs.composite.color_tex;
 	src_fbo = framebufs.composite.fbo;
+	for (int i = 0; i < r_fogvolume_count; ++i)
+	{
+		const fog_volume_t *v = &r_fogvolumes[i];
+		scissor_valid[i] = R_FogVol_ProjectAABBToScreenRect (v, &scissor_x0[i], &scissor_y0[i], &scissor_x1[i], &scissor_y1[i], !use_halfres);
+	}
+	GL_SetScissorEnabled (true);
 
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
 		const fog_volume_t *v = &r_fogvolumes[i];
+		int x0;
+		int y0;
+		int x1;
+		int y1;
 		int fog_dst;
 		GLuint dst_tex;
 		GLuint dst_fbo;
 
-		if (!v->enabled)
+		if (!v->enabled || !scissor_valid[i])
 			continue;
+		x0 = scissor_x0[i];
+		y0 = scissor_y0[i];
+		x1 = scissor_x1[i];
+		y1 = scissor_y1[i];
 
 		fog_dst = has_drawn ? (1 - fog_src) : 0;
 		dst_tex = framebufs.fogvol.color_tex[fog_dst];
@@ -799,8 +952,10 @@ void R_FogVol_Render (void)
 			glViewport (0, 0, fog_width, fog_height);
 		else
 			glViewport ((int)view_x, (int)view_y, (int)view_w, (int)view_h);
+		glScissor (x0, y0, q_max (1, x1 - x0), q_max (1, y1 - y0));
 
 		GL_Uniform1iFunc (FOGVOL_U_VOLUME_INDEX, i);
+		GL_Uniform4fFunc (FOGVOL_U_LIGHT_SCISSOR, (float)x0, (float)y0, (float)x1, (float)y1);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 
 		src_tex = dst_tex;
@@ -808,6 +963,7 @@ void R_FogVol_Render (void)
 		fog_src = fog_dst;
 		has_drawn = true;
 	}
+	GL_SetScissorEnabled (false);
 
 	if (!has_drawn)
 	{
@@ -883,3 +1039,4 @@ void R_FogVol_DrawDebug2D (void)
 void R_FogVol_LogEndFrameState (void)
 {
 }
+

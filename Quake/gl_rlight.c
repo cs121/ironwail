@@ -81,7 +81,7 @@ static float R_ModelLightLuma (const vec3_t color)
 	return color[0] * 0.2126f + color[1] * 0.7152f + color[2] * 0.0722f;
 }
 
-static void R_EvaluateDLightForRender (const dlight_t *l, float *out_radius, vec3_t out_color)
+void R_EvaluateDLightForRender (const dlight_t *l, float *out_radius, vec3_t out_color)
 {
 	float radius;
 	float radius_scale = 1.f;

@@ -649,6 +649,7 @@ qboolean R_LightgridEnabled (void);
 void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao);
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
 void R_AccumulateEntityDLights (const vec3_t pos, vec3_t out_color, vec3_t out_dir);
+void R_EvaluateDLightForRender (const dlight_t *l, float *out_radius, vec3_t out_color);
 
 extern cvar_t r_debug_itemlight;
 extern cvar_t r_minlight_models;
