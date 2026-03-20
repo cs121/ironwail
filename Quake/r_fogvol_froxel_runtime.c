@@ -37,6 +37,7 @@ typedef struct froxel_state_s
 
 #define MAX_FROXEL_GPU_LIGHTS 32
 #define MAX_FROXEL_DEBUG_LIGHTS 5
+#define MAX_FROXEL_LAVA_LIGHTS 4
 
 static froxel_state_t r_froxel;
 static froxel_gpu_light_t r_froxel_gpu_lights[MAX_FROXEL_GPU_LIGHTS];
@@ -59,6 +60,109 @@ typedef struct froxel_debug_state_s
 
 static froxel_debug_state_t r_froxel_debug;
 static float r_froxel_debug_random_slice[192 * 128 * 4];
+
+typedef struct froxel_lava_candidate_s
+{
+	vec3_t center;
+	float extent_radius;
+	float score;
+} froxel_lava_candidate_t;
+
+static void R_Froxel_AddLight (const vec3_t origin, float radius, const vec3_t color, float intensity, uint32_t type);
+
+static qboolean R_Froxel_SurfaceTextureIsLava (const qmodel_t *world, const msurface_t *surf)
+{
+	const texture_t *tex;
+	int texnum;
+
+	if (!world || !surf || !surf->texinfo)
+		return false;
+
+	texnum = surf->texinfo->texnum;
+	if (texnum < 0 || texnum >= world->numtextures)
+		return false;
+
+	tex = world->textures[texnum];
+	if (!tex)
+		return false;
+	if (tex->type == TEXTYPE_LAVA)
+		return true;
+	if (tex->name[0] && q_strcasestr (tex->name, "lava"))
+		return true;
+	if (tex->material_map && tex->material_map[0] && q_strcasestr (tex->material_map, "lava"))
+		return true;
+	return false;
+}
+
+static qboolean R_Froxel_PointInLavaLeaf (qmodel_t *world, const vec3_t point)
+{
+	mleaf_t *leaf;
+	vec3_t probe;
+
+	if (!world)
+		return false;
+
+	VectorCopy (point, probe);
+	leaf = Mod_PointInLeaf (probe, world);
+	return leaf && leaf->contents == CONTENTS_LAVA;
+}
+
+static qboolean R_Froxel_SurfaceIsLava (qmodel_t *world, const msurface_t *surf, const vec3_t center)
+{
+	vec3_t probe;
+
+	if (!world || !surf || !center)
+		return false;
+
+	if (R_Froxel_SurfaceTextureIsLava (world, surf))
+		return true;
+	if (surf->flags & SURF_DRAWLAVA)
+		return true;
+	/* Fallback for maps/materials where lava flagging is missing:
+	 * sample nearby leaf contents on both sides of the surface plane. */
+	if ((surf->flags & SURF_DRAWTURB) == 0 || !surf->plane)
+		return false;
+
+	VectorMA (center, 2.f, surf->plane->normal, probe);
+	if (R_Froxel_PointInLavaLeaf (world, probe))
+		return true;
+	VectorMA (center, -2.f, surf->plane->normal, probe);
+	if (R_Froxel_PointInLavaLeaf (world, probe))
+		return true;
+
+	return false;
+}
+
+static int R_Froxel_InjectLavaProbeFallbackLights (qmodel_t *world, float lava_emissive)
+{
+	static const vec3_t probe_offsets[] = {
+		{   0.f,   0.f, -48.f }, {   0.f,   0.f, -112.f },
+		{  96.f,   0.f, -64.f }, { -96.f,   0.f, -64.f },
+		{   0.f,  96.f, -64.f }, {   0.f, -96.f, -64.f },
+		{ 128.f, 128.f, -72.f }, { 128.f, -128.f, -72.f },
+		{-128.f, 128.f, -72.f }, {-128.f, -128.f, -72.f }
+	};
+	int injected = 0;
+
+	if (!world || lava_emissive <= 0.f)
+		return 0;
+
+	for (int i = 0; i < (int)countof (probe_offsets) && r_froxel.light_count < MAX_FROXEL_GPU_LIGHTS; ++i)
+	{
+		vec3_t probe;
+		vec3_t color;
+
+		VectorAdd (r_refdef.vieworg, probe_offsets[i], probe);
+		if (!R_Froxel_PointInLavaLeaf (world, probe))
+			continue;
+
+		VectorSet (color, 1.75f, 0.42f, 0.10f);
+		R_Froxel_AddLight (probe, 240.f, color, lava_emissive * 2.2f, (uint32_t)DLIGHT_LAVA);
+		injected++;
+	}
+
+	return injected;
+}
 
 static int R_Froxel_DebugMode (void)
 {
@@ -333,6 +437,136 @@ static void R_Froxel_AddLight (const vec3_t origin, float radius, const vec3_t c
 	out->_pad[0] = out->_pad[1] = out->_pad[2] = 0;
 }
 
+static void R_Froxel_InsertLavaCandidate (froxel_lava_candidate_t *candidates, int *candidate_count, int max_candidates,
+	const vec3_t center, float extent_radius, float score)
+{
+	int i;
+	int replace_idx = -1;
+	float min_score;
+
+	if (!candidates || !candidate_count || max_candidates <= 0)
+		return;
+	if (score <= 0.f)
+		return;
+
+	if (*candidate_count < max_candidates)
+	{
+		replace_idx = (*candidate_count)++;
+	}
+	else
+	{
+		min_score = candidates[0].score;
+		replace_idx = 0;
+		for (i = 1; i < max_candidates; ++i)
+		{
+			if (candidates[i].score < min_score)
+			{
+				min_score = candidates[i].score;
+				replace_idx = i;
+			}
+		}
+		if (score <= min_score)
+			return;
+	}
+
+	VectorCopy (center, candidates[replace_idx].center);
+	candidates[replace_idx].extent_radius = extent_radius;
+	candidates[replace_idx].score = score;
+}
+
+static void R_Froxel_InjectLavaSurfaceLights (void)
+{
+	froxel_lava_candidate_t candidates[MAX_FROXEL_LAVA_LIGHTS];
+	qmodel_t *world = cl.worldmodel;
+	float lava_emissive_cvar = r_fogvol_lava_emissive.value;
+	float lava_emissive = (lava_emissive_cvar > 0.f) ? lava_emissive_cvar : 2.0f;
+	float max_dist = q_max (384.f, q_min (r_froxel.far_clip * 0.85f, 3072.f));
+	int max_lava_lights = q_min (MAX_FROXEL_LAVA_LIGHTS, q_max (0, MAX_FROXEL_GPU_LIGHTS - r_froxel.light_count));
+	int candidate_count = 0;
+	int liquid_surface_count = 0;
+	int lava_surface_count = 0;
+	int probe_injected = 0;
+	int i;
+
+	if (!r_froxel.valid)
+		return;
+	if (!world || !world->surfaces || world->numsurfaces <= 0)
+		return;
+	if (lava_emissive_cvar < 0.f)
+	{
+		if (r_fogvol_stats.value > 0.f || r_fogvol_debug.value >= 8.f)
+			Con_DPrintf ("fogvol_lava: disabled (r_fogvol_lava_emissive=%.2f)\n", lava_emissive_cvar);
+		return;
+	}
+	if (max_lava_lights <= 0)
+		return;
+
+	memset (candidates, 0, sizeof (candidates));
+
+	for (i = 0; i < world->numsurfaces; ++i)
+	{
+		const msurface_t *surf = &world->surfaces[i];
+		vec3_t center;
+		vec3_t half_extent;
+		vec3_t delta;
+		float extent_radius;
+		float dist2;
+		float dist;
+		float score;
+
+		/* Restrict expensive checks unless surface already looks lava-like. */
+		if ((surf->flags & (SURF_DRAWTURB | SURF_DRAWLAVA)) == 0
+			&& !R_Froxel_SurfaceTextureIsLava (world, surf))
+			continue;
+		liquid_surface_count++;
+
+		for (int a = 0; a < 3; ++a)
+		{
+			center[a] = 0.5f * (surf->mins[a] + surf->maxs[a]);
+			half_extent[a] = 0.5f * q_max (0.f, surf->maxs[a] - surf->mins[a]);
+		}
+
+		extent_radius = VectorLength (half_extent);
+		if (extent_radius <= 1.f)
+			continue;
+		if (!R_Froxel_SurfaceIsLava (world, surf, center))
+			continue;
+		lava_surface_count++;
+
+		VectorSubtract (center, r_refdef.vieworg, delta);
+		dist2 = DotProduct (delta, delta);
+		dist = sqrtf (q_max (dist2, 0.f));
+		if (dist > max_dist + extent_radius)
+			continue;
+
+		/* Prefer broader/closer lava patches for stable, low-count proxies. */
+		score = ((extent_radius + 32.f) * (extent_radius + 32.f)) / (dist2 + 4096.f);
+		R_Froxel_InsertLavaCandidate (candidates, &candidate_count, max_lava_lights, center, extent_radius, score);
+	}
+
+	for (i = 0; i < candidate_count && r_froxel.light_count < MAX_FROXEL_GPU_LIGHTS; ++i)
+	{
+		vec3_t light_color;
+		float light_radius;
+		float light_intensity;
+
+		/* Keep lava contribution clearly visible in fog: warm spectrum + stronger baseline energy. */
+		VectorSet (light_color, 1.80f, 0.45f, 0.12f);
+		light_radius = CLAMP (160.f, candidates[i].extent_radius * 4.0f, q_max (224.f, r_froxel.far_clip * 0.65f));
+		light_intensity = lava_emissive * CLAMP (1.8f + candidates[i].extent_radius / 64.f, 1.8f, 6.0f);
+
+		R_Froxel_AddLight (candidates[i].center, light_radius, light_color, light_intensity, (uint32_t)DLIGHT_LAVA);
+	}
+	if (candidate_count <= 0)
+		probe_injected = R_Froxel_InjectLavaProbeFallbackLights (world, lava_emissive);
+
+	if (r_fogvol_stats.value > 0.f || r_fogvol_debug.value >= 8.f)
+	{
+		Con_DPrintf ("fogvol_lava: injected=%d probe=%d lava=%d liquid=%d emissive=%.2f(cvar=%.2f) max_dist=%.0f\n",
+			candidate_count, probe_injected, lava_surface_count, liquid_surface_count, lava_emissive, lava_emissive_cvar, max_dist);
+	}
+}
+
 static void R_Froxel_InjectSun (void)
 {
 	const sun_t *sun;
@@ -430,13 +664,17 @@ void R_Froxel_InjectDlights (void)
 {
 	int active_count = 0;
 	const dlight_t *const *active = NULL;
+	const qboolean allow_lava_emissive = (r_fogvol_lava_emissive.value >= 0.f);
+	const qboolean fog_light_enabled = (r_fogvol_light.value > 0.f);
 	float intensity_scale;
 
 	if (!r_froxel.valid)
 		return;
+	if (!fog_light_enabled && !allow_lava_emissive)
+		return;
 
 	/* Debug lights are additive and do not replace real dlights. */
-	if (R_Froxel_DebugEnabled ())
+	if (fog_light_enabled && R_Froxel_DebugEnabled ())
 	{
 		R_Froxel_DebugRefreshState ();
 		for (int i = 0; i < r_froxel_debug.random_light_count && r_froxel.light_count < MAX_FROXEL_GPU_LIGHTS; ++i)
@@ -451,7 +689,11 @@ void R_Froxel_InjectDlights (void)
 		}
 		/* No early return here: real dlights are injected below as well. */
 	}
-	if (r_fogvol_light.value <= 0.f)
+
+	if (allow_lava_emissive)
+		R_Froxel_InjectLavaSurfaceLights ();
+
+	if (!fog_light_enabled)
 		return;
 	/* r_fogvol_dlightscale is applied in fogvol.frag via FogLightSourceScales.x.
 	 * Do not bake it into froxel injection as well, otherwise dlights are scaled
