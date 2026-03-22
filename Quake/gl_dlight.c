@@ -1,6 +1,7 @@
 #include "quakedef.h"
 
 #include "gl_dlight.h"
+#include "r_realtimelight.h"
 
 static void R_SetDlightConfig (GLuint program, float scale)
 {
@@ -14,18 +15,52 @@ static void R_SetDlightConfig (GLuint program, float scale)
 void R_DrawDLightPass (void)
 {
 	int count = 0;
+	float pp_debug_mode = 0.f;
 	entity_t **ents;
+	qboolean use_pp_world = R_PPdlights_WorldPathEnabled ();
+	unsigned int saved_numlights = r_framedata.numlights;
+	gpulightbuffer_t saved_lightbuffer = {0};
+	dlight_t *saved_sources[DLIGHT_GPU_MAX] = {0};
 
 	if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
-		return;
+	{
+		/* Optional per-pixel world path can still feed lights even if legacy list is empty. */
+		if (!use_pp_world)
+			return;
+	}
 
 	ents = R_GetVisEntities (mod_brush, false, &count);
 	if (count <= 0)
 		return;
 
+	if (use_pp_world)
+	{
+		int pp_count;
+		memcpy (&saved_lightbuffer, &r_lightbuffer, sizeof (saved_lightbuffer));
+		memcpy (saved_sources, r_dlight_sources, sizeof (saved_sources));
+
+		pp_count = R_PPdlights_BuildWorldGpuLights (&r_lightbuffer, r_dlight_sources, DLIGHT_GPU_MAX);
+		r_framedata.numlights = (unsigned int)pp_count;
+		if (pp_count <= 0)
+		{
+			r_framedata.numlights = saved_numlights;
+			memcpy (&r_lightbuffer, &saved_lightbuffer, sizeof (saved_lightbuffer));
+			memcpy (r_dlight_sources, saved_sources, sizeof (saved_sources));
+			return;
+		}
+
+		if (r_ppdlights_debug.value >= 1.f && (r_framecount % 60) == 0)
+			Con_DPrintf ("r_ppdlights_world: active (lights=%d)\n", pp_count);
+
+		pp_debug_mode = CLAMP (0.f, r_ppdlights_debug_mode.value, 4.f);
+		if (pp_debug_mode > 0.f && r_ppdlights_debug.value >= 1.f && (r_framecount % 60) == 0)
+			Con_DPrintf ("r_ppdlights_world: debug mode %.0f active\n", pp_debug_mode);
+	}
+
 	GL_BeginGroup ("Dynamic lights (additive)");
 
 	r_framedata.dlight_params[2] = 1.f;
+	r_framedata.dlight_params[3] = pp_debug_mode;
 	{
 		GLuint buf;
 		GLbyte *ofs;
@@ -39,6 +74,7 @@ void R_DrawDLightPass (void)
 	R_DrawBrushModels_DLights (ents, count);
 
 	r_framedata.dlight_params[2] = 0.f;
+	r_framedata.dlight_params[3] = 0.f;
 	{
 		GLuint buf;
 		GLbyte *ofs;
@@ -47,4 +83,11 @@ void R_DrawDLightPass (void)
 	}
 
 	GL_EndGroup ();
+
+	if (use_pp_world)
+	{
+		r_framedata.numlights = saved_numlights;
+		memcpy (&r_lightbuffer, &saved_lightbuffer, sizeof (saved_lightbuffer));
+		memcpy (r_dlight_sources, saved_sources, sizeof (saved_sources));
+	}
 }

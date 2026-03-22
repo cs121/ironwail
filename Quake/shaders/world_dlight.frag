@@ -166,10 +166,12 @@ void main()
 		float rim_ndotv = 1.0 - clamp(dot(surface_normal, view_dir), 0.0, 1.0);
 		rim_factor = pow(max(rim_ndotv, 0.0), max(RimLightParams0.z, 0.5)) * max(RimLightParams0.y, 0.0);
 	}
-	uvec3 _tile_coord = ComputeLightTileCoord(in_coord, max(in_depth, 1e-6));
-
+	int pp_debug_mode = int(DLightParams.w + 0.5);
 	vec3 dynamic_light = vec3(0.0);
+	vec3 dynamic_light_legacy = vec3(0.0);
 	vec3 rim_dlight_accum = vec3(0.0);
+	float debug_attenuation = 0.0;
+	float debug_affected_count = 0.0;
 	if (NumLights > 0u)
 	{
 		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
@@ -214,6 +216,9 @@ void main()
 			float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, rad);
 			vec3 light_contrib = shaped * ndotl * shadow * l.color * dynamic_light_noise;
 			dynamic_light += light_contrib;
+			dynamic_light_legacy += intensity * shadow * l.color * dynamic_light_noise;
+			debug_attenuation += attenuation;
+			debug_affected_count += 1.0;
 			if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
 			{
 				float rim_shadow = (RimLightParams0.w > 0.5) ? shadow : 1.0;
@@ -231,11 +236,36 @@ void main()
 	}
 
 	vec3 contrib = clamp(dynamic_light * DLightScale * Overbright, 0.0, Overbright);
+	vec3 contrib_legacy = clamp(dynamic_light_legacy * DLightScale * Overbright, 0.0, Overbright);
 	vec3 color = albedo * contrib;
 	if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
 	{
 		vec3 rim_light = rim_dlight_accum * RimLightParams1.w;
 		color += albedo * rim_light * rim_factor;
+	}
+
+	if (pp_debug_mode > 0)
+	{
+		if (pp_debug_mode == 1)
+		{
+			float count_norm = debug_affected_count / max(float(NumLights), 1.0);
+			color = vec3(clamp(count_norm, 0.0, 1.0));
+		}
+		else if (pp_debug_mode == 2)
+		{
+			float atten_vis = debug_attenuation / max(debug_affected_count, 1.0);
+			color = vec3(clamp(atten_vis, 0.0, 1.0));
+		}
+		else if (pp_debug_mode == 3)
+		{
+			color = clamp(dynamic_light, 0.0, 1.0);
+		}
+		else if (pp_debug_mode == 4)
+		{
+			/* Debug hook: split the new shaping model against a legacy-style approximation. */
+			float split = mod(floor(gl_FragCoord.x / 16.0), 2.0);
+			color = (split < 1.0) ? (albedo * contrib) : (albedo * contrib_legacy);
+		}
 	}
 
 	if (ShadowEnableDebug.w > 1.5)

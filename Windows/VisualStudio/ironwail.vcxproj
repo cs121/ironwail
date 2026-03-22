@@ -333,6 +333,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\r_sanitize.c" />
     <ClCompile Include="..\..\Quake\r_godrays.c" />
     <ClCompile Include="..\..\Quake\r_postfx.c" />
+    <ClCompile Include="..\..\Quake\r_realtimelight.c" />
     <ClCompile Include="..\..\Quake\r_part.c" />
     <ClCompile Include="..\..\Quake\r_part_q3p.c" />
     <ClCompile Include="..\..\Quake\r_ssao.c" />
@@ -440,6 +441,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\q_sound.h" />
     <ClInclude Include="..\..\Quake\q_stdinc.h" />
     <ClInclude Include="..\..\Quake\render.h" />
+    <ClInclude Include="..\..\Quake\r_realtimelight.h" />
     <ClInclude Include="..\..\Quake\r_dlight_pool.h" />
     <ClInclude Include="..\..\Quake\r_fogvol.h" />
     <ClInclude Include="..\..\Quake\resource.h" />

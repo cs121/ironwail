@@ -3,6 +3,7 @@
 #include "r_fogvol.h"
 #include "r_fogvol_internal.h"
 #include "r_dlight_pool.h"
+#include "r_realtimelight.h"
 #include <math.h>
 #include <string.h>
 
@@ -42,6 +43,25 @@ typedef struct froxel_state_s
 static froxel_state_t r_froxel;
 static froxel_gpu_light_t r_froxel_gpu_lights[MAX_FROXEL_GPU_LIGHTS];
 
+typedef struct froxel_ppdlight_debug_stats_s
+{
+	int source_count;
+	int fog_eligible_count;
+	int injected_count;
+	int rejected_nonvolumetric;
+	int rejected_distance;
+	int rejected_local_budget;
+	int rejected_budget;
+	int gi_candidates;
+	int gi_injected_count;
+	int gi_rejected_distance;
+	int gi_rejected_budget;
+	float injected_radiance;
+	float gi_radiance;
+} froxel_ppdlight_debug_stats_t;
+
+static froxel_ppdlight_debug_stats_t r_froxel_ppd_stats;
+
 typedef struct froxel_debug_state_s
 {
 	double next_refresh_time;
@@ -69,6 +89,8 @@ typedef struct froxel_lava_candidate_s
 } froxel_lava_candidate_t;
 
 static void R_Froxel_AddLight (const vec3_t origin, float radius, const vec3_t color, float intensity, uint32_t type);
+static void R_Froxel_InjectPPDLights (void);
+static void R_Froxel_InjectPPDGIHelper (const rl_light_t *lights, int light_count);
 
 static qboolean R_Froxel_SurfaceTextureIsLava (const qmodel_t *world, const msurface_t *surf)
 {
@@ -437,6 +459,174 @@ static void R_Froxel_AddLight (const vec3_t origin, float radius, const vec3_t c
 	out->_pad[0] = out->_pad[1] = out->_pad[2] = 0;
 }
 
+static uint32_t R_Froxel_DlightTypeFromRealtimeLight (const rl_light_t *src)
+{
+	if (!src)
+		return (uint32_t)DLIGHT_DEFAULT;
+
+	switch ((rl_light_type_t)src->type)
+	{
+	case RL_LIGHT_EMISSIVE_PROXY:
+		return (uint32_t)DLIGHT_TORCH;
+	case RL_LIGHT_GI_PROXY:
+		return (uint32_t)DLIGHT_DEFAULT;
+	case RL_LIGHT_POINT:
+	default:
+		return (uint32_t)DLIGHT_DEFAULT;
+	}
+}
+
+static void R_Froxel_InjectPPDGIHelper (const rl_light_t *lights, int light_count)
+{
+	int i;
+	int gi_budget;
+	float gi_scale;
+
+	if (!lights || light_count <= 0)
+		return;
+	if (r_ppdlights_gi.value <= 0.f)
+		return;
+
+	/* Conservative helper: broad, low-energy secondary bounce proxies for fog ambience. */
+	gi_scale = CLAMP (0.f, r_ppdlights_gi.value, 2.f);
+	gi_budget = CLAMP (0, (int)Q_rint (r_ppdlights_gi_budget.value), MAX_FROXEL_GPU_LIGHTS);
+	for (i = 0; i < light_count; ++i)
+	{
+		const rl_light_t *src = &lights[i];
+		vec3_t to_src;
+		float src_dist2;
+		float luma;
+		float gi_intensity;
+		float gi_radius;
+		float gi_max_dist;
+		int before_count;
+		vec3_t gi_color;
+
+		if ((src->flags & RL_LIGHT_VOLUMETRIC_CONTRIB) == 0u)
+			continue;
+		if (src->intensity <= 0.f || src->radius <= 1.f)
+			continue;
+
+		r_froxel_ppd_stats.gi_candidates++;
+		if (r_froxel_ppd_stats.gi_injected_count >= gi_budget || r_froxel.light_count >= MAX_FROXEL_GPU_LIGHTS)
+		{
+			r_froxel_ppd_stats.gi_rejected_budget++;
+			continue;
+		}
+
+		luma = q_max (0.f, src->color[0] * 0.2126f + src->color[1] * 0.7152f + src->color[2] * 0.0722f);
+		/* Subtle by default: small fraction of source energy as wide bounce fill. */
+		gi_intensity = q_max (0.f, src->intensity) * (0.12f * gi_scale);
+		gi_radius = CLAMP (96.f, src->radius * (1.7f + 0.2f * gi_scale), q_max (384.f, r_froxel.far_clip * 0.55f));
+		gi_max_dist = q_max (96.f, r_froxel.far_clip + gi_radius);
+		VectorSubtract (src->origin, r_refdef.vieworg, to_src);
+		src_dist2 = DotProduct (to_src, to_src);
+		if (src_dist2 > gi_max_dist * gi_max_dist)
+		{
+			r_froxel_ppd_stats.gi_rejected_distance++;
+			continue;
+		}
+		gi_color[0] = q_max (0.f, src->color[0] * 0.35f + luma * 0.65f);
+		gi_color[1] = q_max (0.f, src->color[1] * 0.35f + luma * 0.65f);
+		gi_color[2] = q_max (0.f, src->color[2] * 0.35f + luma * 0.65f);
+
+		before_count = r_froxel.light_count;
+		R_Froxel_AddLight (src->origin, gi_radius, gi_color, gi_intensity, (uint32_t)DLIGHT_DEFAULT);
+		if (r_froxel.light_count > before_count)
+		{
+			r_froxel_ppd_stats.gi_injected_count++;
+			r_froxel_ppd_stats.gi_radiance +=
+				(gi_color[0] * 0.2126f + gi_color[1] * 0.7152f + gi_color[2] * 0.0722f) * gi_intensity;
+		}
+		else
+		{
+			r_froxel_ppd_stats.gi_rejected_budget++;
+		}
+	}
+}
+
+static void R_Froxel_InjectPPDLights (void)
+{
+	const rl_light_t *lights;
+	const int fog_budget = CLAMP (0, (int)Q_rint (r_ppdlights_fog_budget.value), MAX_FROXEL_GPU_LIGHTS);
+	int light_count = 0;
+	int i;
+
+	memset (&r_froxel_ppd_stats, 0, sizeof (r_froxel_ppd_stats));
+	if (!r_froxel.valid)
+		return;
+
+	lights = R_PPdlights_GetFrameLights (&light_count);
+	r_froxel_ppd_stats.source_count = q_max (0, light_count);
+	if (!lights || light_count <= 0)
+		return;
+
+	for (i = 0; i < light_count; ++i)
+	{
+		const rl_light_t *src = &lights[i];
+		vec3_t to_src;
+		float src_dist2;
+		float max_dist;
+		int before_count;
+		vec3_t scaled_color;
+
+		if ((src->flags & RL_LIGHT_VOLUMETRIC_CONTRIB) == 0u)
+		{
+			r_froxel_ppd_stats.rejected_nonvolumetric++;
+			continue;
+		}
+		r_froxel_ppd_stats.fog_eligible_count++;
+		if (r_froxel_ppd_stats.injected_count >= fog_budget)
+		{
+			r_froxel_ppd_stats.rejected_local_budget++;
+			continue;
+		}
+		max_dist = q_max (64.f, r_froxel.far_clip + src->radius);
+		VectorSubtract (src->origin, r_refdef.vieworg, to_src);
+		src_dist2 = DotProduct (to_src, to_src);
+		if (src_dist2 > max_dist * max_dist)
+		{
+			r_froxel_ppd_stats.rejected_distance++;
+			continue;
+		}
+
+		before_count = r_froxel.light_count;
+		VectorScale (src->color, q_max (0.f, src->intensity), scaled_color);
+		R_Froxel_AddLight (src->origin, src->radius, scaled_color, 1.f, R_Froxel_DlightTypeFromRealtimeLight (src));
+		if (r_froxel.light_count > before_count)
+		{
+			r_froxel_ppd_stats.injected_count++;
+			r_froxel_ppd_stats.injected_radiance +=
+				scaled_color[0] * 0.2126f + scaled_color[1] * 0.7152f + scaled_color[2] * 0.0722f;
+		}
+		else
+		{
+			r_froxel_ppd_stats.rejected_budget++;
+		}
+	}
+	R_Froxel_InjectPPDGIHelper (lights, light_count);
+
+	if ((r_ppdlights_fog_debug.value > 0.f || r_ppdlights_gi_debug.value > 0.f) && (r_framecount % 60) == 0)
+	{
+		Con_DPrintf ("r_ppdlights_fog: src=%d eligible=%d injected=%d reject(nonvol=%d distance=%d local_budget=%d hw_budget=%d) radiance=%.3f gi(candidates=%d injected=%d distance=%d budget=%d radiance=%.3f) caps(fog=%d gi=%d)\n",
+			r_froxel_ppd_stats.source_count,
+			r_froxel_ppd_stats.fog_eligible_count,
+			r_froxel_ppd_stats.injected_count,
+			r_froxel_ppd_stats.rejected_nonvolumetric,
+			r_froxel_ppd_stats.rejected_distance,
+			r_froxel_ppd_stats.rejected_local_budget,
+			r_froxel_ppd_stats.rejected_budget,
+			r_froxel_ppd_stats.injected_radiance,
+			r_froxel_ppd_stats.gi_candidates,
+			r_froxel_ppd_stats.gi_injected_count,
+			r_froxel_ppd_stats.gi_rejected_distance,
+			r_froxel_ppd_stats.gi_rejected_budget,
+			r_froxel_ppd_stats.gi_radiance,
+			fog_budget,
+			CLAMP (0, (int)Q_rint (r_ppdlights_gi_budget.value), MAX_FROXEL_GPU_LIGHTS));
+	}
+}
+
 static void R_Froxel_InsertLavaCandidate (froxel_lava_candidate_t *candidates, int *candidate_count, int max_candidates,
 	const vec3_t center, float extent_radius, float score)
 {
@@ -649,6 +839,7 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 		r_froxel.prev_valid = false;
 	r_froxel.prev_mode = mode;
 	r_froxel.light_count = 0;
+	memset (&r_froxel_ppd_stats, 0, sizeof (r_froxel_ppd_stats));
 	r_froxel.valid = true;
 	/* Debug mode keeps froxel structure crisp; normal mode stays filtered. */
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, r_froxel.light_tex);
@@ -664,12 +855,18 @@ void R_Froxel_InjectDlights (void)
 {
 	int active_count = 0;
 	const dlight_t *const *active = NULL;
+	const qboolean pp_fog_enabled = (r_ppdlights.value > 0.f && r_ppdlights_fog.value > 0.f);
 	const qboolean allow_lava_emissive = (r_fogvol_lava_emissive.value >= 0.f);
 	const qboolean fog_light_enabled = (r_fogvol_light.value > 0.f);
 	float intensity_scale;
 
 	if (!r_froxel.valid)
 		return;
+	if (pp_fog_enabled)
+	{
+		R_Froxel_InjectPPDLights ();
+		return;
+	}
 	if (!fog_light_enabled && !allow_lava_emissive)
 		return;
 

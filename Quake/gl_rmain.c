@@ -30,6 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_ssao.h"
 #include "r_tonemap.h"
 #include "r_quality.h"
+#include "r_realtimelight.h"
 #include "gl_dlight.h"
 #include "gl_oit.h"
 #include "gl_shadow.h"
@@ -3701,6 +3702,9 @@ void R_SetupView (void)
 
 
 	R_PushDlights ();
+	/* Optional per-pixel path consumes this shared list in later milestones.
+	 * Legacy lighting/rendering remains unchanged. */
+	R_PPdlights_CollectFrame ();
 
 	//johnfitz -- cheat-protect some draw modes
 	r_fullbright_cheatsafe = r_lightmap_cheatsafe = false;

@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_ssao.h"
 #include "r_godrays.h"
 #include "r_fogvol.h"
+#include "r_realtimelight.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -560,8 +561,9 @@ Cvar_RegisterVariable (&r_debug_colorspace);
 Cvar_RegisterVariable (&r_color_midtone);
 Cvar_RegisterVariable (&r_color_contrast);
 Cvar_RegisterVariable (&r_color_saturation);
-Cvar_RegisterVariable (&r_bloom);
-Cvar_RegisterVariable (&r_bloom_threshold);
+	Cvar_RegisterVariable (&r_bloom);
+	Cvar_RegisterVariable (&r_bloom_threshold);
+	R_PPdlights_RegisterCvars ();
 	/* CVar owners: r_postfx* in r_postfx.c, r_ssao* in r_ssao.c, r_godray* and r_godrays* in r_godrays.c. */
 	R_PostFX_RegisterCvars ();
 	R_SSAO_RegisterCvars ();

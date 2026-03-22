@@ -25,7 +25,9 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	ModelHalfLambert;
 	float	DLightDebugModels;
 	float	DLightDirectionalMix;
-	float	_Pad1[3];
+	float	PPDLightModelEnable;
+	float	PPDLightModelDebug;
+	float	_Pad1;
 	InstanceData instances[];
 } AliasFrameBuffer;
 

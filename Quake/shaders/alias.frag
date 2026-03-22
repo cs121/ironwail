@@ -25,7 +25,9 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	ModelHalfLambert;
 	float	DLightDebugModels;
 	float	DLightDirectionalMix;
-	float	_Pad1[3];
+	float	PPDLightModelEnable;
+	float	PPDLightModelDebug;
+	float	_Pad1;
 	InstanceData instances[];
 } AliasFrameBuffer;
 
@@ -431,7 +433,7 @@ void main()
 	vec3 albedo = result.rgb;
 	dlight_shadow = ComputeAliasDLightShadow(world_pos);
 	dlight_contrib = in_dlight_color;
-	if (ShadowEnableDebug.x > 0.5 && ShadowNumLights > 0.5)
+	if (AliasFrameBuffer.PPDLightModelEnable > 0.5 && ShadowNumLights > 0.5)
 	{
 		/* Keep CPU-accumulated dlight as a robust baseline and blend towards
 		 * per-light directional response only when requested by the model mix cvar. */
@@ -486,7 +488,7 @@ void main()
 				if (RimLightParams1.w > 0.0)
 				{
 					vec3 rim_dlight = max(in_dlight_color, vec3(0.0));
-					if (use_rim_shadows > 0.5 && ShadowNumLights > 0.5)
+					if (AliasFrameBuffer.PPDLightModelEnable > 0.5 && ShadowNumLights > 0.5)
 						rim_dlight = ComputeAliasDLightContribution(world_pos, world_nor);
 					rim_light += rim_dlight * RimLightParams1.w;
 				}

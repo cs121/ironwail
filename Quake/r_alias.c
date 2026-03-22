@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "../common/lightgrid.h"
+#include "r_realtimelight.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
@@ -713,6 +714,7 @@ void R_FlushAliasInstances (qboolean showtris)
 	GLuint		buf;
 	GLbyte		*ofs;
 	size_t		ibuf_size;
+	qboolean	use_pp_models;
 	GLuint		buffers[2];
 	GLintptr	offsets[2];
 	GLsizeiptr	sizes[2];
@@ -773,8 +775,9 @@ void R_FlushAliasInstances (qboolean showtris)
 
 memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
 memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
-memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
-memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
+	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
+	memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
+	use_pp_models = R_PPdlights_ModelPathEnabled ();
 // use fog density sign bit as overbright flag
 ibuf.global.fog[3] =
 gl_overbright_models.value ?
@@ -786,7 +789,9 @@ ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 ibuf.global.dlight_debug_models = 0.f;
 ibuf.global.dlight_directional_mix = CLAMP (0.f, r_dlight_models_directional.value, 1.f);
-ibuf.global._pad1[0] = ibuf.global._pad1[1] = ibuf.global._pad1[2] = 0.f;
+ibuf.global._pad1[0] = use_pp_models ? 1.f : 0.f;
+ibuf.global._pad1[1] = 0.f;
+ibuf.global._pad1[2] = 0.f;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
@@ -1218,10 +1223,37 @@ R_DrawAliasModels
 */
 void R_DrawAliasModels (entity_t **ents, int count)
 {
-        int i;
-        for (i = 0; i < count; i++)
-                R_DrawAliasModel_Real (ents[i], false);
-        R_FlushAliasInstances (false);
+	int i;
+	qboolean use_pp_models = R_PPdlights_ModelPathEnabled ();
+	unsigned int saved_numlights = r_framedata.numlights;
+	gpulightbuffer_t saved_lightbuffer = {0};
+	dlight_t *saved_sources[DLIGHT_GPU_MAX] = {0};
+
+	if (use_pp_models)
+	{
+		int pp_count;
+		memcpy (&saved_lightbuffer, &r_lightbuffer, sizeof (saved_lightbuffer));
+		memcpy (saved_sources, r_dlight_sources, sizeof (saved_sources));
+
+		pp_count = R_PPdlights_BuildModelGpuLights (&r_lightbuffer, r_dlight_sources, DLIGHT_GPU_MAX);
+		r_framedata.numlights = (unsigned int)pp_count;
+		R_UploadFrameData ();
+
+		if (r_ppdlights_debug.value >= 1.f && (r_framecount % 60) == 0)
+			Con_DPrintf ("r_ppdlights_models: active (lights=%d)\n", pp_count);
+	}
+
+	for (i = 0; i < count; i++)
+		R_DrawAliasModel_Real (ents[i], false);
+	R_FlushAliasInstances (false);
+
+	if (use_pp_models)
+	{
+		r_framedata.numlights = saved_numlights;
+		memcpy (&r_lightbuffer, &saved_lightbuffer, sizeof (saved_lightbuffer));
+		memcpy (r_dlight_sources, saved_sources, sizeof (saved_sources));
+		R_UploadFrameData ();
+	}
 }
 
 void R_DrawAliasModels_Shadow (entity_t **ents, int count, qboolean dlight)
@@ -1240,8 +1272,32 @@ R_DrawAliasModels_ShowTris
 */
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count)
 {
-        int i;
-        for (i = 0; i < count; i++)
-                R_DrawAliasModel_Real (ents[i], true);
-        R_FlushAliasInstances (true);
+	int i;
+	qboolean use_pp_models = R_PPdlights_ModelPathEnabled ();
+	unsigned int saved_numlights = r_framedata.numlights;
+	gpulightbuffer_t saved_lightbuffer = {0};
+	dlight_t *saved_sources[DLIGHT_GPU_MAX] = {0};
+
+	if (use_pp_models)
+	{
+		int pp_count;
+		memcpy (&saved_lightbuffer, &r_lightbuffer, sizeof (saved_lightbuffer));
+		memcpy (saved_sources, r_dlight_sources, sizeof (saved_sources));
+
+		pp_count = R_PPdlights_BuildModelGpuLights (&r_lightbuffer, r_dlight_sources, DLIGHT_GPU_MAX);
+		r_framedata.numlights = (unsigned int)pp_count;
+		R_UploadFrameData ();
+	}
+
+	for (i = 0; i < count; i++)
+		R_DrawAliasModel_Real (ents[i], true);
+	R_FlushAliasInstances (true);
+
+	if (use_pp_models)
+	{
+		r_framedata.numlights = saved_numlights;
+		memcpy (&r_lightbuffer, &saved_lightbuffer, sizeof (saved_lightbuffer));
+		memcpy (r_dlight_sources, saved_sources, sizeof (saved_sources));
+		R_UploadFrameData ();
+	}
 }
