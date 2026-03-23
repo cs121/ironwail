@@ -3,6 +3,8 @@
 #include "gl_dlight.h"
 #include "r_realtimelight.h"
 
+extern cvar_t r_lighting_debug_view;
+
 static void R_SetDlightConfig (GLuint program, float scale, float blend_mode)
 {
 	if (!program)
@@ -30,6 +32,8 @@ void R_DrawDLightPass (void)
 			return;
 	}
 	if (CLAMP (0.f, r_ppdlights_world_scale.value, 4.f) <= 0.f)
+		return;
+	if (CLAMP (0.f, r_lighting_debug_view.value, 9.f) > 0.f)
 		return;
 
 	ents = R_GetVisEntities (mod_brush, false, &count);

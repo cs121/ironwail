@@ -31,6 +31,19 @@ float FogAttenuation(vec3 p)
 	return clamp(fog, 0.0, 1.0);
 }
 
+float SanitizeScalar(float x)
+{
+	return (x == x) ? clamp(x, 0.0, 65504.0) : 0.0;
+}
+
+vec3 SanitizeColor(vec3 color)
+{
+	return vec3(
+		SanitizeScalar(color.x),
+		SanitizeScalar(color.y),
+		SanitizeScalar(color.z));
+}
+
 #define MAX_LIGHTS    64
 #define LIGHT_TILES_X 32
 #define LIGHT_TILES_Y 16
@@ -155,7 +168,18 @@ void main()
 		return;
 	}
 
-	vec3 surface_normal = normalize(in_normal);
+	vec3 surface_normal = in_normal;
+	float surface_normal_len = length(surface_normal);
+	if (surface_normal_len > 1e-8)
+	{
+		surface_normal /= surface_normal_len;
+	}
+	else
+	{
+		vec3 gn = cross(dFdx(in_pos), dFdy(in_pos));
+		float gl = length(gn);
+		surface_normal = (gl > 0.0) ? (gn / gl) : vec3(0.0, 0.0, 1.0);
+	}
 	if (!gl_FrontFacing)
 		surface_normal = -surface_normal;
 	vec3 to_eye = EyePos - in_pos;
@@ -239,8 +263,8 @@ void main()
 	 * Preserve albedo detail on bright hits: soft-compress the RT-light term
 	 * before final overbright scaling, instead of relying on hard clamp only.
 	 */
-	vec3 contrib_raw = max(dynamic_light * DLightScale, vec3(0.0));
-	vec3 contrib_legacy_raw = max(dynamic_light_legacy * DLightScale, vec3(0.0));
+	vec3 contrib_raw = SanitizeColor(dynamic_light * DLightScale);
+	vec3 contrib_legacy_raw = SanitizeColor(dynamic_light_legacy * DLightScale);
 	vec3 contrib_linear = clamp(contrib_raw, 0.0, 1.0);
 	vec3 contrib_legacy_linear = clamp(contrib_legacy_raw, 0.0, 1.0);
 	vec3 contrib_soft = clamp(contrib_raw / (vec3(1.0) + contrib_raw), 0.0, 1.0);
@@ -248,17 +272,13 @@ void main()
 	float blend_mode = clamp(DLightBlendMode, 0.0, 1.0);
 	vec3 contrib = mix(contrib_linear, contrib_soft, blend_mode);
 	vec3 contrib_legacy = mix(contrib_legacy_linear, contrib_legacy_soft, blend_mode);
-	/*
-	 * Avoid "sticker" look in additive pass: use mostly low-frequency albedo
-	 * response instead of re-applying full texture contrast.
-	 */
-	float albedo_luma = dot(albedo, vec3(0.299, 0.587, 0.114));
-	vec3 albedo_response = mix(vec3(albedo_luma), albedo, 0.28);
-	vec3 color = albedo_response * contrib;
+	/* BUGFIX: keep full material response in RT-lighting. Luma-mixing the albedo
+	 * washed out texture contrast and made light look "painted on". */
+	vec3 color = albedo * contrib;
 	if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
 	{
 		vec3 rim_light = rim_dlight_accum * RimLightParams1.w;
-		color += albedo_response * rim_light * rim_factor;
+		color += albedo * rim_light * rim_factor;
 	}
 
 	if (pp_debug_mode > 0)
@@ -289,6 +309,7 @@ void main()
 		color = vec3(clamp(length(dynamic_light), 0.0, 1.0));
 
 	color *= FogAttenuation(in_pos - EyePos);
+	color = SanitizeColor(color);
 
 	out_fragcolor = vec4(color, alpha); // FIX: war "alpha * 0.0" → Fragment immer transparent
 	out_velocity = vec4(0.0, 0.0, 0.0, 1.0);

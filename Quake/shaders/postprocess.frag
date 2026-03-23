@@ -359,6 +359,19 @@ vec3 LinearToSRGB(vec3 color)
         return mix(lower, higher, cutoff);
 }
 
+float SanitizeScalar(float x)
+{
+        return (x == x) ? clamp(x, 0.0, 65504.0) : 0.0;
+}
+
+vec3 SanitizeColor(vec3 color)
+{
+        return vec3(
+                SanitizeScalar(color.x),
+                SanitizeScalar(color.y),
+                SanitizeScalar(color.z));
+}
+
 #include "postprocess_motion.glsl"
 #include "postprocess_dof.glsl"
 
@@ -390,6 +403,7 @@ void main()
         float scale = Params.z;
         float dither = Params.w;
         int debugMode = int(floor(ColorSpaceParams.x + 0.5));
+        int lightingDebugView = int(floor(ColorSpaceParams.w + 0.5));
         float outputSrgb = ColorSpaceParams.z;
         ivec2 pixel = ivec2(gl_FragCoord.xy);
         vec4 color = texelFetch(GammaTexture, pixel, 0);
@@ -403,6 +417,15 @@ void main()
         vec2 invScale = max(DepthParams.xy, vec2(1e-4));
         bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
         DepthSamplingInfo depthInfo = MakeDepthSamplingInfo();
+
+        if (lightingDebugView >= 1 && lightingDebugView <= 7)
+        {
+                vec3 debugColor = clamp(color.rgb, 0.0, 1.0);
+                if (outputSrgb > 0.5)
+                        debugColor = LinearToSRGB(debugColor);
+                out_fragcolor = ApplySoftEmulationPostFX(debugColor, gl_FragCoord.xy, scale, dither);
+                return;
+        }
 
         if (GodraysParams.z > 0.5)
         {
@@ -681,7 +704,7 @@ void main()
         exposure *= exp2(exposureAdd);
         float tonemapMode = HDRParams.z;
         vec3 combined = (hdrColor + bloomColor + godraysColor) * exposure;
-        combined = max(combined, vec3(0.0));
+        combined = SanitizeColor(combined);
         float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
         if (fogStrength > 0.0 && depthInfo.valid)
         {
@@ -689,6 +712,32 @@ void main()
                 float fogFactor = clamp(depth / 2048.0, 0.0, 1.0);
                 fogFactor = clamp(fogFactor * fogStrength, 0.0, 1.0);
                 combined = mix(combined, PostFXFogColor.rgb, fogFactor);
+        }
+        combined = clamp(combined, vec3(0.0), vec3(32.0));
+        if (lightingDebugView == 8)
+        {
+                vec3 debugColor = clamp(log2(vec3(1.0) + combined) * 0.25, 0.0, 1.0);
+                if (outputSrgb > 0.5)
+                        debugColor = LinearToSRGB(debugColor);
+                out_fragcolor = ApplySoftEmulationPostFX(debugColor, gl_FragCoord.xy, scale, dither);
+                return;
+        }
+        if (lightingDebugView == 9)
+        {
+                float maxHdr = max(max(combined.r, combined.g), combined.b);
+                float over = max(maxHdr - 1.0, 0.0);
+                vec3 debugColor = vec3(0.0);
+                if (over > 0.0)
+                {
+                        float t0 = clamp(over, 0.0, 1.0);
+                        float t1 = clamp(over - 1.0, 0.0, 1.0);
+                        vec3 hot = mix(vec3(1.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), t0);
+                        debugColor = mix(hot, vec3(1.0), t1);
+                }
+                if (outputSrgb > 0.5)
+                        debugColor = LinearToSRGB(debugColor);
+                out_fragcolor = ApplySoftEmulationPostFX(debugColor, gl_FragCoord.xy, scale, dither);
+                return;
         }
         vec3 mapped;
         if (tonemapMode > 0.5)
@@ -702,6 +751,7 @@ void main()
         {
                 mapped = clamp(combined, 0.0, 1.0);
         }
+        mapped = SanitizeColor(mapped);
         mapped = clamp(mapped, 0.0, 1.0);
         if (debugMode == 2)
         {

@@ -239,6 +239,7 @@ cvar_t	r_rgblighting_enable = { "r_rgblighting_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_srgb_textures = { "r_srgb_textures", "1", CVAR_ARCHIVE };
 cvar_t	r_srgb_framebuffer = { "r_srgb_framebuffer", "1", CVAR_ARCHIVE };
 cvar_t	r_debug_colorspace = { "r_debug_colorspace", "0", CVAR_ARCHIVE };
+cvar_t	r_lighting_debug_view = { "r_lighting_debug_view", "0", CVAR_ARCHIVE };
 cvar_t	r_color_midtone = { "r_color_midtone", "1.0", CVAR_ARCHIVE };
 cvar_t	r_color_contrast = { "r_color_contrast", "1.0", CVAR_ARCHIVE };
 cvar_t	r_color_saturation = { "r_color_saturation", "1.05", CVAR_ARCHIVE };
@@ -3235,6 +3236,8 @@ static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
 		return true;
 	if (r_debug_colorspace.value > 0.f)
 		return true;
+	if (r_lighting_debug_view.value > 0.f)
+		return true;
 	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_color_contrast.value != 1.f || saturation != 1.f || r_color_midtone.value != 1.f || GL_ShouldApplyMotionBlur ())
 		return true;
 	if (r_srgb_framebuffer.value <= 0.f)
@@ -3574,7 +3577,7 @@ void R_SetupView (void)
         r_framedata.colorspace_params[0] = CLAMP (0.f, r_debug_colorspace.value, 4.f);
         r_framedata.colorspace_params[1] = 0.f;
         r_framedata.colorspace_params[2] = 0.f;
-        r_framedata.colorspace_params[3] = 0.f;
+        r_framedata.colorspace_params[3] = CLAMP (0.f, r_lighting_debug_view.value, 9.f);
         r_framedata.shader_params[0] = r_material_debug.value;
         r_framedata.shader_params[1] = r_tcgen_debug.value;
         r_framedata.shader_params[2] = CLAMP (0.f, r_sun_visibility.value, 1.f);

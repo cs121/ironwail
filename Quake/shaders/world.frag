@@ -29,6 +29,25 @@ vec3 ApplyFog(vec3 clr, vec3 p)
 	return mix(Fog.rgb, clr, fog);
 }
 
+float FogAttenuation(vec3 p)
+{
+	float fog = exp2(-abs(Fog.w) * dot(p, p));
+	return clamp(fog, 0.0, 1.0);
+}
+
+float SanitizeScalar(float x)
+{
+	return (x == x) ? clamp(x, 0.0, 65504.0) : 0.0;
+}
+
+vec3 SanitizeColor(vec3 color)
+{
+	return vec3(
+		SanitizeScalar(color.x),
+		SanitizeScalar(color.y),
+		SanitizeScalar(color.z));
+}
+
 #define MAX_LIGHTS    64
 #define LIGHT_TILES_X 32
 #define LIGHT_TILES_Y 16
@@ -491,6 +510,7 @@ void main()
 #else
 	vec4 result = texture(Tex, uv);
 #endif
+	vec3 albedo = result.rgb;
 
 #if MODE == 1
 	if (result.a < 0.666)
@@ -499,6 +519,7 @@ void main()
 
 	// --- Debug modes (early-out) ---
 	int debug_mode = int(ColorSpaceParams.x + 0.5);
+	int lighting_debug_view = int(ColorSpaceParams.w + 0.5);
 	if (debug_mode == 1)
 	{
 		// BUG FIX: original wrote to literal "out_fragcolor" which is only a valid
@@ -528,12 +549,14 @@ void main()
 		return;
 	}
 
-	bool additive_dlights = DLightParams.x > 0.5;
+	bool additive_dlights = (DLightParams.x > 0.5) && (lighting_debug_view == 0);
 
 	// Lightmap sampling
 	vec2 lmuv = in_lmuv;
 	vec3 total_lightmap = vec3(1.0);
 	vec3 specular_light = vec3(0.0);
+	float ndotl_accum = 0.0;
+	float ndotl_weight = 0.0;
 #if DITHER
 	// OPT: compute once, reuse below for dithering
 	vec2 lmsize = vec2(textureSize(LMTex, 0).xy) * 16.0;
@@ -709,6 +732,9 @@ void main()
 				{
 					vec3  light_dir = light_vec * inv_surface_dist;      // already normalised
 					float ndotl     = max(dot(surface_normal, light_dir), 0.0);
+					float light_weight = attenuation * falloff * shadow;
+					ndotl_accum += ndotl * light_weight;
+					ndotl_weight += light_weight;
 
 					if (ndotl > 0.0)
 					{
@@ -794,14 +820,62 @@ void main()
 		vec3 rim_light = rim_sun_accum * RimLightParams1.z + rim_dlight_accum * RimLightParams1.w;
 		result.rgb += result.rgb * rim_light * rim_factor;
 	}
+	result.rgb = SanitizeColor(result.rgb);
+	vec3 pre_tonemap_hdr = result.rgb;
 
-	// Tone mapping
-	if (LightmapParams.y > 0.5)
-		result.rgb = result.rgb / (vec3(1.0) + result.rgb);
+	// Tone mapping is handled in postprocess only.
 
 	result.rgb  *= in_stage_color.rgb;
 	result.a     = in_alpha * in_stage_color.a;
 	result       = clamp(result, 0.0, 1.0);
+	float fog_att = FogAttenuation(in_pos - EyePos);
+
+	if (lighting_debug_view > 0)
+	{
+		vec3 debug_rgb = result.rgb;
+		if (lighting_debug_view == 1)
+		{
+			debug_rgb = clamp(albedo, 0.0, 1.0);
+		}
+		else if (lighting_debug_view == 2)
+		{
+			vec3 light_vis = total_lightmap / max(Overbright, 1e-4);
+			debug_rgb = clamp(light_vis, 0.0, 1.0);
+		}
+		else if (lighting_debug_view == 3)
+		{
+			float ndotl_vis = (ndotl_weight > 1e-5) ? (ndotl_accum / ndotl_weight) : 0.0;
+			debug_rgb = vec3(clamp(ndotl_vis, 0.0, 1.0));
+		}
+		else if (lighting_debug_view == 4)
+		{
+			debug_rgb = surface_normal * 0.5 + 0.5;
+		}
+		else if (lighting_debug_view == 5)
+		{
+			debug_rgb = clamp(specular_light / max(Overbright, 1e-4), 0.0, 1.0);
+		}
+		else if (lighting_debug_view == 6)
+		{
+			debug_rgb = clamp(in_lightgrid, 0.0, 1.0);
+		}
+		else if (lighting_debug_view == 7)
+		{
+			debug_rgb = vec3(clamp(1.0 - fog_att, 0.0, 1.0));
+		}
+		else if (lighting_debug_view == 8)
+		{
+			debug_rgb = clamp(log2(vec3(1.0) + max(pre_tonemap_hdr, vec3(0.0))) * 0.25, 0.0, 1.0);
+		}
+
+		result.rgb = debug_rgb;
+		result.a = 1.0;
+		OUT_COLOR = result;
+#if !OIT
+		out_velocity = vec4(0.0);
+#endif
+		return;
+	}
 
 	if (ShadowEnableDebug.w > 0.5)
 	{
@@ -826,7 +900,8 @@ void main()
 		}
 	}
 
-	result.rgb   = ApplyFog(result.rgb, in_pos - EyePos);
+	result.rgb   = mix(Fog.rgb, result.rgb, fog_att);
+	result.rgb   = SanitizeColor(result.rgb);
 
 	// BUG FIX: original wrote "out_fragcolor" directly but OUT_COLOR must be used
 	// to stay compatible with both OIT and non-OIT paths.
