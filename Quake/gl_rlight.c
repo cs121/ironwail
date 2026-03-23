@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "../common/lightgrid.h"
 #include "gl_lightgrid.h"
 #include "r_dlight_pool.h"
+#include "r_realtimelight.h"
 #include <float.h>
 #include <math.h>
 
@@ -86,6 +87,7 @@ void R_EvaluateDLightForRender (const dlight_t *l, float *out_radius, vec3_t out
 	float radius;
 	float radius_scale = 1.f;
 	float energy_scale = 1.f;
+	float world_dlight_scale = 1.f;
 	const vec3_t *temp;
 
 	if (!l)
@@ -146,6 +148,10 @@ void R_EvaluateDLightForRender (const dlight_t *l, float *out_radius, vec3_t out
 		out_color[0] *= 1.0f + colorshift;
 		out_color[1] *= 1.0f - colorshift;
 	}
+
+	/* Global dynamic-light output gain used by world/fog/model receive paths. */
+	world_dlight_scale = CLAMP (0.f, r_ppdlights_world_scale.value, 4.f);
+	VectorScale (out_color, world_dlight_scale, out_color);
 
 	if (out_radius)
 		*out_radius = radius;

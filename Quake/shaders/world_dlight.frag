@@ -15,6 +15,7 @@ layout(binding=8) uniform samplerCubeArray DLightShadowTex;
 #endif
 
 layout(location=0) uniform float DLightScale;
+layout(location=1) uniform float DLightBlendMode; // 0=linear add, 1=soft-add
 
 layout(location=30) uniform mat4 ShadowSunViewProj;
 layout(location=34) uniform vec4 ShadowEnableDebug;   // x=enabled, y=sun, z=dlight, w=debug mode
@@ -174,12 +175,11 @@ void main()
 	float debug_affected_count = 0.0;
 	if (NumLights > 0u)
 	{
-		float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-		const float core_boost = 0.75;
-		const float core_exp = 6.0;
-		const float knee = 1.5;
-		const float ndotl_mix = 0.2;
-		const float saturation_chop = 0.1;
+		const float core_boost = 0.0;
+		const float core_exp = 1.0;
+		const float knee = 0.0;
+		const float ndotl_mix = 1.0;
+		const float saturation_chop = 0.0;
 
 		for (uint light_index = 0u; light_index < NumLights; light_index++)
 		{
@@ -198,10 +198,10 @@ void main()
 
 			float normalized_dist = surface_dist / max(rad, 1e-4);
 			float x = clamp(1.0 - normalized_dist, 0.0, 1.0);
-			float falloff = ComputeFalloff(x);
 			float minlight_norm = minlight / max(rad, 1e-4);
-			float attenuation = clamp((x - minlight_norm) / max(1.0 - minlight_norm, 1e-4), 0.0, 1.0);
-			float intensity = attenuation * falloff;
+			float attenuation = x * x;
+			float minlight_mask = clamp((x - minlight_norm) / max(1.0 - minlight_norm, 1e-4), 0.0, 1.0);
+			float intensity = attenuation * minlight_mask;
 			float core = 1.0 + core_boost * pow(max(x, 0.0), core_exp);
 			float core_intensity = intensity * core;
 			float shaped = (knee > 0.0) ? (core_intensity / (core_intensity + knee)) : core_intensity;
@@ -214,9 +214,9 @@ void main()
 			}
 
 			float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, rad);
-			vec3 light_contrib = shaped * ndotl * shadow * l.color * dynamic_light_noise;
+			vec3 light_contrib = shaped * ndotl * shadow * l.color;
 			dynamic_light += light_contrib;
-			dynamic_light_legacy += intensity * shadow * l.color * dynamic_light_noise;
+			dynamic_light_legacy += intensity * shadow * l.color;
 			debug_attenuation += attenuation;
 			debug_affected_count += 1.0;
 			if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
@@ -224,7 +224,7 @@ void main()
 				float rim_shadow = (RimLightParams0.w > 0.5) ? shadow : 1.0;
 				vec3 rim_light_dir = (surface_dist > 0.0) ? (to_light / surface_dist) : vec3(0.0, 0.0, 1.0);
 				float backlight = mix(0.35, 1.0, max(dot(-surface_normal, rim_light_dir), 0.0));
-				rim_dlight_accum += shaped * rim_shadow * l.color * dynamic_light_noise * backlight;
+				rim_dlight_accum += shaped * rim_shadow * l.color * backlight;
 			}
 		}
 
@@ -235,13 +235,30 @@ void main()
 		}
 	}
 
-	vec3 contrib = clamp(dynamic_light * DLightScale * Overbright, 0.0, Overbright);
-	vec3 contrib_legacy = clamp(dynamic_light_legacy * DLightScale * Overbright, 0.0, Overbright);
-	vec3 color = albedo * contrib;
+	/*
+	 * Preserve albedo detail on bright hits: soft-compress the RT-light term
+	 * before final overbright scaling, instead of relying on hard clamp only.
+	 */
+	vec3 contrib_raw = max(dynamic_light * DLightScale, vec3(0.0));
+	vec3 contrib_legacy_raw = max(dynamic_light_legacy * DLightScale, vec3(0.0));
+	vec3 contrib_linear = clamp(contrib_raw, 0.0, 1.0);
+	vec3 contrib_legacy_linear = clamp(contrib_legacy_raw, 0.0, 1.0);
+	vec3 contrib_soft = clamp(contrib_raw / (vec3(1.0) + contrib_raw), 0.0, 1.0);
+	vec3 contrib_legacy_soft = clamp(contrib_legacy_raw / (vec3(1.0) + contrib_legacy_raw), 0.0, 1.0);
+	float blend_mode = clamp(DLightBlendMode, 0.0, 1.0);
+	vec3 contrib = mix(contrib_linear, contrib_soft, blend_mode);
+	vec3 contrib_legacy = mix(contrib_legacy_linear, contrib_legacy_soft, blend_mode);
+	/*
+	 * Avoid "sticker" look in additive pass: use mostly low-frequency albedo
+	 * response instead of re-applying full texture contrast.
+	 */
+	float albedo_luma = dot(albedo, vec3(0.299, 0.587, 0.114));
+	vec3 albedo_response = mix(vec3(albedo_luma), albedo, 0.28);
+	vec3 color = albedo_response * contrib;
 	if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
 	{
 		vec3 rim_light = rim_dlight_accum * RimLightParams1.w;
-		color += albedo * rim_light * rim_factor;
+		color += albedo_response * rim_light * rim_factor;
 	}
 
 	if (pp_debug_mode > 0)

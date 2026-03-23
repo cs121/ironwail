@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "mat_material.h"
+#include "r_realtimelight.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
 extern cvar_t r_godrays;
@@ -1751,7 +1752,10 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 
         state = GLS_CULL_BACK | GLS_ATTRIBS(6);
         if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
-                state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
+        {
+                int blendop = CLAMP (0, (int)Q_rint (r_ppdlights_world_blendop.value), 1);
+                state |= ((blendop == 1) ? GLS_BLEND_SCREEN : GLS_BLEND_ADD) | GLS_NO_ZWRITE;
+        }
         else if (pass == BP_SHADOW_SUN || pass == BP_SHADOW_DLIGHT)
         {
                 /* Shadow caster pass: disable face culling so one-sided BSP

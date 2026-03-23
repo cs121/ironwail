@@ -4,6 +4,7 @@
 #include "r_fogvol_internal.h"
 #include "r_dlight_pool.h"
 #include "r_godrays.h"
+#include "r_realtimelight.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>

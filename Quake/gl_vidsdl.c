@@ -1208,6 +1208,9 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
                         case GLS_BLEND_ADD:
                                 glBlendFunc(GL_ONE, GL_ONE);
                                 break;
+                        case GLS_BLEND_SCREEN:
+                                glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ONE);
+                                break;
                 }
         }
 

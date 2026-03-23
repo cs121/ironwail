@@ -55,6 +55,9 @@ typedef struct rl_light_collect_stats_s
 
 extern cvar_t r_ppdlights;
 extern cvar_t r_ppdlights_world;
+extern cvar_t r_ppdlights_world_scale;
+extern cvar_t r_ppdlights_world_blend;
+extern cvar_t r_ppdlights_world_blendop;
 extern cvar_t r_ppdlights_models;
 extern cvar_t r_ppdlights_fog;
 extern cvar_t r_ppdlights_fog_debug;

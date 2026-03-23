@@ -471,6 +471,10 @@ static uint32_t R_Froxel_DlightTypeFromRealtimeLight (const rl_light_t *src)
 	case RL_LIGHT_GI_PROXY:
 		return (uint32_t)DLIGHT_DEFAULT;
 	case RL_LIGHT_POINT:
+		/* Keep original dlight subtype (lava/torch/etc.) when available. */
+		if (src->reserved < (unsigned int)DLIGHT_MAX_TYPES)
+			return src->reserved;
+		return (uint32_t)DLIGHT_DEFAULT;
 	default:
 		return (uint32_t)DLIGHT_DEFAULT;
 	}
@@ -564,9 +568,6 @@ static void R_Froxel_InjectPPDLights (void)
 	for (i = 0; i < light_count; ++i)
 	{
 		const rl_light_t *src = &lights[i];
-		vec3_t to_src;
-		float src_dist2;
-		float max_dist;
 		int before_count;
 		vec3_t scaled_color;
 
@@ -581,15 +582,6 @@ static void R_Froxel_InjectPPDLights (void)
 			r_froxel_ppd_stats.rejected_local_budget++;
 			continue;
 		}
-		max_dist = q_max (64.f, r_froxel.far_clip + src->radius);
-		VectorSubtract (src->origin, r_refdef.vieworg, to_src);
-		src_dist2 = DotProduct (to_src, to_src);
-		if (src_dist2 > max_dist * max_dist)
-		{
-			r_froxel_ppd_stats.rejected_distance++;
-			continue;
-		}
-
 		before_count = r_froxel.light_count;
 		VectorScale (src->color, q_max (0.f, src->intensity), scaled_color);
 		R_Froxel_AddLight (src->origin, src->radius, scaled_color, 1.f, R_Froxel_DlightTypeFromRealtimeLight (src));
@@ -862,6 +854,13 @@ void R_Froxel_InjectDlights (void)
 
 	if (!r_froxel.valid)
 		return;
+	/*
+	 * Keep lava emissive parity between legacy and pp-fog paths.
+	 * Previously pp-fog returned before this injection, causing visible
+	 * differences whenever lava was in view.
+	 */
+	if (allow_lava_emissive)
+		R_Froxel_InjectLavaSurfaceLights ();
 	if (pp_fog_enabled)
 	{
 		R_Froxel_InjectPPDLights ();
@@ -886,9 +885,6 @@ void R_Froxel_InjectDlights (void)
 		}
 		/* No early return here: real dlights are injected below as well. */
 	}
-
-	if (allow_lava_emissive)
-		R_Froxel_InjectLavaSurfaceLights ();
 
 	if (!fog_light_enabled)
 		return;

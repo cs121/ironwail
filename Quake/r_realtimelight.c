@@ -9,6 +9,11 @@ extern cvar_t r_dlight_entities;
 
 cvar_t r_ppdlights = { "r_ppdlights", "0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_world = { "r_ppdlights_world", "1", CVAR_ARCHIVE };
+cvar_t r_ppdlights_world_scale = { "r_ppdlights_world_scale", "1", CVAR_ARCHIVE };
+/* 0 = linear add, 1 = soft-add compression (default). */
+cvar_t r_ppdlights_world_blend = { "r_ppdlights_world_blend", "1", CVAR_ARCHIVE };
+/* 0 = additive (GL_ONE,GL_ONE), 1 = screen-like (GL_ONE_MINUS_DST_COLOR,GL_ONE). */
+cvar_t r_ppdlights_world_blendop = { "r_ppdlights_world_blendop", "0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_models = { "r_ppdlights_models", "1", CVAR_ARCHIVE };
 cvar_t r_ppdlights_fog = { "r_ppdlights_fog", "0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_fog_debug = { "r_ppdlights_fog_debug", "0", CVAR_NONE };
@@ -121,7 +126,14 @@ static qboolean R_PPdlights_AddFrameLight (const vec3_t origin, float radius, co
 		return false;
 	}
 
-	if (R_PPdlights_IsFrustumCulled (origin, radius))
+	/*
+	 * Keep froxel fog parity with legacy dlight injection:
+	 * when PP fog is enabled, do not frustum-cull volumetric contributors.
+	 */
+	if (R_PPdlights_IsFrustumCulled (origin, radius)
+		&& !(r_ppdlights.value > 0.f
+			&& r_ppdlights_fog.value > 0.f
+			&& (flags & RL_LIGHT_VOLUMETRIC_CONTRIB) != 0u))
 	{
 		rl_frame_stats.rejected_frustum++;
 		return false;
@@ -141,7 +153,10 @@ static qboolean R_PPdlights_AddFrameLight (const vec3_t origin, float radius, co
 	dst->type = type;
 	dst->flags = flags;
 	dst->source_id = source_id;
-	dst->reserved = 0u;
+	/* Preserve original dlight subtype for fog/froxel parity (e.g. lava/torch weighting). */
+	dst->reserved = (type == RL_LIGHT_POINT && source != NULL)
+		? (unsigned int)source->type
+		: 0u;
 	rl_frame_light_sources[rl_frame_light_count - 1] = source;
 	rl_frame_stats.accepted++;
 	if (from_emissive)
@@ -270,6 +285,9 @@ void R_PPdlights_RegisterCvars (void)
 {
 	Cvar_RegisterVariable (&r_ppdlights);
 	Cvar_RegisterVariable (&r_ppdlights_world);
+	Cvar_RegisterVariable (&r_ppdlights_world_scale);
+	Cvar_RegisterVariable (&r_ppdlights_world_blend);
+	Cvar_RegisterVariable (&r_ppdlights_world_blendop);
 	Cvar_RegisterVariable (&r_ppdlights_models);
 	Cvar_RegisterVariable (&r_ppdlights_fog);
 	Cvar_RegisterVariable (&r_ppdlights_fog_debug);
