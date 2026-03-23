@@ -32,6 +32,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_godrays.h"
 #include "r_fogvol.h"
 #include "r_realtimelight.h"
+#include "r_skyvis.h"
 
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
@@ -449,6 +450,7 @@ void R_Init (void)
         Cmd_AddCommand ("r_showbboxes_filter_clear", R_ShowbboxesFilterClear_f);
 
         Lightgrid_Init ();
+        R_SkyVis_Init ();
         Material_Init ();
 
 Cvar_RegisterVariable (&r_norefresh);
@@ -1002,6 +1004,7 @@ void R_NewMap (void)
 	R_ClearDecals ();
 
 	GL_BuildLightmaps ();
+	R_SkyVis_NewMap ();
         GL_BuildBModelVertexBuffer ();
         GL_BuildBModelMarkBuffers ();
         //ericw -- no longer load alias models into a VBO here, it's done in Mod_LoadAliasModel

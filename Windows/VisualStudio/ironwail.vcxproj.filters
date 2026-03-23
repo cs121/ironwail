@@ -90,6 +90,9 @@
     <ClCompile Include="..\..\Quake\gl_rmisc.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\r_skyvis.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\r_decals.c">
       <Filter>Source Files</Filter>
     </ClCompile>

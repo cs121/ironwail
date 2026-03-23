@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "gl_lightgrid.h"
+#include "r_skyvis.h"
 
 extern cvar_t gl_fullbrights, gl_overbright; //johnfitz
 extern cvar_t r_lightmap_mipmaps;
@@ -917,6 +918,7 @@ void GL_BuildBModelVertexBuffer (void)
                                         {
                                                 VectorSet (vert->lightgrid, 1.f, 1.f, 1.f);
                                         }
+					vert->skyvisibility = R_SkyVis_Sample (vec);
                                 }
 
                                 s = DotProduct (vec, fa->texinfo->vecs[0]) + fa->texinfo->vecs[0][3] * useofs;

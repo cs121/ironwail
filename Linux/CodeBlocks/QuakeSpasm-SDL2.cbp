@@ -129,6 +129,9 @@
 		<Unit filename="../../Quake/gl_rmisc.c">
 			<Option compilerVar="CC" />
 		</Unit>
+		<Unit filename="../../Quake/r_skyvis.c">
+			<Option compilerVar="CC" />
+		</Unit>
 		<Unit filename="../../Quake/gl_screen.c">
 			<Option compilerVar="CC" />
 		</Unit>
