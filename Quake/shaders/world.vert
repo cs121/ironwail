@@ -132,6 +132,7 @@ layout(location=2) in float  in_lmofs;
 layout(location=3) in ivec4  in_styles;
 layout(location=4) in vec3   in_normal;
 layout(location=5) in vec3   in_lightgrid;
+layout(location=6) in float  in_skyvisibility;
 
 // Vertex outputs
 layout(location=0)  flat out uint  out_flags;
@@ -155,9 +156,10 @@ layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
 layout(location=13) out vec3 out_normal;
 layout(location=14) out vec3 out_lightgrid;
-layout(location=15) flat out vec4 out_stage_color;
-layout(location=16) flat out uint out_tcgen;
-layout(location=17) flat out vec3 out_bmodel_relight;
+layout(location=15) out float out_skyvisibility;
+layout(location=16) flat out vec4 out_stage_color;
+layout(location=17) flat out uint out_tcgen;
+layout(location=18) flat out vec3 out_bmodel_relight;
 
 vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 {
@@ -212,6 +214,7 @@ void main()
 	// consistent results. normalize() still required — non-uniform scale possible.
 	out_normal    = normalize(world_normal);
 	out_lightgrid = in_lightgrid;
+	out_skyvisibility = in_skyvisibility;
 	out_bmodel_relight = vec3(instance.pad0, instance.pad1, instance.pad2);
 
 	// UV selection

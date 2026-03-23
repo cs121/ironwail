@@ -172,9 +172,10 @@ layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
 layout(location=13) in vec3 in_normal;
 layout(location=14) in vec3 in_lightgrid;
-layout(location=15) flat in vec4 in_stage_color;
-layout(location=16) flat in uint in_tcgen;
-layout(location=17) flat in vec3 in_bmodel_relight;
+layout(location=15) in float in_skyvisibility;
+layout(location=16) flat in vec4 in_stage_color;
+layout(location=17) flat in uint in_tcgen;
+layout(location=18) flat in vec3 in_bmodel_relight;
 
 // Utility: ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -651,6 +652,16 @@ void main()
 			return;
 		}
 
+		if (LightgridParams.w > 0.5)
+		{
+			float skyvis_debug = clamp(in_skyvisibility, 0.0, 1.0);
+			OUT_COLOR = vec4(vec3(skyvis_debug), 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
+
 		// Directional lightmap
 		if (LightmapParams.z > 0.5)
 		{
@@ -673,6 +684,12 @@ void main()
 
 		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
 		vec3 total_light    = clamped_static * lightgrid + in_bmodel_relight;
+		float sky_visibility = clamp(in_skyvisibility, 0.0, 1.0);
+		float sky_upness = clamp(surface_normal.z * 0.5 + 0.5, 0.0, 1.0);
+		float sky_room = 1.0 - 0.6 * max(max(clamped_static.r, clamped_static.g), clamped_static.b);
+		vec3 sky_diffuse = SkyVisTint.rgb * (ShaderParams.z * mix(0.2, 1.0, sky_upness) * sky_visibility * max(sky_room, 0.0));
+		sky_diffuse = min(sky_diffuse, vec3(SkyVisTint.a));
+		total_light += max(min(sky_diffuse, 1.0 - total_light), 0.0);
 
 		// Dynamic lights
 		if (!additive_dlights && NumLights > 0u)
@@ -764,28 +781,23 @@ void main()
 			float ndotl = max(dot(surface_normal, sun_to_surface), 0.0);
 			if (ndotl > 0.0)
 			{
-				/* Minimal stopgap visibility: sky surfaces always receive full sun,
-				 * non-sky surfaces get a conservative attenuation from ShaderParams.z
-				 * (driven by cvar r_sun_visibility, clamped to [0,1] on CPU). */
-				float sun_visibility = ((in_flags & CF_MAT_SKY) != 0u) ? 1.0 : ShaderParams.z;
 				float sun_shadow = SampleSunShadow(in_pos);
-				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl * sun_visibility * sun_shadow;
+				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl * sun_shadow;
 				total_light += max(min(sun_contrib, 1.0 - total_light), 0.0);
 				if (rim_factor > 1e-5 && RimLightParams1.z > 0.0)
 				{
 					float rim_shadow = (RimLightParams0.w > 0.5) ? sun_shadow : 1.0;
 					float sun_back = max(dot(-surface_normal, sun_to_surface), 0.0);
 					rim_sun_accum += SunColorIntensity.rgb * SunColorIntensity.a
-						* sun_visibility * rim_shadow * mix(0.35, 1.0, sun_back);
+						* rim_shadow * mix(0.35, 1.0, sun_back);
 				}
 			}
 			else if (rim_factor > 1e-5 && RimLightParams1.z > 0.0)
 			{
-				float sun_visibility = ((in_flags & CF_MAT_SKY) != 0u) ? 1.0 : ShaderParams.z;
 				float rim_shadow = (RimLightParams0.w > 0.5) ? SampleSunShadow(in_pos) : 1.0;
 				float sun_back = max(dot(-surface_normal, sun_to_surface), 0.0);
 				rim_sun_accum += SunColorIntensity.rgb * SunColorIntensity.a
-					* sun_visibility * rim_shadow * mix(0.35, 1.0, sun_back);
+					* rim_shadow * mix(0.35, 1.0, sun_back);
 			}
 		}
 
@@ -857,7 +869,7 @@ void main()
 		}
 		else if (lighting_debug_view == 6)
 		{
-			debug_rgb = clamp(in_lightgrid, 0.0, 1.0);
+			debug_rgb = vec3(clamp(in_skyvisibility, 0.0, 1.0));
 		}
 		else if (lighting_debug_view == 7)
 		{

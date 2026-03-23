@@ -225,6 +225,7 @@ GLOBJS = \
 	gl_fog.o \
 	gl_rmisc.o \
 	r_postfx.o \
+	r_skyvis.o \
 	r_realtimelight.o \
 	r_part.o \
 	r_world.o \

@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_framegraph.h"
 #include "r_fogvol.h"
 #include "r_godrays.h"
+#include "r_skyvis.h"
 #include "r_ssao.h"
 #include "r_tonemap.h"
 #include "r_quality.h"
@@ -3568,8 +3569,8 @@ void R_SetupView (void)
         r_framedata.lightmap_params[3] = r_lightstyle_framefrac;
         r_framedata.lightgrid_params[0] = R_LightgridEnabled () ? 1.f : 0.f;
         r_framedata.lightgrid_params[1] = (r_lightgrid_debug.value >= 2.f) ? 1.f : 0.f;
-        r_framedata.lightgrid_params[2] = 0.f;
-        r_framedata.lightgrid_params[3] = 0.f;
+        r_framedata.lightgrid_params[2] = (r_skyvis.value > 0.f && R_SkyVis_Active ()) ? 1.f : 0.f;
+        r_framedata.lightgrid_params[3] = (r_skyvis_debug.value >= 2.f) ? 1.f : 0.f;
         r_framedata.dlight_params[0] = 1.f;
         r_framedata.dlight_params[1] = 0.f;
         r_framedata.dlight_params[2] = 0.f;
@@ -3580,7 +3581,7 @@ void R_SetupView (void)
         r_framedata.colorspace_params[3] = CLAMP (0.f, r_lighting_debug_view.value, 9.f);
         r_framedata.shader_params[0] = r_material_debug.value;
         r_framedata.shader_params[1] = r_tcgen_debug.value;
-        r_framedata.shader_params[2] = CLAMP (0.f, r_sun_visibility.value, 1.f);
+        r_framedata.shader_params[2] = R_SkyVis_GetResolvedScale ();
         r_framedata.shader_params[3] = 0.f;
 
 	{
@@ -3596,6 +3597,18 @@ void R_SetupView (void)
 		r_framedata.sun_color_intensity[1] = sun->color[1];
 		r_framedata.sun_color_intensity[2] = sun->color[2];
 		r_framedata.sun_color_intensity[3] = sun->intensity;
+	}
+
+	{
+		vec3_t skyvis_tint = {0.f, 0.f, 0.f};
+
+		if (r_skyvis.value > 0.f && R_SkyVis_Active ())
+			R_SkyVis_GetTint (skyvis_tint);
+
+		r_framedata.skyvis_tint[0] = skyvis_tint[0];
+		r_framedata.skyvis_tint[1] = skyvis_tint[1];
+		r_framedata.skyvis_tint[2] = skyvis_tint[2];
+		r_framedata.skyvis_tint[3] = R_SkyVis_GetResolvedCap ();
 	}
 
 	double prev_delta = cl.time - r_prev_frame_time;
@@ -5255,6 +5268,5 @@ void R_RenderView (void)
 			rs_dynamiclightmaps);
 	//johnfitz
 }
-
 
 
