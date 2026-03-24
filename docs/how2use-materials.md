@@ -4,6 +4,10 @@ Ironwail loads material definitions from `materials/*.material` through the
 material pipeline. These definitions are used for texture metadata and selected
 render-stage behavior (including particle material integration).
 
+For the particle-stage compatibility contract (MVP scope + strict/tolerant
+policy), see
+[`docs/particle_material_contract.md`](./particle_material_contract.md).
+
 ## Console workflow
 
 1. **List loaded materials**
