@@ -973,6 +973,11 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 				data = SkipUnknownBlockOrLine (data, true, state);
 				break;
 			}
+			if (stage.map_path)
+			{
+				Z_Free (stage.map_path);
+				stage.map_path = NULL;
+			}
 			if (!q_strcasecmp (value, "$lightmap"))
 			{
 				stage.map_type = MAT_MAP_LIGHTMAP;
@@ -1000,6 +1005,11 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 				valid = false;
 				data = SkipUnknownBlockOrLine (data, true, state);
 				break;
+			}
+			if (stage.map_path)
+			{
+				Z_Free (stage.map_path);
+				stage.map_path = NULL;
 			}
 			stage.map_type = MAT_MAP_CLAMPMAP;
 			stage.map_path = Material_DupString (value);
