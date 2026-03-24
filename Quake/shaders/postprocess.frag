@@ -150,6 +150,7 @@ layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: 
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
 // Volumetric fog params for SSAO suppression.
 // x: fogvol active flag (1.0 = fogvol texture is bound and valid, 0.0 = inactive)
+// y: transmittance source policy (0=global only, 1=fogvol preferred with global fallback)
 layout(location=27) uniform vec4 FogVolParams;
 
 const int MOTION_MAX_SAMPLES = 64;
@@ -257,6 +258,25 @@ float FogVolTransmittance(vec2 uv)
                 return 1.0; // fogvol inactive — no suppression
         float fogDensity = texture(FogVolTexture, uv).a; // 0=no fog, 1=full fog
         return clamp(1.0 - fogDensity, 0.0, 1.0);
+}
+
+// Deterministic SSAO suppression source selection:
+//  - Policy 1 + valid fogvol -> use fogvol transmittance.
+//  - Otherwise              -> use global fog transmittance fallback.
+// outSource: 1=global, 2=fogvol.
+float SelectSuppressionTransmittance(vec2 uv, float depth, out float outSource)
+{
+        float policy = floor(FogVolParams.y + 0.5);
+        bool fogvolValid = FogVolParams.x > 0.5;
+        bool useFogVol = (policy >= 1.0) && fogvolValid;
+        if (useFogVol)
+        {
+                outSource = 2.0;
+                return FogVolTransmittance(uv);
+        }
+
+        outSource = 1.0;
+        return FogTransmittanceFromGlobalFog(depth);
 }
 
 float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)
@@ -591,25 +611,14 @@ void main()
                                 float ssaoFogStrength = clamp(SSAOParams.w, 0.0, 1.0);
                                 float ssaoFogPower = max(SSAOBlurParams.w, 0.01);
                                 float fogTransmittance = 1.0;
+                                float fogSource = 0.0;
                                 if (ssaoUseDepth)
                                 {
                                         float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
                                         float underwaterTransmittance = 1.0;
                                         if (fogStrength > 0.0)
                                                 underwaterTransmittance = FogTransmittanceFromDepth(ssaoCenterDepth, fogStrength);
-					/* When volumetric fog is active, use the fogvol transmittance
-					 * buffer as the authoritative medium signal. Mixing the
-					 * legacy global-fog transmittance here over-suppresses SSAO
-					 * because fogvol density uses different units. */
-					float globalTransmittance = (FogVolParams.x < 0.5)
-						? FogTransmittanceFromGlobalFog(ssaoCenterDepth)
-						: 1.0;
-                                        // Volumetric fog transmittance: sample the fogvol composite buffer
-                                        // directly. This correctly handles spatial noise variation and
-                                        // color variation that FogTransmittanceFromGlobalFog cannot model.
-                                        // Take the minimum (most suppressing) of classical and volumetric fog.
-                                        float fogvolTransmittance = FogVolTransmittance(uv);
-                                        fogTransmittance = min(globalTransmittance, fogvolTransmittance) * underwaterTransmittance;
+                                        fogTransmittance = SelectSuppressionTransmittance(uv, ssaoCenterDepth, fogSource) * underwaterTransmittance;
                                 }
                                 float aoFogMask = pow(clamp(fogTransmittance, 0.0, 1.0), ssaoFogPower);
                                 float aoFogged = mix(1.0, ao, aoFogMask);
@@ -621,7 +630,12 @@ void main()
                                 }
                                 else if (ssaoDebugMode == 13)
                                 {
-                                        color.rgb = vec3(fogTransmittance);
+                                        vec3 sourceTint = vec3(0.0);
+                                        if (fogSource > 1.5)
+                                                sourceTint = vec3(0.15, 0.50, 1.0); // fogvol source
+                                        else if (fogSource > 0.5)
+                                                sourceTint = vec3(1.0, 0.45, 0.1); // global source
+                                        color.rgb = mix(vec3(fogTransmittance), sourceTint, 0.75);
                                 }
                                 else if (ssaoDebugMode == 14)
                                 {

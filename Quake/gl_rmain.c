@@ -403,7 +403,7 @@ cvar_t	r_ssao_blur_radius = { "r_ssao_blur_radius", "2", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_bilateral = { "r_ssao_blur_bilateral", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
-// r_ssao_debug modes: 0 off, 1 raw AO, 2 AO*fog, 3 fog factor, 4 depth raw, 5 view-space Z, 6 view-space position, 7 normals, 8 noise, 9 sample hit ratio, 10 AO raw, 11 blur debug, 12 AO mask, 13 fog transmittance, 14 fog-damped AO.
+// r_ssao_debug modes: 0 off, 1 raw AO, 2 AO*fog, 3 fog factor, 4 depth raw, 5 view-space Z, 6 view-space position, 7 normals, 8 noise, 9 sample hit ratio, 10 AO raw, 11 blur debug, 12 AO mask, 13 fog transmittance+source, 14 fog-damped AO.
 cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
@@ -2205,12 +2205,25 @@ static float GL_UpdateAutoExposure (void)
 }
 
 
-static void GL_PostProcess_SetMediumScatterUniforms (void)
+static void GL_PostProcess_SetMediumScatterUniforms (const r_ssao_fog_state_t *fog_state)
 {
-	medium_scatter_source_t medium = GL_GetMediumScatterSource ();
+	medium_scatter_source_t medium = { 0, 0.f };
+	float fogvol_valid = 0.f;
+	float transmittance_policy = (float)R_SSAO_FOG_TRANS_GLOBAL_ONLY;
+
+	if (fog_state)
+	{
+		fogvol_valid = fog_state->fogvol_valid ? 1.f : 0.f;
+		transmittance_policy = (float)fog_state->transmittance_policy;
+	}
+
+	/* Framegraph fog handoff captures whether FogVol composite is valid for this
+	 * frame; only sample the medium texture when that handoff says it's ready. */
+	if (fogvol_valid > 0.5f)
+		medium = GL_GetMediumScatterSource ();
 
 	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, medium.texture);
-	GL_Uniform4fFunc (27, medium.valid, 0.f, 0.f, 0.f);
+	GL_Uniform4fFunc (27, medium.valid, transmittance_policy, 0.f, 0.f);
 }
 
 static float GL_ComputeEffectiveBloomIntensity (float bloom_base, float bloom_boost)
@@ -2506,7 +2519,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	/* Bind medium scatter/transmittance texture at slot 10 for SSAO suppression
 	 * in postprocess.frag. The current implementation sources FogVol composite via
 	 * GL_GetMediumScatterSource(), preserving validity gating and stale-handle safety. */
-	GL_PostProcess_SetMediumScatterUniforms ();
+	GL_PostProcess_SetMediumScatterUniforms (&r_ssao_fog_state);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	{
 		float post_contrast = CLAMP (0.8f, r_color_contrast.value, 1.2f);
@@ -5127,12 +5140,14 @@ static const RenderPassDesc s_fogvol_framegraph_pass_noshadow = {
 static void R_FG_ExecSSAOFogHandoff (RenderPassContext *ctx)
 {
 	(void)ctx;
+	/* Capture both global fog parameters and fogvol composite validity so
+	 * postprocess SSAO suppression uses deterministic source selection. */
 	R_SSAO_CaptureFogState (&r_framedata, &r_ssao_fog_state);
 }
 
 static const RenderPassDesc s_ssao_fog_handoff_framegraph_pass = {
 	"Capture fog handoff",
-	/* Captures CPU-side fog state into SSAO handoff data; no framebuffer read required. */
+	/* Captures CPU-side global fog + fogvol availability into SSAO handoff data. */
 	RENDER_RES_NONE,
 	RENDER_RES_SSAO_FOG_STATE,
 	0,
@@ -5320,4 +5335,3 @@ void R_RenderView (void)
 			rs_dynamiclightmaps);
 	//johnfitz
 }
-
