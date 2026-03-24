@@ -46,10 +46,10 @@ layout(std140, binding=0) uniform FrameDataUBO
     vec4    LightgridParams;    // 320
     vec4    DLightParams;       // 336
     vec4    ColorSpaceParams;   // 352
-    vec4    ShaderParams;       // 368  x: shader debug, y: tcgen debug, z: legacy sun visibility, w: skyvis scale
+    vec4    ShaderParams;       // 368  x: shader debug, y: tcgen debug, z: legacy sun visibility, w: ambient-sky scale
     vec4    SunDirEnabled;  // 384  xyz: scene->sun direction, w: enabled
     vec4    SunColorIntensity; // 400 rgb: sun color, w: intensity
-    vec4    SkyVisTint;     // 416 rgb: sky tint, w: cap
+    vec4    SkyVisTint;     // 416 shared ambient-sky contract: rgb tint, w cap
 
     //  Global params  offset 432
     // NOTE: These members must stay layout-compatible with gpuframedata_t
@@ -62,6 +62,39 @@ layout(std140, binding=0) uniform FrameDataUBO
     uint    _Pad1;          // 424
     uint    _Pad2;          // 428
 };                          // Total: 432 bytes
+
+float AmbientSkyEnabled()
+{
+    return (LightgridParams.z > 0.5) ? 1.0 : 0.0;
+}
+
+float AmbientSkyDebugEnabled()
+{
+    return (LightgridParams.w > 0.5) ? 1.0 : 0.0;
+}
+
+float AmbientSkyScale()
+{
+    return max(ShaderParams.w, 0.0);
+}
+
+vec3 AmbientSkyTint()
+{
+    return max(SkyVisTint.rgb, vec3(0.0));
+}
+
+float AmbientSkyCap()
+{
+    return max(SkyVisTint.a, 0.0);
+}
+
+vec3 AmbientSkyDiffuse(float visibility, float upness, float room)
+{
+    float sky = AmbientSkyEnabled() * AmbientSkyScale() * clamp(visibility, 0.0, 1.0)
+        * mix(0.2, 1.0, clamp(upness, 0.0, 1.0)) * max(room, 0.0);
+    vec3 diffuse = AmbientSkyTint() * sky;
+    return min(diffuse, vec3(AmbientSkyCap()));
+}
 
 
 #endif // FRAME_UNIFORMS_GLSL

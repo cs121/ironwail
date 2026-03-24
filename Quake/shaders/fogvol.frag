@@ -467,6 +467,13 @@ void main()
 	float transmittance = 1.0;
 	float tau = 0.0;
 	float ambientWeight = clamp(FogClusterParams.x, 0.0, 1.0);
+	float ambientSkyVis = clamp(volume.params2.w, 0.0, 1.0);
+	float ambientSkyMod = 1.0;
+	if (AmbientSkyEnabled() > 0.5)
+	{
+		float skyRoom = 1.0 - clamp(max(max(volume.color_density.r, volume.color_density.g), volume.color_density.b) * 0.6, 0.0, 1.0);
+		ambientSkyMod = clamp(AmbientSkyScale() * ambientSkyVis * max(skyRoom, 0.0), 0.0, 1.0);
+	}
 	// Keep ambient contribution capped so lit scattering remains dominant.
 	float lightContrast = clamp(FogLightSourceScales.w, 0.5, 4.0);
 	float extinctionRelief = clamp(FogClusterParams.w, 0.0, 0.95);
@@ -502,7 +509,8 @@ void main()
 
 		vec3 scattering = vec3(0.0);
 		// Keep only a small unlit baseline so lighting and shadows dominate.
-		scattering += volume.color_density.rgb * min(ambientWeight, 0.15);
+		vec3 ambientTint = mix(vec3(1.0), AmbientSkyTint(), clamp(ambientSkyMod, 0.0, 1.0));
+		scattering += volume.color_density.rgb * ambientTint * min(ambientWeight, 0.15);
 		scattering += froxelScatter;
 		scattering += sunScatter;
 		scattering += emissiveScatter;
@@ -549,6 +557,11 @@ void main()
 		FragColor = vec4(vec3(clamp(transmittance, 0.0, 1.0)), 1.0);
 		return;
 	}
+	if (AmbientSkyDebugEnabled() > 0.5)
+	{
+		FragColor = vec4(vec3(ambientSkyVis), 1.0);
+		return;
+	}
 	if (FogFroxelDebug != 0)
 	{
 		vec3 uvw;
@@ -593,4 +606,3 @@ void main()
 
 	FragColor = vec4(outColor, 1.0 - transmittance);
 }
-

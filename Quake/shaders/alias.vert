@@ -7,6 +7,8 @@ struct InstanceData
 	vec4	DLightColor; // xyz=DLightColor
 	vec4	DLightDir;   // xyz=dominant dlight direction
 	vec4	StaticLightDir; // xyz=dominant static light direction
+	float	SkyVisibility;
+	vec3	_PadSky;
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -27,7 +29,9 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	DLightDirectionalMix;
 	float	PPDLightModelEnable;
 	float	PPDLightModelDebug;
-	float	_Pad1;
+	vec4	AmbientSkyParams; // x: enabled, y: scale, z: debug mode, w: unused
+	vec4	AmbientSkyTint;   // rgb: tint, w: cap
+	float	_Pad1[3];
 	InstanceData instances[];
 } AliasFrameBuffer;
 
@@ -100,6 +104,7 @@ layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
 layout(location=7) out float out_dlight_vis;
 layout(location=8) out vec3 out_dlight_color;
+layout(location=9) out float out_sky_visibility;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 
@@ -158,4 +163,5 @@ void main()
 	out_dlight_vis = clamp(dot(litDlight, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
 	out_dlight_color = litDlight;
 	out_normal = world_normal;
+	out_sky_visibility = clamp(inst.SkyVisibility, 0.0, 1.0);
 }

@@ -5,6 +5,7 @@
 #include "r_dlight_pool.h"
 #include "r_godrays.h"
 #include "r_realtimelight.h"
+#include "r_skyvis.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -655,6 +656,9 @@ static void R_FogVol_FillGPUVolume (const fog_volume_t *v, fog_volume_gpu_t *gpu
 	gpu->params2[0] = v->edgeSoftness;
 	gpu->params2[1] = v->heightScale;
 	gpu->params2[2] = v->falloff;
+	gpu->params2[3] = 0.f;
+	if (r_skyvis.value > 0.f && R_SkyVis_Active ())
+		gpu->params2[3] = CLAMP (0.f, R_SkyVis_Sample (v->sphereCenter), 1.f);
 }
 
 static void R_FogVol_UploadVolumeRange (const fog_volume_t *volumes, int count)
@@ -1044,4 +1048,3 @@ void R_FogVol_DrawDebug2D (void)
 void R_FogVol_LogEndFrameState (void)
 {
 }
-
