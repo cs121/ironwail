@@ -580,13 +580,13 @@ static qboolean Material_ParseTcGen (const char *token, mat_tcgen_t *out)
 	return false;
 }
 
-static void Material_PushTcMod (material_stage_t *stage, mat_tcmod_type_t type, const float *args, int arg_count)
+static qboolean Material_PushTcMod (material_stage_t *stage, mat_tcmod_type_t type, const float *args, int arg_count)
 {
 	mat_tcmod_t mod;
 	int i;
 
 	if (!stage || stage->tcmod_count >= (int)countof (stage->tcmods))
-		return;
+		return false;
 
 	memset (&mod, 0, sizeof (mod));
 	mod.type = type;
@@ -594,6 +594,7 @@ static void Material_PushTcMod (material_stage_t *stage, mat_tcmod_type_t type, 
 		mod.args[i] = args[i];
 
 	stage->tcmods[stage->tcmod_count++] = mod;
+	return true;
 }
 
 static qboolean ExpectToken (const char **data, const char *token, mat_material_parse_state_t *state)
@@ -1388,7 +1389,13 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 					break;
 				}
 				Material_ValidateTcModArgs (state, "tcMod scroll", scroll, scroll_defaults, 2);
-				Material_PushTcMod (&stage, MAT_TCMOD_SCROLL, scroll, 2);
+				if (!Material_PushTcMod (&stage, MAT_TCMOD_SCROLL, scroll, 2))
+				{
+					Material_WarnMaterial (state, "tcMod limit exceeded; ignoring extra modifiers");
+					stage.tcmod_overflow = true;
+					if (r_particles_material_strict.value > 0.f)
+						valid = false;
+				}
 				continue;
 			}
 			if (!q_strcasecmp (value, "scale"))
@@ -1402,7 +1409,13 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 					break;
 				}
 				Material_ValidateTcModArgs (state, "tcMod scale", scale, scale_defaults, 2);
-				Material_PushTcMod (&stage, MAT_TCMOD_SCALE, scale, 2);
+				if (!Material_PushTcMod (&stage, MAT_TCMOD_SCALE, scale, 2))
+				{
+					Material_WarnMaterial (state, "tcMod limit exceeded; ignoring extra modifiers");
+					stage.tcmod_overflow = true;
+					if (r_particles_material_strict.value > 0.f)
+						valid = false;
+				}
 				continue;
 			}
 			if (!q_strcasecmp (value, "rotate"))
@@ -1416,7 +1429,13 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 					break;
 				}
 				Material_ValidateTcModArgs (state, "tcMod rotate", &deg_per_sec, &rotate_default, 1);
-				Material_PushTcMod (&stage, MAT_TCMOD_ROTATE, &deg_per_sec, 1);
+				if (!Material_PushTcMod (&stage, MAT_TCMOD_ROTATE, &deg_per_sec, 1))
+				{
+					Material_WarnMaterial (state, "tcMod limit exceeded; ignoring extra modifiers");
+					stage.tcmod_overflow = true;
+					if (r_particles_material_strict.value > 0.f)
+						valid = false;
+				}
 				continue;
 			}
 			if (!q_strcasecmp (value, "turb"))
@@ -1430,7 +1449,13 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 					break;
 				}
 				Material_ValidateTcModArgs (state, "tcMod turb", turb, turb_defaults, 4);
-				Material_PushTcMod (&stage, MAT_TCMOD_TURB, turb, 4);
+				if (!Material_PushTcMod (&stage, MAT_TCMOD_TURB, turb, 4))
+				{
+					Material_WarnMaterial (state, "tcMod limit exceeded; ignoring extra modifiers");
+					stage.tcmod_overflow = true;
+					if (r_particles_material_strict.value > 0.f)
+						valid = false;
+				}
 				continue;
 			}
 			if (!q_strcasecmp (value, "stretch"))
@@ -1444,7 +1469,13 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 					break;
 				}
 				Material_ValidateTcModArgs (state, "tcMod stretch", stretch, stretch_defaults, 4);
-				Material_PushTcMod (&stage, MAT_TCMOD_STRETCH, stretch, 4);
+				if (!Material_PushTcMod (&stage, MAT_TCMOD_STRETCH, stretch, 4))
+				{
+					Material_WarnMaterial (state, "tcMod limit exceeded; ignoring extra modifiers");
+					stage.tcmod_overflow = true;
+					if (r_particles_material_strict.value > 0.f)
+						valid = false;
+				}
 				continue;
 			}
 			Material_ReportUnknownToken (value, MATERIAL_KEYWORD_SCOPE_STAGE, material->name,

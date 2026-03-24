@@ -1141,6 +1141,12 @@ mat_particle_stage_support_t Material_ClassifyParticleStage (const material_stag
 			q_strlcpy (reason, "tcMod count overflow", reason_size);
 		return MAT_PARTICLE_STAGE_HARD_FAIL;
 	}
+	if (stage->tcmod_overflow)
+	{
+		if (reason && reason_size)
+			q_strlcpy (reason, "tcMod limit exceeded", reason_size);
+		return MAT_PARTICLE_STAGE_HARD_FAIL;
+	}
 
 	for (i = 0; i < stage->tcmod_count; ++i)
 	{

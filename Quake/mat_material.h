@@ -219,6 +219,7 @@ typedef struct mat_material_stage_s
 	mat_map_type_t		map_type;
 	mat_tcgen_t		tcgen;
 	int			tcmod_count;
+	qboolean		tcmod_overflow;
 	mat_tcmod_t		tcmods[4];
 	float			anim_map_fps;
 	char			**anim_map_frames;
