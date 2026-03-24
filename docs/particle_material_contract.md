@@ -45,8 +45,9 @@ Not allowed in the particle MVP:
 
 Additionally:
 
-- `tcGen` must be `base`.
-- More than `countof(stage->tcmods)` is a hard fail (inconsistent stage data).
+- `tcGen` muss `base` sein.
+- Mehr als `countof(stage->tcmods)` wird beim Parsen verworfen, als `tcmod_overflow` markiert
+  und als Hard-Fail klassifiziert.
 
 ### Allowed blend modes
 
@@ -92,9 +93,9 @@ syntactically valid** stage features:
 Independent of strict/tolerant policy, **inconsistent data** is always hard
 fail:
 
-- missing stage (`NULL`)
-- `tcMod` overflow
-- `blendFunc` custom with invalid factors
+- fehlende Stage (`NULL`)
+- `tcMod` overflow (`tcmod_overflow`, inkl. Warnung: `tcMod limit exceeded; ignoring extra modifiers`)
+- `blendFunc` custom mit ungültigen Faktoren
 
 ## 4) Acceptance criteria and tests
 
@@ -119,7 +120,7 @@ Each stage must be classified unambiguously as:
    - strict → **hard-fail**
 6. `blendFunc GL_ONE ???` with invalid factor parsing → **hard-fail**
 7. `stage == NULL` → **hard-fail**
-8. `tcmod_count > countof(tcmods)` → **hard-fail**
+8. mehr als 4 `tcMod`-Direktiven in einer Stage (Overflow-Flag gesetzt) → **hard-fail**
 
 ### Documented fallback
 
