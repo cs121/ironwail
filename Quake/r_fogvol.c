@@ -3,7 +3,6 @@
 #include "r_fogvol.h"
 #include "r_fogvol_internal.h"
 #include "r_dlight_pool.h"
-#include "r_godrays.h"
 #include "r_realtimelight.h"
 #include "r_skyvis.h"
 #include <math.h>
@@ -172,7 +171,6 @@ enum
 	FOGVOL_U_LIGHT_SCISSOR = 29,
 	FOGVOL_U_LIGHT_SOURCE_SCALES = 39,
 	FOGVOL_U_LIGHTING_MODE = 40,
-	FOGVOL_U_GODRAY_COUPLING = 41,
 	FOGVOL_U_LOCAL_OCCLUSION_MODE = 42,
 	FOGVOL_U_CHECKERBOARD = 47,
 	FOGVOL_U_FROXEL_ENABLED = 34,
@@ -198,10 +196,6 @@ static qboolean r_fogvol_composite_valid = false;
 static GLuint r_fogvol_composite_tex = 0;
 static fog_light_lists_gpu_t r_fogvol_empty_lights;
 
-static GLuint r_fogvol_godray_shafts_tex = 0;
-static GLuint r_fogvol_godray_mask_tex = 0;
-static GLuint r_fogvol_godray_source_tex = 0;
-static qboolean r_fogvol_godray_ready = false;
 
 static int FogVol_NormalizeShape (int shape)
 {
@@ -317,12 +311,7 @@ void R_FogVol_RegisterCvars (void)
 		Cvar_RegisterVariable (fogvol_cvar_table[i].var);
 }
 
-void R_FogVol_SetGodrayCouplingTextures (GLuint shafts_tex, GLuint mask_tex, GLuint source_tex, qboolean ready)
 {
-	r_fogvol_godray_shafts_tex = shafts_tex;
-	r_fogvol_godray_mask_tex = mask_tex;
-	r_fogvol_godray_source_tex = source_tex;
-	r_fogvol_godray_ready = ready;
 }
 
 void R_FogVol_ClearEntities (void)
@@ -810,8 +799,6 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SCISSOR, 0.f, 0.f, 0.f, 0.f);
 	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES, light_scale_dlight, light_scale_sun, light_scale_emissive, light_contrast);
 	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, lighting_mode);
-	/* Safety fallback: disable Godray->Fog coupling to avoid translucent band artifacts. */
-	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, 0);
 	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, 0);
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (mode > 0 && (froxel_ready || force_froxel_debug)) ? 1 : 0);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, froxel_params0[0], froxel_params0[1], froxel_params0[2], froxel_params0[3]);

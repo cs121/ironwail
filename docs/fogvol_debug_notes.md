@@ -16,7 +16,6 @@ The dominant issue was **A + C combined**:
 - `6`: transmittance visualization
 - `7`: temporal history contribution (`R=alpha, G=history valid, B=motion factor`)
 - `8`: fog shadow debug (`R=shadowed scattering, G=unshadowed estimate, B=visibility ratio`)
-- `9`: godray shaft coupling contribution (`R=shaft energy, G=half-energy`, requires `r_fogvol_godray_coupling > 0`)
 
 ## Added guardrails
 - Runtime depth conventions are now passed explicitly (`near/far/reverseZ/skyCutoff`) to fog shader.
@@ -60,9 +59,6 @@ The dominant issue was **A + C combined**:
     - Active only when local light-list shading runs (`mode 1` raymarch or `mode 3` froxel+detail).
     - Forced to `0` in pure froxel mode (`mode 2`) and lighting off (`mode 0`).
     - Mode `2` is downgraded to mode `1` when `r_fogvol_shadow 0`.
-- `r_fogvol_godray_coupling` (default `1`): enables fogvol/godray coupling path.
-  - Preferred path: inject previous-frame godray shafts into froxel lighting when `r_fogvol_froxel 1` and `r_fogvol_froxel_godrays > 0`.
-  - Alternate path: sample godray shafts directly in `fogvol.frag` during march (depth-gated) when froxel path is unavailable.
 - `r_fogvol_clustered` (default `0`): experimental tile-bucketed local-volume path.
   - `0`: legacy per-volume ping-pong path
   - `1`: allow clustered local rendering for supported low/medium local-volume scenes
@@ -72,7 +68,6 @@ The dominant issue was **A + C combined**:
 
 ## Preset matrix
 
-| Preset | Steps | Shadows | Local occlusion | Godray coupling | Local lighting path |
 | --- | --- | --- | --- | --- | --- |
 | `0` low | low (`8` global / `12` local) | forced off | forced off | forced off | at most one path (`froxel` or `light-list`) |
 | `1` medium | medium (`12` global / `18` local) | on if enabled, capped to `1..2` samples | capped to mode `1` | allowed | never `froxel + light-list` together |

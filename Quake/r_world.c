@@ -27,7 +27,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_realtimelight.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
-extern cvar_t r_godrays;
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_oit;
 
@@ -768,11 +767,8 @@ static void R_FlushBModelCalls (void)
 #define CALLFLAG_EMISSIVE        (1u << 3)
 #define CALLFLAG_ALPHA_TEST      (1u << 4)
 #define CALLFLAG_NOLIGHTMAP      (1u << 2)
-#define CALLFLAG_GODRAYS_LIGHT   (1u << 5)
-#define CALLFLAG_GODRAYS_EMISSIVE (1u << 6)
 #define CALLFLAG_MAT_BLOOM       (1u << 7)
 #define CALLFLAG_MAT_EMISSIVE    (1u << 8)
-#define CALLFLAG_MAT_GODRAY      (1u << 9)
 #define CALLFLAG_MAT_TRANS       (1u << 10)
 #define CALLFLAG_MAT_SKY         (1u << 11)
 #define CALLFLAG_MAT_HAS_SHADER  (1u << 12)
@@ -787,13 +783,10 @@ static unsigned R_StageOutputCallFlags (const material_stage_t *stage)
 		flags |= CALLFLAG_MAT_BLOOM;
 	if (stage->outputs & MAT_STAGE_OUT_EMISSIVE)
 		flags |= CALLFLAG_MAT_EMISSIVE;
-	if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
-		flags |= CALLFLAG_MAT_GODRAY;
 
 	return flags;
 }
 
-qboolean R_TextureEmitsGodrays (texture_t *t)
 {
 	if (!t)
 		return false;
@@ -808,7 +801,6 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 		for (size_t i = 0; i < stage_count; ++i)
 		{
 			const material_stage_t *stage = &t->material->stages[i];
-			if (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE)
 				return true;
 		}
 	}
@@ -816,17 +808,14 @@ qboolean R_TextureEmitsGodrays (texture_t *t)
 	return false;
 }
 
-qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 {
 	if (!s)
 		return false;
 
-	if ((s->flags & SURF_DRAWSKY) && r_godrays.value > 0.f)
 	{
 		if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
 		{
 			texture_t *t = cl.worldmodel->textures[s->texinfo->texnum];
-			return R_TextureEmitsGodrays (t);
 		}
 		return false;
 	}
@@ -834,7 +823,6 @@ qboolean R_SurfaceEmitsGodrays (msurface_t *s)
 	if (cl.worldmodel && s->texinfo && s->texinfo->texnum >= 0 && s->texinfo->texnum < cl.worldmodel->numtextures)
 	{
 		texture_t *t = cl.worldmodel->textures[s->texinfo->texnum];
-		return R_TextureEmitsGodrays (t);
 	}
 
 	return false;
@@ -1257,7 +1245,6 @@ typedef enum {
         BP_ALPHATEST,
         BP_SHADOW_SUN,
         BP_SHADOW_DLIGHT,
-        BP_GODRAYS,
         BP_SKYLAYERS,
         BP_SKYCUBEMAP,
         BP_SKYSTENCIL,
@@ -1483,7 +1470,6 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
 }
 
-static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 {
 	int i, j;
 	int totalinst, baseinst;
@@ -1491,7 +1477,6 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 	GLbyte *ofs;
 	textype_t texbegin, texend;
 
-	if (!count || r_materials.value <= 0.f || !glprogs.godrays_source)
 		return;
 
 	if (count > countof (bmodel_instances))
@@ -1517,7 +1502,6 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 	if (!totalinst)
 		return;
 
-	R_ResetBModelCalls (glprogs.godrays_source);
 	GL_SetState (GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (6));
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
@@ -1545,7 +1529,6 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 			|| model->texofs[texend] < model->texofs[texbegin]
 			|| model->texofs[texend] > model->texofs[TEXTYPE_COUNT])
 		{
-			Con_DWarning ("R_DrawBrushModels_GodrayStages: invalid texofs for %s (%d..%d of %d)\n",
 				model->name, model->texofs[texbegin], model->texofs[texend], model->texofs[TEXTYPE_COUNT]);
 			continue;
 		}
@@ -1591,9 +1574,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 				vec4_t stage_color;
 				unsigned extra_flags = CALLFLAG_MAT_HAS_SHADER;
 				qboolean wants_emissive = (stage->outputs & MAT_STAGE_OUT_EMISSIVE) != 0u;
-				qboolean wants_godray = (stage->outputs & MAT_STAGE_OUT_GODRAY_SOURCE) != 0u;
 
-				if (!wants_godray)
 					continue;
 
 				if (stage->map_type == MAT_MAP_MAP && (!stage->map_path || !stage->map_path[0]) && stage_index == 0)
@@ -1605,10 +1586,6 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 					continue;
 
 				R_EvalStageColorAlpha (stage, cl.time, stage_color);
-				stage_color[0] *= stage->godray_scale;
-				stage_color[1] *= stage->godray_scale;
-				stage_color[2] *= stage->godray_scale;
-				stage_color[3] *= stage->godray_scale;
 
 				if (stage_index == 0 && stage_tex == t->gltexture)
 				{
@@ -1618,11 +1595,9 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 						fb = NULL;
 				}
 
-				extra_flags |= CALLFLAG_GODRAYS_LIGHT;
 
 				if (wants_emissive)
 				{
-					extra_flags |= CALLFLAG_GODRAYS_EMISSIVE;
 					extra_flags |= CALLFLAG_MAT_EMISSIVE;
 				}
 
@@ -1700,10 +1675,8 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 texend = TEXTYPE_CUTOUT;
                 program = glprogs.world_shadow[1];
                 break;
-        case BP_GODRAYS:
                 texbegin = 0;
                 texend = TEXTYPE_COUNT;
-                program = glprogs.godrays_source;
                 break;
         case BP_SKYLAYERS:
                 texbegin = TEXTYPE_SKY;
@@ -1742,7 +1715,6 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 		entity_t *ent = ents[i];
 		if (!ent || !Mod_IsKnownModel (ent->model))
 			continue;
-		if (pass == BP_GODRAYS && !R_BrushModelHasTextureTables (ent->model))
 			continue;
 		if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
 			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
@@ -1764,7 +1736,6 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 state &= ~GLS_MASK_CULL;
                 state |= GLS_CULL_NONE | GLS_BLEND_OPAQUE;
         }
-        else if (pass == BP_GODRAYS)
                 state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
         else if (!translucent)
                 state |= GLS_BLEND_OPAQUE;
@@ -1802,7 +1773,6 @@ else if (pass == BP_SKYCUBEMAP)
 		if (!e || !Mod_IsKnownModel (e->model))
 			continue;
 		model = e->model;
-		if (pass == BP_GODRAYS && !R_BrushModelHasTextureTables (model))
 			continue;
 		qboolean isworld = (e == &cl_entities[0]);
 		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
@@ -1847,7 +1817,6 @@ else if (pass == BP_SKYCUBEMAP)
 			if (mat_flags & MATERIAL_FLAG_NODRAW)
 				continue;
 
-			if (pass == BP_GODRAYS)
 			{
 				if (r_materials.value <= 0.f || !t->material || !t->material->stages)
 					continue;
@@ -2220,15 +2189,11 @@ void R_DrawBrushModels_Shadow (entity_t **ents, int count, qboolean dlight)
 
 /*
 =============
-R_DrawBrushModels_Godrays
 =============
 */
-void R_DrawBrushModels_Godrays (entity_t **ents, int count)
 {
-	if (!count || !glprogs.godrays_source)
 		return;
 
-	R_DrawBrushModels_GodrayStages (ents, count);
 }
 
 

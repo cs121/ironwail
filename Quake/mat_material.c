@@ -101,10 +101,8 @@ static const material_keyword_def_t mat_material_keyword_table[] =
 	{ "polygonOffset", MATERIAL_KEYWORD_SCOPE_TOPLEVEL, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Optional boolean or factor/units pair." },
 	{ "emissive", MATERIAL_KEYWORD_SCOPE_TOPLEVEL, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "bloom", MATERIAL_KEYWORD_SCOPE_TOPLEVEL, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
-	{ "godray", MATERIAL_KEYWORD_SCOPE_TOPLEVEL, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "emissive_scale", MATERIAL_KEYWORD_SCOPE_TOPLEVEL, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "bloom_scale", MATERIAL_KEYWORD_SCOPE_TOPLEVEL, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
-	{ "godray_scale", MATERIAL_KEYWORD_SCOPE_TOPLEVEL, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Non-Q3 extension." },
 	{ "skyParms", MATERIAL_KEYWORD_SCOPE_TOPLEVEL, MATERIAL_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 sky parameters (deferred; non-MVP)." },
 	{ "fogParms", MATERIAL_KEYWORD_SCOPE_TOPLEVEL, MATERIAL_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 fog parameters (deferred; non-MVP)." },
 	{ "deformVertexes", MATERIAL_KEYWORD_SCOPE_TOPLEVEL, MATERIAL_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 vertex deformation (deferred; non-MVP)." },
@@ -123,10 +121,8 @@ static const material_keyword_def_t mat_material_keyword_table[] =
 	{ "tcMod", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_PARTIAL, "Types: scroll/scale/rotate/turb/stretch." },
 	{ "emissive", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Stage-level emissive toggle." },
 	{ "bloom", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Stage-level bloom toggle." },
-	{ "godray", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Stage-level godray toggle." },
 	{ "emissiveScale", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Stage-level emissive scale." },
 	{ "bloomScale", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Stage-level bloom scale." },
-	{ "godrayScale", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Stage-level godray scale." },
 
 	{ "solid", MATERIAL_KEYWORD_SCOPE_SURFACEPARM, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Surface solid." },
 	{ "nonsolid", MATERIAL_KEYWORD_SCOPE_SURFACEPARM, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Surface non-solid." },
@@ -1328,8 +1324,6 @@ unsigned int Material_GetTextureFlags (const material_t *material)
 		flags |= MATERIAL_FLAG_EMISSIVE;
 	if (material->bloom_enable)
 		flags |= MATERIAL_FLAG_BLOOM;
-	if (material->godray_enable)
-		flags |= MATERIAL_FLAG_GODRAY;
 
 	return flags;
 }
@@ -1415,7 +1409,6 @@ void Material_Print (const material_t *material)
 		Con_Printf ("  polygon offset: off\n");
 	Con_Printf ("  emissive: %s (scale %.2f)\n", material->emissive_enable ? "on" : "off", material->emissive_scale);
 	Con_Printf ("  bloom: %s (scale %.2f)\n", material->bloom_enable ? "on" : "off", material->bloom_scale);
-	Con_Printf ("  godray: %s (scale %.2f)\n", material->godray_enable ? "on" : "off", material->godray_scale);
 	if (material->stage0.map_path || material->stage0.map_type != MAT_MAP_MAP)
 	{
 		const char *map_name = map_names[q_min ((int)material->stage0.map_type, (int)countof (map_names) - 1)];

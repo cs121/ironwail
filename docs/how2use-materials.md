@@ -20,7 +20,6 @@ render-stage behavior (including particle material integration).
    materialprint textures/common/nodraw
    ```
 
-   Prints source file, surface/render/content flags, emissive/bloom/godray
    settings, and stage details.
 
 3. **Reload all materials**
