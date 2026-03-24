@@ -81,6 +81,11 @@ void R_SSAO_CaptureFogState (const gpuframedata_t *framedata, r_ssao_fog_state_t
 	if (!out_state)
 		return;
 
+	out_state->fogvol_valid = R_FogVol_HasValidComposite ();
+	out_state->transmittance_policy = out_state->fogvol_valid
+		? R_SSAO_FOG_TRANS_FOGVOL_OR_GLOBAL
+		: R_SSAO_FOG_TRANS_GLOBAL_ONLY;
+
 	if (!R_FogVol_GetGlobalFogState (color, &density))
 	{
 		VectorClear (out_state->color);
