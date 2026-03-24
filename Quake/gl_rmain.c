@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_postfx.h"
 #include "r_framegraph.h"
 #include "r_fogvol.h"
+#include "r_godrays.h"
 #include "r_skyvis.h"
 #include "r_ssao.h"
 #include "r_tonemap.h"
@@ -103,14 +104,28 @@ static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
 static qboolean r_frame_rendered_this_update;
 
+static godrays_stabilization_t r_godrays_stabilization;
+static int r_godrays_generated_frame = -1;
+static GLuint r_godrays_cached_shafts = 0;
+static GLuint r_godrays_cached_mask = 0;
+static GLuint r_godrays_cached_source = 0;
+static qboolean r_godrays_cached_debug_source_generated = false;
 
 
+static GLuint r_godrays_coupling_shafts_tex = 0;
+static int r_godrays_coupling_shafts_w = 0;
+static int r_godrays_coupling_shafts_h = 0;
 
+qboolean R_Godrays_GetFogCouplingSource (GLuint *out_shafts_tex, int *out_width, int *out_height)
 {
 	if (out_shafts_tex)
+		*out_shafts_tex = r_godrays_coupling_shafts_tex;
 	if (out_width)
+		*out_width = r_godrays_coupling_shafts_w;
 	if (out_height)
+		*out_height = r_godrays_coupling_shafts_h;
 
+	return r_godrays_coupling_shafts_tex != 0;
 }
 
 static void R_GetFramePlanDecisions (qboolean *out_needs_scene_effects, qboolean *out_needs_postprocess);
@@ -144,6 +159,58 @@ static float GL_ConsoleVisibility (void)
 		return 1.f;
 
 	return CLAMP (0.f, scr_con_current / height, 1.f);
+}
+
+static void R_DebugDRSNativeEffects (qboolean bloom_enabled, qboolean ssao_enabled, qboolean fogvol_enabled,
+	qboolean godrays_enabled, qboolean motion_enabled)
+{
+	static int last_logged_scale = 0;
+	static int last_logged_mask = 0;
+	int scene_scale;
+	int mask = 0;
+
+	if (r_drs.value <= 0.f || r_drs_debug.value <= 0.f)
+	{
+		last_logged_scale = 0;
+		last_logged_mask = 0;
+		return;
+	}
+
+	scene_scale = R_GetSceneRenderScale ();
+	if (scene_scale <= 1)
+	{
+		last_logged_scale = 0;
+		last_logged_mask = 0;
+		return;
+	}
+
+	if (bloom_enabled)
+		mask |= 1 << 0;
+	if (ssao_enabled)
+		mask |= 1 << 1;
+	if (fogvol_enabled)
+		mask |= 1 << 2;
+	if (godrays_enabled)
+		mask |= 1 << 3;
+	if (motion_enabled)
+		mask |= 1 << 4;
+
+	if (mask == 0)
+		return;
+
+	if (last_logged_scale == scene_scale && last_logged_mask == mask)
+		return;
+
+	last_logged_scale = scene_scale;
+	last_logged_mask = mask;
+
+	Con_DPrintf ("drs note: scene=1/%d with native-domain postfx bloom=%d ssao=%d fogvol=%d godrays=%d motion=%d\n",
+		scene_scale,
+		bloom_enabled ? 1 : 0,
+		ssao_enabled ? 1 : 0,
+		fogvol_enabled ? 1 : 0,
+		godrays_enabled ? 1 : 0,
+		motion_enabled ? 1 : 0);
 }
 
 
@@ -405,7 +472,28 @@ cvar_t	r_ssao_fog_power = { "r_ssao_fog_power", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_max_distance = { "r_ssao_max_distance", "1024", CVAR_ARCHIVE };
 cvar_t	r_ssao_validate = { "r_ssao_validate", "0", CVAR_ARCHIVE };
 
+cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_sky_threshold = { "r_godrays_sky_threshold", "0.05", CVAR_ARCHIVE };
+cvar_t	r_godrays_sky_intensity = { "r_godrays_sky_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_sky_tint = { "r_godrays_sky_tint", "1 1 1", CVAR_ARCHIVE };
+cvar_t	r_godrays_emissive_intensity = { "r_godrays_emissive_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_lighttex_intensity = { "r_godrays_lighttex_intensity", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_emissive_threshold = { "r_godrays_emissive_threshold", "0.4", CVAR_ARCHIVE };
+cvar_t	r_godrays_light_threshold = { "r_godrays_light_threshold", "0.6", CVAR_ARCHIVE };
+cvar_t	r_godrays_mask_knee = { "r_godrays_mask_knee", "0.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_blur = { "r_godrays_blur", "1.5", CVAR_ARCHIVE };
+/* When enabled, light-texture godray stages are emitted only if the texture/stage/material
  * name contains a light token (light, lamp, glow, flare, neon, torch, lantern). */
+cvar_t	r_godrays_lighttex_name_match = { "r_godrays_lighttex_name_match", "1", CVAR_ARCHIVE };
+cvar_t	r_godrays_samples = { "r_godrays_samples", "48", CVAR_ARCHIVE };
+cvar_t	r_godrays_density = { "r_godrays_density", "0.9", CVAR_ARCHIVE };
+cvar_t	r_godrays_weight = { "r_godrays_weight", "0.015", CVAR_ARCHIVE };
+cvar_t	r_godrays_decay = { "r_godrays_decay", "0.97", CVAR_ARCHIVE };
+cvar_t	r_godrays_exposure = { "r_godrays_exposure", "1.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_threshold = { "r_godrays_threshold", "0.0", CVAR_ARCHIVE };
+cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_debug_source = { "r_godrays_debug_source", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_vol_pow = { "r_godrays_vol_pow", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_vignette = { "r_vignette", "0.15", CVAR_ARCHIVE };
 cvar_t	r_vignette_radius_inner = { "r_vignette_radius_inner", "0.8", CVAR_ARCHIVE };
@@ -470,9 +558,257 @@ float	map_fallbackalpha;
 qboolean r_fullbright_cheatsafe, r_lightmap_cheatsafe, r_drawworld_cheatsafe; //johnfitz
 
 cvar_t	r_scale = { "r_scale", "1", CVAR_ARCHIVE };
+cvar_t	r_scene_scale_debug = { "r_scene_scale_debug", "0", CVAR_NONE };
+cvar_t	r_drs = { "r_drs", "0", CVAR_ARCHIVE };
+cvar_t	r_drs_use_gpu = { "r_drs_use_gpu", "1", CVAR_ARCHIVE };
+cvar_t	r_drs_target_ms = { "r_drs_target_ms", "16.6", CVAR_ARCHIVE };
+cvar_t	r_drs_target_fps = { "r_drs_target_fps", "0", CVAR_ARCHIVE };
+cvar_t	r_drs_min_scale = { "r_drs_min_scale", "1", CVAR_ARCHIVE };
+cvar_t	r_drs_max_scale = { "r_drs_max_scale", "4", CVAR_ARCHIVE };
+cvar_t	r_drs_step_up = { "r_drs_step_up", "1", CVAR_ARCHIVE };
+cvar_t	r_drs_step_down = { "r_drs_step_down", "1", CVAR_ARCHIVE };
+cvar_t	r_drs_hysteresis_ms = { "r_drs_hysteresis_ms", "0.5", CVAR_ARCHIVE };
+cvar_t	r_drs_filter_alpha = { "r_drs_filter_alpha", "0.25", CVAR_ARCHIVE };
+cvar_t	r_drs_debug = { "r_drs_debug", "0", CVAR_NONE };
 
 static float view_znear;
 static float view_zfar;
+
+typedef struct render_scene_size_state_s {
+	int native_width;
+	int native_height;
+	int scene_width;
+	int scene_height;
+	int scene_scale;
+	int prev_scene_width;
+	int prev_scene_height;
+	qboolean initialized;
+} render_scene_size_state_t;
+
+static render_scene_size_state_t r_scene_size_state;
+
+typedef struct render_drs_state_s {
+	int dynamic_scale;
+	float filtered_ms;
+	float last_raw_ms;
+	qboolean initialized;
+	qboolean last_gpu_valid;
+	int upscale_cooldown;
+} render_drs_state_t;
+
+static render_drs_state_t r_drs_state;
+
+static int R_GetDRSMinScale (void)
+{
+	int max_supported = q_max (1, vid.maxscale);
+	return CLAMP (1, (int)Q_rint (r_drs_min_scale.value), max_supported);
+}
+
+static int R_GetDRSMaxScale (int min_scale)
+{
+	int max_supported = q_max (1, vid.maxscale);
+	return CLAMP (min_scale, (int)Q_rint (r_drs_max_scale.value), max_supported);
+}
+
+static int R_ClampSceneScaleSupported (int scale)
+{
+	int max_supported = q_max (1, vid.maxscale);
+	return CLAMP (1, scale, max_supported);
+}
+
+static int R_ClampDRSScale (int scale)
+{
+	int min_scale = q_max (1, R_GetDRSMinScale ());
+	int max_scale = q_max (min_scale, R_GetDRSMaxScale (min_scale));
+	return CLAMP (min_scale, scale, max_scale);
+}
+
+static void R_UpdateDynamicResolutionScale (void)
+{
+	double gpu_ms = 0.0;
+	double cpu_ms = 0.0;
+	qboolean gpu_valid = false;
+	double raw_ms = 0.0;
+	float target_ms;
+	float alpha;
+	float hysteresis_ms;
+	int min_scale;
+	int max_scale;
+	int step_up;
+	int step_down;
+	int current_scale;
+	int new_scale;
+	int debug_level;
+	qboolean use_gpu = (r_drs_use_gpu.value > 0.f);
+	qboolean use_gpu_timing = false;
+
+	if (r_drs.value <= 0.f)
+	{
+		memset (&r_drs_state, 0, sizeof (r_drs_state));
+		return;
+	}
+
+	R_FrameGraph_GetTimingSummary (&gpu_ms, &cpu_ms, &gpu_valid);
+	use_gpu_timing = (use_gpu && gpu_valid && gpu_ms > 0.0);
+	raw_ms = use_gpu_timing ? gpu_ms : ((host_frametime > 0.0) ? host_frametime * 1000.0 : cpu_ms);
+	if (raw_ms <= 0.0)
+		raw_ms = 0.001;
+
+	target_ms = (r_drs_target_ms.value > 0.f)
+		? r_drs_target_ms.value
+		: ((r_drs_target_fps.value > 1.f) ? (1000.f / r_drs_target_fps.value) : (1000.f / 60.f));
+	target_ms = CLAMP (1.f, target_ms, 1000.f);
+
+	alpha = CLAMP (0.01f, r_drs_filter_alpha.value, 1.f);
+	hysteresis_ms = q_max (0.f, r_drs_hysteresis_ms.value);
+	min_scale = R_GetDRSMinScale ();
+	max_scale = R_GetDRSMaxScale (min_scale);
+	step_up = CLAMP (1, (int)Q_rint (r_drs_step_up.value), 8);
+	step_down = CLAMP (1, (int)Q_rint (r_drs_step_down.value), 8);
+	debug_level = (int)Q_rint (r_drs_debug.value);
+
+	if (!r_drs_state.initialized)
+	{
+		r_drs_state.dynamic_scale = R_ClampDRSScale (q_max (1, r_refdef.scale));
+		r_drs_state.filtered_ms = (float)raw_ms;
+		r_drs_state.last_raw_ms = (float)raw_ms;
+		r_drs_state.last_gpu_valid = use_gpu_timing;
+		r_drs_state.initialized = true;
+		r_drs_state.upscale_cooldown = 0;
+		if (debug_level > 0)
+			Con_DPrintf ("drs init: scale=%d raw_ms=%.2f source=%s target=%.2f\n",
+				r_drs_state.dynamic_scale, (float)raw_ms, use_gpu_timing ? "gpu" : "frame", target_ms);
+		return;
+	}
+
+	r_drs_state.filtered_ms = r_drs_state.filtered_ms * (1.f - alpha) + (float)raw_ms * alpha;
+	r_drs_state.last_raw_ms = (float)raw_ms;
+	r_drs_state.last_gpu_valid = use_gpu_timing;
+	current_scale = R_ClampDRSScale (r_drs_state.dynamic_scale > 0 ? r_drs_state.dynamic_scale : q_max (1, r_refdef.scale));
+	new_scale = current_scale;
+
+	if (r_drs_state.filtered_ms > target_ms + hysteresis_ms)
+	{
+		new_scale = q_min (max_scale, current_scale + step_down);
+		r_drs_state.upscale_cooldown = 8;
+	}
+	else if (r_drs_state.filtered_ms < target_ms - hysteresis_ms)
+	{
+		if (r_drs_state.upscale_cooldown > 0)
+			r_drs_state.upscale_cooldown--;
+		else
+		{
+			new_scale = q_max (min_scale, current_scale - step_up);
+			r_drs_state.upscale_cooldown = 2;
+		}
+	}
+	else if (r_drs_state.upscale_cooldown > 0)
+	{
+		r_drs_state.upscale_cooldown--;
+	}
+
+	if (new_scale != current_scale && debug_level > 0)
+	{
+		Con_DPrintf ("drs scale: %d -> %d raw_ms=%.2f filtered_ms=%.2f target_ms=%.2f source=%s\n",
+			current_scale, new_scale, (float)raw_ms, r_drs_state.filtered_ms, target_ms,
+			use_gpu_timing ? "gpu" : "frame");
+	}
+	else if (debug_level > 1)
+	{
+		Con_DPrintf ("drs sample: scale=%d raw_ms=%.2f filtered_ms=%.2f target_ms=%.2f source=%s\n",
+			current_scale, (float)raw_ms, r_drs_state.filtered_ms, target_ms,
+			use_gpu_timing ? "gpu" : "frame");
+	}
+
+	r_drs_state.dynamic_scale = new_scale;
+}
+
+static void R_UpdateSceneSizeState (void)
+{
+	int debug = (int)Q_rint (r_scene_scale_debug.value);
+	int requested_scale = q_max (1, r_refdef.scale);
+	int native_width = q_max (1, vid.width);
+	int native_height = q_max (1, vid.height);
+	int base_scene_width = q_max (1, r_refdef.vrect.width);
+	int base_scene_height = q_max (1, r_refdef.vrect.height);
+	if (r_drs.value > 0.f && r_drs_state.dynamic_scale > 0)
+		requested_scale = r_drs_state.dynamic_scale;
+	requested_scale = R_ClampSceneScaleSupported (q_max (1, requested_scale));
+	if (r_drs.value > 0.f)
+		requested_scale = R_ClampDRSScale (requested_scale);
+
+	int scene_width = q_max (1, base_scene_width / requested_scale);
+	int scene_height = q_max (1, base_scene_height / requested_scale);
+	qboolean size_changed;
+	qboolean scale_changed;
+
+	if (!r_scene_size_state.initialized)
+	{
+		r_scene_size_state.prev_scene_width = scene_width;
+		r_scene_size_state.prev_scene_height = scene_height;
+	}
+
+	size_changed = !r_scene_size_state.initialized
+		|| r_scene_size_state.scene_width != scene_width
+		|| r_scene_size_state.scene_height != scene_height
+		|| r_scene_size_state.native_width != native_width
+		|| r_scene_size_state.native_height != native_height;
+	scale_changed = !r_scene_size_state.initialized
+		|| r_scene_size_state.scene_scale != requested_scale;
+
+	if (size_changed || scale_changed)
+	{
+		r_scene_size_state.prev_scene_width = r_scene_size_state.initialized ? r_scene_size_state.scene_width : scene_width;
+		r_scene_size_state.prev_scene_height = r_scene_size_state.initialized ? r_scene_size_state.scene_height : scene_height;
+	}
+
+	r_scene_size_state.native_width = native_width;
+	r_scene_size_state.native_height = native_height;
+	r_scene_size_state.scene_width = scene_width;
+	r_scene_size_state.scene_height = scene_height;
+	r_scene_size_state.scene_scale = requested_scale;
+	r_scene_size_state.initialized = true;
+
+	if (debug > 0 && (debug > 1 || size_changed || scale_changed))
+	{
+		Con_DPrintf ("scene_size: output=%dx%d view=%dx%d scale=%d scene=%dx%d prev=%dx%d\n",
+			r_scene_size_state.native_width, r_scene_size_state.native_height,
+			base_scene_width, base_scene_height,
+			r_scene_size_state.scene_scale,
+			r_scene_size_state.scene_width, r_scene_size_state.scene_height,
+			r_scene_size_state.prev_scene_width, r_scene_size_state.prev_scene_height);
+	}
+}
+
+int R_GetNativeRenderWidth (void)
+{
+	R_UpdateSceneSizeState ();
+	return r_scene_size_state.native_width;
+}
+
+int R_GetNativeRenderHeight (void)
+{
+	R_UpdateSceneSizeState ();
+	return r_scene_size_state.native_height;
+}
+
+int R_GetSceneRenderWidth (void)
+{
+	R_UpdateSceneSizeState ();
+	return r_scene_size_state.scene_width;
+}
+
+int R_GetSceneRenderHeight (void)
+{
+	R_UpdateSceneSizeState ();
+	return r_scene_size_state.scene_height;
+}
+
+int R_GetSceneRenderScale (void)
+{
+	R_UpdateSceneSizeState ();
+	return r_scene_size_state.scene_scale;
+}
 
 static qboolean R_DoFEnabled (void)
 {
@@ -612,22 +948,24 @@ static GLuint GL_CreateSSAONoiseTexture (void)
 GL_CreateFBOAttachment
 =============
 */
-static GLuint GL_CreateFBOAttachment (GLenum format, int samples, GLenum filter, const char* name)
+static GLuint GL_CreateFBOAttachment (GLenum format, int width, int height, int samples, GLenum filter, const char* name)
 {
 	GLenum target = samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
 	GLuint texnum;
 	qboolean is_depth_format = (format == GL_DEPTH24_STENCIL8 || format == GL_DEPTH32F_STENCIL8 || format == GL_DEPTH_COMPONENT24 || format == GL_DEPTH_COMPONENT32F);
+	width = q_max (1, width);
+	height = q_max (1, height);
 
 	glGenTextures (1, &texnum);
 	GL_BindNative (GL_TEXTURE0, target, texnum);
 	GL_ObjectLabelFunc (GL_TEXTURE, texnum, -1, name);
 	if (samples > 1)
 	{
-		GL_TexStorage2DMultisampleFunc (target, samples, format, vid.width, vid.height, GL_FALSE);
+		GL_TexStorage2DMultisampleFunc (target, samples, format, width, height, GL_FALSE);
 	}
 	else
 	{
-		GL_TexStorage2DFunc (target, 1, format, vid.width, vid.height);
+		GL_TexStorage2DFunc (target, 1, format, width, height);
 		glTexParameteri (target, GL_TEXTURE_MAG_FILTER, filter);
 		glTexParameteri (target, GL_TEXTURE_MIN_FILTER, filter);
 		if (is_depth_format)
@@ -738,6 +1076,10 @@ void GL_CreateFrameBuffers (void)
 {
 	GLenum color_format = GL_RGBA16F;
 	GLenum depth_format = GL_DEPTH24_STENCIL8;
+	int native_w = R_GetNativeRenderWidth ();
+	int native_h = R_GetNativeRenderHeight ();
+	int scene_w = R_GetSceneRenderWidth ();
+	int scene_h = R_GetSceneRenderHeight ();
 
 	framebufs.ssao.valid = false;
 	r_ssao_invalid_warned = false;
@@ -748,8 +1090,8 @@ void GL_CreateFrameBuffers (void)
 	framebufs.max_samples = q_min (framebufs.max_color_tex_samples, framebufs.max_depth_tex_samples);
 
 	/* main framebuffer (color + depth + stencil) */
-	framebufs.composite.color_tex = GL_CreateFBOAttachment (color_format, 1, GL_NEAREST, "composite colors");
-	framebufs.composite.depth_stencil_tex = GL_CreateFBOAttachment (depth_format, 1, GL_NEAREST, "composite depth/stencil");
+	framebufs.composite.color_tex = GL_CreateFBOAttachment (color_format, native_w, native_h, 1, GL_NEAREST, "composite colors");
+	framebufs.composite.depth_stencil_tex = GL_CreateFBOAttachment (depth_format, native_w, native_h, 1, GL_NEAREST, "composite depth/stencil");
 	framebufs.composite.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D,
 		framebufs.composite.color_tex,
 		framebufs.composite.depth_stencil_tex,
@@ -757,12 +1099,12 @@ void GL_CreateFrameBuffers (void)
 		"composite fbo"
 	);
 	R_Shadow_CreateFrameBuffers ();
-	framebufs.fogvol.width = vid.width;
-	framebufs.fogvol.height = vid.height;
+	framebufs.fogvol.width = native_w;
+	framebufs.fogvol.height = native_h;
 	if (r_fogvol_halfres.value > 0.f)
 	{
-		framebufs.fogvol.width = q_max (1, vid.width / 2);
-		framebufs.fogvol.height = q_max (1, vid.height / 2);
+		framebufs.fogvol.width = q_max (1, native_w / 2);
+		framebufs.fogvol.height = q_max (1, native_h / 2);
 	}
 	for (int i = 0; i < 2; ++i)
 	{
@@ -796,8 +1138,8 @@ void GL_CreateFrameBuffers (void)
 	framebufs.autoexposure.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.autoexposure.tex, 0, 0, "autoexposure fbo");
 	GL_AutoExposureInitPBOs ();
 
-	framebufs.bloom.width = q_max (1, vid.width / 2);
-	framebufs.bloom.height = q_max (1, vid.height / 2);
+	framebufs.bloom.width = q_max (1, native_w / 2);
+	framebufs.bloom.height = q_max (1, native_h / 2);
 	framebufs.bloom.extract_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom extract");
 	framebufs.bloom.pingpong_tex[0] = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom blur 0");
 	framebufs.bloom.pingpong_tex[1] = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom blur 1");
@@ -805,13 +1147,22 @@ void GL_CreateFrameBuffers (void)
 	framebufs.bloom.pingpong_fbo[0] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.pingpong_tex[0], 0, 0, "bloom blur fbo 0");
 	framebufs.bloom.pingpong_fbo[1] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.pingpong_tex[1], 0, 0, "bloom blur fbo 1");
 
+	framebufs.godrays.width = q_max (1, native_w / 2);
+	framebufs.godrays.height = q_max (1, native_h / 2);
+	framebufs.godrays.source_tex = GL_CreateTexture2D (GL_RGBA16F, native_w, native_h, GL_LINEAR, "godrays source");
+	framebufs.godrays.mask_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays mask");
+	framebufs.godrays.shafts_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.godrays.width, framebufs.godrays.height, GL_LINEAR, "godrays shafts");
+	framebufs.godrays.source_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.source_tex,
 		framebufs.composite.depth_stencil_tex,
 		framebufs.composite.depth_stencil_tex,
+		"godrays source fbo");
+	framebufs.godrays.mask_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.mask_tex, 0, 0, "godrays mask fbo");
+	framebufs.godrays.shafts_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.shafts_tex, 0, 0, "godrays shafts fbo");
 
-	framebufs.ssao.width[0] = vid.width;
-	framebufs.ssao.height[0] = vid.height;
-	framebufs.ssao.width[1] = q_max (1, vid.width / 2);
-	framebufs.ssao.height[1] = q_max (1, vid.height / 2);
+	framebufs.ssao.width[0] = scene_w;
+	framebufs.ssao.height[0] = scene_h;
+	framebufs.ssao.width[1] = q_max (1, scene_w / 2);
+	framebufs.ssao.height[1] = q_max (1, scene_h / 2);
 	framebufs.ssao.noise_tex = GL_CreateSSAONoiseTexture ();
 	// SSAO FIX: Prefer higher precision AO targets to avoid R8 banding in dark areas.
 	GLenum ssao_format = (Q_rint (r_ssao_format.value) > 0) ? GL_R16F : GL_R8;
@@ -838,10 +1189,12 @@ void GL_CreateFrameBuffers (void)
 	/* scene framebuffer (color + depth + stencil, potentially multisampled) */
 	framebufs.scene.samples = Q_nextPow2 ((int)q_max (1.f, vid_fsaa.value));
 	framebufs.scene.samples = CLAMP (1, framebufs.scene.samples, framebufs.max_samples);
+	framebufs.scene.width = scene_w;
+	framebufs.scene.height = scene_h;
 
-	framebufs.scene.color_tex = GL_CreateFBOAttachment (color_format, framebufs.scene.samples, GL_NEAREST, "scene colors");
-	framebufs.scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, framebufs.scene.samples, GL_NEAREST, "scene velocity");
-	framebufs.scene.depth_stencil_tex = GL_CreateFBOAttachment (depth_format, framebufs.scene.samples, GL_NEAREST, "scene depth/stencil");
+	framebufs.scene.color_tex = GL_CreateFBOAttachment (color_format, scene_w, scene_h, framebufs.scene.samples, GL_NEAREST, "scene colors");
+	framebufs.scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, scene_w, scene_h, framebufs.scene.samples, GL_NEAREST, "scene velocity");
+	framebufs.scene.depth_stencil_tex = GL_CreateFBOAttachment (depth_format, scene_w, scene_h, framebufs.scene.samples, GL_NEAREST, "scene depth/stencil");
 	{
 		GLuint colors[2] = { framebufs.scene.color_tex, framebufs.scene.velocity_tex };
 		framebufs.scene.fbo = GL_CreateFBO (framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D,
@@ -853,8 +1206,8 @@ void GL_CreateFrameBuffers (void)
 	}
 
 	/* weighted blended order-independent transparency (accum + revealage, potentially multisampled */
-	framebufs.oit.accum_tex = GL_CreateFBOAttachment (GL_RGBA16F, framebufs.scene.samples, GL_NEAREST, "oit accum");
-	framebufs.oit.revealage_tex = GL_CreateFBOAttachment (GL_R8, framebufs.scene.samples, GL_NEAREST, "oit revealage");
+	framebufs.oit.accum_tex = GL_CreateFBOAttachment (GL_RGBA16F, scene_w, scene_h, framebufs.scene.samples, GL_NEAREST, "oit accum");
+	framebufs.oit.revealage_tex = GL_CreateFBOAttachment (GL_R8, scene_w, scene_h, framebufs.scene.samples, GL_NEAREST, "oit revealage");
 
 	// FIX #1: Initialize MRT array before using it
 	framebufs.oit.mrt[0] = framebufs.oit.accum_tex;
@@ -870,8 +1223,10 @@ void GL_CreateFrameBuffers (void)
 	/* resolved scene framebuffer (color only) */
 	if (framebufs.scene.samples > 1)
 	{
-	framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, 1, GL_NEAREST, "resolved scene colors");
-	framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, 1, GL_NEAREST, "resolved scene velocity");
+		framebufs.resolved_scene.width = scene_w;
+		framebufs.resolved_scene.height = scene_h;
+		framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, scene_w, scene_h, 1, GL_NEAREST, "resolved scene colors");
+		framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, scene_w, scene_h, 1, GL_NEAREST, "resolved scene velocity");
 		{
 			GLuint colors[2] = { framebufs.resolved_scene.color_tex, framebufs.resolved_scene.velocity_tex };
 			framebufs.resolved_scene.fbo = GL_CreateFBO (GL_TEXTURE_2D, colors, 2, 0, 0, "resolved scene fbo");
@@ -879,6 +1234,8 @@ void GL_CreateFrameBuffers (void)
 	}
 	else
 	{
+		framebufs.resolved_scene.width = 0;
+		framebufs.resolved_scene.height = 0;
 		framebufs.resolved_scene.color_tex = 0;
 		framebufs.resolved_scene.velocity_tex = 0;
 		framebufs.resolved_scene.fbo = 0;
@@ -919,6 +1276,9 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
 	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[1]);
+	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.source_fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.mask_fbo);
+	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.shafts_fbo);
 	for (int i = 0; i < 2; ++i)
 	{
 		GL_DeleteFramebuffersFunc (1, &framebufs.ssao.ao_fbo[i]);
@@ -944,6 +1304,9 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
 	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
 	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
+	GL_DeleteNativeTexture (framebufs.godrays.source_tex);
+	GL_DeleteNativeTexture (framebufs.godrays.mask_tex);
+	GL_DeleteNativeTexture (framebufs.godrays.shafts_tex);
 	GL_DeleteNativeTexture (framebufs.ssao.noise_tex);
 	framebufs.ssao.valid = false;
 	r_ssao_invalid_warned = false;
@@ -1012,9 +1375,9 @@ static GLuint GL_GenerateBloomTexture (void)
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, 0);
 	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
-	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
-		(float)vid.width / (float)width,
-		(float)vid.height / (float)height);
+	GL_Uniform4fFunc (1, (float)R_GetNativeRenderWidth (), (float)R_GetNativeRenderHeight (),
+		(float)R_GetNativeRenderWidth () / (float)width,
+		(float)R_GetNativeRenderHeight () / (float)height);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_EndGroup ();
 
@@ -1066,9 +1429,9 @@ static GLuint GL_GenerateBloomTextureFrom (GLuint source_tex, float threshold, f
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, source_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, 0);
 	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
-	GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
-		(float)vid.width / (float)width,
-		(float)vid.height / (float)height);
+	GL_Uniform4fFunc (1, (float)R_GetNativeRenderWidth (), (float)R_GetNativeRenderHeight (),
+		(float)R_GetNativeRenderWidth () / (float)width,
+		(float)R_GetNativeRenderHeight () / (float)height);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
 	GL_EndGroup ();
 
@@ -1173,7 +1536,7 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 		scissor_box[2], scissor_box[3], scissor_box[0], scissor_box[1],
 		color_mask[0] ? 1 : 0, color_mask[1] ? 1 : 0, color_mask[2] ? 1 : 0, color_mask[3] ? 1 : 0);
 	Con_DPrintf ("SSAO AO output: tex=%u format=0x%X size=%dx%d screen=%dx%d normals=%dx%d\n",
-		ao_tex, ao_internal_format, ao_width, ao_height, vid.width, vid.height, normal_width, normal_height);
+	ao_tex, ao_internal_format, ao_width, ao_height, R_GetNativeRenderWidth (), R_GetNativeRenderHeight (), normal_width, normal_height);
 	Con_DPrintf ("SSAO depth range: [%0.4f, %0.4f] reversedZ=%d mode=%d znear=%0.4f zfar=%0.4f cutoff=%0.4f viewRect=[%0.3f,%0.3f]-[%0.3f,%0.3f] ssao=%dx%d debug=%d\n",
 		depth_range[0], depth_range[1],
 		gl_clipcontrol_able ? 1 : 0,
@@ -1283,10 +1646,10 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_UniformMatrix4fvFunc (1, 1, GL_FALSE, r_matinvproj);
 	GL_Uniform4fFunc (2, radius, bias, power, min_ao);
 	GL_Uniform4fFunc (3,
-		1.f / (float)vid.width,
-		1.f / (float)vid.height,
-		(float)vid.width,
-		(float)vid.height);
+		1.f / (float)R_GetNativeRenderWidth (),
+		1.f / (float)R_GetNativeRenderHeight (),
+		(float)R_GetNativeRenderWidth (),
+		(float)R_GetNativeRenderHeight ());
 	GL_Uniform4fFunc (4,
 		1.f / (float)width,
 		1.f / (float)height,
@@ -1326,10 +1689,10 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		GL_UseProgram (glprogs.ssao_blur);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 		GL_Uniform4fFunc (0,
-			1.f / (float)vid.width,
-			1.f / (float)vid.height,
-			(float)vid.width,
-			(float)vid.height);
+			1.f / (float)R_GetNativeRenderWidth (),
+			1.f / (float)R_GetNativeRenderHeight (),
+			(float)R_GetNativeRenderWidth (),
+			(float)R_GetNativeRenderHeight ());
 		GL_Uniform4fFunc (1,
 			1.f / (float)width,
 			1.f / (float)height,
@@ -1366,21 +1729,47 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	return framebufs.ssao.ao_tex[index];
 }
 
+void R_ResetGodraysStabilization (void)
 {
+	R_Godrays_ResetStabilization (&r_godrays_stabilization);
 }
 
+static void R_GetGodraysSkyParams_Current (godrays_sky_params_t *params)
 {
+	R_Godrays_GetSkyParams (
+		r_godrays.value,
+		r_godrays_sky_threshold.value,
+		r_godrays_sky_intensity.value,
+		r_godrays_blur.value,
+		r_godrays_sky_tint.string,
 		params);
 }
 
+static void R_InvalidateGodraysFrameCache (void)
 {
+	r_godrays_generated_frame = -1;
+	r_godrays_cached_shafts = 0;
+	r_godrays_cached_mask = 0;
+	r_godrays_cached_source = 0;
+	r_godrays_cached_debug_source_generated = false;
 }
 
+static void R_InvalidateTemporalHistoryOnSceneResize (void)
 {
+	R_FogVol_ClearHistory ();
+	R_ResetGodraysStabilization ();
+	R_InvalidateGodraysFrameCache ();
+	r_prev_frame_valid = false;
+}
+
+static qboolean R_GodraysMediumEnabled (void)
+{
+	/* Godrays are a volumetric effect and should only run when a volumetric
 	 * fog medium path is active (fog volumes and/or froxel fog). */
 	return R_FogVol_ShouldAffectPostFX ();
 }
 
+static void R_GetGodraysLightPos_Current (float *out_x, float *out_y)
 {
 	const sun_t *sun;
 	float dist;
@@ -1434,32 +1823,42 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	*out_y = y;
 }
 
+static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 {
-	int width = vid.width;
-	int height = vid.height;
+	int width = R_GetNativeRenderWidth ();
+	int height = R_GetNativeRenderHeight ();
+	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
 		return;
 	if (!draw_sky && !draw_brush)
 		return;
+	float mask_knee = q_max (0.f, r_godrays_mask_knee.value);
 
+	GL_BeginGroup ("Godrays source");
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.source_fbo);
 	glViewport (0, 0, width, height);
 	{
 		const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 	}
 
+	godrays_sky_params_t sky_params;
 
+	R_GetGodraysSkyParams_Current (&sky_params);
 
+	if (draw_sky && glprogs.godrays_source_sky && sky_params.enabled)
 	{
 		float sky_intensity = sky_params.intensity;
 		float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 		float sky_depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
 
 		/*
+		 * Keep sky godrays available whenever the effect itself is active.
 		 * A zeroed intensity cvar should not silently suppress the sky source pass.
 		 */
 		if (sky_intensity <= 0.f)
 			sky_intensity = 1.f;
 
+		GL_UseProgram (glprogs.godrays_source_sky);
 		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 		GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, sky_params.threshold);
@@ -1468,14 +1867,21 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		glDrawArrays (GL_TRIANGLES, 0, 3);
 	}
 
+	if (draw_brush && glprogs.godrays_source)
 	{
 		int count = 0;
 		entity_t **ents = R_GetVisEntities (mod_brush, false, &count);
 		if (count > 0)
 		{
+			GL_UseProgram (glprogs.godrays_source);
 			GL_SetState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (6));
 			GL_Uniform4fFunc (0,
+				q_max (0.f, r_godrays_emissive_intensity.value),
+				q_max (0.f, r_godrays_lighttex_intensity.value),
+				q_max (0.f, r_godrays_emissive_threshold.value),
+				q_max (0.f, r_godrays_light_threshold.value));
 			GL_Uniform4fFunc (1, mask_knee, 0.f, 0.f, 0.f);
+			R_DrawBrushModels_Godrays (ents, count);
 		}
 	}
 
@@ -1493,6 +1899,7 @@ static medium_scatter_source_t GL_GetMediumScatterSource (void)
 	medium_scatter_source_t medium = { 0, 0.f };
 
 	/*
+	 * Medium scatter/transmittance texture contract (shared by postprocess + godrays):
 	 *  - RGB: medium in-scatter/radiance already composited in display space.
 	 *  - A:   medium coverage proxy = 1 - transmittance.
 	 *         Expected normalized range: [0, 1] where 0 means no medium and 1 means
@@ -1510,28 +1917,44 @@ static medium_scatter_source_t GL_GetMediumScatterSource (void)
 	return medium;
 }
 
+static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 {
+	int width = framebufs.godrays.width;
+	int height = framebufs.godrays.height;
 	GLuint fallback = 0;
 	if (out_mask)
 		*out_mask = 0;
 	if (width <= 0 || height <= 0)
 		return fallback;
+	if (!glprogs.godrays_mask || !glprogs.godrays)
 		return fallback;
+	if (framebufs.godrays.mask_fbo == 0 || framebufs.godrays.shafts_fbo == 0)
 		return fallback;
+	if (framebufs.godrays.source_fbo == 0 || framebufs.godrays.source_tex == 0)
 		return fallback;
+	if (!R_Godrays_IsReady (cl.worldmodel, r_framecount))
 		return fallback;
 
+	godrays_sky_params_t sky_params;
 	qboolean emit_sky;
 
+	R_GetGodraysSkyParams_Current (&sky_params);
+	emit_sky = (glprogs.godrays_source_sky != 0 && sky_params.enabled);
+	/* Force sky-driven godrays only: ignore local brush/lighttex emitters. */
 	qboolean emit_brush = false;
 	if (!emit_sky && !emit_brush)
 		return fallback;
 
+	float samples_value = R_Godrays_SanitizeValue (r_godrays_samples.value, 48.f, 1.f, 128.f);
 	int samples = (int)Q_rint (samples_value);
 	samples = CLAMP (8, samples, 128);
 
+	float threshold = R_Godrays_SanitizeValue (r_godrays_threshold.value, 0.f, 0.f, FLT_MAX);
 	float density = R_GetSun ()->ray_density;
+	float weight = R_Godrays_SanitizeValue (r_godrays_weight.value, 0.015f, 0.f, FLT_MAX);
 	float decay = R_GetSun ()->ray_decay;
+	float exposure = R_Godrays_SanitizeValue (r_godrays_exposure.value, 1.f, 0.f, FLT_MAX);
+	float softness = R_Godrays_SanitizeValue (r_godrays_blur.value, 1.5f, 0.f, FLT_MAX);
 	float sharpness = 1.25f;
 	float max_radius = 1.f;
 	float light_x = 0.5f;
@@ -1542,7 +1965,9 @@ static medium_scatter_source_t GL_GetMediumScatterSource (void)
 	GLuint volumetric_tex = 0;
 	float volumetric_enabled = 0.f;
 
+	R_GetGodraysLightPos_Current (&light_x, &light_y);
 
+	if (r_godrays.value > 0.f)
 	{
 		medium = GL_GetMediumScatterSource ();
 		volumetric_tex = medium.texture;
@@ -1550,6 +1975,7 @@ static medium_scatter_source_t GL_GetMediumScatterSource (void)
 	}
 
 	{
+		r_godrays_stabilize_input_t stabilize_input;
 		stabilize_input.width = width;
 		stabilize_input.height = height;
 		stabilize_input.raw_x = light_x;
@@ -1562,8 +1988,11 @@ static medium_scatter_source_t GL_GetMediumScatterSource (void)
 		stabilize_input.stabilize_max_px = 0.f;
 		stabilize_input.max_shift_per_sec = 0.f;
 		stabilize_input.reset_on_teleport = true;
+		R_Godrays_ComputeLightPos (&r_godrays_stabilization, &stabilize_input, &stabilized_x, &stabilized_y);
 	}
 
+	GL_BeginGroup ("Godrays scatter");
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
 	glViewport (0, 0, width, height);
 	{
 		const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
@@ -1577,25 +2006,35 @@ static medium_scatter_source_t GL_GetMediumScatterSource (void)
 
 		if (emit_sky)
 		{
+			GL_GenerateGodraysSource (true, false);
 
+			GL_BeginGroup ("Godrays mask (sky)");
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
 			glViewport (0, 0, width, height);
 			{
 				const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 				GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 			}
+			GL_UseProgram (glprogs.godrays_mask);
 			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.source_tex);
 			GL_Uniform4fFunc (0, threshold, sky_softness, 1.f, 0.f);
-			GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
-				(float)vid.width / (float)width,
-				(float)vid.height / (float)height);
+			GL_Uniform4fFunc (1, (float)R_GetNativeRenderWidth (), (float)R_GetNativeRenderHeight (),
+				(float)R_GetNativeRenderWidth () / (float)width,
+				(float)R_GetNativeRenderHeight () / (float)height);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 
+			GL_BeginGroup ("Godrays scatter (sky)");
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
 			glViewport (0, 0, width, height);
+			GL_UseProgram (glprogs.godrays);
 			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
 			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, volumetric_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
+			GL_Uniform4fFunc (2, volumetric_enabled, q_max (0.f, r_godrays_vol_pow.value), volumetric_enabled, 0.f);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 			first_pass = false;
@@ -1603,63 +2042,118 @@ static medium_scatter_source_t GL_GetMediumScatterSource (void)
 
 		if (emit_brush)
 		{
+			GL_GenerateGodraysSource (false, true);
 
+			GL_BeginGroup ("Godrays mask (brush)");
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
 			glViewport (0, 0, width, height);
 			{
 				const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 				GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 			}
+			GL_UseProgram (glprogs.godrays_mask);
 			GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.source_tex);
 			GL_Uniform4fFunc (0, threshold, softness, sharpness, 0.f);
-			GL_Uniform4fFunc (1, (float)vid.width, (float)vid.height,
-				(float)vid.width / (float)width,
-				(float)vid.height / (float)height);
+			GL_Uniform4fFunc (1, (float)R_GetNativeRenderWidth (), (float)R_GetNativeRenderHeight (),
+				(float)R_GetNativeRenderWidth () / (float)width,
+				(float)R_GetNativeRenderHeight () / (float)height);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 
+			GL_BeginGroup ("Godrays scatter (brush)");
+			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
 			glViewport (0, 0, width, height);
+			GL_UseProgram (glprogs.godrays);
 			GL_SetState ((first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
 			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, volumetric_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
 			GL_Uniform4fFunc (1, decay, exposure, max_radius, (float)samples);
+			GL_Uniform4fFunc (2, volumetric_enabled, q_max (0.f, r_godrays_vol_pow.value), volumetric_enabled, 0.f);
 			glDrawArrays (GL_TRIANGLES, 0, 3);
 			GL_EndGroup ();
 		}
 	}
 
 	if (out_mask)
+		*out_mask = framebufs.godrays.mask_tex;
 
+	return framebufs.godrays.shafts_tex;
 }
 
+static void R_EnsureGodraysTexturesForFrame (qboolean allow_debug_source)
 {
+	qboolean godrays_enabled;
+	qboolean godrays_debug_enabled;
+	qboolean godrays_preview;
+	float godrays_debug;
+	float godrays_debug_source;
 	qboolean ready;
 	qboolean medium_enabled;
 
+	if (r_godrays_generated_frame == r_framecount)
 	{
 		if (allow_debug_source
+			&& !r_godrays_cached_debug_source_generated
+			&& R_Godrays_IsReady (cl.worldmodel, r_framecount)
+			&& r_godrays_debug_source.value > 0.f)
 		{
+			GL_GenerateGodraysSource (
+				(glprogs.godrays_source_sky != 0),
 				true);
+			r_godrays_cached_debug_source_generated = true;
+			r_godrays_cached_source = framebufs.godrays.source_tex;
 		}
 		return;
 	}
 
+	r_godrays_generated_frame = r_framecount;
+	r_godrays_cached_shafts = 0;
+	r_godrays_cached_mask = 0;
+	r_godrays_cached_source = 0;
+	r_godrays_cached_debug_source_generated = false;
 
+	ready = R_Godrays_IsReady (cl.worldmodel, r_framecount);
+	medium_enabled = R_GodraysMediumEnabled ();
+	godrays_enabled = (r_godrays.value > 0.f && medium_enabled && ready);
+	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
+	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
+	godrays_debug_enabled = (godrays_debug > 0.f || godrays_debug_source > 0.f);
+	godrays_preview = (godrays_enabled || (godrays_debug_enabled && ready));
+	if (!godrays_preview)
 		return;
 
+	if (allow_debug_source && godrays_debug_source > 0.f && ready)
 	{
+		GL_GenerateGodraysSource (
+			(glprogs.godrays_source_sky != 0),
 			true);
+		r_godrays_cached_debug_source_generated = true;
 	}
 
+	if (godrays_enabled || godrays_debug > 0.f)
+		r_godrays_cached_shafts = GL_GenerateGodraysTexture (&r_godrays_cached_mask);
 
+	r_godrays_cached_source = framebufs.godrays.source_tex;
 }
 
 static void R_PrepareFogVolInputs (void)
 {
+	const qboolean need_godray_inputs = R_FogVol_IsEnabledForFrame () && R_FogVol_HasRenderableContent ();
 
+	if (!need_godray_inputs || !R_FogVol_IsEnabledForFrame () || !R_FogVol_HasRenderableContent ())
 	{
+		R_FogVol_SetGodrayCouplingTextures (0, 0, 0, false);
 		return;
 	}
 
+	R_EnsureGodraysTexturesForFrame (false);
+	R_FogVol_SetGodrayCouplingTextures (
+		r_godrays_cached_shafts,
+		r_godrays_cached_mask,
+		r_godrays_cached_source,
+		r_godrays_cached_shafts != 0);
 }
 
 
@@ -1875,7 +2369,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 
 	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.composite.fbo);
 	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.autoexposure.fbo);
-	GL_BlitFramebufferFunc (0, 0, vid.width, vid.height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+	GL_BlitFramebufferFunc (0, 0, R_GetNativeRenderWidth (), R_GetNativeRenderHeight (), 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
 	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, framebufs.autoexposure.fbo);
 	glReadBuffer (GL_COLOR_ATTACHMENT0);
@@ -2086,6 +2580,9 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	qboolean msaa;
 	GLuint velocity_texture;
 	GLuint depth_texture;
+	GLuint godrays_texture;
+	GLuint godrays_mask;
+	GLuint godrays_source;
 	GLuint ssao_texture;
 	float motion_strength;
 	float motion_shutter;
@@ -2096,6 +2593,11 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	int motion_max_samples;
 	float teleport_fade;
 	float teleport_blur;
+	qboolean godrays_enabled;
+	qboolean godrays_debug_enabled;
+	qboolean godrays_preview;
+	float godrays_debug;
+	float godrays_debug_source;
 	float ssao_intensity;
 	float ssao_debug_mode;
 	float ssao_fog_strength;
@@ -2145,7 +2647,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, composite_fbo);
 		glReadBuffer (GL_BACK);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
-		GL_BlitFramebufferFunc (0, 0, vid.width, vid.height, 0, 0, vid.width, vid.height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		GL_BlitFramebufferFunc (0, 0, R_GetNativeRenderWidth (), R_GetNativeRenderHeight (), 0, 0, R_GetNativeRenderWidth (), R_GetNativeRenderHeight (), GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 		glDrawBuffer (GL_BACK);
 		glReadBuffer (GL_BACK);
@@ -2155,6 +2657,9 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 
 	GL_BeginGroup ("Postprocess");
 
+	r_godrays_coupling_shafts_tex = 0;
+	r_godrays_coupling_shafts_w = 0;
+	r_godrays_coupling_shafts_h = 0;
 
 	R_PostFX_GetState (&postfx_state);
 
@@ -2221,16 +2726,34 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		postfx_lut_strength = 0.f;
 	}
 
+	godrays_enabled = (r_godrays.value > 0.f
+		&& R_GodraysMediumEnabled ()
+		&& R_Godrays_IsReady (cl.worldmodel, r_framecount));
+	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
+	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
+	godrays_debug_enabled = (godrays_debug > 0.f || godrays_debug_source > 0.f);
+	godrays_preview = (godrays_enabled || (godrays_debug_enabled && R_Godrays_IsReady (cl.worldmodel, r_framecount)));
+	if (!godrays_preview)
 	{
+		godrays_debug = 0.f;
+		godrays_debug_source = 0.f;
 	}
+	godrays_texture = 0;
+	godrays_mask = 0;
+	godrays_source = 0;
+	if (godrays_preview)
 	{
+		R_EnsureGodraysTexturesForFrame (true);
+		godrays_texture = r_godrays_cached_shafts;
+		godrays_mask = r_godrays_cached_mask;
+		godrays_source = r_godrays_cached_source;
 	}
 
-	view_min_x = (glx + r_refdef.vrect.x) / (float)vid.width;
-	view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)vid.height;
-	view_max_x = view_min_x + r_refdef.vrect.width / (float)vid.width;
-	view_max_y = view_min_y + r_refdef.vrect.height / (float)vid.height;
-	inv_scale = r_refdef.scale > 0 ? 1.f / (float)r_refdef.scale : 1.f;
+	view_min_x = (glx + r_refdef.vrect.x) / (float)R_GetNativeRenderWidth ();
+	view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)R_GetNativeRenderHeight ();
+	view_max_x = view_min_x + r_refdef.vrect.width / (float)R_GetNativeRenderWidth ();
+	view_max_y = view_min_y + r_refdef.vrect.height / (float)R_GetNativeRenderHeight ();
+	inv_scale = 1.f / (float)q_max (1, R_GetSceneRenderScale ());
 
 	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
 	/* Keep SSAO intensity aligned with the cvar's intended tuning range.
@@ -2285,6 +2808,12 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		}
 	}
 	motion_enabled = (motion_effective_shutter > 0.f && motion_max_samples > 0 && velocity_texture != 0);
+	R_DebugDRSNativeEffects (
+		bloom_intensity_effective > 0.f,
+		ssao_texture != 0 && ssao_intensity > 0.f,
+		R_FogVol_ShouldAffectPostFX (),
+		godrays_texture != 0,
+		motion_enabled);
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	glViewport (glx, gly, glwidth, glheight);
@@ -2308,6 +2837,9 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
 	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
 	GL_BindNative (GL_TEXTURE4, GL_TEXTURE_2D, velocity_texture);
+	GL_BindNative (GL_TEXTURE5, GL_TEXTURE_2D, godrays_texture);
+	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, godrays_mask);
+	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, godrays_source);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, ssao_texture);
 	GL_BindNative (GL_TEXTURE9, GL_TEXTURE_2D_ARRAY, R_PostFX_GetLUTTexture ());
 	/* Bind medium scatter/transmittance texture at slot 10 for SSAO suppression
@@ -2317,7 +2849,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	{
 		float post_contrast = CLAMP (0.8f, r_color_contrast.value, 1.2f);
-		GL_Uniform4fFunc (0, 1.f, post_contrast, 1.f / r_refdef.scale, dither);
+		GL_Uniform4fFunc (0, 1.f, post_contrast, 1.f / (float)q_max (1, R_GetSceneRenderScale ()), dither);
 	}
 	{
 		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
@@ -2379,6 +2911,9 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		GL_Uniform4fFunc (26, dv_time, dv_quality, dv_debug, 0.f);
 	}
 	{
+		GLint godrays_params_loc = GL_GetUniformLocationFunc ? GL_GetUniformLocationFunc (glprogs.postprocess[variant], "GodraysParams") : -1;
+		if (godrays_params_loc >= 0)
+			GL_Uniform4fFunc (godrays_params_loc, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
 	}
 	{
 		float upscale_nearest = (r_ssao_upscale_nearest.value > 0.f) ? 1.f : 0.f;
@@ -3033,6 +3568,7 @@ GL_NeedsSceneEffects
 static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
 {
 	float saturation;
+	qboolean godrays_medium;
 	qboolean fogvol_requested = R_FogVol_IsEnabledForFrame ();
 
 	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
@@ -3048,6 +3584,8 @@ static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
 		return true;
 	if (r_ssao.value > 0.f)
 		return true;
+	godrays_medium = R_GodraysMediumEnabled ();
+	if (r_godrays.value > 0.f && godrays_medium)
 		return true;
 	if (include_fogvol && fogvol_requested)
 		return true;
@@ -3058,7 +3596,7 @@ qboolean GL_NeedsSceneEffects (void)
 {
 	qboolean fogvol_active = R_FogVol_IsEnabledForFrame ();
 
-        if (framebufs.scene.samples > 1 || water_warp || r_refdef.scale != 1)
+	if (framebufs.scene.samples > 1 || water_warp || R_GetSceneRenderScale () != 1)
 		return true;
 
 	/* Bloom enabled: keep scene-effects path active for a full-frame bloom extract/composite pass. */
@@ -3122,14 +3660,21 @@ static void R_EnsureRenderTargetSampleState (void)
 {
 	int desired_samples = R_GetDesiredSceneSampleCount ();
 	int current_samples = framebufs.scene.samples > 0 ? framebufs.scene.samples : 1;
+	int desired_scene_w = R_GetSceneRenderWidth ();
+	int desired_scene_h = R_GetSceneRenderHeight ();
+	int current_scene_w = framebufs.scene.width > 0 ? framebufs.scene.width : desired_scene_w;
+	int current_scene_h = framebufs.scene.height > 0 ? framebufs.scene.height : desired_scene_h;
+	qboolean sample_changed = (current_samples != desired_samples);
+	qboolean size_changed = (current_scene_w != desired_scene_w || current_scene_h != desired_scene_h);
 
-	if (current_samples == desired_samples)
+	if (!sample_changed && !size_changed)
 		return;
 
-	Con_DPrintf ("Recreating render targets (scene samples %d -> %d)\n", current_samples, desired_samples);
+	Con_DPrintf ("Recreating render targets (scene %dx%d -> %dx%d, samples %d -> %d)\n",
+		current_scene_w, current_scene_h, desired_scene_w, desired_scene_h, current_samples, desired_samples);
 	GL_DeleteFrameBuffers ();
 	GL_CreateFrameBuffers ();
-	R_FogVol_ClearHistory ();
+	R_InvalidateTemporalHistoryOnSceneResize ();
 	R_FrameGraph_SetRenderFramePlan (NULL);
 }
 
@@ -3157,6 +3702,8 @@ void R_SetupGL (void)
 {
 	qboolean needs_scene_effects = false;
 	qboolean needs_postprocess = false;
+	int scene_width = R_GetSceneRenderWidth ();
+	int scene_height = R_GetSceneRenderHeight ();
 
 	R_GetFramePlanDecisions (&needs_scene_effects, &needs_postprocess);
 
@@ -3200,7 +3747,7 @@ void R_SetupGL (void)
 			glDrawBuffer (GL_COLOR_ATTACHMENT0);
 			glReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
-		glViewport (0, 0, r_refdef.vrect.width / r_refdef.scale, r_refdef.vrect.height / r_refdef.scale);
+		glViewport (0, 0, scene_width, scene_height);
 	}
 }
 
@@ -3320,6 +3867,7 @@ void R_SetupView (void)
 	static qboolean gpuframedata_layout_logged = false;
 
 	R_Quality_Update ();
+	R_UpdateDynamicResolutionScale ();
 	R_EnsureRenderTargetSampleState ();
 	framesetup.composite_ready = false;
 	memset (r_framedata.fogdata, 0, sizeof (r_framedata.fogdata));
@@ -4602,13 +5150,14 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	srcx = glx + r_refdef.vrect.x;
 	srcy = gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height;
-	srcw = r_refdef.vrect.width / r_refdef.scale;
-	srch = r_refdef.vrect.height / r_refdef.scale;
+	srcw = R_GetSceneRenderWidth ();
+	srch = R_GetSceneRenderHeight ();
 
-	needwarpscale = r_refdef.scale != 1 || water_warp;
+	needwarpscale = R_GetSceneRenderScale () != 1 || water_warp;
 	fbodest = needs_postprocess ? composite_fbo : 0;
 	need_depth_resolve = (fbodest == composite_fbo)
 		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || R_FogVol_ShouldAffectPostFX ()
+			|| (R_Godrays_IsReady (cl.worldmodel, r_framecount) && (r_godrays.value > 0.f || r_godrays_debug.value > 0.f || r_godrays_debug_source.value > 0.f)));
 
 	if (msaa)
 	{
@@ -4650,8 +5199,8 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	if (need_depth_resolve)
 	{
-		int dstw = (r_refdef.scale != 1) ? r_refdef.vrect.width : srcw;
-		int dsth = (r_refdef.scale != 1) ? r_refdef.vrect.height : srch;
+		int dstw = (R_GetSceneRenderScale () != 1) ? r_refdef.vrect.width : srcw;
+		int dsth = (R_GetSceneRenderScale () != 1) ? r_refdef.vrect.height : srch;
 
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, scene_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
@@ -4704,8 +5253,8 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	GL_BeginGroup ("Warp/scale view");
 
-	smax = srcw / (float)vid.width;
-	tmax = srch / (float)vid.height;
+	smax = srcw / (float)R_GetNativeRenderWidth ();
+	tmax = srch / (float)R_GetNativeRenderHeight ();
 
 	GL_UseProgram (glprogs.warpscale[water_warp]);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
@@ -5085,6 +5634,7 @@ void R_RenderView (void)
         else if (gl_finish.value)
                 glFinish ();
 
+	R_InvalidateGodraysFrameCache ();
 	R_FrameGraph_RenderView ();
 	if (r_gl_state_validate.value > 0.f && r_framegraph_debug.value > 0.f)
 	{

@@ -121,6 +121,7 @@ typedef struct render_pass_context_s
 void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan);
 void R_FrameGraph_SetRenderFramePlan (const RenderFramePlan *plan);
 qboolean R_FrameGraph_GetRenderFramePlan (RenderFramePlan *out_plan);
+void R_FrameGraph_GetTimingSummary (double *out_gpu_ms, double *out_cpu_ms, qboolean *out_gpu_valid);
 void R_FrameGraph_ResetPasses (void);
 qboolean R_FrameGraph_AddPass (const RenderPassDesc *pass_desc);
 void R_FrameGraph_RenderView (void);

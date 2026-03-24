@@ -131,6 +131,18 @@ extern	cvar_t	r_dynamic;
 extern	cvar_t	r_quality;
 extern	cvar_t	r_novis;
 extern	cvar_t	r_scale;
+extern	cvar_t	r_scene_scale_debug;
+extern	cvar_t	r_drs;
+extern	cvar_t	r_drs_use_gpu;
+extern	cvar_t	r_drs_target_ms;
+extern	cvar_t	r_drs_target_fps;
+extern	cvar_t	r_drs_min_scale;
+extern	cvar_t	r_drs_max_scale;
+extern	cvar_t	r_drs_step_up;
+extern	cvar_t	r_drs_step_down;
+extern	cvar_t	r_drs_hysteresis_ms;
+extern	cvar_t	r_drs_filter_alpha;
+extern	cvar_t	r_drs_debug;
 extern	cvar_t	r_shadow;
 extern	cvar_t	r_shadow_sun;
 extern	cvar_t	r_shadow_dlight;
@@ -526,6 +538,7 @@ typedef struct {
 	float shadow_strength;
 	float shadow_distance;
 
+	// godrays
 	float ray_decay;
 	float ray_density;
 } sun_t;
@@ -579,6 +592,7 @@ qboolean R_PrevFrameValid (void);
 void R_DrawBrushModels (entity_t **ents, int count);
 void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent);
 void R_DrawBrushModels_DLights (entity_t **ents, int count);
+void R_DrawBrushModels_Godrays (entity_t **ents, int count);
 void R_DrawBrushModels_SkyLayers (entity_t **ents, int count);
 void R_DrawBrushModels_SkyCubemap (entity_t **ents, int count);
 void R_DrawBrushModels_SkyStencil (entity_t **ents, int count);
@@ -636,6 +650,7 @@ void GL_BuildLightmaps (void);
 void GL_DeleteBModelBuffers (void);
 void GL_BuildBModelVertexBuffer (void);
 void GL_BuildBModelMarkBuffers (void);
+void R_ResetGodraysStabilization (void);
 void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *hdr);
 void GLMesh_LoadVertexBuffers (void);
 void GLMesh_DeleteVertexBuffers (void);
@@ -682,6 +697,10 @@ typedef struct glprogs_s {
 	GLuint		bloom_blur;
 	GLuint		ssao;
 	GLuint		ssao_blur;
+	GLuint		godrays_mask;
+	GLuint		godrays;
+	GLuint		godrays_source;
+	GLuint		godrays_source_sky;
 	GLuint		fogvol;
 	GLuint		fogvol_global;
 	GLuint		fogvol_clustered;
@@ -736,6 +755,8 @@ typedef struct glframebufs_s {
 
 	struct {
 		GLint		samples;
+		int			width;
+		int			height;
 		GLuint		color_tex;
 		GLuint		velocity_tex;
 		GLuint		depth_stencil_tex;
@@ -743,6 +764,8 @@ typedef struct glframebufs_s {
 	}				scene;
 
 	struct {
+		int			width;
+		int			height;
 		GLuint		color_tex;
 		GLuint		velocity_tex;
 		GLuint		fbo;
@@ -785,6 +808,7 @@ typedef struct glframebufs_s {
 		GLuint		shafts_fbo;
 		int			width;
 		int			height;
+	}				godrays;
 
 	struct {
 		GLuint		noise_tex;
@@ -871,6 +895,8 @@ void Sky_LoadSkyBox (const char *name);
 void Sky_SetupFrame (void);
 qboolean Sky_IsAnimated (void);
 
+qboolean R_TextureEmitsGodrays (texture_t *t);
+qboolean R_SurfaceEmitsGodrays (msurface_t *s);
 
 void GL_BindBuffer (GLenum target, GLuint buffer);
 void GL_BindBufferRange (GLenum target, GLuint index, GLuint buffer, GLintptr offset, GLsizeiptr size);
@@ -890,6 +916,12 @@ void GL_AddGarbageBuffer (GLuint handle);
 qboolean GL_NeedsSceneEffects (void);
 qboolean GL_NeedsPostprocess (void);
 void GL_PostProcess (const RenderGraphResourceHandle *resources);
+
+int R_GetNativeRenderWidth (void);
+int R_GetNativeRenderHeight (void);
+int R_GetSceneRenderWidth (void);
+int R_GetSceneRenderHeight (void);
+int R_GetSceneRenderScale (void);
 
 float GL_WaterAlphaForTextureType (textype_t type);
 

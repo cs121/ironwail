@@ -30,6 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_quality.h"
 #include "r_ssao.h"
 #include "r_fogvol.h"
+#include "r_godrays.h"
 #include "r_realtimelight.h"
 #include "r_skyvis.h"
 
@@ -159,6 +160,8 @@ extern cvar_t r_shadow_cull_frustum;
 extern cvar_t r_shadow_cull_sphere;
 extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_log;
+extern cvar_t r_godrays_decay;
+extern cvar_t r_godrays_density;
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -565,8 +568,10 @@ Cvar_SetCallback (&r_srgb_textures, TexMgr_SRGBTextures_f);
 	Cvar_RegisterVariable (&r_bloom);
 	Cvar_RegisterVariable (&r_bloom_threshold);
 	R_PPdlights_RegisterCvars ();
+	/* CVar owners: r_postfx* in r_postfx.c, r_ssao* in r_ssao.c, r_godray* and r_godrays* in r_godrays.c. */
 	R_PostFX_RegisterCvars ();
 	R_SSAO_RegisterCvars ();
+	R_Godrays_RegisterCvars ();
 Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_vignette_radius_inner);
 	Cvar_RegisterVariable (&r_vignette_radius_outer);
@@ -632,6 +637,18 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_telealpha);
 	Cvar_RegisterVariable (&r_slimealpha);
 	Cvar_RegisterVariable (&r_scale);
+	Cvar_RegisterVariable (&r_scene_scale_debug);
+	Cvar_RegisterVariable (&r_drs);
+	Cvar_RegisterVariable (&r_drs_use_gpu);
+	Cvar_RegisterVariable (&r_drs_target_ms);
+	Cvar_RegisterVariable (&r_drs_target_fps);
+	Cvar_RegisterVariable (&r_drs_min_scale);
+	Cvar_RegisterVariable (&r_drs_max_scale);
+	Cvar_RegisterVariable (&r_drs_step_up);
+	Cvar_RegisterVariable (&r_drs_step_down);
+	Cvar_RegisterVariable (&r_drs_hysteresis_ms);
+	Cvar_RegisterVariable (&r_drs_filter_alpha);
+	Cvar_RegisterVariable (&r_drs_debug);
 	Cvar_RegisterVariable (&r_sun_light);
 	Cvar_SetCallback (&r_telealpha, R_SetTelealpha_f);
 	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
@@ -753,6 +770,8 @@ void R_Sun_ResetToDefaults (sun_t *s)
 	s->shadow_bias = 0.001f;
 	s->shadow_strength = CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f);
 	s->shadow_distance = 0.f;
+	s->ray_decay = CLAMP (0.f, r_godrays_decay.value, 1.f);
+	s->ray_density = q_max (0.f, r_godrays_density.value);
 }
 
 void R_Sun_ApplyMapOverrides (sun_t *s, const char *worldspawn_entity_string)
@@ -991,6 +1010,7 @@ void R_NewMap (void)
 	R_ClearParticles ();
 	VEC_CLEAR (r_pointfile);
 
+	R_ResetGodraysStabilization ();
 	R_FogVol_ClearHistory ();
 	R_ReloadDecals ();
 	R_ClearDecals ();

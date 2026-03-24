@@ -794,11 +794,10 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderP
 		break;
 	case FG_PASS_VIEWPORT_VIEW_RECT_SCALED:
 	{
-		int scale = q_max (1, (int)r_refdef.scale);
 		view_x = glx + r_refdef.vrect.x;
 		view_y = gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height;
-		view_w = q_max (1, r_refdef.vrect.width / scale);
-		view_h = q_max (1, r_refdef.vrect.height / scale);
+		view_w = R_GetSceneRenderWidth ();
+		view_h = R_GetSceneRenderHeight ();
 		glViewport (view_x, view_y, view_w, view_h);
 		break;
 	}
@@ -875,8 +874,50 @@ qboolean R_FrameGraph_GetRenderFramePlan (RenderFramePlan *out_plan)
 	if (s_cached_plan_frame != r_framecount)
 		return false;
 	if (out_plan)
-		*out_plan = s_cached_plan;
+	*out_plan = s_cached_plan;
 	return true;
+}
+
+void R_FrameGraph_GetTimingSummary (double *out_gpu_ms, double *out_cpu_ms, qboolean *out_gpu_valid)
+{
+	double gpu_total = 0.0;
+	double cpu_total = 0.0;
+	qboolean gpu_valid = false;
+	int i;
+
+	for (i = 1; i < FG_PASS_STATS_COUNT; ++i)
+		cpu_total += s_channel_stats[i].cpu_avg_ms;
+
+	for (i = 0; i < s_runtime_pass_count; ++i)
+	{
+		const fg_runtime_pass_entry_t *entry = &s_runtime_passes[i];
+		unsigned channel;
+		const framegraph_pass_stats_t *stats;
+
+		if (!entry->desc)
+			continue;
+
+		channel = entry->desc->stats_channel;
+		if (channel <= FG_PASS_STATS_NONE || channel >= FG_PASS_STATS_COUNT)
+			continue;
+		if (entry->profile_slot < 0 || entry->profile_slot >= s_profile_slot_count)
+			continue;
+
+		stats = &s_pass_stats[entry->profile_slot];
+		gpu_total += stats->gpu_avg_ms;
+		if (stats->gpu_samples > 0)
+			gpu_valid = true;
+	}
+
+	if (!FG_Backend_HasTimestampQueries ())
+		gpu_valid = false;
+
+	if (out_gpu_ms)
+		*out_gpu_ms = gpu_total;
+	if (out_cpu_ms)
+		*out_cpu_ms = cpu_total;
+	if (out_gpu_valid)
+		*out_gpu_valid = gpu_valid;
 }
 
 /*

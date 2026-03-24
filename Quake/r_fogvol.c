@@ -171,6 +171,7 @@ enum
 	FOGVOL_U_LIGHT_SCISSOR = 29,
 	FOGVOL_U_LIGHT_SOURCE_SCALES = 39,
 	FOGVOL_U_LIGHTING_MODE = 40,
+	FOGVOL_U_GODRAY_COUPLING = 41,
 	FOGVOL_U_LOCAL_OCCLUSION_MODE = 42,
 	FOGVOL_U_CHECKERBOARD = 47,
 	FOGVOL_U_FROXEL_ENABLED = 34,
@@ -196,6 +197,10 @@ static qboolean r_fogvol_composite_valid = false;
 static GLuint r_fogvol_composite_tex = 0;
 static fog_light_lists_gpu_t r_fogvol_empty_lights;
 
+static GLuint r_fogvol_godray_shafts_tex = 0;
+static GLuint r_fogvol_godray_mask_tex = 0;
+static GLuint r_fogvol_godray_source_tex = 0;
+static qboolean r_fogvol_godray_ready = false;
 
 static int FogVol_NormalizeShape (int shape)
 {
@@ -311,7 +316,12 @@ void R_FogVol_RegisterCvars (void)
 		Cvar_RegisterVariable (fogvol_cvar_table[i].var);
 }
 
+void R_FogVol_SetGodrayCouplingTextures (GLuint shafts_tex, GLuint mask_tex, GLuint source_tex, qboolean ready)
 {
+	r_fogvol_godray_shafts_tex = shafts_tex;
+	r_fogvol_godray_mask_tex = mask_tex;
+	r_fogvol_godray_source_tex = source_tex;
+	r_fogvol_godray_ready = ready;
 }
 
 void R_FogVol_ClearEntities (void)
@@ -512,8 +522,10 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 	float max_y = -1e30f;
 	qboolean any_projected = false;
 	qboolean any_behind = false;
-	int target_w = fullres ? glwidth : framebufs.fogvol.width;
-	int target_h = fullres ? glheight : framebufs.fogvol.height;
+	const int native_w = R_GetNativeRenderWidth ();
+	const int native_h = R_GetNativeRenderHeight ();
+	int target_w = fullres ? native_w : framebufs.fogvol.width;
+	int target_h = fullres ? native_h : framebufs.fogvol.height;
 	int out_x0;
 	int out_y0;
 	int out_x1;
@@ -590,8 +602,8 @@ qboolean R_FogVol_ProjectAABBToScreenRect (const fog_volume_t *v, int *x0, int *
 
 	if (!fullres)
 	{
-		float scale_x = (float)target_w / q_max ((float)glwidth, 1.f);
-		float scale_y = (float)target_h / q_max ((float)glheight, 1.f);
+		float scale_x = (float)target_w / q_max ((float)native_w, 1.f);
+		float scale_y = (float)target_h / q_max ((float)native_h, 1.f);
 		out_x0 = (int)floorf ((float)out_x0 * scale_x);
 		out_y0 = (int)floorf ((float)out_y0 * scale_y);
 		out_x1 = (int)ceilf ((float)out_x1 * scale_x);
@@ -711,6 +723,8 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float debug_sun_scale = 0.f;
 	float debug_emissive_scale = 0.f;
 	qboolean sun_shadow_map_enabled = R_Shadow_GetSunCascadeData (sun_shadow_viewproj, sun_shadow_splits, &sun_shadow_cascades, &sun_shadow_bias, &sun_shadow_pcf);
+	const int native_w = R_GetNativeRenderWidth ();
+	const int native_h = R_GetNativeRenderHeight ();
 
 	if (R_Froxel_GetDebugScales (&debug_dlight_scale, &debug_sun_scale, &debug_emissive_scale))
 	{
@@ -776,7 +790,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform1iFunc (FOGVOL_U_PHYS_BLEND, 1);
 	GL_Uniform1iFunc (FOGVOL_U_JITTER_ENABLED, r_fogvol_jitter.value > 0.f ? 1 : 0);
 	GL_Uniform3fFunc (FOGVOL_U_CAMERA_POS_WS, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
-	GL_Uniform4fFunc (FOGVOL_U_VIEWPORT_PARAMS, (float)glwidth, (float)glheight, 1.f / q_max (1.f, (float)glwidth), 1.f / q_max (1.f, (float)glheight));
+	GL_Uniform4fFunc (FOGVOL_U_VIEWPORT_PARAMS, (float)native_w, (float)native_h, 1.f / q_max (1.f, (float)native_w), 1.f / q_max (1.f, (float)native_h));
 	GL_Uniform2fFunc (FOGVOL_U_DEPTH_SCALE, depth_scale_x, depth_scale_y);
 	GL_Uniform4fFunc (FOGVOL_U_VIEW_PARAMS, view_x, view_y, 1.f / q_max (1.f, view_w), 1.f / q_max (1.f, view_h));
 	GL_Uniform4fFunc (FOGVOL_U_DEPTH_PARAMS, depth_near, depth_far, reverse_z_flag, depth_sky_cutoff);
@@ -799,6 +813,8 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SCISSOR, 0.f, 0.f, 0.f, 0.f);
 	GL_Uniform4fFunc (FOGVOL_U_LIGHT_SOURCE_SCALES, light_scale_dlight, light_scale_sun, light_scale_emissive, light_contrast);
 	GL_Uniform1iFunc (FOGVOL_U_LIGHTING_MODE, lighting_mode);
+	/* Safety fallback: disable Godray->Fog coupling to avoid translucent band artifacts. */
+	GL_Uniform1iFunc (FOGVOL_U_GODRAY_COUPLING, 0);
 	GL_Uniform1iFunc (FOGVOL_U_LOCAL_OCCLUSION_MODE, 0);
 	GL_Uniform1iFunc (FOGVOL_U_FROXEL_ENABLED, (mode > 0 && (froxel_ready || force_froxel_debug)) ? 1 : 0);
 	GL_Uniform4fFunc (FOGVOL_U_FROXEL_PARAMS0, froxel_params0[0], froxel_params0[1], froxel_params0[2], froxel_params0[3]);
@@ -841,6 +857,8 @@ void R_FogVol_Render (void)
 	int scissor_x1[MAX_FOGVOLUMES];
 	int scissor_y1[MAX_FOGVOLUMES];
 	qboolean scissor_valid[MAX_FOGVOLUMES];
+	const int native_w = R_GetNativeRenderWidth ();
+	const int native_h = R_GetNativeRenderHeight ();
 
 	r_fogvol_composite_valid = false;
 	r_fogvol_composite_tex = 0;
@@ -869,8 +887,8 @@ void R_FogVol_Render (void)
 	use_halfres = (r_fogvol_halfres.value > 0.f);
 	if (r_fogvol_debug_froxel_random.value > 0.f)
 		use_halfres = false;
-	fog_width = use_halfres ? framebufs.fogvol.width : glwidth;
-	fog_height = use_halfres ? framebufs.fogvol.height : glheight;
+	fog_width = use_halfres ? framebufs.fogvol.width : native_w;
+	fog_height = use_halfres ? framebufs.fogvol.height : native_h;
 	view_x = (float)(glx + r_refdef.vrect.x);
 	view_y = (float)(gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height);
 	view_w = (float)r_refdef.vrect.width;
@@ -880,8 +898,8 @@ void R_FogVol_Render (void)
 		return;
 
 	/* Protect against division by zero when fog render targets are unavailable. */
-	depth_scale_x = (float)glwidth  / (float)q_max (1, fog_width);
-	depth_scale_y = (float)glheight / (float)q_max (1, fog_height);
+	depth_scale_x = (float)native_w / (float)q_max (1, fog_width);
+	depth_scale_y = (float)native_h / (float)q_max (1, fog_height);
 	depth_near = 0.5f;
 	depth_far = gl_farclip.value > depth_near ? gl_farclip.value : depth_near + 1.f;
 	depth_sky_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
@@ -976,7 +994,7 @@ void R_FogVol_Render (void)
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, final_fbo);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.fogvol.finalcopy_fbo);
 		GL_BlitFramebufferFunc (0, 0, fog_width, fog_height,
-			0, 0, glwidth, glheight,
+			0, 0, native_w, native_h,
 			GL_COLOR_BUFFER_BIT, GL_LINEAR);
 		final_tex = framebufs.fogvol.finalcopy_tex;
 		final_fbo = framebufs.fogvol.finalcopy_fbo;
@@ -987,8 +1005,8 @@ void R_FogVol_Render (void)
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 	if (use_halfres)
 	{
-		GL_BlitFramebufferFunc (0, 0, glwidth, glheight,
-			0, 0, glwidth, glheight,
+		GL_BlitFramebufferFunc (0, 0, native_w, native_h,
+			0, 0, native_w, native_h,
 			GL_COLOR_BUFFER_BIT, GL_LINEAR);
 	}
 	else

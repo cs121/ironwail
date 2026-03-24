@@ -453,6 +453,13 @@ static shadow_receiver_uniforms_t *R_Shadow_GetReceiverUniforms (GLuint program)
 		u->pcf_texel = GL_GetUniformLocationFunc (program, "ShadowPCFTexel");
 		u->rim_params0 = GL_GetUniformLocationFunc (program, "RimLightParams0");
 		u->rim_params1 = GL_GetUniformLocationFunc (program, "RimLightParams1");
+		/* Rim uniforms use explicit locations in GLSL (45/46). On some drivers,
+		 * querying explicit uniform locations may spuriously return -1, which
+		 * leaves rim light permanently disabled. Fall back to the fixed slots. */
+		if (u->rim_params0 < 0)
+			u->rim_params0 = 45;
+		if (u->rim_params1 < 0)
+			u->rim_params1 = 46;
 		return u;
 	}
 }
