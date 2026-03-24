@@ -260,10 +260,24 @@ typedef struct material_s
 } material_t;
 
 // Developer note:
-// Supported directives: qer_editorimage, surfaceparm, emissive, bloom, godray, emissive_scale,
-// bloom_scale, godray_scale, emissiveScale, bloomScale, godrayScale, and a single stage block
-// with map + rgbGen identity.
-// To add new surfaceparms, extend mat_surfaceparm_table in mat_material_parse.c and map to flags.
+// Material parsing supports top-level and stage blocks as implemented by ParseMaterialBlock
+// and ParseStageBlock in Quake/mat_material_parse.c.
+//
+// Capability snapshot (see keyword table/docs for exact coverage):
+// - Implemented: core top-level metadata/flags (qer_editorimage, surfaceparm, polygonOffset,
+//   emissive/bloom/godray + *_scale) and core stage features (map/clampmap, depthWrite,
+//   stage emissive/bloom/godray + *Scale).
+// - Partial: selected classic directives such as cull, sort, animMap, rgbGen/alphaGen,
+//   blendFunc, depthFunc, tcGen, and tcMod.
+// - Deferred (known unimplemented): skyParms, fogParms, deformVertexes, q3map_*, alphaFunc.
+//
+// Extension/status references:
+// - Canonical status map: mat_material_keyword_table in Quake/mat_material.c.
+// - Authoring guide: docs/how2use-materials.md.
+// - Particle constraints: docs/particle_material_contract.md.
+//
+// Warning: parser coverage evolves over time; always treat mat_material_keyword_table as the
+// canonical source of directive support status.
 
 typedef struct texture_s texture_t;
 
