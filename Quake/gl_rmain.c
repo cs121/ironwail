@@ -3581,8 +3581,10 @@ void R_SetupView (void)
         r_framedata.colorspace_params[3] = CLAMP (0.f, r_lighting_debug_view.value, 9.f);
         r_framedata.shader_params[0] = r_material_debug.value;
         r_framedata.shader_params[1] = r_tcgen_debug.value;
-        r_framedata.shader_params[2] = R_SkyVis_GetResolvedScale ();
-        r_framedata.shader_params[3] = 0.f;
+        /* Keep legacy sun-visibility fill attenuation alive for non-sky surfaces.
+         * SkyVis skylight scale is carried separately in shader_params[3]. */
+        r_framedata.shader_params[2] = CLAMP (0.f, r_sun_visibility.value, 1.f);
+        r_framedata.shader_params[3] = R_SkyVis_GetResolvedScale ();
 
 	{
 		const sun_t *sun = R_GetSun ();

@@ -92,6 +92,93 @@ static void R_Froxel_AddLight (const vec3_t origin, float radius, const vec3_t c
 static void R_Froxel_InjectPPDLights (void);
 static void R_Froxel_InjectPPDGIHelper (const rl_light_t *lights, int light_count);
 
+static float R_Froxel_DlightRadiusForFog (float radius, uint32_t type)
+{
+	float scale = 0.70f;
+	float cap;
+
+	switch ((dlighttype_t)type)
+	{
+	case DLIGHT_EXPLOSION:
+		scale = 0.85f;
+		break;
+	case DLIGHT_ROCKET:
+	case DLIGHT_PLASMA:
+	case DLIGHT_LIGHTNING:
+	case DLIGHT_TELEPORT:
+		scale = 0.76f;
+		break;
+	case DLIGHT_TORCH:
+		scale = 0.62f;
+		break;
+	case DLIGHT_LAVA:
+		scale = 0.68f;
+		break;
+	case DLIGHT_DEFAULT:
+	default:
+		scale = 0.70f;
+		break;
+	}
+
+	/* Fog receives a more compact dlight footprint than opaque shading.
+	 * Keep a hard cap so farclip cannot inflate local fog lighting excessively. */
+	cap = q_max (192.f, q_min (640.f, r_froxel.far_clip * 0.24f));
+	return CLAMP (32.f, radius * scale, cap);
+}
+
+static qboolean R_Froxel_IsViewMuzzleDlight (const dlight_t *dl)
+{
+	if (!dl)
+		return false;
+	if (dl->type != DLIGHT_DEFAULT)
+		return false;
+	if (dl->kind != DL_TRANSIENT)
+		return false;
+	if (dl->key != cl.viewentity)
+		return false;
+	if (dl->minlight <= 0.f)
+		return false;
+	/* Keep the match tight to short-lived muzzle flashes only. */
+	if ((dl->die - dl->spawn) > 0.25f)
+		return false;
+	return true;
+}
+
+static qboolean R_Froxel_IsViewMuzzlePPDLight (const rl_light_t *src, uint32_t fog_type)
+{
+	if (!src)
+		return false;
+	if ((rl_light_type_t)src->type != RL_LIGHT_POINT)
+		return false;
+	if (fog_type != (uint32_t)DLIGHT_DEFAULT)
+		return false;
+	return src->source_id == (unsigned int)cl.viewentity;
+}
+
+static void R_Froxel_ApplyViewMuzzleFogClamp (const vec3_t origin, float *radius, vec3_t color, float *intensity)
+{
+	vec3_t to_cam;
+	float dist;
+	float proximity;
+	float radius_scale;
+	float energy_scale;
+
+	if (!origin || !radius || !color || !intensity)
+		return;
+
+	VectorSubtract (origin, r_refdef.vieworg, to_cam);
+	dist = VectorLength (to_cam);
+	/* Very close muzzle lights can blow out local fog scattering.
+	 * Fade suppression out by ~240u so only first-person flashes are affected. */
+	proximity = CLAMP (0.f, (dist - 48.f) * (1.f / 192.f), 1.f);
+	radius_scale = 0.38f + 0.62f * proximity;
+	energy_scale = 0.22f + 0.78f * proximity;
+
+	*radius = q_max (24.f, *radius * radius_scale);
+	VectorScale (color, energy_scale, color);
+	*intensity *= energy_scale;
+}
+
 static qboolean R_Froxel_SurfaceTextureIsLava (const qmodel_t *world, const msurface_t *surf)
 {
 	const texture_t *tex;
@@ -568,6 +655,9 @@ static void R_Froxel_InjectPPDLights (void)
 	for (i = 0; i < light_count; ++i)
 	{
 		const rl_light_t *src = &lights[i];
+		uint32_t fog_type;
+		float fog_radius;
+		float fog_intensity = 1.f;
 		int before_count;
 		vec3_t scaled_color;
 
@@ -583,8 +673,12 @@ static void R_Froxel_InjectPPDLights (void)
 			continue;
 		}
 		before_count = r_froxel.light_count;
+		fog_type = R_Froxel_DlightTypeFromRealtimeLight (src);
+		fog_radius = R_Froxel_DlightRadiusForFog (src->radius, fog_type);
 		VectorScale (src->color, q_max (0.f, src->intensity), scaled_color);
-		R_Froxel_AddLight (src->origin, src->radius, scaled_color, 1.f, R_Froxel_DlightTypeFromRealtimeLight (src));
+		if (R_Froxel_IsViewMuzzlePPDLight (src, fog_type))
+			R_Froxel_ApplyViewMuzzleFogClamp (src->origin, &fog_radius, scaled_color, &fog_intensity);
+		R_Froxel_AddLight (src->origin, fog_radius, scaled_color, fog_intensity, fog_type);
 		if (r_froxel.light_count > before_count)
 		{
 			r_froxel_ppd_stats.injected_count++;
@@ -903,6 +997,8 @@ void R_Froxel_InjectDlights (void)
 	{
 		const dlight_t *dl = active[i];
 		float eval_radius = 0.f;
+		float fog_radius = 0.f;
+		float fog_intensity = intensity_scale;
 		vec3_t eval_color;
 
 		if (!dl)
@@ -919,8 +1015,11 @@ void R_Froxel_InjectDlights (void)
 			continue;
 		if (eval_color[0] <= 0.f && eval_color[1] <= 0.f && eval_color[2] <= 0.f)
 			continue;
+		fog_radius = R_Froxel_DlightRadiusForFog (eval_radius, (uint32_t)dl->type);
+		if (R_Froxel_IsViewMuzzleDlight (dl))
+			R_Froxel_ApplyViewMuzzleFogClamp (dl->origin, &fog_radius, eval_color, &fog_intensity);
 
-		R_Froxel_AddLight (dl->origin, eval_radius, eval_color, intensity_scale, (uint32_t)dl->type);
+		R_Froxel_AddLight (dl->origin, fog_radius, eval_color, fog_intensity, (uint32_t)dl->type);
 	}
 }
 

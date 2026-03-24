@@ -1695,6 +1695,7 @@ static void Mod_LoadLighting (lump_t *l)
 	int	bspxsize, bspx_lighting_size, bspx_rgb_size, bspx_dlit_size;
 	int remastered_lump_samples;
 	qboolean bsp_lightmap_bgr = false;
+	qboolean litfile_bgr = false;
 	const char *lightmap_source_name = "NONE";
 
 	loadmodel->lightdata = NULL;
@@ -1715,6 +1716,11 @@ static void Mod_LoadLighting (lump_t *l)
 		bsp_lightmap_bgr = true;
 	else if (gl_bsp_lightmap_bgr.value < 0.f)
 		bsp_lightmap_bgr = Mod_ShouldAutoSwapBspLighting(loadmodel);
+
+	/* External .lit files are authored RGB/RGBE in most packs.
+	 * Keep auto BGR detection scoped to embedded BSP/BSPX lighting only. */
+	if (gl_bsp_lightmap_bgr.value > 0.f)
+		litfile_bgr = true;
 
 	/*
 	 * Lighting source precedence for loadmodel->lightdata:
@@ -1785,7 +1791,7 @@ static void Mod_LoadLighting (lump_t *l)
 				{
 					Con_Printf("loaded %s lighting (ldr)\n", lighting_source);
 
-					if (bsp_lightmap_bgr)
+					if (litfile_bgr)
 					{
 						byte *tmp = (byte *)q_malloc(l->filelen * 3);
 						byte *hunkbuf;
@@ -1850,7 +1856,7 @@ static void Mod_LoadLighting (lump_t *l)
                                         decoded = (byte *)Hunk_AllocName(l->filelen * 3, litfilename);
 
                                         Con_Printf("loaded %s lighting (hdr)\n", lighting_source);
-                                        Mod_DecodeRgbeLighting(decoded, rgbe, l->filelen, bsp_lightmap_bgr);
+                                        Mod_DecodeRgbeLighting(decoded, rgbe, l->filelen, litfile_bgr);
 
                                         q_free(rgbe);
 

@@ -674,7 +674,7 @@ void main()
 
 		if (LightmapParams.x > 0.5)
 		{
-			vec3 static_light_debug = static_light * lightgrid;
+			vec3 static_light_debug = static_light;
 			OUT_COLOR = vec4(clamp(static_light_debug, 0.0, 1.0), 1.0);
 #if !OIT
 			out_velocity = vec4(0.0);
@@ -683,11 +683,15 @@ void main()
 		}
 
 		vec3 clamped_static = clamp(static_light, 0.0, 1.0);
-		vec3 total_light    = clamped_static * lightgrid + in_bmodel_relight;
+		/* Lightgrid probes are intended for dynamic/model relighting.
+		 * Applying them multiplicatively to baked world lightmaps can over-darken
+		 * indoor scenes (double attenuation). Keep world static lighting authored. */
+		vec3 total_light    = clamped_static + in_bmodel_relight;
 		float sky_visibility = clamp(in_skyvisibility, 0.0, 1.0);
+		float skyvis_enable = (LightgridParams.z > 0.5) ? 1.0 : 0.0;
 		float sky_upness = clamp(surface_normal.z * 0.5 + 0.5, 0.0, 1.0);
 		float sky_room = 1.0 - 0.6 * max(max(clamped_static.r, clamped_static.g), clamped_static.b);
-		vec3 sky_diffuse = SkyVisTint.rgb * (ShaderParams.z * mix(0.2, 1.0, sky_upness) * sky_visibility * max(sky_room, 0.0));
+		vec3 sky_diffuse = SkyVisTint.rgb * (skyvis_enable * ShaderParams.w * mix(0.2, 1.0, sky_upness) * sky_visibility * max(sky_room, 0.0));
 		sky_diffuse = min(sky_diffuse, vec3(SkyVisTint.a));
 		total_light += max(min(sky_diffuse, 1.0 - total_light), 0.0);
 
@@ -778,18 +782,21 @@ void main()
 			/* SunDirEnabled.xyz stores scene->sun direction. Surface lighting needs
 			 * incoming-light direction (sun->scene), therefore we negate it. */
 			vec3 sun_to_surface = -SunDirEnabled.xyz;
+			/* Legacy fallback fill for non-sky surfaces. This keeps old map
+			 * readability when SkyVis data is sparse or unavailable. */
+			float sun_visibility = ((in_flags & CF_MAT_SKY) != 0u) ? 1.0 : ShaderParams.z;
 			float ndotl = max(dot(surface_normal, sun_to_surface), 0.0);
 			if (ndotl > 0.0)
 			{
 				float sun_shadow = SampleSunShadow(in_pos);
-				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl * sun_shadow;
+				vec3 sun_contrib = SunColorIntensity.rgb * SunColorIntensity.a * ndotl * sun_visibility * sun_shadow;
 				total_light += max(min(sun_contrib, 1.0 - total_light), 0.0);
 				if (rim_factor > 1e-5 && RimLightParams1.z > 0.0)
 				{
 					float rim_shadow = (RimLightParams0.w > 0.5) ? sun_shadow : 1.0;
 					float sun_back = max(dot(-surface_normal, sun_to_surface), 0.0);
 					rim_sun_accum += SunColorIntensity.rgb * SunColorIntensity.a
-						* rim_shadow * mix(0.35, 1.0, sun_back);
+						* sun_visibility * rim_shadow * mix(0.35, 1.0, sun_back);
 				}
 			}
 			else if (rim_factor > 1e-5 && RimLightParams1.z > 0.0)
@@ -797,7 +804,7 @@ void main()
 				float rim_shadow = (RimLightParams0.w > 0.5) ? SampleSunShadow(in_pos) : 1.0;
 				float sun_back = max(dot(-surface_normal, sun_to_surface), 0.0);
 				rim_sun_accum += SunColorIntensity.rgb * SunColorIntensity.a
-					* rim_shadow * mix(0.35, 1.0, sun_back);
+					* sun_visibility * rim_shadow * mix(0.35, 1.0, sun_back);
 			}
 		}
 

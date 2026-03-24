@@ -420,6 +420,8 @@ void main()
 #else
 	vec4 result = texture(Tex, uv);
 #endif
+	vec3 texel_albedo = result.rgb;
+	float texel_alpha = result.a;
 
 #if ALPHATEST
 	if (result.a < 0.666)
@@ -443,7 +445,11 @@ void main()
 		if (gpu_energy > 1e-6)
 			dlight_contrib = mix(in_dlight_color, gpu_dlight, dir_mix);
 	}
-	result.rgb += albedo * dlight_contrib;
+#if ALPHATEST
+	result.rgb += texel_albedo * dlight_contrib;
+#else
+	result.rgb += texel_albedo * dlight_contrib * texel_alpha;
+#endif
 
 	if (ShadowEnableDebug.x > 0.5 && ShadowSunDirEnabled.w > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
 	{

@@ -44,7 +44,7 @@ typedef struct fog_light_lists_gpu_s
 } fog_light_lists_gpu_t;
 
 /* Public CVars (simplified 0/1/2 dispatch + shared controls). */
-cvar_t r_fogvol = { "r_fogvol", "1", CVAR_ARCHIVE };
+cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
 cvar_t r_fogvol_halfres = { "r_fogvol_halfres", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_noise = { "r_fogvol_noise", "1", CVAR_ARCHIVE };
@@ -717,7 +717,6 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float debug_dlight_scale = 1.f;
 	float debug_sun_scale = 0.f;
 	float debug_emissive_scale = 0.f;
-	const qboolean lava_froxel_emissive = (r_fogvol_lava_emissive.value >= 0.f);
 	qboolean sun_shadow_map_enabled = R_Shadow_GetSunCascadeData (sun_shadow_viewproj, sun_shadow_splits, &sun_shadow_cascades, &sun_shadow_bias, &sun_shadow_pcf);
 
 	if (R_Froxel_GetDebugScales (&debug_dlight_scale, &debug_sun_scale, &debug_emissive_scale))
@@ -736,8 +735,8 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	{
 		if (froxel_debug_random_mode <= 0)
 		{
-			/* Keep froxel lava emissive available even when generic fog lighting is off. */
-			light_scale_dlight = lava_froxel_emissive ? q_max (light_scale_dlight, 1.f) : 0.f;
+			/* Honor explicit dlight controls: do not force a dlight fallback here. */
+			light_scale_dlight = 0.f;
 			light_scale_sun = 0.f;
 			if (r_fogvol_emissive.value <= 0.f)
 			{
@@ -745,11 +744,6 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 				emissive_floor = 0.f;
 			}
 		}
-	}
-	else if (light_scale_dlight <= 0.f && lava_froxel_emissive)
-	{
-		/* Allow lava-only froxel lights to contribute even if dlightscale is set to zero. */
-		light_scale_dlight = 1.f;
 	}
 
 	if (sun && R_WorldHasSun ())

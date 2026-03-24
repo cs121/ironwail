@@ -46,7 +46,7 @@ layout(std140, binding=0) uniform FrameDataUBO
     vec4    LightgridParams;    // 320
     vec4    DLightParams;       // 336
     vec4    ColorSpaceParams;   // 352
-    vec4    ShaderParams;       // 368  x: shader debug, y: tcgen debug, z: skyvis scale, w: unused
+    vec4    ShaderParams;       // 368  x: shader debug, y: tcgen debug, z: legacy sun visibility, w: skyvis scale
     vec4    SunDirEnabled;  // 384  xyz: scene->sun direction, w: enabled
     vec4    SunColorIntensity; // 400 rgb: sun color, w: intensity
     vec4    SkyVisTint;     // 416 rgb: sky tint, w: cap
