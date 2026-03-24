@@ -41,7 +41,8 @@ Nicht erlaubt im Partikel-MVP:
 Zusätzlich gilt:
 
 - `tcGen` muss `base` sein.
-- Mehr als `countof(stage->tcmods)` ist ein Hard-Fail (inkonsistente Stage-Daten).
+- Mehr als `countof(stage->tcmods)` wird beim Parsen verworfen, als `tcmod_overflow` markiert
+  und als Hard-Fail klassifiziert.
 
 ### Erlaubte Blend-Modi
 
@@ -83,7 +84,7 @@ Bewusst außerhalb des MVP (deferred):
 Unabhängig von strict/tolerant bleiben **inkonsistente Daten** Hard-Fail:
 
 - fehlende Stage (`NULL`)
-- `tcMod` overflow
+- `tcMod` overflow (`tcmod_overflow`, inkl. Warnung: `tcMod limit exceeded; ignoring extra modifiers`)
 - `blendFunc` custom mit ungültigen Faktoren
 
 ## 4) Akzeptanzkriterien und Tests
@@ -109,7 +110,7 @@ Für jede Stage muss eindeutig klassifiziert sein:
    - strict → **hard-fail**
 6. `blendFunc GL_ONE ???` mit ungültigem Faktor-Parsing → **hard-fail**
 7. `stage == NULL` → **hard-fail**
-8. `tcmod_count > countof(tcmods)` → **hard-fail**
+8. mehr als 4 `tcMod`-Direktiven in einer Stage (Overflow-Flag gesetzt) → **hard-fail**
 
 ### Dokumentierter Fallback
 
