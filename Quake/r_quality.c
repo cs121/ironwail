@@ -47,13 +47,6 @@ extern cvar_t r_ssao_max_distance;
 extern cvar_t r_ssao_fog_strength;
 extern cvar_t r_ssao_fog_power;
 
-extern cvar_t r_godrays;
-extern cvar_t r_godrays_samples;
-extern cvar_t r_godrays_blur;
-extern cvar_t r_godrays_density;
-extern cvar_t r_godrays_weight;
-extern cvar_t r_godrays_exposure;
-extern cvar_t r_godrays_threshold;
 
 extern cvar_t r_bloom;
 extern cvar_t r_bloom_threshold;
@@ -140,13 +133,6 @@ static quality_binding_t r_quality_bindings[] = {
 	{ &r_ssao_max_distance, { "768", "1024", "1280", "1536" } },
 	{ &r_ssao_fog_strength, { "0.75", "0.9", "1.0", "1.1" } },
 	{ &r_ssao_fog_power, { "0.8", "0.9", "1.0", "1.1" } },
-	{ &r_godrays, { "0", "0", "1", "1" } },
-	{ &r_godrays_samples, { "24", "36", "48", "64" } },
-	{ &r_godrays_blur, { "1.0", "1.25", "1.5", "1.8" } },
-	{ &r_godrays_density, { "0.7", "0.8", "0.9", "1.0" } },
-	{ &r_godrays_weight, { "0.010", "0.012", "0.015", "0.018" } },
-	{ &r_godrays_exposure, { "0.8", "0.9", "1.0", "1.15" } },
-	{ &r_godrays_threshold, { "0.1", "0.05", "0.0", "0.0" } },
 	{ &r_bloom, { "0.75", "1.5", "3.0", "3.5" } },
 	{ &r_bloom_threshold, { "1.25", "1.1", "1.0", "0.95" } },
 	{ &r_dof, { "0", "0", "1", "1" } },

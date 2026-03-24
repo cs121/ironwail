@@ -825,10 +825,6 @@ void GL_CreateShaders (void)
     glprogs.bloom_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_blur.frag"), "bloom blur");
 	glprogs.ssao = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao.frag"), "ssao");
 	glprogs.ssao_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao_blur.frag"), "ssao blur");
-	glprogs.godrays_mask = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays_mask.frag"), "godrays mask");
-	glprogs.godrays = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays.frag"), "godrays");
-	glprogs.godrays_source = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("godrays_source.frag"), "world godrays|MODE 0; DITHER 0");
-	glprogs.godrays_source_sky = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("godrays_source_sky.frag"), "godrays source sky");
 	glprogs.fogvol = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes");
 	glprogs.fogvol_global = 0;
 	glprogs.fogvol_froxel_inject = GL_CreateComputeProgram (GLSL_PATH("froxel_inject.comp"), "fogvol froxel inject");

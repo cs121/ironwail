@@ -332,7 +332,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\r_fogvol_static_stub.c" />
     <ClCompile Include="..\..\Quake\r_quality.c" />
     <ClCompile Include="..\..\Quake\r_sanitize.c" />
-    <ClCompile Include="..\..\Quake\r_godrays.c" />
     <ClCompile Include="..\..\Quake\r_postfx.c" />
     <ClCompile Include="..\..\Quake\r_realtimelight.c" />
     <ClCompile Include="..\..\Quake\r_part.c" />

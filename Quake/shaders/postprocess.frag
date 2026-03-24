@@ -8,9 +8,6 @@ layout(binding=1) uniform usampler3D PaletteLUT;
 layout(binding=2) uniform sampler2D DepthTexture;
 layout(binding=3) uniform sampler2D BloomTexture;
 layout(binding=4) uniform sampler2D VelocityTexture;
-layout(binding=5) uniform sampler2D GodraysTexture;
-layout(binding=6) uniform sampler2D GodraysMaskTexture;
-layout(binding=7) uniform sampler2D GodraysSourceTexture;
 layout(binding=8) uniform sampler2D SSAOTexture;
 layout(binding=9) uniform sampler2DArray PostFXLUT;
 // FogVol composite texture input for post effects.
@@ -138,7 +135,6 @@ layout(location=9) uniform vec4 PostFXParams1; // xyz: vignette color, w: blend 
 layout(location=10) uniform vec4 PostFXParams2; // x: vignette noise amount, yzw: unused
 layout(location=11) uniform vec4 TeleportParams; // x: teleport fade, y: blur radius (pixels)
 layout(location=12) uniform float u_saturation;
-layout(location=16) uniform vec4 GodraysParams; // x: enabled, y: debug, z: debug source mode, w: unused
 layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: fog damp strength
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: fog damp power
 layout(location=20) uniform float u_midtone;
@@ -398,7 +394,6 @@ vec3 SanitizeColor(vec3 color)
 layout(location=0) out vec4 out_fragcolor;
 
 // Apply soft-emulation palette/dither after the rest of the postprocess chain so
-// effects such as motion blur, DoF, SSAO, bloom, godrays, tonemapping, and LUTs
 // all operate on the unquantized intermediate color first.
 vec4 ApplySoftEmulationPostFX(vec3 color, vec2 fragCoord, float scale, float dither)
 {
@@ -447,19 +442,12 @@ void main()
                 return;
         }
 
-        if (GodraysParams.z > 0.5)
         {
-                vec4 source = texture(GodraysSourceTexture, uv);
-                vec3 debugColor = (GodraysParams.z < 1.5) ? source.rgb : vec3(source.a);
                 out_fragcolor = ApplySoftEmulationPostFX(debugColor, gl_FragCoord.xy, scale, dither);
                 return;
         }
-        if (GodraysParams.y > 0.5)
         {
-                vec3 maskColor = texture(GodraysMaskTexture, uv).rgb;
                 vec3 shaftsColor = vec3(0.0);
-                if (GodraysParams.x > 0.5)
-                        shaftsColor = texture(GodraysTexture, uv).rgb;
                 out_fragcolor = ApplySoftEmulationPostFX(max(maskColor, shaftsColor), gl_FragCoord.xy, scale, dither);
                 return;
         }
@@ -710,14 +698,10 @@ void main()
         {
                 bloomColor = texture(BloomTexture, uv).rgb * bloomIntensity;
         }
-        vec3 godraysColor = vec3(0.0);
-        if (GodraysParams.x > 0.5)
-                godraysColor = texture(GodraysTexture, uv).rgb;
         float exposure = max(HDRParams.y, 0.0);
         float exposureAdd = clamp(PostFXParams3.x, -2.0, 2.0);
         exposure *= exp2(exposureAdd);
         float tonemapMode = HDRParams.z;
-        vec3 combined = (hdrColor + bloomColor + godraysColor) * exposure;
         combined = SanitizeColor(combined);
         float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
         if (fogStrength > 0.0 && depthInfo.valid)

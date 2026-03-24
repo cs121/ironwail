@@ -191,7 +191,6 @@ typedef enum
 	MATERIAL_FLAG_STONE		= (1u << 9),
 	MATERIAL_FLAG_EMISSIVE		= (1u << 10),
 	MATERIAL_FLAG_BLOOM		= (1u << 11),
-	MATERIAL_FLAG_GODRAY		= (1u << 12)
 } material_flags_t;
 
 typedef struct mat_material_stage_s
@@ -200,10 +199,8 @@ typedef struct mat_material_stage_s
 	unsigned int		output_overrides;
 	float			emissive_scale;
 	float			bloom_scale;
-	float			godray_scale;
 	qboolean		emissive_scale_set;
 	qboolean		bloom_scale_set;
-	qboolean		godray_scale_set;
 	char		*map_path;
 	mat_rgbgen_t	rgbgen;
 	mat_alphagen_t	alphagen;
@@ -234,7 +231,6 @@ typedef enum
 	MAT_STAGE_OUT_COLOR		= (1u << 0),
 	MAT_STAGE_OUT_EMISSIVE		= (1u << 1),
 	MAT_STAGE_OUT_BLOOM		= (1u << 2),
-	MAT_STAGE_OUT_GODRAY_SOURCE	= (1u << 3)
 } mat_stage_output_flags_t;
 
 typedef struct material_s
@@ -252,10 +248,8 @@ typedef struct material_s
 	float			polygon_offset_units;
 	qboolean		emissive_enable;
 	qboolean		bloom_enable;
-	qboolean		godray_enable;
 	float			emissive_scale;
 	float			bloom_scale;
-	float			godray_scale;
 	material_stage_t	stage0;
 	material_stage_t	*stages;
 } material_t;
@@ -266,8 +260,6 @@ typedef struct material_s
 //
 // Capability snapshot (see keyword table/docs for exact coverage):
 // - Implemented: core top-level metadata/flags (qer_editorimage, surfaceparm, polygonOffset,
-//   emissive/bloom/godray + *_scale) and core stage features (map/clampmap, depthWrite,
-//   stage emissive/bloom/godray + *Scale).
 // - Partial: selected classic directives such as cull, sort, animMap, rgbGen/alphaGen,
 //   blendFunc, depthFunc, tcGen, and tcMod.
 // - Deferred (known unimplemented): skyParms, fogParms, deformVertexes, q3map_*, alphaFunc.

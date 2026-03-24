@@ -220,7 +220,6 @@ GLOBJS = \
 	gl_rmain.o \
 	r_framegraph.o \
 	r_ssao.o \
-	r_godrays.o \
 	r_tonemap.o \
 	gl_fog.o \
 	gl_rmisc.o \

@@ -213,7 +213,6 @@
     <ClCompile Include="..\..\Quake\r_fogvol_froxel_runtime.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\r_godrays.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\r_postfx.c">

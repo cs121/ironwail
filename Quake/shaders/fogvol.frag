@@ -16,7 +16,6 @@ layout(binding=0) uniform sampler2D SceneColor;
 layout(binding=1) uniform sampler2D SceneDepth;
 layout(binding=3) uniform sampler3D FogNoiseTex;
 layout(binding=6) uniform sampler3D FogFroxelLightTex;
-layout(binding=7) uniform sampler2D FogGodrayShaftsTex;
 layout(binding=8) uniform sampler2DArray FogSunShadowTex;
 
 struct FogVolume
@@ -75,7 +74,6 @@ layout(location=37) uniform int   FogFroxelDebug;
 layout(location=38) uniform int   FogFroxelParityMode;
 layout(location=39) uniform vec4  FogLightSourceScales;
 layout(location=40) uniform int   FogLightingMode;
-layout(location=41) uniform int   FogGodrayCoupling;
 layout(location=42) uniform int   FogLocalOcclusionMode;
 layout(location=43) uniform vec4  FogFroxelTemporalParams;
 layout(location=47) uniform int   FogCheckerboard;
@@ -463,7 +461,6 @@ void main()
 		flow += (volume.wind_turbulence.xyz / windDirLen) * volume.velocity_windspeed.w;
 
 	vec3 accum = vec3(0.0);
-	vec3 godrayEnergy = (FogGodrayCoupling != 0) ? texture(FogGodrayShaftsTex, clamp(screenUv, 0.0, 1.0)).rgb : vec3(0.0);
 	float transmittance = 1.0;
 	float tau = 0.0;
 	float ambientWeight = clamp(FogClusterParams.x, 0.0, 1.0);
@@ -514,8 +511,6 @@ void main()
 		scattering += froxelScatter;
 		scattering += sunScatter;
 		scattering += emissiveScatter;
-		if (FogGodrayCoupling != 0)
-			scattering += godrayEnergy * volume.color_density.rgb * 0.25;
 
 		float lightLuma = dot(max(froxelScatter + sunScatter + emissiveScatter, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
 		float relief = extinctionRelief * clamp(lightLuma * 0.75, 0.0, 1.0);
