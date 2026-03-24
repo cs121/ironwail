@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "../common/lightgrid.h"
 #include "r_realtimelight.h"
+#include "r_skyvis.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
@@ -79,6 +80,8 @@ typedef struct aliasinstance_s {
 	float		_pad1;
 	vec3_t		staticlightdir;
 	float		_pad2;
+	float		skyvisibility;
+	float		_pad3[3];
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
@@ -105,13 +108,17 @@ struct ibuf_s {
 		float	half_lambert;
 		float	dlight_debug_models;
 		float	dlight_directional_mix;
+		float	pp_dlight_model_enable;
+		float	pp_dlight_model_debug;
+		float	ambient_sky_params[4]; // x: enabled, y: scale, z: debug, w: unused
+		float	ambient_sky_tint[4];   // rgb: tint, w: cap
 		float	_pad1[3];
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
 
 COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) % 16 == 0);
-COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 224);
+COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 240);
 
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
@@ -789,7 +796,17 @@ ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 ibuf.global.dlight_debug_models = 0.f;
 ibuf.global.dlight_directional_mix = CLAMP (0.f, r_dlight_models_directional.value, 1.f);
-ibuf.global._pad1[0] = use_pp_models ? 1.f : 0.f;
+ibuf.global.pp_dlight_model_enable = use_pp_models ? 1.f : 0.f;
+ibuf.global.pp_dlight_model_debug = 0.f;
+ibuf.global.ambient_sky_params[0] = (r_skyvis.value > 0.f && R_SkyVis_Active ()) ? 1.f : 0.f;
+ibuf.global.ambient_sky_params[1] = R_SkyVis_GetResolvedScale ();
+ibuf.global.ambient_sky_params[2] = (r_skyvis_debug.value >= 2.f) ? 1.f : 0.f;
+ibuf.global.ambient_sky_params[3] = 0.f;
+ibuf.global.ambient_sky_tint[0] = r_framedata.skyvis_tint[0];
+ibuf.global.ambient_sky_tint[1] = r_framedata.skyvis_tint[1];
+ibuf.global.ambient_sky_tint[2] = r_framedata.skyvis_tint[2];
+ibuf.global.ambient_sky_tint[3] = r_framedata.skyvis_tint[3];
+ibuf.global._pad1[0] = 0.f;
 ibuf.global._pad1[1] = 0.f;
 ibuf.global._pad1[2] = 0.f;
 
@@ -1057,6 +1074,7 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
 	float		fovscale = 1.0f;
 	float		model_matrix[16];
 	aliasinstance_t	*instance;
+	float		skyvisibility = 0.f;
 
 	//
 	// setup pose/lerp data -- do it first so we don't miss updates due to culling
@@ -1119,6 +1137,8 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         //
 	rs_aliaspolys += paliashdr->numtris;
 	R_SetupAliasLighting (e);
+	if (r_skyvis.value > 0.f && R_SkyVis_Active ())
+		skyvisibility = CLAMP (0.f, R_SkyVis_Sample (lerpdata.origin), 1.f);
 
 	//
 	// draw it
@@ -1192,9 +1212,13 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         VectorCopy (e->lightcache.dlightcolor, instance->dlightcolor);
         VectorCopy (e->lightcache.dlightdir, instance->dlightdir);
         VectorCopy (e->lightcache.staticlightdir, instance->staticlightdir);
+	instance->skyvisibility = skyvisibility;
         instance->_pad0 = 0.f;
         instance->_pad1 = 0.f;
         instance->_pad2 = 0.f;
+	instance->_pad3[0] = 0.f;
+	instance->_pad3[1] = 0.f;
+	instance->_pad3[2] = 0.f;
         instance->alpha = entalpha;
         if (e == &cl.viewent)
                 instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;

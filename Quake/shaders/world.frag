@@ -688,11 +688,9 @@ void main()
 		 * indoor scenes (double attenuation). Keep world static lighting authored. */
 		vec3 total_light    = clamped_static + in_bmodel_relight;
 		float sky_visibility = clamp(in_skyvisibility, 0.0, 1.0);
-		float skyvis_enable = (LightgridParams.z > 0.5) ? 1.0 : 0.0;
 		float sky_upness = clamp(surface_normal.z * 0.5 + 0.5, 0.0, 1.0);
 		float sky_room = 1.0 - 0.6 * max(max(clamped_static.r, clamped_static.g), clamped_static.b);
-		vec3 sky_diffuse = SkyVisTint.rgb * (skyvis_enable * ShaderParams.w * mix(0.2, 1.0, sky_upness) * sky_visibility * max(sky_room, 0.0));
-		sky_diffuse = min(sky_diffuse, vec3(SkyVisTint.a));
+		vec3 sky_diffuse = AmbientSkyDiffuse(sky_visibility, sky_upness, sky_room);
 		total_light += max(min(sky_diffuse, 1.0 - total_light), 0.0);
 
 		// Dynamic lights

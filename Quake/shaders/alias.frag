@@ -7,6 +7,8 @@ struct InstanceData
 	vec4	DLightColor; // xyz=DLightColor
 	vec4	DLightDir;   // xyz=dominant dlight direction
 	vec4	StaticLightDir; // xyz=dominant static light direction
+	float	SkyVisibility;
+	vec3	_PadSky;
 	int		Pose1;
 	int		Pose2;
 	float	Blend;
@@ -27,7 +29,9 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	DLightDirectionalMix;
 	float	PPDLightModelEnable;
 	float	PPDLightModelDebug;
-	float	_Pad1;
+	vec4	AmbientSkyParams; // x: enabled, y: scale, z: debug mode, w: unused
+	vec4	AmbientSkyTint;   // rgb: tint, w: cap
+	float	_Pad1[3];
 	InstanceData instances[];
 } AliasFrameBuffer;
 
@@ -141,6 +145,7 @@ layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
 layout(location=7) in float in_dlight_vis;
 layout(location=8) in vec3 in_dlight_color;
+layout(location=9) in float in_sky_visibility;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -462,6 +467,24 @@ void main()
 			sun_shadow = SampleSunShadow(world_pos);
 			result.rgb += albedo * ShadowSunColorIntensity.rgb * ShadowSunColorIntensity.a
 				* ndotl * max(ShadowSunVisibility, 0.0) * sun_shadow;
+		}
+	}
+
+	{
+		float sky_enable = clamp(AliasFrameBuffer.AmbientSkyParams.x, 0.0, 1.0);
+		float sky_scale = max(AliasFrameBuffer.AmbientSkyParams.y, 0.0);
+		float sky_visibility = clamp(in_sky_visibility, 0.0, 1.0);
+		float sky_upness = clamp(world_nor.z * 0.5 + 0.5, 0.0, 1.0);
+		float sky_room = 1.0 - 0.6 * max(max(lit_color.r, lit_color.g), lit_color.b);
+		vec3 sky_ambient = AliasFrameBuffer.AmbientSkyTint.rgb
+			* (sky_enable * sky_scale * mix(0.2, 1.0, sky_upness) * sky_visibility * max(sky_room, 0.0));
+		sky_ambient = min(sky_ambient, vec3(max(AliasFrameBuffer.AmbientSkyTint.a, 0.0)));
+		result.rgb += max(min(sky_ambient, vec3(1.0) - result.rgb), vec3(0.0));
+
+		if (AliasFrameBuffer.AmbientSkyParams.z > 0.5)
+		{
+			float sky_luma = clamp(dot(sky_ambient, vec3(0.2126, 0.7152, 0.0722)) * 8.0, 0.0, 1.0);
+			result.rgb = vec3(sky_visibility, sky_luma, 0.0);
 		}
 	}
 
