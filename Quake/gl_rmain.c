@@ -5053,6 +5053,29 @@ static qboolean R_FG_PassWhenFogVolEnabled (const RenderPassContext *ctx)
 		&& R_FG_HasResources (ctx, RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_FOGVOL_HISTORY);
 }
 
+static qboolean R_FG_FogVolNeedsSunShadow (const RenderPassContext *ctx)
+{
+	return ctx
+		&& ctx->frame_plan
+		&& ctx->frame_plan->run_shadowmaps
+		&& ctx->resources
+		&& ctx->resources->shadow_sun_depth_tex
+		&& (r_fogvol_shadow.value > 0.f)
+		&& (r_fogvol_froxel_sun.value > 0.f);
+}
+
+static qboolean R_FG_PassWhenFogVolWithShadow (const RenderPassContext *ctx)
+{
+	return R_FG_PassWhenFogVolEnabled (ctx)
+		&& R_FG_FogVolNeedsSunShadow (ctx);
+}
+
+static qboolean R_FG_PassWhenFogVolNoShadow (const RenderPassContext *ctx)
+{
+	return R_FG_PassWhenFogVolEnabled (ctx)
+		&& !R_FG_FogVolNeedsSunShadow (ctx);
+}
+
 static void R_FG_ExecFogVol (RenderPassContext *ctx)
 {
 	(void)ctx;
@@ -5062,15 +5085,41 @@ static void R_FG_ExecFogVol (RenderPassContext *ctx)
 	R_FogVol_Render ();
 }
 
-static const RenderPassDesc s_fogvol_framegraph_pass = {
-	"Render fog volumes",
+static void R_FG_ExecFogVolNoShadow (RenderPassContext *ctx)
+{
+	if (r_framegraph_debug.value > 0.f)
+	{
+		if (ctx && ctx->resources && ctx->resources->shadow_sun_depth_tex == 0)
+			Con_DPrintf ("FrameGraph: fogvol using no-shadow resource contract (shadow depth optional)\n");
+		else if (ctx && ctx->resources && ctx->resources->shadow_sun_depth_tex != 0)
+			Con_DPrintf ("FrameGraph: fogvol selected no-shadow contract while shadow depth exists (feature toggle path)\n");
+	}
+
+	R_FG_ExecFogVol (ctx);
+}
+
+static const RenderPassDesc s_fogvol_framegraph_pass_shadow = {
+	"Render fog volumes (shadowed)",
 	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_SHADOW_SUN_DEPTH | RENDER_RES_FOGVOL_HISTORY | RENDER_RES_VELOCITY | RENDER_RES_FOGVOL_INPUTS,
 	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_FOGVOL_HISTORY,
 	1u << 0,
 	FG_PASS_OUTPUT_KEEP,
 	FG_PASS_VIEWPORT_KEEP,
-	R_FG_PassWhenFogVolEnabled,
+	R_FG_PassWhenFogVolWithShadow,
 	R_FG_ExecFogVol,
+	FG_PASS_STAGE_MAIN,
+	FG_PASS_STATS_FOG
+};
+
+static const RenderPassDesc s_fogvol_framegraph_pass_noshadow = {
+	"Render fog volumes (no-shadow)",
+	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_FOGVOL_HISTORY | RENDER_RES_VELOCITY | RENDER_RES_FOGVOL_INPUTS,
+	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_FOGVOL_HISTORY,
+	1u << 0,
+	FG_PASS_OUTPUT_KEEP,
+	FG_PASS_VIEWPORT_KEEP,
+	R_FG_PassWhenFogVolNoShadow,
+	R_FG_ExecFogVolNoShadow,
 	FG_PASS_STAGE_MAIN,
 	FG_PASS_STATS_FOG
 };
@@ -5197,7 +5246,8 @@ void R_RegisterFrameGraphPasses (void)
 	(void)R_FrameGraph_AddPass (&s_warp_resolve_framegraph_pass);
 	(void)R_FrameGraph_AddPass (&s_fogvol_prepare_framegraph_pass);
 	R_Decals_RegisterFrameGraphPasses ();
-	(void)R_FrameGraph_AddPass (&s_fogvol_framegraph_pass);
+	(void)R_FrameGraph_AddPass (&s_fogvol_framegraph_pass_shadow);
+	(void)R_FrameGraph_AddPass (&s_fogvol_framegraph_pass_noshadow);
 	(void)R_FrameGraph_AddPass (&s_ssao_fog_handoff_framegraph_pass);
 	(void)R_FrameGraph_AddPass (&s_postprocess_framegraph_pass);
 	(void)R_FrameGraph_AddPass (&s_viewmodel_framegraph_pass);
@@ -5270,5 +5320,4 @@ void R_RenderView (void)
 			rs_dynamiclightmaps);
 	//johnfitz
 }
-
 
