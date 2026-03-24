@@ -429,40 +429,29 @@ void main()
         vec2 viewMin = ViewRect.xy;
         vec2 viewMax = ViewRect.zw;
         vec2 viewSize = max(viewMax - viewMin, vec2(1e-6));
-        vec2 invScale = max(DepthParams.xy, vec2(1e-4));
-        bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
-        DepthSamplingInfo depthInfo = MakeDepthSamplingInfo();
+	bool inView = all(greaterThanEqual(uv, viewMin)) && all(lessThanEqual(uv, viewMax));
+	DepthSamplingInfo depthInfo = MakeDepthSamplingInfo();
 
-        if (lightingDebugView >= 1 && lightingDebugView <= 7)
-        {
-                vec3 debugColor = clamp(color.rgb, 0.0, 1.0);
-                if (outputSrgb > 0.5)
-                        debugColor = LinearToSRGB(debugColor);
-                out_fragcolor = ApplySoftEmulationPostFX(debugColor, gl_FragCoord.xy, scale, dither);
-                return;
-        }
-
-        {
-                out_fragcolor = ApplySoftEmulationPostFX(debugColor, gl_FragCoord.xy, scale, dither);
-                return;
-        }
-        {
-                vec3 shaftsColor = vec3(0.0);
-                out_fragcolor = ApplySoftEmulationPostFX(max(maskColor, shaftsColor), gl_FragCoord.xy, scale, dither);
-                return;
-        }
+	if (lightingDebugView >= 1 && lightingDebugView <= 7)
+	{
+		vec3 debugColor = clamp(color.rgb, 0.0, 1.0);
+		if (outputSrgb > 0.5)
+			debugColor = LinearToSRGB(debugColor);
+		out_fragcolor = ApplySoftEmulationPostFX(debugColor, gl_FragCoord.xy, scale, dither);
+		return;
+	}
 
         bool hasVelocityTexture = MotionParams1.z > 0.5;
         vec2 velocity = vec2(0.0);
         float viewModelMask = 0.0;
         int materialMask = 0;
-        if (hasVelocityTexture && inView)
-        {
-                vec2 velocityUV = clamp((uv - viewMin) * invScale, vec2(0.0), vec2(1.0));
-                vec4 velocitySample = texture(VelocityTexture, velocityUV);
-                velocity = velocitySample.xy;
-                viewModelMask = velocitySample.z;
-                materialMask = int(floor(velocitySample.w + 0.5));
+	if (hasVelocityTexture && inView)
+	{
+		vec2 velocityUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
+		vec4 velocitySample = texture(VelocityTexture, velocityUV);
+		velocity = velocitySample.xy;
+		viewModelMask = velocitySample.z;
+		materialMask = int(floor(velocitySample.w + 0.5));
         }
 
         ApplyMotionBlur(color, uv, viewMin, viewMax, texSize, invTexSize, inView, centerOpaque, hasVelocityTexture, velocity, depthInfo, viewModelMask);
@@ -698,11 +687,12 @@ void main()
         {
                 bloomColor = texture(BloomTexture, uv).rgb * bloomIntensity;
         }
-        float exposure = max(HDRParams.y, 0.0);
-        float exposureAdd = clamp(PostFXParams3.x, -2.0, 2.0);
-        exposure *= exp2(exposureAdd);
-        float tonemapMode = HDRParams.z;
-        combined = SanitizeColor(combined);
+	float exposure = max(HDRParams.y, 0.0);
+	float exposureAdd = clamp(PostFXParams3.x, -2.0, 2.0);
+	exposure *= exp2(exposureAdd);
+	float tonemapMode = HDRParams.z;
+	vec3 combined = hdrColor * exposure + bloomColor;
+	combined = SanitizeColor(combined);
         float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
         if (fogStrength > 0.0 && depthInfo.valid)
         {

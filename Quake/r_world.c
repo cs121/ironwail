@@ -428,6 +428,11 @@ typedef struct bmodel_gpu_call_remap_s {
 	GLuint		inst;
 } bmodel_gpu_call_remap_t;
 
+COMPILE_TIME_ASSERT (bmodel_instance_std430_size, sizeof (bmodel_gpu_instance_t) == 112);
+COMPILE_TIME_ASSERT (bmodel_bindless_call_std430_size, sizeof (bmodel_bindless_gpu_call_t) == 80);
+COMPILE_TIME_ASSERT (bmodel_bound_call_std430_size, sizeof (bmodel_bound_gpu_call_t) == 64);
+COMPILE_TIME_ASSERT (bmodel_call_remap_std430_size, sizeof (bmodel_gpu_call_remap_t) == 8);
+
 static bmodel_gpu_instance_t		bmodel_instances[MAX_VISEDICTS + 1]; // +1 for worldspawn
 static union {
 	struct {

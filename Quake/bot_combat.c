@@ -169,7 +169,7 @@ void BotCombat_ComputeAim (bot_state_t *bot, edict_t *self, edict_t *enemy, vec3
 	vec3_t to_target;
 	vec3_t base_angles;
 	float dist;
-	float skill;
+	float bot_skill_value;
 	float lead_time;
 	float jitter;
 	uint32_t seed;
@@ -180,12 +180,12 @@ void BotCombat_ComputeAim (bot_state_t *bot, edict_t *self, edict_t *enemy, vec3
 		return;
 	}
 
-	skill = BotCombat_ClampedSkill ();
+	bot_skill_value = BotCombat_ClampedSkill ();
 	VectorAdd (enemy->v.origin, enemy->v.view_ofs, target);
 	VectorSubtract (target, self->v.origin, to_target);
 	dist = VectorLength (to_target);
 
-	lead_time = CLAMP (0.f, dist / 1400.f, 0.22f) * (0.35f + 0.65f * skill);
+	lead_time = CLAMP (0.f, dist / 1400.f, 0.22f) * (0.35f + 0.65f * bot_skill_value);
 	target[0] += enemy->v.velocity[0] * lead_time;
 	target[1] += enemy->v.velocity[1] * lead_time;
 	target[2] += enemy->v.velocity[2] * (lead_time * 0.4f);
@@ -193,7 +193,7 @@ void BotCombat_ComputeAim (bot_state_t *bot, edict_t *self, edict_t *enemy, vec3
 	VectorSubtract (target, self->v.origin, to_target);
 	VectorAngles (to_target, base_angles);
 
-	jitter = (1.f - skill) * 5.5f;
+	jitter = (1.f - bot_skill_value) * 5.5f;
 	seed = (uint32_t) (host_framecount + bot->clientnum * 17 + (int) dist * 31);
 	base_angles[YAW] += (BotCombat_Noise01 (seed) - 0.5f) * 2.f * jitter;
 	base_angles[PITCH] += (BotCombat_Noise01 (seed ^ 0x9e3779b9U) - 0.5f) * 1.4f * jitter;

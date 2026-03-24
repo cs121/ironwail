@@ -18,6 +18,8 @@ typedef struct froxel_gpu_light_s
 	uint32_t _pad[3];
 } froxel_gpu_light_t;
 
+COMPILE_TIME_ASSERT (froxel_gpu_light_std430_size, sizeof (froxel_gpu_light_t) == 48);
+
 typedef struct froxel_state_s
 {
 	GLuint light_tex;

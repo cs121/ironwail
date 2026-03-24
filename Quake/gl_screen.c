@@ -1443,7 +1443,7 @@ void SCR_DrawEdictInfo (void)
 	int			i;
 	float		x, y;
 	canvasmap_t	proj2canvas;
-	vec3_t		crosshair, focus, anchor, proj, bgcolor;
+	vec3_t		crosshair_pos, focus, anchor, proj, bgcolor;
 	edict_t		*ed;
 
 	if (VEC_SIZE (bbox_linked) == 0 && VEC_SIZE (r_pointfile) == 0)
@@ -1451,13 +1451,13 @@ void SCR_DrawEdictInfo (void)
 
 	GL_SetCanvas (CANVAS_BOTTOMRIGHT);
 	SCR_SetupProjToCanvasMap (&proj2canvas);
-	VectorMA (r_origin, 8.f, vpn, crosshair);
+	VectorMA (r_origin, 8.f, vpn, crosshair_pos);
 
 	// If a pointfile was loaded, print "Leak" at the beginning
 	if (VEC_SIZE (r_pointfile) != 0)
 	{
 		VectorCopy (r_pointfile[0], anchor);
-		SCR_ClipToFrustum (anchor, crosshair);
+		SCR_ClipToFrustum (anchor, crosshair_pos);
 		ProjectVector (anchor, r_matviewproj, proj);
 		SCR_ProjToCanvas (proj, &proj2canvas, &x, &y);
 
@@ -1475,7 +1475,7 @@ void SCR_DrawEdictInfo (void)
 	PR_SwitchQCVM (&sv.qcvm);
 
 	SCR_GetEntityCenter (bbox_linked[0], focus);
-	SCR_ClipToFrustum (focus, crosshair);
+	SCR_ClipToFrustum (focus, crosshair_pos);
 
 	// Show edict numbers and classnames for all highlighted entities.
 	// Note: reversed order, so that the focused entity is drawn last,
@@ -1493,7 +1493,7 @@ void SCR_DrawEdictInfo (void)
 				continue;
 			//SCR_GetEntityBottom (ed, anchor);
 			SCR_GetEntityCenter (ed, anchor);
-			SCR_ClipToFrustum (anchor, crosshair);
+			SCR_ClipToFrustum (anchor, crosshair_pos);
 		}
 		else
 		{

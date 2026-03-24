@@ -82,10 +82,15 @@ typedef struct aliasinstance_s {
 	float		_pad2;
 	float		skyvisibility;
 	float		_pad3[3];
+	/* std430: vec3 has 16-byte base alignment in structs.
+	 * After skyvisibility + _pad3, keep extra 12 bytes so Pose1 starts at byte 236
+	 * (matching shader InstanceData layout), then pad struct stride to 256. */
+	float		_pad_pose[3];
 	int32_t		pose1;
 	int32_t		pose2;
 	float		blend;
 	int32_t		flags;
+	float		_pad_tail;
 } aliasinstance_t;
 
 #define ALIAS_INSTANCE_FLAG_NONE           0
@@ -113,13 +118,19 @@ struct ibuf_s {
 		float	ambient_sky_params[4]; // x: enabled, y: scale, z: debug, w: unused
 		float	ambient_sky_tint[4];   // rgb: tint, w: cap
 		float	_pad1[3];
+		/* std430 rounds the struct size up to 16-byte alignment before instances[].
+		 * Keep explicit tail padding so CPU/GPU offsets match exactly. */
+		float	_pad_tail[2];
 	} global;
 	aliasinstance_t inst[MAX_ALIAS_INSTANCES];
 } ibuf;
 
-/* Compile-unblock: keep build permissive while std430 packing is reconciled. */
-COMPILE_TIME_ASSERT (alias_global_size_matches_std430, 1);
-COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 240);
+COMPILE_TIME_ASSERT (alias_global_size_matches_std430, sizeof (ibuf.global) == 240);
+COMPILE_TIME_ASSERT (alias_instance_size_matches_std430, sizeof (aliasinstance_t) == 256);
+COMPILE_TIME_ASSERT (alias_instance_pose1_std430_offset, offsetof (aliasinstance_t, pose1) == 236);
+COMPILE_TIME_ASSERT (alias_instance_pose2_std430_offset, offsetof (aliasinstance_t, pose2) == 240);
+COMPILE_TIME_ASSERT (alias_instance_blend_std430_offset, offsetof (aliasinstance_t, blend) == 244);
+COMPILE_TIME_ASSERT (alias_instance_flags_std430_offset, offsetof (aliasinstance_t, flags) == 248);
 
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
@@ -810,6 +821,8 @@ ibuf.global.ambient_sky_tint[3] = r_framedata.skyvis_tint[3];
 ibuf.global._pad1[0] = 0.f;
 ibuf.global._pad1[1] = 0.f;
 ibuf.global._pad1[2] = 0.f;
+ibuf.global._pad_tail[0] = 0.f;
+ibuf.global._pad_tail[1] = 0.f;
 
 	ibuf_size = sizeof(ibuf.global) + sizeof(ibuf.inst[0]) * ibuf.count;
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &ibuf.global, ibuf_size, &buf, &ofs);
@@ -1214,17 +1227,20 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         VectorCopy (e->lightcache.dlightdir, instance->dlightdir);
         VectorCopy (e->lightcache.staticlightdir, instance->staticlightdir);
 	instance->skyvisibility = skyvisibility;
-        instance->_pad0 = 0.f;
-        instance->_pad1 = 0.f;
-        instance->_pad2 = 0.f;
+	instance->_pad0 = 0.f;
+	instance->_pad1 = 0.f;
+	instance->_pad2 = 0.f;
 	instance->_pad3[0] = 0.f;
 	instance->_pad3[1] = 0.f;
 	instance->_pad3[2] = 0.f;
-        instance->alpha = entalpha;
-        if (e == &cl.viewent)
-                instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
+	instance->_pad_pose[0] = 0.f;
+	instance->_pad_pose[1] = 0.f;
+	instance->_pad_pose[2] = 0.f;
+	instance->alpha = entalpha;
+	if (e == &cl.viewent)
+		instance->flags |= ALIAS_INSTANCE_FLAG_NO_MOTION_BLUR | ALIAS_INSTANCE_FLAG_VIEWMODEL;
 if (!Q_strncmp (e->model->name, "progs/bolt", 10))
-                instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
+		instance->flags |= ALIAS_INSTANCE_FLAG_LIGHTNING;
         instance->pose1 = lerpdata.pose1;
         instance->pose2 = lerpdata.pose2;
         instance->blend = lerpdata.blend;
@@ -1239,6 +1255,7 @@ if (!Q_strncmp (e->model->name, "progs/bolt", 10))
 		instance->pose1 *= paliashdr->numbones;
 		instance->pose2 *= paliashdr->numbones;
 	}
+	instance->_pad_tail = 0.f;
 }
 
 /*

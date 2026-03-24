@@ -43,6 +43,10 @@ typedef struct fog_light_lists_gpu_s
 	fog_light_gpu_t lights[MAX_FOGVOLUMES * MAX_FOGLIGHTS];
 } fog_light_lists_gpu_t;
 
+COMPILE_TIME_ASSERT (fog_volume_gpu_std430_size, sizeof (fog_volume_gpu_t) == 160);
+COMPILE_TIME_ASSERT (fog_light_gpu_std430_size, sizeof (fog_light_gpu_t) == 32);
+COMPILE_TIME_ASSERT (fog_light_list_gpu_std430_size, sizeof (fog_light_list_gpu_t) == 16);
+
 /* Public CVars (simplified 0/1/2 dispatch + shared controls). */
 cvar_t r_fogvol = { "r_fogvol", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_steps = { "r_fogvol_steps", "32", CVAR_ARCHIVE };
@@ -859,6 +863,9 @@ void R_FogVol_Render (void)
 	qboolean scissor_valid[MAX_FOGVOLUMES];
 	const int native_w = R_GetNativeRenderWidth ();
 	const int native_h = R_GetNativeRenderHeight ();
+	const int expected_half_w = q_max (1, native_w / 2);
+	const int expected_half_h = q_max (1, native_h / 2);
+	static int last_size_mismatch_frame = -1;
 
 	r_fogvol_composite_valid = false;
 	r_fogvol_composite_tex = 0;
@@ -887,6 +894,30 @@ void R_FogVol_Render (void)
 	use_halfres = (r_fogvol_halfres.value > 0.f);
 	if (r_fogvol_debug_froxel_random.value > 0.f)
 		use_halfres = false;
+
+	/* Keep runtime behavior consistent with currently allocated fogvol targets.
+	 * This avoids quadrant artifacts when r_fogvol_halfres is toggled without
+	 * a full framebuffer rebuild. */
+	if (use_halfres)
+	{
+		if (framebufs.fogvol.width != expected_half_w || framebufs.fogvol.height != expected_half_h)
+		{
+			if (framebufs.fogvol.width == native_w && framebufs.fogvol.height == native_h)
+				use_halfres = false;
+			else if (r_framecount != last_size_mismatch_frame)
+			{
+				last_size_mismatch_frame = r_framecount;
+				Con_DPrintf ("fogvol: size mismatch (requested halfres=%d, allocated=%dx%d, expected half=%dx%d/full=%dx%d)\n",
+					1, framebufs.fogvol.width, framebufs.fogvol.height, expected_half_w, expected_half_h, native_w, native_h);
+			}
+		}
+	}
+	else
+	{
+		if (framebufs.fogvol.width == expected_half_w && framebufs.fogvol.height == expected_half_h)
+			use_halfres = true;
+	}
+
 	fog_width = use_halfres ? framebufs.fogvol.width : native_w;
 	fog_height = use_halfres ? framebufs.fogvol.height : native_h;
 	view_x = (float)(glx + r_refdef.vrect.x);
