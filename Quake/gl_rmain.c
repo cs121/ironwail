@@ -737,8 +737,8 @@ static void R_UpdateSceneSizeState (void)
 	if (r_drs.value > 0.f)
 		requested_scale = R_ClampDRSScale (requested_scale);
 
-	int scene_width = q_max (1, base_scene_width / requested_scale);
-	int scene_height = q_max (1, base_scene_height / requested_scale);
+	int scene_width = (base_scene_width + requested_scale - 1) / requested_scale;
+	int scene_height = (base_scene_height + requested_scale - 1) / requested_scale;
 	qboolean size_changed;
 	qboolean scale_changed;
 
@@ -5292,8 +5292,11 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	GL_BeginGroup ("Warp/scale view");
 
-	/* Canonical scene-size path renders directly into size-matched scene textures,
-	 * so warp/upscale should sample the full source texture range. */
+	/* Canonical scene-size path renders directly into size-matched scene textures.
+	 * Scene dimensions now use ceil(base/scale), so srcw/srch may not be exact
+	 * floor divisions of the view rect, but they are still the authoritative
+	 * allocated/rendered source bounds. Sampling the full [0,1] UV range and
+	 * blitting [0,srcw) x [0,srch) therefore remains in-bounds. */
 	smax = 1.f;
 	tmax = 1.f;
 
