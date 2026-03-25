@@ -118,7 +118,7 @@ sys_socket_t WINS_Init (void)
 	char	buff[MAXHOSTNAMELEN];
 
 	if (COM_CheckParm ("-noudp"))
-		return -1;
+		return INVALID_SOCKET;
 
 	if (winsock_initialized == 0)
 	{

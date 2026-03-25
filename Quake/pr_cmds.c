@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define	STRINGTEMP_LENGTH		1024
 static	char	pr_string_temp[STRINGTEMP_BUFFERS][STRINGTEMP_LENGTH];
 static	byte	pr_string_tempindex = 0;
+extern int	Sbar_ColorForMap (int m);
 
 static char *PR_GetTempString (void)
 {
@@ -2000,7 +2001,6 @@ void PF_cl_playerkey_internal(int player, const char *key, qboolean retfloat)
 	const char *ret = buf;
 	extern int	fragsort[MAX_SCOREBOARD];
 	extern int	scoreboardlines;
-	extern int	Sbar_ColorForMap (int m);
 	if (player < 0 && player >= -scoreboardlines)
 		player = fragsort[-1-player];
 	if (player < 0 || player >= MAX_SCOREBOARD)

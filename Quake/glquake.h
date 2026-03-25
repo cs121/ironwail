@@ -140,6 +140,8 @@ extern	cvar_t	r_drs_min_scale;
 extern	cvar_t	r_drs_max_scale;
 extern	cvar_t	r_drs_step_up;
 extern	cvar_t	r_drs_step_down;
+extern	cvar_t	r_drs_cooldown_after_down;
+extern	cvar_t	r_drs_cooldown_after_up;
 extern	cvar_t	r_drs_hysteresis_ms;
 extern	cvar_t	r_drs_filter_alpha;
 extern	cvar_t	r_drs_debug;
@@ -498,6 +500,9 @@ typedef struct gpulightbuffer_s {
 	gpulight_t	lights[DLIGHT_GPU_MAX];
 } gpulightbuffer_t;
 
+COMPILE_TIME_ASSERT (gpulight_std430_size, sizeof (gpulight_t) == 32);
+COMPILE_TIME_ASSERT (gpulightbuffer_std430_size, sizeof (gpulightbuffer_t) == 2560);
+
 typedef struct gpuframedata_s {
         // Fields are grouped into vec4-aligned blocks to match the std140 layout in frame_uniforms.glsl.
         float           viewproj[16];
@@ -644,6 +649,10 @@ typedef struct bmodel_gpu_surf_s {
 	vec3_t		maxs;
 	GLuint		padding1;
 } bmodel_gpu_surf_t;
+
+COMPILE_TIME_ASSERT (bmodel_draw_indirect_std430_size, sizeof (bmodel_draw_indirect_t) == 20);
+COMPILE_TIME_ASSERT (bmodel_marksurf_std430_size, sizeof (bmodel_gpu_marksurf_t) == 8);
+COMPILE_TIME_ASSERT (bmodel_surf_std430_size, sizeof (bmodel_gpu_surf_t) == 64);
 
 void GL_BuildLightmaps (void);
 
@@ -922,6 +931,8 @@ int R_GetNativeRenderHeight (void);
 int R_GetSceneRenderWidth (void);
 int R_GetSceneRenderHeight (void);
 int R_GetSceneRenderScale (void);
+float R_GetViewZNear (void);
+float R_GetViewZFar (void);
 
 float GL_WaterAlphaForTextureType (textype_t type);
 

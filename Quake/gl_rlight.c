@@ -670,7 +670,7 @@ void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao)
 R_AddDynamicLights_Lightgrid
 ==================
 */
-void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
+void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t out_lightcolor)
 {
 	if (!r_dynamic.value)
 		return;
@@ -678,7 +678,7 @@ void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor)
 	int count = 0;
 	const dlight_t *const *active = DLightPool_GetActiveList (&count);
 	if (active && count > 0)
-		R_AccumulateEntityDLightsArray (active, count, pos, lightcolor, NULL);
+		R_AccumulateEntityDLightsArray (active, count, pos, out_lightcolor, NULL);
 }
 
 

@@ -794,8 +794,10 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderP
 		break;
 	case FG_PASS_VIEWPORT_VIEW_RECT_SCALED:
 	{
-		view_x = glx + r_refdef.vrect.x;
-		view_y = gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height;
+		/* Scaled scene passes render into offscreen scene targets, so the viewport
+		 * origin must be texture-space (0,0), not window/view-rect offset space. */
+		view_x = 0;
+		view_y = 0;
 		view_w = R_GetSceneRenderWidth ();
 		view_h = R_GetSceneRenderHeight ();
 		glViewport (view_x, view_y, view_w, view_h);

@@ -1,6 +1,12 @@
 #include "miniz.h"
 #include <stdio.h>
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4127) /* miniz uses intentional constant-condition macros */
+#pragma warning(disable : 4996) /* third-party fopen usage */
+#endif
+
 /**************************************************************************
  *
  * Copyright 2013-2014 RAD Game Tools and Valve Software
@@ -2354,6 +2360,10 @@ mz_bool mz_zip_reader_file_stat(mz_zip_archive *pZip, mz_uint file_index, mz_zip
 
 #ifdef __cplusplus
 }
+#endif
+
+#if defined(_MSC_VER)
+#pragma warning(pop)
 #endif
 
 #endif /*#ifndef MINIZ_NO_ARCHIVE_APIS*/

@@ -2047,7 +2047,7 @@ static void Mod_LoadLighting (lump_t *l)
                 in = mod_base + l->fileofs;
                 out = loadmodel->lightdata;
 
-                for (unsigned int i = 0; i < (unsigned int)(l->filelen / 2); i++)
+                for (unsigned int sample = 0; sample < (unsigned int)(l->filelen / 2); sample++)
                 {
                         q64_b0 = *in++;
                         q64_b1 = *in++;
@@ -2067,7 +2067,7 @@ static void Mod_LoadLighting (lump_t *l)
 		in = loadmodel->lightdata + l->filelen*2; // place the file at the end, so it will not be overwritten until the very last write
 		out = loadmodel->lightdata;
 		memcpy (in, mod_base + l->fileofs, l->filelen);
-                for (unsigned int i = 0; i < (unsigned int)l->filelen; i++)
+                for (unsigned int sample = 0; sample < (unsigned int)l->filelen; sample++)
 		{
 			d = *in++;
 			*out++ = d;

@@ -1432,12 +1432,12 @@ ED_IsSkillSelector
 */
 static qboolean ED_IsSkillSelector (const edict_t *ent)
 {
-	int skill;
+	int skill_value;
 	const char *classname = PR_GetString (ent->v.classname);
 
 	if (strcmp (classname, "trigger_setskill") == 0 || strcmp (classname, "target_setskill") == 0)
 		return true;
-	if (strcmp (classname, "info_command") == 0 && (int)ent->v.message != 0 && sscanf (PR_GetString (ent->v.message), "skill %d", &skill) == 1)
+	if (strcmp (classname, "info_command") == 0 && (int)ent->v.message != 0 && sscanf (PR_GetString (ent->v.message), "skill %d", &skill_value) == 1)
 		return true;
 
 	return false;
@@ -1873,12 +1873,12 @@ static void PR_InitBuiltins (void)
 	for (i = MAX_BUILTINS - 2, j = 0; j < pr_numbuiltindefs; j++)
 	{
 		builtindef_t *def = &pr_builtindefs[j];
-		builtin_t func = (qcvm == &sv.qcvm) ? def->ssqcfunc : def->csqcfunc;
+		builtin_t builtin_func = (qcvm == &sv.qcvm) ? def->ssqcfunc : def->csqcfunc;
 		if (!def->number)
 			def->number = i--;
-		if (func)
+		if (builtin_func)
 		{
-			qcvm->builtins[def->number] = func;
+			qcvm->builtins[def->number] = builtin_func;
 			qcvm->builtin_ext[def->number] = def->ext;
 		}
 	}

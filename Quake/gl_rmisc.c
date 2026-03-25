@@ -646,6 +646,8 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_drs_max_scale);
 	Cvar_RegisterVariable (&r_drs_step_up);
 	Cvar_RegisterVariable (&r_drs_step_down);
+	Cvar_RegisterVariable (&r_drs_cooldown_after_down);
+	Cvar_RegisterVariable (&r_drs_cooldown_after_up);
 	Cvar_RegisterVariable (&r_drs_hysteresis_ms);
 	Cvar_RegisterVariable (&r_drs_filter_alpha);
 	Cvar_RegisterVariable (&r_drs_debug);

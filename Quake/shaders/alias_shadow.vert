@@ -7,6 +7,10 @@ struct InstanceData
 	vec4	DLightColor;
 	vec4	DLightDir;
 	vec4	StaticLightDir;
+	/* Keep identical std430 layout to alias.vert/alias.frag because
+	 * both regular and shadow passes consume the same CPU instance buffer. */
+	float	SkyVisibility;
+	vec3	_PadSky;
 	int		Pose1;
 	int		Pose2;
 	float	Blend;

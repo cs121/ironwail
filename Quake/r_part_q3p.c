@@ -111,7 +111,7 @@ typedef struct q3p_gpu_state_s {
 
 static q3p_gpu_state_t q3p_gpu;
 
-COMPILE_TIME_ASSERT (q3p_particle_gpu_std430_align, (sizeof (q3p_particle_gpu_t) % 16) == 0);
+COMPILE_TIME_ASSERT (q3p_particle_gpu_std430_size, sizeof (q3p_particle_gpu_t) == 96);
 COMPILE_TIME_ASSERT (q3p_sort_entry_gpu_std430_size, sizeof (q3p_sort_entry_gpu_t) == 16);
 
 #define Q3P_MAX_EFFECT_DEFS 256
@@ -532,7 +532,6 @@ static void Q3P_LoadEffectDefs (void)
 	{
 		if (search->pack)
 		{
-			int i;
 			for (i = 0; i < search->pack->numfiles; ++i)
 			{
 				const char *path = search->pack->files[i].name;

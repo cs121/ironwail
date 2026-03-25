@@ -567,6 +567,8 @@ cvar_t	r_drs_min_scale = { "r_drs_min_scale", "1", CVAR_ARCHIVE };
 cvar_t	r_drs_max_scale = { "r_drs_max_scale", "4", CVAR_ARCHIVE };
 cvar_t	r_drs_step_up = { "r_drs_step_up", "1", CVAR_ARCHIVE };
 cvar_t	r_drs_step_down = { "r_drs_step_down", "1", CVAR_ARCHIVE };
+cvar_t	r_drs_cooldown_after_down = { "r_drs_cooldown_after_down", "8", CVAR_ARCHIVE };
+cvar_t	r_drs_cooldown_after_up = { "r_drs_cooldown_after_up", "2", CVAR_ARCHIVE };
 cvar_t	r_drs_hysteresis_ms = { "r_drs_hysteresis_ms", "0.5", CVAR_ARCHIVE };
 cvar_t	r_drs_filter_alpha = { "r_drs_filter_alpha", "0.25", CVAR_ARCHIVE };
 cvar_t	r_drs_debug = { "r_drs_debug", "0", CVAR_NONE };
@@ -636,6 +638,8 @@ static void R_UpdateDynamicResolutionScale (void)
 	int max_scale;
 	int step_up;
 	int step_down;
+	int cooldown_after_down;
+	int cooldown_after_up;
 	int current_scale;
 	int new_scale;
 	int debug_level;
@@ -665,6 +669,8 @@ static void R_UpdateDynamicResolutionScale (void)
 	max_scale = R_GetDRSMaxScale (min_scale);
 	step_up = CLAMP (1, (int)Q_rint (r_drs_step_up.value), 8);
 	step_down = CLAMP (1, (int)Q_rint (r_drs_step_down.value), 8);
+	cooldown_after_down = CLAMP (0, (int)Q_rint (r_drs_cooldown_after_down.value), 120);
+	cooldown_after_up = CLAMP (0, (int)Q_rint (r_drs_cooldown_after_up.value), 120);
 	debug_level = (int)Q_rint (r_drs_debug.value);
 
 	if (!r_drs_state.initialized)
@@ -690,7 +696,7 @@ static void R_UpdateDynamicResolutionScale (void)
 	if (r_drs_state.filtered_ms > target_ms + hysteresis_ms)
 	{
 		new_scale = q_min (max_scale, current_scale + step_down);
-		r_drs_state.upscale_cooldown = 8;
+		r_drs_state.upscale_cooldown = cooldown_after_down;
 	}
 	else if (r_drs_state.filtered_ms < target_ms - hysteresis_ms)
 	{
@@ -699,7 +705,7 @@ static void R_UpdateDynamicResolutionScale (void)
 		else
 		{
 			new_scale = q_max (min_scale, current_scale - step_up);
-			r_drs_state.upscale_cooldown = 2;
+			r_drs_state.upscale_cooldown = cooldown_after_up;
 		}
 	}
 	else if (r_drs_state.upscale_cooldown > 0)
@@ -737,8 +743,8 @@ static void R_UpdateSceneSizeState (void)
 	if (r_drs.value > 0.f)
 		requested_scale = R_ClampDRSScale (requested_scale);
 
-	int scene_width = q_max (1, base_scene_width / requested_scale);
-	int scene_height = q_max (1, base_scene_height / requested_scale);
+	int scene_width = (base_scene_width + requested_scale - 1) / requested_scale;
+	int scene_height = (base_scene_height + requested_scale - 1) / requested_scale;
 	qboolean size_changed;
 	qboolean scale_changed;
 
@@ -808,6 +814,19 @@ int R_GetSceneRenderScale (void)
 {
 	R_UpdateSceneSizeState ();
 	return r_scene_size_state.scene_scale;
+}
+
+float R_GetViewZNear (void)
+{
+	return (view_znear > 0.f) ? view_znear : 0.5f;
+}
+
+float R_GetViewZFar (void)
+{
+	float znear = R_GetViewZNear ();
+	if (view_zfar > znear)
+		return view_zfar;
+	return znear + 1.f;
 }
 
 static qboolean R_DoFEnabled (void)
@@ -1127,8 +1146,9 @@ void GL_CreateFrameBuffers (void)
 			framebufs.fogvol.height, GL_NEAREST, composite_suffix);
 		framebufs.fogvol.composite_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.composite_tex[i], 0, 0, composite_fbo_suffix);
 	}
-	framebufs.fogvol.finalcopy_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
-		framebufs.fogvol.height, GL_NEAREST, "fogvol finalcopy");
+	/* finalcopy stores the upscaled fog result, so it must match native output size. */
+	framebufs.fogvol.finalcopy_tex = GL_CreateTexture2D (GL_RGBA16F, native_w,
+		native_h, GL_NEAREST, "fogvol finalcopy");
 	framebufs.fogvol.finalcopy_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.finalcopy_tex, 0, 0, "fogvol finalcopy fbo");
 
 	framebufs.autoexposure.width = 16;
@@ -2607,6 +2627,8 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	float view_max_x;
 	float view_max_y;
 	float inv_scale;
+	qboolean scaled_scene = false;
+	qboolean drs_postfx_guard = false;
 	postfx_state_t postfx_state;
 	float postfx_exposure_add;
 	float postfx_bloom_boost;
@@ -2726,11 +2748,17 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		postfx_lut_strength = 0.f;
 	}
 
-	godrays_enabled = (r_godrays.value > 0.f
+	godrays_enabled = (!drs_postfx_guard
+		&& r_godrays.value > 0.f
 		&& R_GodraysMediumEnabled ()
 		&& R_Godrays_IsReady (cl.worldmodel, r_framecount));
 	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
 	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
+	if (drs_postfx_guard)
+	{
+		godrays_debug = 0.f;
+		godrays_debug_source = 0.f;
+	}
 	godrays_debug_enabled = (godrays_debug > 0.f || godrays_debug_source > 0.f);
 	godrays_preview = (godrays_enabled || (godrays_debug_enabled && R_Godrays_IsReady (cl.worldmodel, r_framecount)));
 	if (!godrays_preview)
@@ -2754,6 +2782,8 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	view_max_x = view_min_x + r_refdef.vrect.width / (float)R_GetNativeRenderWidth ();
 	view_max_y = view_min_y + r_refdef.vrect.height / (float)R_GetNativeRenderHeight ();
 	inv_scale = 1.f / (float)q_max (1, R_GetSceneRenderScale ());
+	scaled_scene = (R_GetSceneRenderScale () != 1);
+	drs_postfx_guard = scaled_scene || (r_drs.value > 0.f);
 
 	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
 	/* Keep SSAO intensity aligned with the cvar's intended tuning range.
@@ -2775,6 +2805,8 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	msaa = scene_samples > 1;
 	motion_strength = q_max (0.f, r_motionblur.value);
 	if (!GL_ShouldApplyMotionBlur ())
+		motion_strength = 0.f;
+	if (drs_postfx_guard)
 		motion_strength = 0.f;
 	motion_shutter = q_max (0.f, r_motionblur_shutter.value);
 	motion_effective_shutter = motion_strength * motion_shutter;
@@ -2926,11 +2958,11 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 			GL_Uniform4fFunc (18, blur_sigma, (float)blur_radius, depth_threshold_scale, ssao_fog_power);
 		}
 	}
-	dof_enabled = R_DoFEnabled ();
+	dof_enabled = R_DoFEnabled () && !drs_postfx_guard;
 
 	{
 		GL_Uniform4fFunc (3, view_min_x, view_min_y, view_max_x, view_max_y);
-		GL_Uniform4fFunc (4, inv_scale, inv_scale, 0.f, 0.f);
+		GL_Uniform4fFunc (4, 1.f, 1.f, 0.f, 0.f);
 	}
 
 	depth_texture = 0;
@@ -3664,14 +3696,21 @@ static void R_EnsureRenderTargetSampleState (void)
 	int desired_scene_h = R_GetSceneRenderHeight ();
 	int current_scene_w = framebufs.scene.width > 0 ? framebufs.scene.width : desired_scene_w;
 	int current_scene_h = framebufs.scene.height > 0 ? framebufs.scene.height : desired_scene_h;
+	int desired_fog_w = (r_fogvol_halfres.value > 0.f) ? q_max (1, R_GetNativeRenderWidth () / 2) : R_GetNativeRenderWidth ();
+	int desired_fog_h = (r_fogvol_halfres.value > 0.f) ? q_max (1, R_GetNativeRenderHeight () / 2) : R_GetNativeRenderHeight ();
+	int current_fog_w = framebufs.fogvol.width > 0 ? framebufs.fogvol.width : desired_fog_w;
+	int current_fog_h = framebufs.fogvol.height > 0 ? framebufs.fogvol.height : desired_fog_h;
 	qboolean sample_changed = (current_samples != desired_samples);
 	qboolean size_changed = (current_scene_w != desired_scene_w || current_scene_h != desired_scene_h);
+	qboolean fog_size_changed = (current_fog_w != desired_fog_w || current_fog_h != desired_fog_h);
 
-	if (!sample_changed && !size_changed)
+	if (!sample_changed && !size_changed && !fog_size_changed)
 		return;
 
-	Con_DPrintf ("Recreating render targets (scene %dx%d -> %dx%d, samples %d -> %d)\n",
-		current_scene_w, current_scene_h, desired_scene_w, desired_scene_h, current_samples, desired_samples);
+	Con_DPrintf ("Recreating render targets (scene %dx%d -> %dx%d, fog %dx%d -> %dx%d, samples %d -> %d)\n",
+		current_scene_w, current_scene_h, desired_scene_w, desired_scene_h,
+		current_fog_w, current_fog_h, desired_fog_w, desired_fog_h,
+		current_samples, desired_samples);
 	GL_DeleteFrameBuffers ();
 	GL_CreateFrameBuffers ();
 	R_InvalidateTemporalHistoryOnSceneResize ();
@@ -5139,6 +5178,7 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	qboolean msaa = scene_samples > 1;
 	qboolean needwarpscale;
 	qboolean need_depth_resolve;
+	qboolean force_blit_upscale;
 	qboolean needs_scene_effects = false;
 	qboolean needs_postprocess = false;
 	GLuint fbodest;
@@ -5153,7 +5193,8 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	srcw = R_GetSceneRenderWidth ();
 	srch = R_GetSceneRenderHeight ();
 
-	needwarpscale = R_GetSceneRenderScale () != 1 || water_warp;
+	force_blit_upscale = (R_GetSceneRenderScale () != 1) || (r_drs.value > 0.f);
+	needwarpscale = water_warp && !force_blit_upscale;
 	fbodest = needs_postprocess ? composite_fbo : 0;
 	need_depth_resolve = (fbodest == composite_fbo)
 		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || R_FogVol_ShouldAffectPostFX ()
@@ -5181,6 +5222,8 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 		if (!needwarpscale)
 		{
+			int dstw = force_blit_upscale ? r_refdef.vrect.width : srcw;
+			int dsth = force_blit_upscale ? r_refdef.vrect.height : srch;
 			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved_scene_fbo);
 			glReadBuffer (GL_COLOR_ATTACHMENT0);
 			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
@@ -5188,7 +5231,12 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 				glDrawBuffer (GL_COLOR_ATTACHMENT0);
 			else
 				glDrawBuffer (GL_BACK);
-			GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+			{
+				GLbitfield mask = GL_COLOR_BUFFER_BIT;
+				if (need_depth_resolve)
+					mask |= GL_DEPTH_BUFFER_BIT;
+				GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, mask, GL_NEAREST);
+			}
 		}
 	}
 
@@ -5206,6 +5254,8 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	if (!msaa && !needwarpscale)
 	{
+		int dstw = force_blit_upscale ? r_refdef.vrect.width : srcw;
+		int dsth = force_blit_upscale ? r_refdef.vrect.height : srch;
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, scene_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
@@ -5221,7 +5271,7 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 				need_depth_resolve = false;
 			}
 			GL_BlitFramebufferFunc (0, 0, srcw, srch,
-				srcx, srcy, srcx + srcw, srcy + srch,
+				srcx, srcy, srcx + dstw, srcy + dsth,
 				mask, GL_NEAREST);
 		}
 	}
@@ -5248,8 +5298,13 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	GL_BeginGroup ("Warp/scale view");
 
-	smax = srcw / (float)R_GetNativeRenderWidth ();
-	tmax = srch / (float)R_GetNativeRenderHeight ();
+	/* Canonical scene-size path renders directly into size-matched scene textures.
+	 * Scene dimensions now use ceil(base/scale), so srcw/srch may not be exact
+	 * floor divisions of the view rect, but they are still the authoritative
+	 * allocated/rendered source bounds. Sampling the full [0,1] UV range and
+	 * blitting [0,srcw) x [0,srch) therefore remains in-bounds. */
+	smax = 1.f;
+	tmax = 1.f;
 
 	GL_UseProgram (glprogs.warpscale[water_warp]);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));

@@ -9,16 +9,20 @@ layout(location=0) out vec4 out_fragcolor;
 
 void main()
 {
-	vec2 uv = in_uv;
+	vec2 uv = clamp(in_uv, vec2(0.0), vec2(1.0));
 	vec2 uv_scale = UVScaleWarpTime.xy;
 
 #if WARP
 	float time = UVScaleWarpTime.w;
-	float aspect = dFdy(uv.y) / dFdx(uv.x);
+	float dx = abs(dFdx(uv.x));
+	float dy = abs(dFdy(uv.y));
+	float aspect = (dx > 1e-6) ? (dy / dx) : 1.0;
+	aspect = clamp(aspect, 0.25, 4.0);
 	vec2 warp_amp = UVScaleWarpTime.zz;
 	warp_amp.y *= aspect;
 	uv = warp_amp + uv * (1.0 - 2.0 * warp_amp); // remap to safe area
 	uv += warp_amp * sin(vec2(uv.y / aspect, uv.x) * (3.14159265 * 8.0) + time);
+	uv = clamp(uv, vec2(0.0), vec2(1.0));
 #endif // WARP
 
 	out_fragcolor = texture(Tex, uv * uv_scale);

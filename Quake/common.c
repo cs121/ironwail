@@ -3065,13 +3065,13 @@ static void COM_MigrateNightdiveUserFiles (void)
 	// move episode dirs if they contain a config file
 	for (i = 0; i < countof (episodes); i++)
 	{
-		const char *game = episodes[i];
-		if ((size_t) q_snprintf (src, sizeof (src), "%s/%s/%s", com_nightdivedir, game, CONFIG_NAME) >= sizeof (src))
+		const char *episode = episodes[i];
+		if ((size_t) q_snprintf (src, sizeof (src), "%s/%s/%s", com_nightdivedir, episode, CONFIG_NAME) >= sizeof (src))
 			continue;
 		if (!Sys_FileExists (src))
 			continue;
-		q_snprintf (src, sizeof (src), "%s/%s", com_nightdivedir, game);
-		q_snprintf (dst, sizeof (dst), "%s/%s", com_userprefdir, game);
+		q_snprintf (src, sizeof (src), "%s/%s", com_nightdivedir, episode);
+		q_snprintf (dst, sizeof (dst), "%s/%s", com_userprefdir, episode);
 		Sys_rename (src, dst);
 	}
 
