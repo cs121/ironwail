@@ -155,6 +155,14 @@ float DepthToNdcZ(float depth)
 	return depth * 2.0 - 1.0;
 }
 
+bool IsSkyDepthSample(float depth)
+{
+	float cutoff = FogDepthParams.w;
+	if (FogDepthParams.z > 0.5)
+		return depth <= cutoff;
+	return depth >= cutoff;
+}
+
 vec2 ScreenUvToViewUv(vec2 screenUv)
 {
 	vec2 screenPos = screenUv * FogViewportParams.xy;
@@ -405,6 +413,11 @@ void main()
 	}
 
 	float depth = texelFetch(SceneDepth, screenPixel, 0).r;
+	if (IsSkyDepthSample(depth))
+	{
+		FragColor = vec4(scene, 0.0);
+		return;
+	}
 	vec3 worldPos;
 	if (!ReconstructWorldPos(viewUv, depth, worldPos))
 	{
