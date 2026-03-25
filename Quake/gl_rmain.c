@@ -2748,6 +2748,10 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		postfx_lut_strength = 0.f;
 	}
 
+	inv_scale = 1.f / (float)q_max (1, R_GetSceneRenderScale ());
+	scaled_scene = (R_GetSceneRenderScale () != 1);
+	drs_postfx_guard = scaled_scene || (r_drs.value > 0.f);
+
 	godrays_enabled = (!drs_postfx_guard
 		&& r_godrays.value > 0.f
 		&& R_GodraysMediumEnabled ()
@@ -2781,9 +2785,6 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)R_GetNativeRenderHeight ();
 	view_max_x = view_min_x + r_refdef.vrect.width / (float)R_GetNativeRenderWidth ();
 	view_max_y = view_min_y + r_refdef.vrect.height / (float)R_GetNativeRenderHeight ();
-	inv_scale = 1.f / (float)q_max (1, R_GetSceneRenderScale ());
-	scaled_scene = (R_GetSceneRenderScale () != 1);
-	drs_postfx_guard = scaled_scene || (r_drs.value > 0.f);
 
 	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
 	/* Keep SSAO intensity aligned with the cvar's intended tuning range.
