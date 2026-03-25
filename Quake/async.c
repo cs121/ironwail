@@ -1033,6 +1033,7 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 {
 	fs_asyncread_handle_t handle;
 	fs_job_t *job;
+	size_t copied;
 	handle.id = 0;
 
 	if (!path || !path[0] || !cb)
@@ -1053,7 +1054,18 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 	job = (fs_job_t *) q_calloc(1, sizeof (*job));
 	if (!job)
 		Sys_Error ("FS_AsyncRead: out of memory");
-	q_strlcpy (job->path, path, sizeof (job->path));
+	copied = q_strlcpy (job->path, path, sizeof (job->path));
+	if (copied >= sizeof (job->path))
+	{
+		/*
+		 * Prevent truncated filesystem paths from being queued to workers.
+		 * Truncation can produce non-deterministic misses and hard-to-trace
+		 * failures while map assets are loading.
+		 */
+		q_free(job);
+		cb (user, NULL, 0, -1);
+		return handle;
+	}
 	job->cb = cb;
 	job->user = user;
 
@@ -1079,6 +1091,8 @@ fs_asyncread_handle_t FS_AsyncRead (const char *path, fs_async_cb cb, void *user
 void FS_AsyncReadCancel (fs_asyncread_handle_t handle)
 {
 	if (!handle.id)
+		return;
+	if (!fs_mutex)
 		return;
 
 	SDL_LockMutex (fs_mutex);
@@ -1111,6 +1125,11 @@ void FS_AsyncReadCancel (fs_asyncread_handle_t handle)
 
 void FS_AsyncAdvanceGeneration (void)
 {
+	if (!fs_mutex)
+	{
+		fs_generation++;
+		return;
+	}
 	SDL_LockMutex (fs_mutex);
 	fs_generation++;
 	SDL_UnlockMutex (fs_mutex);
@@ -1142,13 +1161,8 @@ void FS_PumpAsyncCompletions (void)
 
 		if (!canceled && !stale)
 			list->cb (list->user, list->data, list->len, list->status);
-		else
-		{
-			if (stale)
-				list->cb (list->user, NULL, 0, -1);
-			if (list->data)
-				q_free(list->data);
-		}
+		else if (list->data)
+			q_free(list->data);
 		q_free(list);
 		list = next;
 	}
@@ -1228,6 +1242,9 @@ void Jobs_Shutdown (void)
 	FS_CancelSet_ClearLocked ();
 	FS_IdSet_ClearLocked (&fs_outstanding_set);
 	FS_IdSet_ClearLocked (&fs_completion_set);
+	fs_recent_completed_count = 0;
+	fs_recent_completed_write = 0;
+	memset (fs_recent_completed_ids, 0, sizeof (fs_recent_completed_ids));
 	SDL_UnlockMutex (fs_mutex);
 }
 
@@ -1271,6 +1288,17 @@ void Jobs_Init (void)
 		jobs_queues[prio].capacity = 0;
 	}
 	SDL_UnlockMutex (jobs_mutex);
+
+	SDL_LockMutex (fs_mutex);
+	fs_generation = 0;
+	fs_next_id = 1;
+	fs_recent_completed_count = 0;
+	fs_recent_completed_write = 0;
+	memset (fs_recent_completed_ids, 0, sizeof (fs_recent_completed_ids));
+	FS_CancelSet_ClearLocked ();
+	FS_IdSet_ClearLocked (&fs_outstanding_set);
+	FS_IdSet_ClearLocked (&fs_completion_set);
+	SDL_UnlockMutex (fs_mutex);
 
 	{
 		int i;
