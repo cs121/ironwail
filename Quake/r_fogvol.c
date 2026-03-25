@@ -902,10 +902,11 @@ void R_FogVol_Render (void)
 	if (r_fogvol_debug_froxel_random.value > 0.f)
 		use_halfres = false;
 
-	/* Global (camera-following) fog covers the whole view. Rendering that path in
-	 * halfres turns the full scene into an upscaled fog pass. Keep it native-res
-	 * by ping-ponging between composite and finalcopy instead. */
-	if (use_halfres && r_fogvol_global_active && r_fogvolume_count == 1)
+	/* Global (camera-following) fog always covers the full view. Rendering any
+	 * frame that includes this path in halfres makes the baseline medium read
+	 * like a post-process overlay instead of volumetric depth. Keep all global
+	 * fog frames native-res by ping-ponging between composite and finalcopy. */
+	if (use_halfres && r_fogvol_global_active)
 	{
 		use_halfres = false;
 		use_native_pingpong = true;
