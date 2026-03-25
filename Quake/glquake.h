@@ -140,6 +140,8 @@ extern	cvar_t	r_drs_min_scale;
 extern	cvar_t	r_drs_max_scale;
 extern	cvar_t	r_drs_step_up;
 extern	cvar_t	r_drs_step_down;
+extern	cvar_t	r_drs_cooldown_after_down;
+extern	cvar_t	r_drs_cooldown_after_up;
 extern	cvar_t	r_drs_hysteresis_ms;
 extern	cvar_t	r_drs_filter_alpha;
 extern	cvar_t	r_drs_debug;
