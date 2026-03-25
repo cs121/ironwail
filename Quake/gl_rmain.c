@@ -5188,12 +5188,7 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 				glDrawBuffer (GL_COLOR_ATTACHMENT0);
 			else
 				glDrawBuffer (GL_BACK);
-			{
-				GLbitfield mask = GL_COLOR_BUFFER_BIT;
-				if (need_depth_resolve)
-					mask |= GL_DEPTH_BUFFER_BIT;
-				GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, mask, GL_NEAREST);
-			}
+			GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + srcw, srcy + srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 		}
 	}
 
