@@ -572,6 +572,7 @@ cvar_t	r_drs_cooldown_after_up = { "r_drs_cooldown_after_up", "2", CVAR_ARCHIVE 
 cvar_t	r_drs_hysteresis_ms = { "r_drs_hysteresis_ms", "0.5", CVAR_ARCHIVE };
 cvar_t	r_drs_filter_alpha = { "r_drs_filter_alpha", "0.25", CVAR_ARCHIVE };
 cvar_t	r_drs_debug = { "r_drs_debug", "0", CVAR_NONE };
+cvar_t	r_drs_guard_mode = { "r_drs_guard_mode", "0", CVAR_ARCHIVE };
 
 static float view_znear;
 static float view_zfar;
@@ -2771,7 +2772,11 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	}
 
 	inv_scale = 1.f / (float)q_max (1, R_GetSceneRenderScale ());
-	drs_postfx_guard = R_PostFX_DRSGuardActive ();
+	scaled_scene = (R_GetSceneRenderScale () != 1);
+	{
+		int guard_mode = CLAMP (0, (int)Q_rint (r_drs_guard_mode.value), 1);
+		drs_postfx_guard = scaled_scene || (guard_mode == 1 && r_drs.value > 0.f);
+	}
 
 	godrays_enabled = (!drs_postfx_guard
 		&& r_godrays.value > 0.f
