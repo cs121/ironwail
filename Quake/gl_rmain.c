@@ -834,6 +834,29 @@ static qboolean R_DoFEnabled (void)
 	return r_dof.value > 0.f && r_dof_strength.value > 0.f;
 }
 
+static qboolean R_PostFX_DRSGuardActive (void)
+{
+	return R_GetSceneRenderScale () != 1 || r_drs.value > 0.f;
+}
+
+static qboolean R_PostFX_DoFEnabledEffective (void)
+{
+	return R_DoFEnabled () && !R_PostFX_DRSGuardActive ();
+}
+
+static qboolean R_PostFX_GodraysPreviewEnabledEffective (void)
+{
+	if (R_PostFX_DRSGuardActive ())
+		return false;
+
+	if (!R_Godrays_IsReady (cl.worldmodel, r_framecount))
+		return false;
+
+	return r_godrays.value > 0.f
+		|| r_godrays_debug.value > 0.f
+		|| r_godrays_debug_source.value > 0.f;
+}
+
 static qboolean r_dof_autofocus_initialized = false;
 static float r_dof_autofocus_value = 0.f;
 
@@ -2627,7 +2650,6 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	float view_max_x;
 	float view_max_y;
 	float inv_scale;
-	qboolean scaled_scene = false;
 	qboolean drs_postfx_guard = false;
 	postfx_state_t postfx_state;
 	float postfx_exposure_add;
@@ -2749,8 +2771,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	}
 
 	inv_scale = 1.f / (float)q_max (1, R_GetSceneRenderScale ());
-	scaled_scene = (R_GetSceneRenderScale () != 1);
-	drs_postfx_guard = scaled_scene || (r_drs.value > 0.f);
+	drs_postfx_guard = R_PostFX_DRSGuardActive ();
 
 	godrays_enabled = (!drs_postfx_guard
 		&& r_godrays.value > 0.f
@@ -2959,7 +2980,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 			GL_Uniform4fFunc (18, blur_sigma, (float)blur_radius, depth_threshold_scale, ssao_fog_power);
 		}
 	}
-	dof_enabled = R_DoFEnabled () && !drs_postfx_guard;
+	dof_enabled = R_PostFX_DoFEnabledEffective ();
 
 	{
 		GL_Uniform4fFunc (3, view_min_x, view_min_y, view_max_x, view_max_y);
@@ -5180,6 +5201,10 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	qboolean needwarpscale;
 	qboolean need_depth_resolve;
 	qboolean force_blit_upscale;
+	qboolean effective_dof_enabled;
+	qboolean effective_ssao_enabled;
+	qboolean effective_fogvol_enabled;
+	qboolean effective_godrays_preview;
 	qboolean needs_scene_effects = false;
 	qboolean needs_postprocess = false;
 	GLuint fbodest;
@@ -5197,9 +5222,12 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	force_blit_upscale = (R_GetSceneRenderScale () != 1) || (r_drs.value > 0.f);
 	needwarpscale = water_warp && !force_blit_upscale;
 	fbodest = needs_postprocess ? composite_fbo : 0;
+	effective_dof_enabled = R_PostFX_DoFEnabledEffective ();
+	effective_ssao_enabled = ((r_ssao.value > 0.f && r_ssao_intensity.value > 0.f) || r_ssao_debug.value > 0.f);
+	effective_fogvol_enabled = R_FogVol_ShouldAffectPostFX ();
+	effective_godrays_preview = R_PostFX_GodraysPreviewEnabledEffective ();
 	need_depth_resolve = (fbodest == composite_fbo)
-		&& (R_DoFEnabled () || r_ssao.value > 0.f || r_ssao_debug.value > 0.f || R_FogVol_ShouldAffectPostFX ()
-			|| (R_Godrays_IsReady (cl.worldmodel, r_framecount) && (r_godrays.value > 0.f || r_godrays_debug.value > 0.f || r_godrays_debug_source.value > 0.f)));
+		&& (effective_dof_enabled || effective_ssao_enabled || effective_fogvol_enabled || effective_godrays_preview);
 
 	if (msaa)
 	{
