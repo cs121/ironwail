@@ -384,12 +384,16 @@ float InterleavedGradientNoise(vec2 p)
 
 void main()
 {
-	ivec2 screenPixel = ivec2(floor(gl_FragCoord.xy * FogDepthScale));
+	/* Reproject fog-target pixels into native depth-space using pixel centers.
+	 * This avoids depth quantization/collapse when fog runs at half resolution
+	 * or under dynamic viewport scaling. */
+	vec2 screenPos = gl_FragCoord.xy * FogDepthScale;
+	ivec2 screenPixel = ivec2(floor(screenPos));
 	ivec2 depthSize = textureSize(SceneDepth, 0);
 	screenPixel = clamp(screenPixel, ivec2(0), max(depthSize - ivec2(1), ivec2(0)));
-	vec2 screenPos = vec2(screenPixel) + vec2(0.5);
+	screenPos = vec2(screenPixel) + vec2(0.5);
 	vec2 screenUv = screenPos * FogViewportParams.zw;
-	vec2 viewUv = (screenPos - FogViewParams.xy) * FogViewParams.zw;
+	vec2 viewUv = ScreenUvToViewUv(screenUv);
 	vec3 scene = texture(SceneColor, screenUv).rgb;
 
 	if (FogCheckerboard != 0)
