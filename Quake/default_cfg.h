@@ -82,6 +82,11 @@ static const char default_cfg[] =
 "bind LTRIGGER +jump\n"
 "bind RTRIGGER +attack\n"
 
+"alias drs_resp_low \"r_drs_step_up 1; r_drs_step_down 1; r_drs_cooldown_after_down 12; r_drs_cooldown_after_up 4; r_drs_hysteresis_ms 0.7; echo DRS responsiveness: low (stable, slower reactions)\"\n"
+"alias drs_resp_medium \"r_drs_step_up 1; r_drs_step_down 1; r_drs_cooldown_after_down 8; r_drs_cooldown_after_up 2; r_drs_hysteresis_ms 0.5; echo DRS responsiveness: medium (balanced)\"\n"
+"alias drs_resp_high \"r_drs_step_up 1; r_drs_step_down 2; r_drs_cooldown_after_down 4; r_drs_cooldown_after_up 1; r_drs_hysteresis_ms 0.25; echo DRS responsiveness: high (fast reactions)\"\n"
+"alias drs_profile_60_moderate \"r_drs 1; r_drs_target_fps 60; r_drs_target_ms 0; r_drs_min_scale 1; r_drs_max_scale 3; r_drs_guard_mode 1; drs_resp_medium; echo DRS profile: 60 FPS moderate stability\"\n"
+
 "gamma 0.95\n"
 "contrast 1.2\n"
 "volume 0.7\n"
