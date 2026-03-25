@@ -567,6 +567,8 @@ cvar_t	r_drs_min_scale = { "r_drs_min_scale", "1", CVAR_ARCHIVE };
 cvar_t	r_drs_max_scale = { "r_drs_max_scale", "4", CVAR_ARCHIVE };
 cvar_t	r_drs_step_up = { "r_drs_step_up", "1", CVAR_ARCHIVE };
 cvar_t	r_drs_step_down = { "r_drs_step_down", "1", CVAR_ARCHIVE };
+cvar_t	r_drs_cooldown_after_down = { "r_drs_cooldown_after_down", "8", CVAR_ARCHIVE };
+cvar_t	r_drs_cooldown_after_up = { "r_drs_cooldown_after_up", "2", CVAR_ARCHIVE };
 cvar_t	r_drs_hysteresis_ms = { "r_drs_hysteresis_ms", "0.5", CVAR_ARCHIVE };
 cvar_t	r_drs_filter_alpha = { "r_drs_filter_alpha", "0.25", CVAR_ARCHIVE };
 cvar_t	r_drs_debug = { "r_drs_debug", "0", CVAR_NONE };
@@ -636,6 +638,8 @@ static void R_UpdateDynamicResolutionScale (void)
 	int max_scale;
 	int step_up;
 	int step_down;
+	int cooldown_after_down;
+	int cooldown_after_up;
 	int current_scale;
 	int new_scale;
 	int debug_level;
@@ -665,6 +669,8 @@ static void R_UpdateDynamicResolutionScale (void)
 	max_scale = R_GetDRSMaxScale (min_scale);
 	step_up = CLAMP (1, (int)Q_rint (r_drs_step_up.value), 8);
 	step_down = CLAMP (1, (int)Q_rint (r_drs_step_down.value), 8);
+	cooldown_after_down = CLAMP (0, (int)Q_rint (r_drs_cooldown_after_down.value), 120);
+	cooldown_after_up = CLAMP (0, (int)Q_rint (r_drs_cooldown_after_up.value), 120);
 	debug_level = (int)Q_rint (r_drs_debug.value);
 
 	if (!r_drs_state.initialized)
@@ -690,7 +696,7 @@ static void R_UpdateDynamicResolutionScale (void)
 	if (r_drs_state.filtered_ms > target_ms + hysteresis_ms)
 	{
 		new_scale = q_min (max_scale, current_scale + step_down);
-		r_drs_state.upscale_cooldown = 8;
+		r_drs_state.upscale_cooldown = cooldown_after_down;
 	}
 	else if (r_drs_state.filtered_ms < target_ms - hysteresis_ms)
 	{
@@ -699,7 +705,7 @@ static void R_UpdateDynamicResolutionScale (void)
 		else
 		{
 			new_scale = q_max (min_scale, current_scale - step_up);
-			r_drs_state.upscale_cooldown = 2;
+			r_drs_state.upscale_cooldown = cooldown_after_up;
 		}
 	}
 	else if (r_drs_state.upscale_cooldown > 0)
