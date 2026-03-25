@@ -273,6 +273,7 @@ static qboolean FogVol_BuildGlobalVolume (fog_volume_t *out)
 	vec3_t color;
 	float radius;
 	float density;
+	const float world_density_scale = 1.f / 64.f;
 
 	if (!out || r_fogvol_global.value <= 0.f)
 		return false;
@@ -284,7 +285,10 @@ static qboolean FogVol_BuildGlobalVolume (fog_volume_t *out)
 	memset (&v, 0, sizeof (v));
 	FogVol_ParseColor (r_fogvol_global_color.string, color);
 	VectorCopy (color, v.color);
-	v.density = density;
+	/* Global density cvar is authored as a scene-scale control, not as
+	 * extinction-per-world-unit. Convert to world-space extinction so the
+	 * result is volumetric fog instead of a flat full-screen tint. */
+	v.density = density * world_density_scale;
 	v.falloff = q_max (0.f, r_fogvol_global_falloff.value);
 	v.noiseScale = q_max (0.f, r_fogvol_global_noise_scale.value);
 	v.noiseAmount = CLAMP (0.f, r_fogvol_global_noise_amount.value, 2.f);
@@ -434,6 +438,8 @@ qboolean R_FogVol_CanRenderGlobal (void)
 
 qboolean R_FogVol_GetGlobalFogState (vec3_t color, float *density)
 {
+	const float world_density_scale = 1.f / 64.f;
+
 	if (!r_fogvol_global_active)
 	{
 		float fallback_density = q_max (0.f, r_fogvol_global_density_scale.value);
@@ -442,7 +448,7 @@ qboolean R_FogVol_GetGlobalFogState (vec3_t color, float *density)
 		if (color)
 			FogVol_ParseColor (r_fogvol_global_color.string, color);
 		if (density)
-			*density = fallback_density;
+			*density = fallback_density * world_density_scale;
 		return true;
 	}
 	if (color)
@@ -841,6 +847,7 @@ void R_FogVol_Render (void)
 	float inv_viewproj[16];
 	int mode;
 	qboolean use_halfres;
+	qboolean use_native_pingpong = false;
 	int fog_width, fog_height;
 	float view_x, view_y, view_w, view_h;
 	float depth_scale_x, depth_scale_y;
@@ -895,10 +902,19 @@ void R_FogVol_Render (void)
 	if (r_fogvol_debug_froxel_random.value > 0.f)
 		use_halfres = false;
 
+	/* Global (camera-following) fog covers the whole view. Rendering that path in
+	 * halfres turns the full scene into an upscaled fog pass. Keep it native-res
+	 * by ping-ponging between composite and finalcopy instead. */
+	if (use_halfres && r_fogvol_global_active && r_fogvolume_count == 1)
+	{
+		use_halfres = false;
+		use_native_pingpong = true;
+	}
+
 	/* Keep runtime behavior consistent with currently allocated fogvol targets.
 	 * This avoids quadrant artifacts when r_fogvol_halfres is toggled without
 	 * a full framebuffer rebuild. */
-	if (use_halfres)
+	if (!use_native_pingpong && use_halfres)
 	{
 		if (framebufs.fogvol.width != expected_half_w || framebufs.fogvol.height != expected_half_h)
 		{
@@ -912,7 +928,7 @@ void R_FogVol_Render (void)
 			}
 		}
 	}
-	else
+	else if (!use_native_pingpong)
 	{
 		if (framebufs.fogvol.width == expected_half_w && framebufs.fogvol.height == expected_half_h)
 			use_halfres = true;
@@ -931,9 +947,12 @@ void R_FogVol_Render (void)
 	/* Protect against division by zero when fog render targets are unavailable. */
 	depth_scale_x = (float)native_w / (float)q_max (1, fog_width);
 	depth_scale_y = (float)native_h / (float)q_max (1, fog_height);
-	depth_near = 0.5f;
-	depth_far = gl_farclip.value > depth_near ? gl_farclip.value : depth_near + 1.f;
-	depth_sky_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
+	depth_near = R_GetViewZNear ();
+	depth_far = R_GetViewZFar ();
+	/* Treat only clear-depth as sky. A broad cutoff (e.g. 0.001 in reverse-Z)
+	 * classifies distant world geometry as sky and collapses volumetric depth
+	 * into a near-uniform fullscreen tint. */
+	depth_sky_cutoff = gl_clipcontrol_able ? 1e-6f : (1.f - 1e-6f);
 
 	steps = CLAMP (8, (int)Q_rint (r_fogvol_steps.value), 128);
 	/* Halfres mode controls step reduction; keep full-res step budget unchanged. */
@@ -987,9 +1006,25 @@ void R_FogVol_Render (void)
 		x1 = scissor_x1[i];
 		y1 = scissor_y1[i];
 
-		fog_dst = has_drawn ? (1 - fog_src) : 0;
-		dst_tex = framebufs.fogvol.color_tex[fog_dst];
-		dst_fbo = framebufs.fogvol.fbo[fog_dst];
+		if (use_native_pingpong)
+		{
+			if (!has_drawn || src_tex == framebufs.composite.color_tex)
+			{
+				dst_tex = framebufs.fogvol.finalcopy_tex;
+				dst_fbo = framebufs.fogvol.finalcopy_fbo;
+			}
+			else
+			{
+				dst_tex = framebufs.composite.color_tex;
+				dst_fbo = framebufs.composite.fbo;
+			}
+		}
+		else
+		{
+			fog_dst = has_drawn ? (1 - fog_src) : 0;
+			dst_tex = framebufs.fogvol.color_tex[fog_dst];
+			dst_fbo = framebufs.fogvol.fbo[fog_dst];
+		}
 
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, src_tex);
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, dst_fbo);
@@ -1005,7 +1040,8 @@ void R_FogVol_Render (void)
 
 		src_tex = dst_tex;
 		src_fbo = dst_fbo;
-		fog_src = fog_dst;
+		if (!use_native_pingpong)
+			fog_src = fog_dst;
 		has_drawn = true;
 	}
 	GL_SetScissorEnabled (false);
@@ -1031,22 +1067,25 @@ void R_FogVol_Render (void)
 		final_fbo = framebufs.fogvol.finalcopy_fbo;
 	}
 
-	GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, final_fbo);
-	GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
-	if (use_halfres)
+	if (final_fbo != framebufs.composite.fbo)
 	{
-		GL_BlitFramebufferFunc (0, 0, native_w, native_h,
-			0, 0, native_w, native_h,
-			GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, final_fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, framebufs.composite.fbo);
+		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+		if (use_halfres)
+		{
+			GL_BlitFramebufferFunc (0, 0, native_w, native_h,
+				0, 0, native_w, native_h,
+				GL_COLOR_BUFFER_BIT, GL_LINEAR);
+		}
+		else
+		{
+			GL_BlitFramebufferFunc ((int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
+				(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
+				GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		}
+		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	}
-	else
-	{
-		GL_BlitFramebufferFunc ((int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
-			(int)view_x, (int)view_y, (int)(view_x + view_w), (int)(view_y + view_h),
-			GL_COLOR_BUFFER_BIT, GL_NEAREST);
-	}
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glViewport (glx, gly, glwidth, glheight);
 	/* Keep subsequent passes deterministic: fogvol uses custom FBO/read targets
 	 * and fullscreen state, so restore a sane default baseline afterwards. */

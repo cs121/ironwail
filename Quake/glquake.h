@@ -929,6 +929,8 @@ int R_GetNativeRenderHeight (void);
 int R_GetSceneRenderWidth (void);
 int R_GetSceneRenderHeight (void);
 int R_GetSceneRenderScale (void);
+float R_GetViewZNear (void);
+float R_GetViewZFar (void);
 
 float GL_WaterAlphaForTextureType (textype_t type);
 

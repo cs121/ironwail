@@ -810,6 +810,19 @@ int R_GetSceneRenderScale (void)
 	return r_scene_size_state.scene_scale;
 }
 
+float R_GetViewZNear (void)
+{
+	return (view_znear > 0.f) ? view_znear : 0.5f;
+}
+
+float R_GetViewZFar (void)
+{
+	float znear = R_GetViewZNear ();
+	if (view_zfar > znear)
+		return view_zfar;
+	return znear + 1.f;
+}
+
 static qboolean R_DoFEnabled (void)
 {
 	return r_dof.value > 0.f && r_dof_strength.value > 0.f;
@@ -1127,8 +1140,9 @@ void GL_CreateFrameBuffers (void)
 			framebufs.fogvol.height, GL_NEAREST, composite_suffix);
 		framebufs.fogvol.composite_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.composite_tex[i], 0, 0, composite_fbo_suffix);
 	}
-	framebufs.fogvol.finalcopy_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
-		framebufs.fogvol.height, GL_NEAREST, "fogvol finalcopy");
+	/* finalcopy stores the upscaled fog result, so it must match native output size. */
+	framebufs.fogvol.finalcopy_tex = GL_CreateTexture2D (GL_RGBA16F, native_w,
+		native_h, GL_NEAREST, "fogvol finalcopy");
 	framebufs.fogvol.finalcopy_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.finalcopy_tex, 0, 0, "fogvol finalcopy fbo");
 
 	framebufs.autoexposure.width = 16;

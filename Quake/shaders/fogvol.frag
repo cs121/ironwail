@@ -155,13 +155,6 @@ float DepthToNdcZ(float depth)
 	return depth * 2.0 - 1.0;
 }
 
-bool IsSkyDepth(float depth)
-{
-	if (FogDepthParams.z > 0.5)
-		return depth <= FogDepthParams.w;
-	return depth >= FogDepthParams.w;
-}
-
 vec2 ScreenUvToViewUv(vec2 screenUv)
 {
 	vec2 screenPos = screenUv * FogViewportParams.xy;
@@ -237,7 +230,7 @@ float EdgeFade(vec3 p, FogVolume volume, float falloff, out float edgeDist)
 	return smoothstep(0.0, falloff, edgeDist);
 }
 
-float EvaluateFogSigma(vec3 p, FogVolume volume, vec3 flow, int lod)
+float EvaluateFogSigma(vec3 p, FogVolume volume, vec3 flow, int lod, float noiseAmountScale)
 {
 	float density = max(volume.color_density.w * FogDensityParams.x, 0.0);
 	float falloff = max(volume.params2.z, 0.0);
@@ -256,7 +249,7 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, vec3 flow, int lod)
 	if (FogNoiseEnabled != 0)
 	{
 		float scale = clamp(max(volume.noise_params.x, 1e-4) * max(FogDensityParams.z, 1e-4), NOISE_SCALE_MIN, NOISE_SCALE_MAX);
-		float amount = clamp(volume.noise_params.y * max(FogNoiseDetailStrength, 0.0), 0.0, 2.0);
+		float amount = clamp(volume.noise_params.y * max(FogNoiseDetailStrength, 0.0) * max(noiseAmountScale, 0.0), 0.0, 2.0);
 		float bias = clamp(volume.noise_params.z + FogDensityParams.w, -1.5, 1.5);
 		vec3 noisePos = p * scale + flow * Time * scale;
 		float n = FogNoiseSample(noisePos, lod);
@@ -266,6 +259,16 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, vec3 flow, int lod)
 
 	float sigma = density * edge * HeightFactor(p, volume) * noiseFactor;
 	return clamp(sigma, 0.0, max(FogDensityParams.y, 0.001));
+}
+
+bool IsCameraFollowGlobalFog(FogVolume volume)
+{
+	if (int(volume.misc.y + 0.5) != FOGVOL_SHAPE_SPHERE)
+		return false;
+	if (volume.sphere.w < 1024.0)
+		return false;
+	vec3 d = volume.sphere.xyz - FogCameraPosWS;
+	return dot(d, d) <= 64.0;
 }
 
 float AnisotropicPhase(float cosTheta, float g)
@@ -392,6 +395,8 @@ void main()
 	}
 
 	FogVolume volume = FogVolumes[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
+	bool isCameraFollowGlobalFog = IsCameraFollowGlobalFog(volume);
+	float noiseAmountScale = isCameraFollowGlobalFog ? 0.35 : 1.0;
 	// extra.z mirrors the CPU-side enabled flag for this volume.
 	if (volume.extra.z <= 0.0)
 	{
@@ -417,7 +422,7 @@ void main()
 	}
 	vec3 rd = rayDelta * inversesqrt(rayLen2);
 	vec3 viewDir = -rd;
-	float tScene = IsSkyDepth(depth) ? FogDepthParams.y : sqrt(rayLen2);
+	float tScene = sqrt(rayLen2);
 
 	float tEnter;
 	float tExit;
@@ -449,7 +454,7 @@ void main()
 	int stepCount = max(FogSteps, 1);
 	float stepLen = lengthInVolume / float(stepCount);
 
-	if (FogJitterEnabled != 0)
+	if (FogJitterEnabled != 0 && !isCameraFollowGlobalFog)
 	{
 		float jitter = InterleavedGradientNoise(gl_FragCoord.xy + vec2(float(FogFrameIndex) * 0.7548777)) - 0.5;
 		tEnter += jitter * stepLen;
@@ -487,7 +492,7 @@ void main()
 		vec3 p = ro + rd * t;
 		// Use distance-only noise LOD so dense fog keeps detail.
 		int noiseLod = (t > FogNoiseLodSwitchDist) ? 1 : 0;
-		float sigma = EvaluateFogSigma(p, volume, flow, noiseLod);
+		float sigma = EvaluateFogSigma(p, volume, flow, noiseLod, noiseAmountScale);
 		if (sigma <= 1e-6)
 			continue;
 
