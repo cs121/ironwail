@@ -46,16 +46,18 @@ struct Call
 	uint	flags;
 	uint	tcgen;
 	float	wateralpha;
-	float	_pad0;
+	int		spec_mode;
 	vec2	polygon_offset;
+	vec2	specular; // x=intensity y=exponent
 	vec4	stage_color;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;
+	uvec2	smhandle;
 #else
 	int		baseinstance;
-	int		padding;
+	int		padding[3];
 #endif
 };
 
@@ -151,7 +153,7 @@ layout(location=7)  flat out vec4  out_styles;
 layout(location=8)  flat out float out_lmofs;
 #if BINDLESS
 	layout(location=9)  flat out uvec4 out_samplers0;
-	layout(location=10) flat out uvec2 out_samplers1;
+	layout(location=10) flat out uvec4 out_samplers1;
 #endif
 layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
@@ -162,6 +164,7 @@ layout(location=16) out float out_skyvisibility;
 layout(location=17) flat out vec4 out_stage_color;
 layout(location=18) flat out uint out_tcgen;
 layout(location=19) flat out vec3 out_bmodel_relight;
+layout(location=20) flat out vec4 out_specular; // x=intensity y=exponent z=mode
 
 vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 {
@@ -265,6 +268,7 @@ void main()
 	out_lmofs       = in_lmofs;
 	out_stage_color = call.stage_color;
 	out_tcgen       = call.tcgen;
+	out_specular    = vec4(call.specular, float(call.spec_mode), 0.0);
 
 #if BINDLESS
 	out_samplers0.xy = call.txhandle;
@@ -272,5 +276,6 @@ void main()
 	// This is a known-safe pattern on most drivers.
 	out_samplers0.zw = ((call.flags & CF_USE_FULLBRIGHT) != 0u) ? call.fbhandle : call.txhandle;
 	out_samplers1.xy = call.emhandle;
+	out_samplers1.zw = call.smhandle;
 #endif
 }
