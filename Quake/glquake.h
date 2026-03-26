@@ -931,6 +931,9 @@ int R_GetNativeRenderHeight (void);
 int R_GetSceneRenderWidth (void);
 int R_GetSceneRenderHeight (void);
 int R_GetSceneRenderScale (void);
+void R_GetSceneTexelSize (float *out_inv_w, float *out_inv_h);
+void R_GetOutputTexelSize (float *out_inv_w, float *out_inv_h);
+int R_GetSceneResizeGeneration (void);
 float R_GetViewZNear (void);
 float R_GetViewZFar (void);
 
