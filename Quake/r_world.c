@@ -410,6 +410,7 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint64	emissive;
 	GLuint64	normal_map;
 	GLuint64	specular_map;
+	GLuint		padding[2];
 } bmodel_bindless_gpu_call_t;
 
 typedef struct bmodel_bound_gpu_call_s {
@@ -434,8 +435,8 @@ COMPILE_TIME_ASSERT (bmodel_bindless_call_std430_size, sizeof (bmodel_bindless_g
 COMPILE_TIME_ASSERT (bmodel_bound_call_std430_size, sizeof (bmodel_bound_gpu_call_t) == 64);
 COMPILE_TIME_ASSERT (bmodel_call_remap_std430_size, sizeof (bmodel_gpu_call_remap_t) == 8);
 COMPILE_TIME_ASSERT (bmodel_bindless_call_spec_mode_offset, offsetof (bmodel_bindless_gpu_call_t, spec_mode) == 12);
-COMPILE_TIME_ASSERT (bmodel_bindless_call_normal_map_offset, offsetof (bmodel_bindless_gpu_call_t, normal_map) == 80);
-COMPILE_TIME_ASSERT (bmodel_bindless_call_spec_map_offset, offsetof (bmodel_bindless_gpu_call_t, specular_map) == 88);
+COMPILE_TIME_ASSERT (bmodel_bindless_call_normal_map_offset, offsetof (bmodel_bindless_gpu_call_t, normal_map) == 72);
+COMPILE_TIME_ASSERT (bmodel_bindless_call_spec_map_offset, offsetof (bmodel_bindless_gpu_call_t, specular_map) == 80);
 COMPILE_TIME_ASSERT (bmodel_bound_call_spec_mode_offset, offsetof (bmodel_bound_gpu_call_t, spec_mode) == 12);
 
 static bmodel_gpu_instance_t		bmodel_instances[MAX_VISEDICTS + 1]; // +1 for worldspawn
@@ -938,6 +939,8 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
 		call->normal_map = greytexture->bindless_handle;
 		call->specular_map = whitetexture->bindless_handle;
+		call->padding[0] = 0;
+		call->padding[1] = 0;
 	}
 	else
 	{
@@ -1018,6 +1021,8 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
 		call->normal_map = nm ? nm->bindless_handle : greytexture->bindless_handle;
 		call->specular_map = sm ? sm->bindless_handle : whitetexture->bindless_handle;
+		call->padding[0] = 0;
+		call->padding[1] = 0;
 	}
 	else
 	{

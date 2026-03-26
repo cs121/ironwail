@@ -79,7 +79,10 @@ static void GLMesh_BuildTangents (float (*tangents)[4], const float (*xyz)[3], c
 		float sign;
 
 		if (normals && DotProduct (normals[i], normals[i]) > 1e-8f)
-			VectorNormalize2 (normals[i], n);
+		{
+			VectorCopy (normals[i], n);
+			VectorNormalize (n);
+		}
 		else
 			VectorSet (n, 0.f, 0.f, 1.f);
 

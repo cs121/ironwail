@@ -245,6 +245,8 @@ static void R_DLightContract_EnforceGuards (void)
 	}
 }
 
+extern cvar_t r_dlight_entities;
+
 static void R_DLightContract_DebugOverlay (void)
 {
 	const qboolean legacy_world_opaque = (r_dynamic.value > 0.f && r_drawworld_cheatsafe);
@@ -2819,6 +2821,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	float view_max_x;
 	float view_max_y;
 	float inv_scale;
+	qboolean scaled_scene;
 	qboolean drs_postfx_guard = false;
 	postfx_state_t postfx_state;
 	float postfx_exposure_add;

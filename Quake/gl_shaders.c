@@ -1092,7 +1092,7 @@ void GL_CreateShaders (void)
 
 static void GL_ShaderReloadAll_f (void)
 {
-	if (!gl_glsl_able)
+	if (!GL_CreateProgramFunc)
 	{
 		Con_Warning ("shader_reload_all: GLSL is not available.\n");
 		return;
@@ -1123,7 +1123,7 @@ void GL_PollShaderHotReload (void)
 	time_t timestamp = 0;
 	double now;
 
-	if (!gl_glsl_able)
+	if (!GL_CreateProgramFunc)
 		return;
 	if (developer.value == 0.f)
 		return;
