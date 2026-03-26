@@ -946,6 +946,9 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 	stage.blend_src = GL_ONE;
 	stage.blend_dst = GL_ZERO;
 	stage.tcgen = MAT_TCGEN_BASE;
+	stage.normal_scale = 1.f;
+	stage.spec_power = 1.f;
+	stage.spec_intensity = 1.f;
 	stage.anim_map_fps = 0.f;
 	stage.anim_map_frame = 0;
 	stage.texmatrix_time_bucket = -1;
@@ -1014,6 +1017,57 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 			}
 			stage.map_type = MAT_MAP_CLAMPMAP;
 			stage.map_path = Material_DupString (value);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "normalMap"))
+		{
+			Material_MarkKeywordSeen ("normalMap", MATERIAL_KEYWORD_SCOPE_STAGE);
+			if (!ParseIdentExpected (&data, &value, state, "normal map path"))
+			{
+				valid = false;
+				data = SkipUnknownBlockOrLine (data, true, state);
+				break;
+			}
+			if (stage.normal_map_path)
+			{
+				Z_Free (stage.normal_map_path);
+				stage.normal_map_path = NULL;
+			}
+			stage.normal_map_path = Material_DupString (value);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "specularMap"))
+		{
+			Material_MarkKeywordSeen ("specularMap", MATERIAL_KEYWORD_SCOPE_STAGE);
+			if (!ParseIdentExpected (&data, &value, state, "specular map path"))
+			{
+				valid = false;
+				data = SkipUnknownBlockOrLine (data, true, state);
+				break;
+			}
+			if (stage.specular_map_path)
+			{
+				Z_Free (stage.specular_map_path);
+				stage.specular_map_path = NULL;
+			}
+			stage.specular_map_path = Material_DupString (value);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "ormMap"))
+		{
+			Material_MarkKeywordSeen ("ormMap", MATERIAL_KEYWORD_SCOPE_STAGE);
+			if (!ParseIdentExpected (&data, &value, state, "orm map path"))
+			{
+				valid = false;
+				data = SkipUnknownBlockOrLine (data, true, state);
+				break;
+			}
+			if (stage.orm_map_path)
+			{
+				Z_Free (stage.orm_map_path);
+				stage.orm_map_path = NULL;
+			}
+			stage.orm_map_path = Material_DupString (value);
 			continue;
 		}
 		if (!q_strcasecmp (com_token, "rgbGen"))
@@ -1648,6 +1702,54 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 			Material_ValidateFiniteFloat (state, "godrayScale", scale, 1.f, &validated_scale);
 			stage.godray_scale = CLAMP (0.f, validated_scale, MATERIAL_SCALE_MAX);
 			stage.godray_scale_set = true;
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "normalScale"))
+		{
+			Material_MarkKeywordSeen ("normalScale", MATERIAL_KEYWORD_SCOPE_STAGE);
+			float value_scale;
+			float validated_scale = 1.f;
+
+			if (!ParseFloat (&data, &value_scale, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+
+			Material_ValidateFiniteFloat (state, "normalScale", value_scale, 1.f, &validated_scale);
+			stage.normal_scale = CLAMP (0.f, validated_scale, MATERIAL_SCALE_MAX);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "specPower"))
+		{
+			Material_MarkKeywordSeen ("specPower", MATERIAL_KEYWORD_SCOPE_STAGE);
+			float value_scale;
+			float validated_scale = 1.f;
+
+			if (!ParseFloat (&data, &value_scale, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+
+			Material_ValidateFiniteFloat (state, "specPower", value_scale, 1.f, &validated_scale);
+			stage.spec_power = CLAMP (0.f, validated_scale, MATERIAL_SCALE_MAX);
+			continue;
+		}
+		if (!q_strcasecmp (com_token, "specIntensity"))
+		{
+			Material_MarkKeywordSeen ("specIntensity", MATERIAL_KEYWORD_SCOPE_STAGE);
+			float value_scale;
+			float validated_scale = 1.f;
+
+			if (!ParseFloat (&data, &value_scale, state))
+			{
+				data = ResyncMaterialBlock (data, state);
+				break;
+			}
+
+			Material_ValidateFiniteFloat (state, "specIntensity", value_scale, 1.f, &validated_scale);
+			stage.spec_intensity = CLAMP (0.f, validated_scale, MATERIAL_SCALE_MAX);
 			continue;
 		}
 
