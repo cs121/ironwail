@@ -589,6 +589,8 @@ typedef struct render_scene_size_state_s {
 } render_scene_size_state_t;
 
 static render_scene_size_state_t r_scene_size_state;
+static int r_scene_resize_generation = 0;
+static qboolean r_scene_resize_pending_invalidation = false;
 
 typedef struct render_drs_state_s {
 	int dynamic_scale;
@@ -600,6 +602,7 @@ typedef struct render_drs_state_s {
 } render_drs_state_t;
 
 static render_drs_state_t r_drs_state;
+static void R_InvalidateTemporalHistoryOnSceneResize (void);
 
 static int R_GetDRSMinScale (void)
 {
@@ -767,6 +770,8 @@ static void R_UpdateSceneSizeState (void)
 	{
 		r_scene_size_state.prev_scene_width = r_scene_size_state.initialized ? r_scene_size_state.scene_width : scene_width;
 		r_scene_size_state.prev_scene_height = r_scene_size_state.initialized ? r_scene_size_state.scene_height : scene_height;
+		r_scene_resize_generation++;
+		r_scene_resize_pending_invalidation = true;
 	}
 
 	r_scene_size_state.native_width = native_width;
@@ -815,6 +820,32 @@ int R_GetSceneRenderScale (void)
 {
 	R_UpdateSceneSizeState ();
 	return r_scene_size_state.scene_scale;
+}
+
+void R_GetSceneTexelSize (float *out_inv_w, float *out_inv_h)
+{
+	int w = R_GetSceneRenderWidth ();
+	int h = R_GetSceneRenderHeight ();
+	if (out_inv_w)
+		*out_inv_w = 1.f / (float)q_max (1, w);
+	if (out_inv_h)
+		*out_inv_h = 1.f / (float)q_max (1, h);
+}
+
+void R_GetOutputTexelSize (float *out_inv_w, float *out_inv_h)
+{
+	int w = R_GetNativeRenderWidth ();
+	int h = R_GetNativeRenderHeight ();
+	if (out_inv_w)
+		*out_inv_w = 1.f / (float)q_max (1, w);
+	if (out_inv_h)
+		*out_inv_h = 1.f / (float)q_max (1, h);
+}
+
+int R_GetSceneResizeGeneration (void)
+{
+	R_UpdateSceneSizeState ();
+	return r_scene_resize_generation;
 }
 
 float R_GetViewZNear (void)
@@ -1689,11 +1720,12 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, r_matproj);
 	GL_UniformMatrix4fvFunc (1, 1, GL_FALSE, r_matinvproj);
 	GL_Uniform4fFunc (2, radius, bias, power, min_ao);
-	GL_Uniform4fFunc (3,
-		1.f / (float)R_GetNativeRenderWidth (),
-		1.f / (float)R_GetNativeRenderHeight (),
-		(float)R_GetNativeRenderWidth (),
-		(float)R_GetNativeRenderHeight ());
+	{
+		float inv_out_w = 0.f;
+		float inv_out_h = 0.f;
+		R_GetOutputTexelSize (&inv_out_w, &inv_out_h);
+		GL_Uniform4fFunc (3, inv_out_w, inv_out_h, 1.f / inv_out_w, 1.f / inv_out_h);
+	}
 	GL_Uniform4fFunc (4,
 		1.f / (float)width,
 		1.f / (float)height,
@@ -1732,11 +1764,12 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 		GL_UseProgram (glprogs.ssao_blur);
 		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
-		GL_Uniform4fFunc (0,
-			1.f / (float)R_GetNativeRenderWidth (),
-			1.f / (float)R_GetNativeRenderHeight (),
-			(float)R_GetNativeRenderWidth (),
-			(float)R_GetNativeRenderHeight ());
+		{
+			float inv_out_w = 0.f;
+			float inv_out_h = 0.f;
+			R_GetOutputTexelSize (&inv_out_w, &inv_out_h);
+			GL_Uniform4fFunc (0, inv_out_w, inv_out_h, 1.f / inv_out_w, 1.f / inv_out_h);
+		}
 		GL_Uniform4fFunc (1,
 			1.f / (float)width,
 			1.f / (float)height,
@@ -3728,10 +3761,16 @@ static void R_EnsureRenderTargetSampleState (void)
 	int current_fog_w = framebufs.fogvol.width > 0 ? framebufs.fogvol.width : desired_fog_w;
 	int current_fog_h = framebufs.fogvol.height > 0 ? framebufs.fogvol.height : desired_fog_h;
 	qboolean sample_changed = (current_samples != desired_samples);
-	qboolean size_changed = (current_scene_w != desired_scene_w || current_scene_h != desired_scene_h);
+	qboolean size_grow_required = (current_scene_w < desired_scene_w || current_scene_h < desired_scene_h);
 	qboolean fog_size_changed = (current_fog_w != desired_fog_w || current_fog_h != desired_fog_h);
 
-	if (!sample_changed && !size_changed && !fog_size_changed)
+	if (r_scene_resize_pending_invalidation)
+	{
+		R_InvalidateTemporalHistoryOnSceneResize ();
+		r_scene_resize_pending_invalidation = false;
+	}
+
+	if (!sample_changed && !size_grow_required && !fog_size_changed)
 		return;
 
 	Con_DPrintf ("Recreating render targets (scene %dx%d -> %dx%d, fog %dx%d -> %dx%d, samples %d -> %d)\n",
@@ -3740,7 +3779,9 @@ static void R_EnsureRenderTargetSampleState (void)
 		current_samples, desired_samples);
 	GL_DeleteFrameBuffers ();
 	GL_CreateFrameBuffers ();
-	R_InvalidateTemporalHistoryOnSceneResize ();
+	if (!r_scene_resize_pending_invalidation)
+		R_InvalidateTemporalHistoryOnSceneResize ();
+	r_scene_resize_pending_invalidation = false;
 	R_FrameGraph_SetRenderFramePlan (NULL);
 }
 

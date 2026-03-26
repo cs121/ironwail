@@ -910,8 +910,12 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 	if (mode <= 0)
 		return;
 
-	nx = CLAMP (16, (r_refdef.vrect.width + 15) / 16, 192);
-	ny = CLAMP (12, (r_refdef.vrect.height + 15) / 16, 128);
+	{
+		const int scene_w = q_max (1, R_GetSceneRenderWidth ());
+		const int scene_h = q_max (1, R_GetSceneRenderHeight ());
+		nx = CLAMP (16, (scene_w + 15) / 16, 192);
+		ny = CLAMP (12, (scene_h + 15) / 16, 128);
+	}
 	nz = 32;
 
 	r_froxel.near_clip = q_max (near_clip, 1.f);
