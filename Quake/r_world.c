@@ -1774,7 +1774,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         state = GLS_CULL_BACK | GLS_ATTRIBS(6);
         if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
         {
-                int blendop = CLAMP (0, (int)Q_rint (r_ppdlights_world_blendop.value), 1);
+                int blendop = CLAMP (0, (int)Q_rint (r_experimental_ppdlights_world_blendop.value), 1);
                 state |= ((blendop == 1) ? GLS_BLEND_SCREEN : GLS_BLEND_ADD) | GLS_NO_ZWRITE;
         }
         else if (pass == BP_SHADOW_SUN || pass == BP_SHADOW_DLIGHT)

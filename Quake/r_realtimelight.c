@@ -11,10 +11,11 @@ cvar_t r_ppdlights = { "r_ppdlights", "0", CVAR_ARCHIVE };
 /* Forward world consumer toggle (shared frame-light list -> world dlight pass). */
 cvar_t r_ppdlights_world = { "r_ppdlights_world", "1", CVAR_ARCHIVE };
 cvar_t r_ppdlights_world_scale = { "r_ppdlights_world_scale", "1", CVAR_ARCHIVE };
-/* World forward-lighting response: 0 = linear add, 1 = soft-add compression (default). */
-cvar_t r_ppdlights_world_blend = { "r_ppdlights_world_blend", "1", CVAR_ARCHIVE };
-/* World blend op: 0 = additive (GL_ONE,GL_ONE), 1 = screen-like (GL_ONE_MINUS_DST_COLOR,GL_ONE). */
-cvar_t r_ppdlights_world_blendop = { "r_ppdlights_world_blendop", "0", CVAR_ARCHIVE };
+/* World-light shaping controls, applied in shader before additive blend. */
+cvar_t r_ppdlights_world_luma_clamp = { "r_ppdlights_world_luma_clamp", "1.0", CVAR_ARCHIVE };
+cvar_t r_ppdlights_world_soft_knee = { "r_ppdlights_world_soft_knee", "1.0", CVAR_ARCHIVE };
+/* Experimental fixed-function blend op override for world dlight pass. */
+cvar_t r_experimental_ppdlights_world_blendop = { "r_experimental_ppdlights_world_blendop", "0", CVAR_ARCHIVE };
 /* Forward alias/model consumer toggle (shared frame-light list -> alias lighting). */
 cvar_t r_ppdlights_models = { "r_ppdlights_models", "1", CVAR_ARCHIVE };
 /* Froxel fog consumer toggle (shared frame-light list -> volumetric injection). */
@@ -27,7 +28,8 @@ cvar_t r_ppdlights_gi = { "r_ppdlights_gi", "0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_gi_debug = { "r_ppdlights_gi_debug", "0", CVAR_NONE };
 cvar_t r_ppdlights_gi_budget = { "r_ppdlights_gi_budget", "8", CVAR_ARCHIVE };
 cvar_t r_ppdlights_debug = { "r_ppdlights_debug", "0", CVAR_NONE };
-/* World dlight debug views: 0=off, 1=affected count, 2=attenuation, 3=raw, 4=new/legacy split. */
+/* World dlight debug views: 0=off, 1=affected count, 2=attenuation, 3=raw light, 4=new/legacy split,
+ * 5=pre-compression contribution, 6=post-compression contribution. */
 cvar_t r_ppdlights_debug_mode = { "r_ppdlights_dbgmode", "0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_emissive = { "r_ppdlights_emissive", "0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_emissive_debug = { "r_ppdlights_emissive_debug", "0", CVAR_NONE };
@@ -62,6 +64,18 @@ static void R_PPdlights_DebugModeCompat_f (void)
 	}
 
 	Cvar_SetValueQuick (&r_ppdlights_debug_mode, Q_atof (Cmd_Argv (1)));
+}
+
+static void R_PPdlights_WorldBlendOpCompat_f (void)
+{
+	if (Cmd_Argc () <= 1)
+	{
+		Con_Printf ("\"r_ppdlights_world_blendop\" is deprecated; use \"r_experimental_ppdlights_world_blendop\" (current %.0f)\n",
+			r_experimental_ppdlights_world_blendop.value);
+		return;
+	}
+
+	Cvar_SetValueQuick (&r_experimental_ppdlights_world_blendop, Q_atof (Cmd_Argv (1)));
 }
 
 /* Backward compatibility for temporary milestone cvar names. */
@@ -395,8 +409,9 @@ void R_PPdlights_RegisterCvars (void)
 	Cvar_RegisterVariable (&r_ppdlights);
 	Cvar_RegisterVariable (&r_ppdlights_world);
 	Cvar_RegisterVariable (&r_ppdlights_world_scale);
-	Cvar_RegisterVariable (&r_ppdlights_world_blend);
-	Cvar_RegisterVariable (&r_ppdlights_world_blendop);
+	Cvar_RegisterVariable (&r_ppdlights_world_luma_clamp);
+	Cvar_RegisterVariable (&r_ppdlights_world_soft_knee);
+	Cvar_RegisterVariable (&r_experimental_ppdlights_world_blendop);
 	Cvar_RegisterVariable (&r_ppdlights_models);
 	Cvar_RegisterVariable (&r_ppdlights_fog);
 	Cvar_RegisterVariable (&r_ppdlights_fog_debug);
@@ -410,6 +425,7 @@ void R_PPdlights_RegisterCvars (void)
 	Cvar_RegisterVariable (&r_ppdlights_emissive_debug);
 	Cmd_AddCommand ("r_ppdlights_stats", R_PPdlights_Stats_f);
 	Cmd_AddCommand ("r_ppdlights_debug_mode", R_PPdlights_DebugModeCompat_f);
+	Cmd_AddCommand ("r_ppdlights_world_blendop", R_PPdlights_WorldBlendOpCompat_f);
 	Cmd_AddCommand ("r_ppd_emissive", R_PPdlights_EmissiveShortAlias_f);
 	Cmd_AddCommand ("r_ppd_emisdbg", R_PPdlights_EmissiveDebugShortAlias_f);
 	Cmd_AddCommand ("r_ppdlights_participation", R_PPdlights_Participation_f);

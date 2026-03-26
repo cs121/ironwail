@@ -5,14 +5,15 @@
 
 extern cvar_t r_lighting_debug_view;
 
-static void R_SetDlightConfig (GLuint program, float scale, float blend_mode)
+static void R_SetDlightConfig (GLuint program, float scale, float luma_clamp, float soft_knee)
 {
 	if (!program)
 		return;
 
 	GL_UseProgram (program);
 	GL_Uniform1fFunc (0, scale);
-	GL_Uniform1fFunc (1, blend_mode);
+	GL_Uniform1fFunc (1, luma_clamp);
+	GL_Uniform1fFunc (2, soft_knee);
 }
 
 void R_DrawDLightPass (void)
@@ -77,7 +78,7 @@ void R_DrawDLightPass (void)
 				consumer_stats.rejected[RL_REJECT_LOCAL_BUDGET]);
 		}
 
-		pp_debug_mode = CLAMP (0.f, r_ppdlights_debug_mode.value, 4.f);
+		pp_debug_mode = CLAMP (0.f, r_ppdlights_debug_mode.value, 6.f);
 		if (pp_debug_mode > 0.f && r_ppdlights_debug.value >= 1.f && (r_framecount % 60) == 0)
 			Con_DPrintf ("r_ppdlights_world: debug mode %.0f active\n", pp_debug_mode);
 	}
@@ -94,10 +95,11 @@ void R_DrawDLightPass (void)
 	}
 
 	{
-		const float blend_mode = CLAMP (0.f, (float)Q_rint (r_ppdlights_world_blend.value), 1.f);
 		const float world_scale = CLAMP (0.f, r_ppdlights_world_scale.value, 4.f);
-		R_SetDlightConfig (glprogs.world_dlight[0], world_scale, blend_mode);
-		R_SetDlightConfig (glprogs.world_dlight[1], world_scale, blend_mode);
+		const float luma_clamp = CLAMP (0.f, r_ppdlights_world_luma_clamp.value, 16.f);
+		const float soft_knee = CLAMP (0.05f, r_ppdlights_world_soft_knee.value, 8.f);
+		R_SetDlightConfig (glprogs.world_dlight[0], world_scale, luma_clamp, soft_knee);
+		R_SetDlightConfig (glprogs.world_dlight[1], world_scale, luma_clamp, soft_knee);
 	}
 
 	R_DrawBrushModels_DLights (ents, count);
