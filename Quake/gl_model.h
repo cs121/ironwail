@@ -141,6 +141,7 @@ typedef struct
 typedef struct glvert_s {
 	vec3_t		pos;
 	vec3_t		normal;
+	float		tangent[4];
 	vec3_t		lightgrid;
 	float		skyvisibility;
 	float		st[4];
@@ -296,6 +297,7 @@ typedef struct meshxyz_s
 typedef struct meshst_s
 {
 	float st[2];
+	int8_t tangent[4];
 } meshst_t;
 //--
 
@@ -364,6 +366,7 @@ typedef struct
 {
 	float		xyz[3];
 	int8_t		norm[4];
+	int8_t		tangent[4];
 	float		st[2];
 	uint8_t		weight[4];
 	uint8_t		idx[4];

@@ -47,6 +47,7 @@ struct PoseVertex
 	layout(location=2) in vec2 in_uv;
 	layout(location=3) in vec4 in_weights;
 	layout(location=4) in ivec4 in_indices;
+	layout(location=5) in vec4 in_tangent;
 
 	layout(std430, binding=2) restrict readonly buffer PoseBuffer
 	{
@@ -68,6 +69,7 @@ struct PoseVertex
 
 #else
 	layout(location=0) in vec2 in_uv;
+	layout(location=1) in vec4 in_tangent;
 
 	layout(std430, binding=2) restrict readonly buffer BlendShapeBuffer
 	{
@@ -102,9 +104,10 @@ layout(location=3) noperspective out vec4 out_curr_clip;
 layout(location=4) noperspective out vec4 out_prev_clip;
 layout(location=5) flat out int out_flags;
 layout(location=6) out vec3 out_normal;
-layout(location=7) out float out_dlight_vis;
-layout(location=8) out vec3 out_dlight_color;
-layout(location=9) out float out_sky_visibility;
+layout(location=7) out vec4 out_tangent;
+layout(location=8) out float out_dlight_vis;
+layout(location=9) out vec3 out_dlight_color;
+layout(location=10) out float out_sky_visibility;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
 

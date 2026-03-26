@@ -52,6 +52,7 @@ layout(std430, binding=0) restrict readonly buffer LightBuffer
 layout(binding=0) uniform sampler2D Tex;
 layout(binding=1) uniform sampler2D FullbrightTex;
 layout(binding=2) uniform sampler2D EmissiveTex;
+layout(binding=3) uniform sampler2D NormalTex;
 layout(binding=7) uniform sampler2DArray SunShadowTex;
 layout(binding=8) uniform samplerCubeArray DLightShadowTex;
 
@@ -143,9 +144,10 @@ layout(location=3) noperspective in vec4 in_curr_clip;
 layout(location=4) noperspective in vec4 in_prev_clip;
 layout(location=5) flat in int in_flags;
 layout(location=6) in vec3 in_normal;
-layout(location=7) in float in_dlight_vis;
-layout(location=8) in vec3 in_dlight_color;
-layout(location=9) in float in_sky_visibility;
+layout(location=7) in vec4 in_tangent;
+layout(location=8) in float in_dlight_vis;
+layout(location=9) in vec3 in_dlight_color;
+layout(location=10) in float in_sky_visibility;
 
 #define OUT_COLOR out_fragcolor
 #if OIT
@@ -415,6 +417,17 @@ void main()
 	vec4 lit_color = in_color;
 	vec3 world_pos = in_pos + AliasFrameBuffer.EyePos;
 	vec3 world_nor = normalize(in_normal);
+	vec3 world_geo_nor = world_nor;
+	float tangent_len = length(in_tangent.xyz);
+	vec3 sampled_n = texture(NormalTex, uv).xyz * 2.0 - 1.0;
+	bool has_nm = dot(sampled_n.xy, sampled_n.xy) > 1e-5;
+	if (tangent_len > 1e-5 && has_nm)
+	{
+		vec3 T = normalize(in_tangent.xyz);
+		vec3 B = normalize(cross(world_geo_nor, T)) * sign(in_tangent.w);
+		mat3 TBN = mat3(T, B, world_geo_nor);
+		world_nor = normalize(TBN * normalize(sampled_n));
+	}
 	float dlight_shadow = 1.0;
 	float sun_shadow = 1.0;
 	vec3 dlight_contrib = vec3(0.0);
