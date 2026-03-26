@@ -84,8 +84,9 @@ void R_DrawDLightPass (void)
 
 	{
 		const float blend_mode = CLAMP (0.f, (float)Q_rint (r_ppdlights_world_blend.value), 1.f);
-		R_SetDlightConfig (glprogs.world_dlight[0], 1.f, blend_mode);
-		R_SetDlightConfig (glprogs.world_dlight[1], 1.f, blend_mode);
+		const float world_scale = CLAMP (0.f, r_ppdlights_world_scale.value, 4.f);
+		R_SetDlightConfig (glprogs.world_dlight[0], world_scale, blend_mode);
+		R_SetDlightConfig (glprogs.world_dlight[1], world_scale, blend_mode);
 	}
 
 	R_DrawBrushModels_DLights (ents, count);
