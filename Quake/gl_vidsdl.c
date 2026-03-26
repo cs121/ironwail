@@ -1740,6 +1740,7 @@ void	VID_Init (void)
 	Cmd_AddCommand ("vid_test", VID_Test); //johnfitz
 	Cmd_AddCommand ("vid_describecurrentmode", VID_DescribeCurrentMode_f);
 	Cmd_AddCommand ("vid_describemodes", VID_DescribeModes_f);
+	GL_RegisterShaderCommands ();
 
 	putenv (vid_center);	/* SDL_putenv is problematic in versions <= 1.2.9 */
 
