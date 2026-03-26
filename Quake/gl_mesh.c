@@ -23,6 +23,97 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 
+static void GLMesh_BuildTangents (float (*tangents)[4], const float (*xyz)[3], const float (*normals)[3], const float (*st)[2], int numverts, const unsigned short *indexes, int numindexes)
+{
+	int i;
+	vec3_t *tan1 = (vec3_t *) q_calloc (numverts, sizeof (vec3_t));
+	vec3_t *tan2 = (vec3_t *) q_calloc (numverts, sizeof (vec3_t));
+
+	if (!tan1 || !tan2)
+		goto done;
+
+	for (i = 0; i + 2 < numindexes; i += 3)
+	{
+		unsigned int i0 = indexes[i + 0];
+		unsigned int i1 = indexes[i + 1];
+		unsigned int i2 = indexes[i + 2];
+		vec3_t e1, e2, sdir, tdir;
+		float x1, x2, y1, y2, z1, z2, s1, s2, t1, t2, r;
+
+		if (i0 >= (unsigned)numverts || i1 >= (unsigned)numverts || i2 >= (unsigned)numverts)
+			continue;
+
+		x1 = xyz[i1][0] - xyz[i0][0];
+		y1 = xyz[i1][1] - xyz[i0][1];
+		z1 = xyz[i1][2] - xyz[i0][2];
+		x2 = xyz[i2][0] - xyz[i0][0];
+		y2 = xyz[i2][1] - xyz[i0][1];
+		z2 = xyz[i2][2] - xyz[i0][2];
+
+		s1 = st[i1][0] - st[i0][0];
+		t1 = st[i1][1] - st[i0][1];
+		s2 = st[i2][0] - st[i0][0];
+		t2 = st[i2][1] - st[i0][1];
+
+		r = s1 * t2 - s2 * t1;
+		if (fabsf (r) < 1e-8f)
+			continue;
+		r = 1.0f / r;
+
+		VectorSet (e1, x1, y1, z1);
+		VectorSet (e2, x2, y2, z2);
+		VectorSet (sdir, (t2 * e1[0] - t1 * e2[0]) * r, (t2 * e1[1] - t1 * e2[1]) * r, (t2 * e1[2] - t1 * e2[2]) * r);
+		VectorSet (tdir, (s1 * e2[0] - s2 * e1[0]) * r, (s1 * e2[1] - s2 * e1[1]) * r, (s1 * e2[2] - s2 * e1[2]) * r);
+
+		VectorAdd (tan1[i0], sdir, tan1[i0]);
+		VectorAdd (tan1[i1], sdir, tan1[i1]);
+		VectorAdd (tan1[i2], sdir, tan1[i2]);
+		VectorAdd (tan2[i0], tdir, tan2[i0]);
+		VectorAdd (tan2[i1], tdir, tan2[i1]);
+		VectorAdd (tan2[i2], tdir, tan2[i2]);
+	}
+
+	for (i = 0; i < numverts; ++i)
+	{
+		vec3_t n, t, b, c;
+		float sign;
+
+		if (normals && DotProduct (normals[i], normals[i]) > 1e-8f)
+			VectorNormalize2 (normals[i], n);
+		else
+			VectorSet (n, 0.f, 0.f, 1.f);
+
+		VectorCopy (tan1[i], t);
+		VectorMA (t, -DotProduct (n, t), n, t);
+		if (DotProduct (t, t) <= 1e-8f)
+		{
+			vec3_t axis = {0.f, 0.f, 1.f};
+			if (fabsf (n[2]) > 0.999f)
+				VectorSet (axis, 0.f, 1.f, 0.f);
+			CrossProduct (axis, n, t);
+		}
+		if (DotProduct (t, t) <= 1e-8f)
+		{
+			tangents[i][0] = tangents[i][1] = tangents[i][2] = tangents[i][3] = 0.f;
+			continue;
+		}
+		VectorNormalize (t);
+		VectorCopy (tan2[i], b);
+		CrossProduct (n, t, c);
+		sign = DotProduct (c, b) < 0.f ? -1.f : 1.f;
+		tangents[i][0] = t[0];
+		tangents[i][1] = t[1];
+		tangents[i][2] = t[2];
+		tangents[i][3] = sign;
+	}
+
+done:
+	if (tan1)
+		q_free (tan1);
+	if (tan2)
+		q_free (tan2);
+}
+
 
 /*
 =================================================================
@@ -210,6 +301,9 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *mainhdr)
 		// grab the pointers to data in the extradata
 		desc = (aliasmesh_t *) ((byte *) hdr + hdr->meshdesc);
 		trivertexes = (const trivertx_t *) ((byte *)hdr + hdr->vertexes);
+		float (*tangent)[4] = NULL;
+		float (*uv)[2] = NULL;
+		int v;
 
 		//submit the index data.
 		hdr->eboofs = numindexes * sizeof (unsigned short);
@@ -218,13 +312,54 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *mainhdr)
 
 		hdr->vbovertofs = vertofs;
 
+		tangent = (float (*)[4]) q_calloc (hdr->numverts_vbo, sizeof (*tangent));
+		uv = (float (*)[2]) q_malloc (hdr->numverts_vbo * sizeof (*uv));
+		if (!tangent || !uv)
+		{
+			if (tangent) q_free (tangent);
+			if (uv) q_free (uv);
+			tangent = NULL;
+			uv = NULL;
+		}
+
+		if (uv)
+		{
+			float hscale = 1.0f / (float)TexMgr_PadConditional(hdr->skinwidth);
+			float vscale = 1.0f / (float)TexMgr_PadConditional(hdr->skinheight);
+			for (v = 0; v < hdr->numverts_vbo; ++v)
+			{
+				uv[v][0] = hscale * ((float)desc[v].st[0] + 0.5f);
+				uv[v][1] = vscale * ((float)desc[v].st[1] + 0.5f);
+			}
+		}
+
 		// fill in the vertices at the start of the buffer
 		switch(hdr->poseverttype)
 		{
 		case PV_QUAKE1:
+			{
+				float (*xyzf)[3] = (float (*)[3]) q_malloc (hdr->numverts_vbo * sizeof (*xyzf));
+				float (*norf)[3] = (float (*)[3]) q_malloc (hdr->numverts_vbo * sizeof (*norf));
+				const trivertx_t *tv0 = (const trivertx_t *)trivertexes;
+				if (xyzf && norf && uv && tangent)
+				{
+					for (v = 0; v < hdr->numverts_vbo; ++v)
+					{
+						trivertx_t trivert = tv0[desc[v].vertindex];
+						xyzf[v][0] = trivert.v[0];
+						xyzf[v][1] = trivert.v[1];
+						xyzf[v][2] = trivert.v[2];
+						norf[v][0] = r_avertexnormals[trivert.lightnormalindex][0];
+						norf[v][1] = r_avertexnormals[trivert.lightnormalindex][1];
+						norf[v][2] = r_avertexnormals[trivert.lightnormalindex][2];
+					}
+					GLMesh_BuildTangents (tangent, (const float (*)[3])xyzf, (const float (*)[3])norf, (const float (*)[2])uv, hdr->numverts_vbo, (const unsigned short *)((byte *)hdr + hdr->indexes), hdr->numindexes);
+				}
+				if (xyzf) q_free (xyzf);
+				if (norf) q_free (norf);
+			}
 			for (f = 0; f < hdr->numposes; f++) // ericw -- what RMQEngine called nummeshframes is called numposes in QuakeSpasm
 			{
-				int v;
 				meshxyz_t *xyz = (meshxyz_t *) (vbodata + vertofs);
 				const trivertx_t *tv = (const trivertx_t*)trivertexes + (hdr->numverts * f);
 				vertofs += hdr->numverts_vbo * sizeof (*xyz);
@@ -249,15 +384,53 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *mainhdr)
 			}
 			break;
 		case PV_IQM:
+			{
+				const iqmvert_t *tv0 = (const iqmvert_t *)trivertexes;
+				if (uv && tangent)
+				{
+					float (*xyzf)[3] = (float (*)[3]) q_malloc (hdr->numverts_vbo * sizeof (*xyzf));
+					float (*norf)[3] = (float (*)[3]) q_malloc (hdr->numverts_vbo * sizeof (*norf));
+					if (xyzf && norf)
+					{
+						for (v = 0; v < hdr->numverts_vbo; ++v)
+						{
+							xyzf[v][0] = tv0[v].xyz[0];
+							xyzf[v][1] = tv0[v].xyz[1];
+							xyzf[v][2] = tv0[v].xyz[2];
+							norf[v][0] = tv0[v].norm[0] * (1.0f / 127.0f);
+							norf[v][1] = tv0[v].norm[1] * (1.0f / 127.0f);
+							norf[v][2] = tv0[v].norm[2] * (1.0f / 127.0f);
+							uv[v][0] = tv0[v].st[0];
+							uv[v][1] = tv0[v].st[1];
+						}
+						GLMesh_BuildTangents (tangent, (const float (*)[3])xyzf, (const float (*)[3])norf, (const float (*)[2])uv, hdr->numverts_vbo, (const unsigned short *)((byte *)hdr + hdr->indexes), hdr->numindexes);
+					}
+					if (xyzf) q_free (xyzf);
+					if (norf) q_free (norf);
+				}
+			}
 			for (f = 0; f < hdr->numposes; f++) // ericw -- what RMQEngine called nummeshframes is called numposes in QuakeSpasm
 			{
-				int v;
 				iqmvert_t *xyz = (iqmvert_t *) (vbodata + vertofs);
 				const iqmvert_t *tv = (const iqmvert_t*)trivertexes + (hdr->numverts_vbo * f);
 				vertofs += hdr->numverts_vbo * sizeof (*xyz);
 
 				for (v = 0; v < hdr->numverts_vbo; v++, tv++)
+				{
 					xyz[v] = *tv;
+					if (tangent)
+					{
+						xyz[v].tangent[0] = (int8_t) CLAMP (-127, (int)(tangent[v][0] * 127.f), 127);
+						xyz[v].tangent[1] = (int8_t) CLAMP (-127, (int)(tangent[v][1] * 127.f), 127);
+						xyz[v].tangent[2] = (int8_t) CLAMP (-127, (int)(tangent[v][2] * 127.f), 127);
+						xyz[v].tangent[3] = (int8_t) (tangent[v][3] < 0.f ? -127 : 127);
+					}
+					else
+					{
+						xyz[v].tangent[0] = xyz[v].tangent[1] = xyz[v].tangent[2] = 0;
+						xyz[v].tangent[3] = 0;
+					}
+				}
 			}
 
 			// copy bone poses
@@ -286,8 +459,24 @@ void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *mainhdr)
 			{
 				st[f].st[0] = hscale * ((float) desc[f].st[0] + 0.5f);
 				st[f].st[1] = vscale * ((float) desc[f].st[1] + 0.5f);
+				if (tangent)
+				{
+					st[f].tangent[0] = (int8_t) CLAMP (-127, (int)(tangent[f][0] * 127.f), 127);
+					st[f].tangent[1] = (int8_t) CLAMP (-127, (int)(tangent[f][1] * 127.f), 127);
+					st[f].tangent[2] = (int8_t) CLAMP (-127, (int)(tangent[f][2] * 127.f), 127);
+					st[f].tangent[3] = (int8_t) (tangent[f][3] < 0.f ? -127 : 127);
+				}
+				else
+				{
+					st[f].tangent[0] = st[f].tangent[1] = st[f].tangent[2] = 0;
+					st[f].tangent[3] = 0;
+				}
 			}
 		}
+		if (tangent)
+			q_free (tangent);
+		if (uv)
+			q_free (uv);
 
 		if (hdr->nextsurface)
 			hdr = (aliashdr_t*)((byte*)hdr + hdr->nextsurface);

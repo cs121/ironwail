@@ -131,8 +131,9 @@ layout(location=1) in vec4   in_uv;       // xy = base UV, zw = lightmap UV
 layout(location=2) in float  in_lmofs;
 layout(location=3) in ivec4  in_styles;
 layout(location=4) in vec3   in_normal;
-layout(location=5) in vec3   in_lightgrid;
-layout(location=6) in float  in_skyvisibility;
+layout(location=5) in vec4   in_tangent;
+layout(location=6) in vec3   in_lightgrid;
+layout(location=7) in float  in_skyvisibility;
 
 // Vertex outputs
 layout(location=0)  flat out uint  out_flags;
@@ -155,11 +156,12 @@ layout(location=8)  flat out float out_lmofs;
 layout(location=11) noperspective out vec4 out_curr_clip;
 layout(location=12) noperspective out vec4 out_prev_clip;
 layout(location=13) out vec3 out_normal;
-layout(location=14) out vec3 out_lightgrid;
-layout(location=15) out float out_skyvisibility;
-layout(location=16) flat out vec4 out_stage_color;
-layout(location=17) flat out uint out_tcgen;
-layout(location=18) flat out vec3 out_bmodel_relight;
+layout(location=14) out vec4 out_tangent;
+layout(location=15) out vec3 out_lightgrid;
+layout(location=16) out float out_skyvisibility;
+layout(location=17) flat out vec4 out_stage_color;
+layout(location=18) flat out uint out_tcgen;
+layout(location=19) flat out vec3 out_bmodel_relight;
 
 vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 {

@@ -440,7 +440,7 @@ static union {
 	} bindless;
 	struct {
 		bmodel_bound_gpu_call_t		params[MAX_BMODEL_DRAWS];
-		gltexture_t					*textures[MAX_BMODEL_DRAWS][3];
+		gltexture_t					*textures[MAX_BMODEL_DRAWS][4];
 	} bound;
 } bmodel_calls;
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
@@ -742,8 +742,9 @@ static void R_FlushBModelCalls (void)
 	GL_VertexAttribPointerFunc (2, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lmofs));
 	GL_VertexAttribIPointerFunc (3, 4, GL_UNSIGNED_BYTE, sizeof (glvert_t), (void *) offsetof (glvert_t, styles));
 	GL_VertexAttribPointerFunc (4, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, normal));
-	GL_VertexAttribPointerFunc (5, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lightgrid));
-	GL_VertexAttribPointerFunc (6, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, skyvisibility));
+	GL_VertexAttribPointerFunc (5, 4, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, tangent));
+	GL_VertexAttribPointerFunc (6, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lightgrid));
+	GL_VertexAttribPointerFunc (7, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, skyvisibility));
 
 	if (gl_bindless_able)
 	{
@@ -763,6 +764,7 @@ static void R_FlushBModelCalls (void)
 			GL_Uniform1iFunc (0, i);
 			GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
 			GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
+			GL_Bind (GL_TEXTURE5, bmodel_calls.bound.textures[i][3]);
 			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const byte *)(dstcmdofs + i * sizeof (bmodel_draw_indirect_t)));
 		}
 	}
@@ -941,6 +943,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		textures[0] = tx ? tx : greytexture;
 		textures[1] = fb ? fb : blacktexture;
 		textures[2] = em ? em : blacktexture;
+		textures[3] = greytexture;
 	}
 
 	SDL_assert (num_instances > 0);
@@ -951,7 +954,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 	++num_bmodel_calls;
 }
 
-static void R_AddBModelCallWithTextures (int index, int first_instance, int num_instances, gltexture_t *tx, gltexture_t *fb, gltexture_t *em,
+static void R_AddBModelCallWithTextures (int index, int first_instance, int num_instances, gltexture_t *tx, gltexture_t *fb, gltexture_t *em, gltexture_t *nm,
 	tcgen_mode_t tcgen, qboolean zfix, float polygon_offset_factor, float polygon_offset_units, float alpha_override, unsigned extra_flags,
 	const vec4_t stage_color)
 {
@@ -964,6 +967,7 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 	tx = R_SanitizeGLTexture (tx, "shaderstage", "base");
 	fb = R_SanitizeGLTexture (fb, "shaderstage", "fullbright");
 	em = R_SanitizeGLTexture (em, "shaderstage", "emissive");
+	nm = R_SanitizeGLTexture (nm, "shaderstage", "normal");
 
 	flags = zfix | ((fb != NULL) << 1) | (r_fullbright_cheatsafe ? CALLFLAG_NOLIGHTMAP : 0u) | extra_flags;
 	if (em != NULL && (extra_flags & CALLFLAG_MAT_EMISSIVE))
@@ -1014,6 +1018,7 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		textures[0] = tx ? tx : greytexture;
 		textures[1] = fb ? fb : blacktexture;
 		textures[2] = em ? em : blacktexture;
+		textures[3] = nm ? nm : greytexture;
 	}
 
 	SDL_assert (num_instances > 0);
@@ -1179,6 +1184,13 @@ static gltexture_t *R_FindStageTexture (const qmodel_t *model, const material_st
 	return TexMgr_FindTexture ((qmodel_t *)model, path);
 }
 
+static gltexture_t *R_FindStageNormalTexture (const qmodel_t *model, const material_stage_t *stage)
+{
+	if (!stage || !stage->normal_map_path || !stage->normal_map_path[0])
+		return NULL;
+	return TexMgr_FindTexture ((qmodel_t *)model, stage->normal_map_path);
+}
+
 static qboolean R_StageUsesLightmap (const material_stage_t *stage, size_t stage_index)
 {
 	if (!stage)
@@ -1318,6 +1330,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	R_ResetBModelCalls (program);
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+	GL_Bind (GL_TEXTURE5, greytexture);
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof (bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof (bmodel_instances[0]) * totalinst);
@@ -1396,6 +1409,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 				gltexture_t *stage_tex;
 				gltexture_t *fb = NULL;
 				gltexture_t *em = NULL;
+				gltexture_t *nm = NULL;
 				vec4_t stage_color;
 				unsigned extra_flags = mat_call_flags | R_StageOutputCallFlags (stage);
 				unsigned stage_state;
@@ -1430,6 +1444,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					if (!gl_fullbrights.value && t->type != TEXTYPE_SKY)
 						fb = NULL;
 				}
+				nm = R_FindStageNormalTexture (model, stage);
 
 				uses_lightmap = R_StageUsesLightmap (stage, stage_index);
 				if (!uses_lightmap || !model->lightdata)
@@ -1437,7 +1452,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 				if (t->type == TEXTYPE_CUTOUT)
 					extra_flags |= CALLFLAG_ALPHA_TEST;
 
-				stage_state = GLS_ATTRIBS (6) | R_MapBlendMode (stage) | R_MapCullMode (material->cull_mode);
+				stage_state = GLS_ATTRIBS (8) | R_MapBlendMode (stage) | R_MapCullMode (material->cull_mode);
 				if (!stage->depth_write)
 					stage_state |= GLS_NO_ZWRITE;
 
@@ -1473,7 +1488,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 
 					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
-						stage_tex, fb, em, R_ResolveStageTcGen (stage),
+						stage_tex, fb, em, nm, R_ResolveStageTcGen (stage),
 						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color);
 				}
 			}
@@ -1523,9 +1538,10 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 		return;
 
 	R_ResetBModelCalls (glprogs.godrays_source);
-	GL_SetState (GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (6));
+	GL_SetState (GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (8));
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+	GL_Bind (GL_TEXTURE5, greytexture);
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof (bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof (bmodel_instances[0]) * totalinst);
@@ -1641,7 +1657,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 
 					R_GetPolygonOffsetValues (material, use_polygon_offset, &polygon_offset_factor, &polygon_offset_units);
 					R_AddBModelCallWithTextures (model->firstcmd + j, baseinst, numinst,
-						stage_tex, fb, em, R_ResolveStageTcGen (stage),
+						stage_tex, fb, em, R_FindStageNormalTexture (model, stage), R_ResolveStageTcGen (stage),
 						use_polygon_offset, polygon_offset_factor, polygon_offset_units, -1.f, extra_flags, stage_color);
 				}
 			}
@@ -1799,6 +1815,7 @@ if (pass <= BP_ALPHATEST)
 GL_UseProgram (program);
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+	GL_Bind (GL_TEXTURE5, greytexture);
 }
 else if (pass == BP_SHADOW_SUN || pass == BP_SHADOW_DLIGHT)
 {
@@ -2045,6 +2062,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	GL_SetState (state);
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
+	GL_Bind (GL_TEXTURE5, greytexture);
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_instances, sizeof(bmodel_instances[0]) * totalinst, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, buf, (GLintptr)ofs, sizeof(bmodel_instances[0]) * totalinst);

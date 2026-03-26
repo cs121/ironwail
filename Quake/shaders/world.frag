@@ -4,6 +4,7 @@
 	layout(binding=0) uniform sampler2D Tex;
 	layout(binding=1) uniform sampler2D FullbrightTex;
 	layout(binding=4) uniform sampler2D EmissiveTex;
+layout(binding=5) uniform sampler2D NormalTex;
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
@@ -171,11 +172,12 @@ layout(location=8)  flat in float in_lmofs;
 layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
 layout(location=13) in vec3 in_normal;
-layout(location=14) in vec3 in_lightgrid;
-layout(location=15) in float in_skyvisibility;
-layout(location=16) flat in vec4 in_stage_color;
-layout(location=17) flat in uint in_tcgen;
-layout(location=18) flat in vec3 in_bmodel_relight;
+layout(location=14) in vec4 in_tangent;
+layout(location=15) in vec3 in_lightgrid;
+layout(location=16) in float in_skyvisibility;
+layout(location=17) flat in vec4 in_stage_color;
+layout(location=18) flat in uint in_tcgen;
+layout(location=19) flat in vec3 in_bmodel_relight;
 
 // Utility: ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -579,6 +581,19 @@ void main()
 		}
 		if (!gl_FrontFacing)
 			surface_normal = -surface_normal;
+
+		vec3 geom_normal = surface_normal;
+		vec3 tangent = in_tangent.xyz;
+		float tlen = length(tangent);
+		vec3 sampled_n = texture(NormalTex, in_uv).xyz * 2.0 - 1.0;
+		bool has_nm = dot(sampled_n.xy, sampled_n.xy) > 1e-5;
+		if (tlen > 1e-5 && has_nm)
+		{
+			vec3 T = tangent / tlen;
+			vec3 B = normalize(cross(geom_normal, T)) * sign(in_tangent.w);
+			mat3 TBN = mat3(T, B, geom_normal);
+			surface_normal = normalize(TBN * normalize(sampled_n));
+		}
 	}
 
 	// View direction (computed once; used by specular lighting)

@@ -902,6 +902,27 @@ void GL_BuildBModelVertexBuffer (void)
                                 VectorCopy (surfnormal, vert->normal);
                                 if ((fa->texinfo->flags & TEX_VERTEXNORMALS) && (m->vertexes[vertindex].normal[0] || m->vertexes[vertindex].normal[1] || m->vertexes[vertindex].normal[2]))
                                         VectorCopy (m->vertexes[vertindex].normal, vert->normal);
+				{
+					vec3_t tangent, bitangent, ortho_tangent, cross_nt;
+					float handedness = 1.f;
+
+					VectorCopy (fa->texinfo->vecs[0], tangent);
+					VectorCopy (fa->texinfo->vecs[1], bitangent);
+					VectorMA (tangent, -DotProduct (vert->normal, tangent), vert->normal, ortho_tangent);
+					if (DotProduct (ortho_tangent, ortho_tangent) > 1e-8f)
+						VectorNormalize (ortho_tangent);
+					else
+						VectorClear (ortho_tangent);
+
+					CrossProduct (vert->normal, ortho_tangent, cross_nt);
+					if (DotProduct (cross_nt, bitangent) < 0.f)
+						handedness = -1.f;
+
+					vert->tangent[0] = ortho_tangent[0];
+					vert->tangent[1] = ortho_tangent[1];
+					vert->tangent[2] = ortho_tangent[2];
+					vert->tangent[3] = (DotProduct (ortho_tangent, ortho_tangent) > 1e-8f) ? handedness : 0.f;
+				}
 
                                 {
                                         vec3_t lg_color;

@@ -778,9 +778,9 @@ void R_FlushAliasInstances (qboolean showtris)
 	R_Shadow_ApplyAliasReceiverUniforms (glprogs.alias[oit][mode][alphatest][md5]);
 
 	if (md5)
-		state = GLS_CULL_BACK | GLS_ATTRIBS(5);
+		state = GLS_CULL_BACK | GLS_ATTRIBS(6);
 	else
-		state = GLS_CULL_BACK | GLS_ATTRIBS(1);
+		state = GLS_CULL_BACK | GLS_ATTRIBS(2);
 
 	if (!translucent)
 	{
@@ -853,6 +853,7 @@ ibuf.global._pad_tail[1] = 0.f;
 			GL_VertexAttribPointerFunc  (2, 2, GL_FLOAT,			GL_FALSE, sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, st)));
 			GL_VertexAttribPointerFunc  (3, 4, GL_UNSIGNED_BYTE,	GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, weight)));
 			GL_VertexAttribIPointerFunc (4, 4, GL_UNSIGNED_BYTE,	          sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, idx)));
+			GL_VertexAttribPointerFunc  (5, 4, GL_BYTE,             GL_TRUE,  sizeof (iqmvert_t), (void *) (hdr->vbovertofs + offsetof (iqmvert_t, tangent)));
 
 			buffers[1] = model->meshvbo;
 			offsets[1] = hdr->vboposeofs;
@@ -861,6 +862,7 @@ ibuf.global._pad_tail[1] = 0.f;
 		else
 		{
 			GL_VertexAttribPointerFunc (0, 2, GL_FLOAT, GL_FALSE, sizeof (meshst_t), (void *) hdr->vbostofs);
+			GL_VertexAttribPointerFunc (1, 4, GL_BYTE, GL_TRUE, sizeof (meshst_t), (void *) (hdr->vbostofs + offsetof (meshst_t, tangent)));
 
 			buffers[1] = model->meshvbo;
 			offsets[1] = hdr->vbovertofs;
@@ -914,6 +916,7 @@ ibuf.global._pad_tail[1] = 0.f;
 		}
 
 		GL_BindTextures (0, 3, textures);
+		GL_Bind (GL_TEXTURE3, blacktexture);
 
 		GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *)hdr->eboofs, ibuf.count);
 
@@ -950,9 +953,9 @@ static void R_FlushAliasInstances_Shadow (qboolean dlight)
 	R_Shadow_ApplyAliasCasterUniforms (program);
 
 	if (md5)
-		state = GLS_CULL_BACK | GLS_BLEND_OPAQUE | GLS_ATTRIBS (5);
+		state = GLS_CULL_BACK | GLS_BLEND_OPAQUE | GLS_ATTRIBS (6);
 	else
-		state = GLS_CULL_BACK | GLS_BLEND_OPAQUE | GLS_ATTRIBS (1);
+		state = GLS_CULL_BACK | GLS_BLEND_OPAQUE | GLS_ATTRIBS (2);
 	GL_SetState (state);
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, ibuf.inst, sizeof (ibuf.inst[0]) * ibuf.count, &instance_buf, &instance_ofs);
@@ -973,6 +976,7 @@ static void R_FlushAliasInstances_Shadow (qboolean dlight)
 			GL_VertexAttribPointerFunc  (2, 2, GL_FLOAT,         GL_FALSE, sizeof (iqmvert_t), (void *)(hdr->vbovertofs + offsetof (iqmvert_t, st)));
 			GL_VertexAttribPointerFunc  (3, 4, GL_UNSIGNED_BYTE, GL_TRUE,  sizeof (iqmvert_t), (void *)(hdr->vbovertofs + offsetof (iqmvert_t, weight)));
 			GL_VertexAttribIPointerFunc (4, 4, GL_UNSIGNED_BYTE,          sizeof (iqmvert_t), (void *)(hdr->vbovertofs + offsetof (iqmvert_t, idx)));
+			GL_VertexAttribPointerFunc  (5, 4, GL_BYTE,          GL_TRUE,  sizeof (iqmvert_t), (void *)(hdr->vbovertofs + offsetof (iqmvert_t, tangent)));
 
 			buffers[1] = model->meshvbo;
 			offsets[1] = hdr->vboposeofs;
@@ -981,6 +985,7 @@ static void R_FlushAliasInstances_Shadow (qboolean dlight)
 		else
 		{
 			GL_VertexAttribPointerFunc (0, 2, GL_FLOAT, GL_FALSE, sizeof (meshst_t), (void *)hdr->vbostofs);
+			GL_VertexAttribPointerFunc (1, 4, GL_BYTE, GL_TRUE, sizeof (meshst_t), (void *)(hdr->vbostofs + offsetof (meshst_t, tangent)));
 
 			buffers[1] = model->meshvbo;
 			offsets[1] = hdr->vbovertofs;
