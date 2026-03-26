@@ -1266,12 +1266,15 @@ R_DrawAliasModels
 void R_DrawAliasModels (entity_t **ents, int count)
 {
 	int i;
-	qboolean use_pp_models = R_PPdlights_ModelPathEnabled ();
+	qboolean use_shared_model_lights = R_PPdlights_ModelPathEnabled ();
 	unsigned int saved_numlights = r_framedata.numlights;
 	gpulightbuffer_t saved_lightbuffer = {0};
 	dlight_t *saved_sources[DLIGHT_GPU_MAX] = {0};
 
-	if (use_pp_models)
+	/* Shared-light architecture: consumes the same frame-collected list as
+	 * world dlights/froxel fog, but filtered for forward alias/model shading. */
+
+	if (use_shared_model_lights)
 	{
 		int pp_count;
 		memcpy (&saved_lightbuffer, &r_lightbuffer, sizeof (saved_lightbuffer));
@@ -1289,7 +1292,7 @@ void R_DrawAliasModels (entity_t **ents, int count)
 		R_DrawAliasModel_Real (ents[i], false);
 	R_FlushAliasInstances (false);
 
-	if (use_pp_models)
+	if (use_shared_model_lights)
 	{
 		r_framedata.numlights = saved_numlights;
 		memcpy (&r_lightbuffer, &saved_lightbuffer, sizeof (saved_lightbuffer));
@@ -1315,12 +1318,12 @@ R_DrawAliasModels_ShowTris
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count)
 {
 	int i;
-	qboolean use_pp_models = R_PPdlights_ModelPathEnabled ();
+	qboolean use_shared_model_lights = R_PPdlights_ModelPathEnabled ();
 	unsigned int saved_numlights = r_framedata.numlights;
 	gpulightbuffer_t saved_lightbuffer = {0};
 	dlight_t *saved_sources[DLIGHT_GPU_MAX] = {0};
 
-	if (use_pp_models)
+	if (use_shared_model_lights)
 	{
 		int pp_count;
 		memcpy (&saved_lightbuffer, &r_lightbuffer, sizeof (saved_lightbuffer));
@@ -1335,7 +1338,7 @@ void R_DrawAliasModels_ShowTris (entity_t **ents, int count)
 		R_DrawAliasModel_Real (ents[i], true);
 	R_FlushAliasInstances (true);
 
-	if (use_pp_models)
+	if (use_shared_model_lights)
 	{
 		r_framedata.numlights = saved_numlights;
 		memcpy (&r_lightbuffer, &saved_lightbuffer, sizeof (saved_lightbuffer));

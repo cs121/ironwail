@@ -8,16 +8,21 @@
 extern cvar_t r_dlight_entities;
 
 cvar_t r_ppdlights = { "r_ppdlights", "0", CVAR_ARCHIVE };
+/* Forward world consumer toggle (shared frame-light list -> world dlight pass). */
 cvar_t r_ppdlights_world = { "r_ppdlights_world", "1", CVAR_ARCHIVE };
 cvar_t r_ppdlights_world_scale = { "r_ppdlights_world_scale", "1", CVAR_ARCHIVE };
-/* 0 = linear add, 1 = soft-add compression (default). */
+/* World forward-lighting response: 0 = linear add, 1 = soft-add compression (default). */
 cvar_t r_ppdlights_world_blend = { "r_ppdlights_world_blend", "1", CVAR_ARCHIVE };
-/* 0 = additive (GL_ONE,GL_ONE), 1 = screen-like (GL_ONE_MINUS_DST_COLOR,GL_ONE). */
+/* World blend op: 0 = additive (GL_ONE,GL_ONE), 1 = screen-like (GL_ONE_MINUS_DST_COLOR,GL_ONE). */
 cvar_t r_ppdlights_world_blendop = { "r_ppdlights_world_blendop", "0", CVAR_ARCHIVE };
+/* Forward alias/model consumer toggle (shared frame-light list -> alias lighting). */
 cvar_t r_ppdlights_models = { "r_ppdlights_models", "1", CVAR_ARCHIVE };
+/* Froxel fog consumer toggle (shared frame-light list -> volumetric injection). */
 cvar_t r_ppdlights_fog = { "r_ppdlights_fog", "0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_fog_debug = { "r_ppdlights_fog_debug", "0", CVAR_NONE };
+/* Per-frame fog consumer budget from the shared frame-light list. */
 cvar_t r_ppdlights_fog_budget = { "r_ppdlights_fog_budget", "32", CVAR_ARCHIVE };
+/* Optional GI helper that derives broad bounce from shared frame lights. */
 cvar_t r_ppdlights_gi = { "r_ppdlights_gi", "0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_gi_debug = { "r_ppdlights_gi_debug", "0", CVAR_NONE };
 cvar_t r_ppdlights_gi_budget = { "r_ppdlights_gi_budget", "8", CVAR_ARCHIVE };
@@ -324,6 +329,12 @@ void R_PPdlights_CollectFrame (void)
 	if (!collect_enabled)
 		return;
 
+	/*
+	 * Architecture: this is the sole frame-level gather point.
+	 * We merge dynamic + emissive contributors once, then downstream passes
+	 * (world forward lights, alias/model forward lights, froxel fog/GI) each
+	 * consume filtered views of this same array in their own pass budgets.
+	 */
 	active = DLightPool_GetActiveList (&active_count);
 	if (active && active_count > 0)
 	{

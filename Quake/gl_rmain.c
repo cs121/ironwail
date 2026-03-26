@@ -4176,8 +4176,9 @@ void R_SetupView (void)
 
 
 	R_PushDlights ();
-	/* Optional per-pixel path consumes this shared list in later milestones.
-	 * Legacy lighting/rendering remains unchanged. */
+	/* Build one shared light-collection list for this frame; forward world/model
+	 * and froxel fog/GI passes consume it later. This is scene-light plumbing,
+	 * not a fullscreen postprocess lighting pass. */
 	R_PPdlights_CollectFrame ();
 
 	//johnfitz -- cheat-protect some draw modes
