@@ -4,7 +4,8 @@
 	layout(binding=0) uniform sampler2D Tex;
 	layout(binding=1) uniform sampler2D FullbrightTex;
 	layout(binding=4) uniform sampler2D EmissiveTex;
-layout(binding=5) uniform sampler2D NormalTex;
+	layout(binding=5) uniform sampler2D NormalTex;
+	layout(binding=6) uniform sampler2D SpecularTex;
 #endif
 layout(binding=2) uniform sampler2D LMTex;
 layout(binding=3) uniform sampler2D LMTexDir;
@@ -78,16 +79,18 @@ struct Call
 	uint	flags;
 	uint	tcgen;
 	float	wateralpha;
-	float	_pad0;
+	int		spec_mode;
 	vec2	polygon_offset;
+	vec2	specular;
 	vec4	stage_color;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;
+	uvec2	smhandle;
 #else
 	int		baseinstance;
-	int		padding;
+	int		padding[3];
 #endif
 };
 
@@ -167,7 +170,7 @@ layout(location=7)  flat in vec4  in_styles;
 layout(location=8)  flat in float in_lmofs;
 #if BINDLESS
 	layout(location=9)  flat in uvec4 in_samplers0;
-	layout(location=10) flat in uvec2 in_samplers1;
+	layout(location=10) flat in uvec4 in_samplers1;
 #endif
 layout(location=11) noperspective in vec4 in_curr_clip;
 layout(location=12) noperspective in vec4 in_prev_clip;
@@ -178,6 +181,7 @@ layout(location=16) in float in_skyvisibility;
 layout(location=17) flat in vec4 in_stage_color;
 layout(location=18) flat in uint in_tcgen;
 layout(location=19) flat in vec3 in_bmodel_relight;
+layout(location=20) flat in vec4 in_specular;
 
 // Utility: ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -468,6 +472,7 @@ void main()
 {
 	vec3 fullbright = vec3(0.0);
 	vec3 emissive   = vec3(0.0);
+	float spec_map_value = 1.0;
 	vec2 uv = in_uv;
 
 #if MODE == 2
@@ -499,11 +504,22 @@ void main()
 		sampler2D EmissiveSampler = sampler2D(in_samplers1.xy);
 		emissive = texture(EmissiveSampler, uv).rgb;
 	}
+	if (in_specular.z > 0.5)
+	{
+		sampler2D SpecSampler = sampler2D(in_samplers1.zw);
+		vec4 spec_sample = texture(SpecSampler, uv);
+		spec_map_value = (in_specular.z > 1.5) ? (1.0 - spec_sample.a) : spec_sample.r;
+	}
 #else
 	if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
 		fullbright = texture(FullbrightTex, uv).rgb;
 	if ((in_flags & CF_USE_EMISSIVE) != 0u)
 		emissive = texture(EmissiveTex, uv).rgb;
+	if (in_specular.z > 0.5)
+	{
+		vec4 spec_sample = texture(SpecularTex, uv);
+		spec_map_value = (in_specular.z > 1.5) ? (1.0 - spec_sample.a) : spec_sample.r;
+	}
 #endif
 
 #if DITHER >= 2
@@ -778,9 +794,12 @@ void main()
 						float h2  = ndoth * ndoth;
 						float h4  = h2 * h2;
 						float h8  = h4 * h4;
-						float h16 = h8 * h8;
-						float spec = h16 * ndotl;
-						specular_light += light_contrib * spec * 0.4; // SPECULAR_SCALE=0.4
+						float h16 = h8 * h8; // legacy x^16 baseline
+						float spec_exp = max(in_specular.y, 1.0);
+						float legacy_to_exp = pow(max(h16, 0.0), spec_exp * (1.0 / 16.0));
+						float spec = legacy_to_exp * ndotl;
+						float spec_scale = max(in_specular.x, 0.0) * clamp(spec_map_value, 0.0, 1.0);
+						specular_light += light_contrib * spec * spec_scale;
 					}
 				}
 			}
