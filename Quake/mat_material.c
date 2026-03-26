@@ -119,6 +119,12 @@ static const material_keyword_def_t mat_material_keyword_table[] =
 	{ "alphaFunc", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_KNOWN_UNIMPLEMENTED, "Q3 alpha test (deferred; non-MVP)." },
 	{ "tcGen", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_PARTIAL, "Modes: base/environment/lightmap." },
 	{ "tcMod", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_PARTIAL, "Types: scroll/scale/rotate/turb/stretch." },
+	{ "normalMap", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Optional per-stage normal texture path." },
+	{ "specularMap", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Optional per-stage specular texture path." },
+	{ "ormMap", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Optional per-stage occlusion/roughness/metallic texture path." },
+	{ "normalScale", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Optional per-stage normal scaling factor (default 1)." },
+	{ "specPower", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Optional per-stage specular power scalar (default 1)." },
+	{ "specIntensity", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Optional per-stage specular intensity scalar (default 1)." },
 	{ "emissive", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Stage-level emissive toggle." },
 	{ "bloom", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Stage-level bloom toggle." },
 	{ "emissiveScale", MATERIAL_KEYWORD_SCOPE_STAGE, MATERIAL_KEYWORD_STATUS_IMPLEMENTED, "Stage-level emissive scale." },
@@ -170,6 +176,21 @@ static void Material_FreeStageData (material_stage_t *stage)
 		Z_Free (stage->map_path);
 		stage->map_path = NULL;
 	}
+	if (stage->normal_map_path)
+	{
+		Z_Free (stage->normal_map_path);
+		stage->normal_map_path = NULL;
+	}
+	if (stage->specular_map_path)
+	{
+		Z_Free (stage->specular_map_path);
+		stage->specular_map_path = NULL;
+	}
+	if (stage->orm_map_path)
+	{
+		Z_Free (stage->orm_map_path);
+		stage->orm_map_path = NULL;
+	}
 	if (stage->anim_map_frames)
 	{
 		size_t j;
@@ -198,6 +219,9 @@ static void Material_FreeMaterial (material_t *material)
 		   are owned by stages[0] and already freed above. Clear the pointers
 		   to prevent any accidental use-after-free. */
 		material->stage0.map_path = NULL;
+		material->stage0.normal_map_path = NULL;
+		material->stage0.specular_map_path = NULL;
+		material->stage0.orm_map_path = NULL;
 		material->stage0.anim_map_frames = NULL;
 	}
 	else
@@ -1409,10 +1433,22 @@ void Material_Print (const material_t *material)
 		Con_Printf ("  polygon offset: off\n");
 	Con_Printf ("  emissive: %s (scale %.2f)\n", material->emissive_enable ? "on" : "off", material->emissive_scale);
 	Con_Printf ("  bloom: %s (scale %.2f)\n", material->bloom_enable ? "on" : "off", material->bloom_scale);
-	if (material->stage0.map_path || material->stage0.map_type != MAT_MAP_MAP)
+	if (material->stage0.map_path
+		|| material->stage0.map_type != MAT_MAP_MAP
+		|| material->stage0.normal_map_path
+		|| material->stage0.specular_map_path
+		|| material->stage0.orm_map_path
+		|| material->stage0.normal_scale != 1.f
+		|| material->stage0.spec_power != 1.f
+		|| material->stage0.spec_intensity != 1.f)
 	{
 		const char *map_name = map_names[q_min ((int)material->stage0.map_type, (int)countof (map_names) - 1)];
 		Con_Printf ("  stage0 map: %s (%s)\n", material->stage0.map_path ? material->stage0.map_path : "<builtin>", map_name);
+		Con_Printf ("  stage0 normal map: %s\n", material->stage0.normal_map_path ? material->stage0.normal_map_path : "<none>");
+		Con_Printf ("  stage0 specular map: %s\n", material->stage0.specular_map_path ? material->stage0.specular_map_path : "<none>");
+		Con_Printf ("  stage0 orm map: %s\n", material->stage0.orm_map_path ? material->stage0.orm_map_path : "<none>");
+		Con_Printf ("  stage0 normal/spec: normalScale %.2f specPower %.2f specIntensity %.2f\n",
+			material->stage0.normal_scale, material->stage0.spec_power, material->stage0.spec_intensity);
 		Con_Printf ("  stage0 blend: %s\n", blend_names[q_min ((int)material->stage0.blend_mode, (int)countof (blend_names) - 1)]);
 		Con_Printf ("  stage0 depth: %s (write %s)\n",
 			depth_names[q_min ((int)material->stage0.depth_func, (int)countof (depth_names) - 1)],

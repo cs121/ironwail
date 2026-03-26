@@ -204,6 +204,12 @@ typedef struct mat_material_stage_s
 	qboolean		bloom_scale_set;
 	qboolean		godray_scale_set;
 	char		*map_path;
+	char		*normal_map_path;
+	char		*specular_map_path;
+	char		*orm_map_path;
+	float			normal_scale;
+	float			spec_power;
+	float			spec_intensity;
 	mat_rgbgen_t	rgbgen;
 	mat_alphagen_t	alphagen;
 	float		const_color[3];
