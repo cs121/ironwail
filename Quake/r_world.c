@@ -401,13 +401,14 @@ typedef struct bmodel_bindless_gpu_call_s {
 	GLuint		flags;
 	GLuint		tcgen;
 	GLfloat		alpha;
-	GLfloat		_pad0;
+	GLint		spec_mode;
 	GLfloat		polygon_offset[2];
 	GLfloat		specular[2]; /* x = intensity, y = exponent */
 	GLfloat		stage_color[4];
 	GLuint64	texture;
 	GLuint64	fullbright;
 	GLuint64	emissive;
+	GLuint64	normal_map;
 	GLuint64	specular_map;
 } bmodel_bindless_gpu_call_t;
 
@@ -429,9 +430,13 @@ typedef struct bmodel_gpu_call_remap_s {
 } bmodel_gpu_call_remap_t;
 
 COMPILE_TIME_ASSERT (bmodel_instance_std430_size, sizeof (bmodel_gpu_instance_t) == 112);
-COMPILE_TIME_ASSERT (bmodel_bindless_call_std430_size, sizeof (bmodel_bindless_gpu_call_t) == 80);
+COMPILE_TIME_ASSERT (bmodel_bindless_call_std430_size, sizeof (bmodel_bindless_gpu_call_t) == 96);
 COMPILE_TIME_ASSERT (bmodel_bound_call_std430_size, sizeof (bmodel_bound_gpu_call_t) == 64);
 COMPILE_TIME_ASSERT (bmodel_call_remap_std430_size, sizeof (bmodel_gpu_call_remap_t) == 8);
+COMPILE_TIME_ASSERT (bmodel_bindless_call_spec_mode_offset, offsetof (bmodel_bindless_gpu_call_t, spec_mode) == 12);
+COMPILE_TIME_ASSERT (bmodel_bindless_call_normal_map_offset, offsetof (bmodel_bindless_gpu_call_t, normal_map) == 80);
+COMPILE_TIME_ASSERT (bmodel_bindless_call_spec_map_offset, offsetof (bmodel_bindless_gpu_call_t, specular_map) == 88);
+COMPILE_TIME_ASSERT (bmodel_bound_call_spec_mode_offset, offsetof (bmodel_bound_gpu_call_t, spec_mode) == 12);
 
 static bmodel_gpu_instance_t		bmodel_instances[MAX_VISEDICTS + 1]; // +1 for worldspawn
 static union {
@@ -446,6 +451,18 @@ static union {
 static bmodel_gpu_call_remap_t		bmodel_call_remap[MAX_BMODEL_DRAWS];
 static int							num_bmodel_calls;
 static GLuint						bmodel_batch_program;
+
+enum
+{
+	BMODEL_TEX_SLOT_BASE = 0,
+	BMODEL_TEX_SLOT_FULLBRIGHT,
+	BMODEL_TEX_SLOT_EMISSIVE,
+	BMODEL_TEX_SLOT_NORMAL,
+	BMODEL_TEX_SLOT_SPECULAR_OR_ORM,
+	BMODEL_TEX_SLOT_COUNT
+};
+
+COMPILE_TIME_ASSERT (bmodel_bound_texture_slot_count, BMODEL_TEX_SLOT_COUNT == 5);
 
 static void R_GetPolygonOffsetValues (const material_t *material, qboolean use_offset,
 	float *factor, float *units)
@@ -763,9 +780,9 @@ static void R_FlushBModelCalls (void)
 		{
 			GL_Uniform1iFunc (0, i);
 			GL_BindTextures (0, 2, bmodel_calls.bound.textures[i]);
-			GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][2]);
-			GL_Bind (GL_TEXTURE5, bmodel_calls.bound.textures[i][3]);
-			GL_Bind (GL_TEXTURE6, bmodel_calls.bound.textures[i][4]);
+			GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][BMODEL_TEX_SLOT_EMISSIVE]);
+			GL_Bind (GL_TEXTURE5, bmodel_calls.bound.textures[i][BMODEL_TEX_SLOT_NORMAL]);
+			GL_Bind (GL_TEXTURE6, bmodel_calls.bound.textures[i][BMODEL_TEX_SLOT_SPECULAR_OR_ORM]);
 			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const byte *)(dstcmdofs + i * sizeof (bmodel_draw_indirect_t)));
 		}
 	}
@@ -919,6 +936,7 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
+		call->normal_map = greytexture->bindless_handle;
 		call->specular_map = whitetexture->bindless_handle;
 	}
 	else
@@ -941,11 +959,11 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->padding[0] = 0;
 		call->padding[1] = 0;
 		call->padding[2] = 0;
-		textures[0] = tx ? tx : greytexture;
-		textures[1] = fb ? fb : blacktexture;
-		textures[2] = em ? em : blacktexture;
-		textures[3] = greytexture;
-		textures[4] = whitetexture;
+		textures[BMODEL_TEX_SLOT_BASE] = tx ? tx : greytexture;
+		textures[BMODEL_TEX_SLOT_FULLBRIGHT] = fb ? fb : blacktexture;
+		textures[BMODEL_TEX_SLOT_EMISSIVE] = em ? em : blacktexture;
+		textures[BMODEL_TEX_SLOT_NORMAL] = greytexture;
+		textures[BMODEL_TEX_SLOT_SPECULAR_OR_ORM] = whitetexture;
 	}
 
 	SDL_assert (num_instances > 0);
@@ -971,6 +989,8 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 	em = R_SanitizeGLTexture (em, "shaderstage", "emissive");
 	nm = R_SanitizeGLTexture (nm, "shaderstage", "normal");
 	sm = R_SanitizeGLTexture (sm, "shaderstage", "specular");
+	if (!sm)
+		spec_mode = 0;
 
 	flags = zfix | ((fb != NULL) << 1) | (r_fullbright_cheatsafe ? CALLFLAG_NOLIGHTMAP : 0u) | extra_flags;
 	if (em != NULL && (extra_flags & CALLFLAG_MAT_EMISSIVE))
@@ -996,6 +1016,7 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
 		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
 		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
+		call->normal_map = nm ? nm->bindless_handle : greytexture->bindless_handle;
 		call->specular_map = sm ? sm->bindless_handle : whitetexture->bindless_handle;
 	}
 	else
@@ -1018,11 +1039,11 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->padding[0] = 0;
 		call->padding[1] = 0;
 		call->padding[2] = 0;
-		textures[0] = tx ? tx : greytexture;
-		textures[1] = fb ? fb : blacktexture;
-		textures[2] = em ? em : blacktexture;
-		textures[3] = nm ? nm : greytexture;
-		textures[4] = sm ? sm : whitetexture;
+		textures[BMODEL_TEX_SLOT_BASE] = tx ? tx : greytexture;
+		textures[BMODEL_TEX_SLOT_FULLBRIGHT] = fb ? fb : blacktexture;
+		textures[BMODEL_TEX_SLOT_EMISSIVE] = em ? em : blacktexture;
+		textures[BMODEL_TEX_SLOT_NORMAL] = nm ? nm : greytexture;
+		textures[BMODEL_TEX_SLOT_SPECULAR_OR_ORM] = sm ? sm : whitetexture;
 	}
 
 	SDL_assert (num_instances > 0);

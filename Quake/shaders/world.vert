@@ -54,6 +54,7 @@ struct Call
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;
+	uvec2	nmhandle;
 	uvec2	smhandle;
 #else
 	int		baseinstance;
@@ -154,17 +155,18 @@ layout(location=8)  flat out float out_lmofs;
 #if BINDLESS
 	layout(location=9)  flat out uvec4 out_samplers0;
 	layout(location=10) flat out uvec4 out_samplers1;
+	layout(location=11) flat out uvec4 out_samplers2;
 #endif
-layout(location=11) noperspective out vec4 out_curr_clip;
-layout(location=12) noperspective out vec4 out_prev_clip;
-layout(location=13) out vec3 out_normal;
-layout(location=14) out vec4 out_tangent;
-layout(location=15) out vec3 out_lightgrid;
-layout(location=16) out float out_skyvisibility;
-layout(location=17) flat out vec4 out_stage_color;
-layout(location=18) flat out uint out_tcgen;
-layout(location=19) flat out vec3 out_bmodel_relight;
-layout(location=20) flat out vec4 out_specular; // x=intensity y=exponent z=mode
+layout(location=12) noperspective out vec4 out_curr_clip;
+layout(location=13) noperspective out vec4 out_prev_clip;
+layout(location=14) out vec3 out_normal;
+layout(location=15) out vec4 out_tangent;
+layout(location=16) out vec3 out_lightgrid;
+layout(location=17) out float out_skyvisibility;
+layout(location=18) flat out vec4 out_stage_color;
+layout(location=19) flat out uint out_tcgen;
+layout(location=20) flat out vec3 out_bmodel_relight;
+layout(location=21) flat out vec4 out_specular; // x=intensity y=exponent z=mode
 
 vec2 ComputeEnvUV(vec3 world_pos, vec3 world_normal)
 {
@@ -276,6 +278,8 @@ void main()
 	// This is a known-safe pattern on most drivers.
 	out_samplers0.zw = ((call.flags & CF_USE_FULLBRIGHT) != 0u) ? call.fbhandle : call.txhandle;
 	out_samplers1.xy = call.emhandle;
-	out_samplers1.zw = call.smhandle;
+	out_samplers1.zw = call.nmhandle;
+	out_samplers2.xy = call.smhandle;
+	out_samplers2.zw = uvec2(0u);
 #endif
 }
