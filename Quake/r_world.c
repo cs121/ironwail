@@ -1672,6 +1672,18 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         textype_t texbegin, texend;
         qboolean oit;
 
+	/* Dynamic-light receiver contract for brush/world-side categories:
+	 *   category              legacy dlight pass      pp dlight pass
+	 *   -------------------------------------------------------------
+	 *   world opaque          yes                     yes
+	 *   world translucent     no (guarded off)        no (guarded off)
+	 *   water                 no (guarded off)        no (guarded off)
+	 *   decals                no (pass-order excl.)   no (pass-order excl.)
+	 *   particles             no (pass-order excl.)   no (pass-order excl.)
+	 * Notes:
+	 * - Alias opaque/translucent are handled in alias paths, not brush paths.
+	 * - Fog receives pp dlights via froxel injection, never via this pass. */
+
         if (!count)
                 return;
 
@@ -1731,11 +1743,14 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 program = glprogs.world[0][0][0];
                 break;
         case BP_DLIGHT_SOLID:
+                /* Intentionally limited to opaque/cutout world surfaces.
+                 * Translucent world + water are excluded by contract. */
                 texbegin = 0;
                 texend = TEXTYPE_CUTOUT;
                 program = glprogs.world_dlight[0];
                 break;
         case BP_DLIGHT_ALPHA:
+                /* Cutout alpha-tested surfaces only; not generic translucency. */
                 texbegin = TEXTYPE_CUTOUT;
                 texend = TEXTYPE_CUTOUT + 1;
                 program = glprogs.world_dlight[1];
