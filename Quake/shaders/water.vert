@@ -21,16 +21,19 @@ struct Call
 	uint	flags;
 	uint	tcgen;
 	float	wateralpha;
-	float	_pad0;
+	int		spec_mode;
 	vec2	polygon_offset;
+	vec2	specular;
 	vec4	stage_color;
 #if BINDLESS
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;
+	uvec2	nmhandle;
+	uvec2	smhandle;
 #else
 	int		baseinstance;
-	int		padding;
+	int		padding[3];
 #endif // BINDLESS
 };
 const uint

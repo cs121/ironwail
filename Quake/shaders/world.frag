@@ -87,6 +87,7 @@ struct Call
 	uvec2	txhandle;
 	uvec2	fbhandle;
 	uvec2	emhandle;
+	uvec2	nmhandle;
 	uvec2	smhandle;
 #else
 	int		baseinstance;
@@ -171,17 +172,18 @@ layout(location=8)  flat in float in_lmofs;
 #if BINDLESS
 	layout(location=9)  flat in uvec4 in_samplers0;
 	layout(location=10) flat in uvec4 in_samplers1;
+	layout(location=11) flat in uvec4 in_samplers2;
 #endif
-layout(location=11) noperspective in vec4 in_curr_clip;
-layout(location=12) noperspective in vec4 in_prev_clip;
-layout(location=13) in vec3 in_normal;
-layout(location=14) in vec4 in_tangent;
-layout(location=15) in vec3 in_lightgrid;
-layout(location=16) in float in_skyvisibility;
-layout(location=17) flat in vec4 in_stage_color;
-layout(location=18) flat in uint in_tcgen;
-layout(location=19) flat in vec3 in_bmodel_relight;
-layout(location=20) flat in vec4 in_specular;
+layout(location=12) noperspective in vec4 in_curr_clip;
+layout(location=13) noperspective in vec4 in_prev_clip;
+layout(location=14) in vec3 in_normal;
+layout(location=15) in vec4 in_tangent;
+layout(location=16) in vec3 in_lightgrid;
+layout(location=17) in float in_skyvisibility;
+layout(location=18) flat in vec4 in_stage_color;
+layout(location=19) flat in uint in_tcgen;
+layout(location=20) flat in vec3 in_bmodel_relight;
+layout(location=21) flat in vec4 in_specular;
 
 // Utility: ALU-only 16x16 Bayer matrix
 float bayer01(ivec2 coord)
@@ -494,6 +496,7 @@ void main()
 	// Sample textures
 #if BINDLESS
 	sampler2D Tex = sampler2D(in_samplers0.xy);
+	sampler2D NormalSampler = sampler2D(in_samplers1.zw);
 	if ((in_flags & CF_USE_FULLBRIGHT) != 0u)
 	{
 		sampler2D FullbrightTex = sampler2D(in_samplers0.zw);
@@ -506,7 +509,7 @@ void main()
 	}
 	if (in_specular.z > 0.5)
 	{
-		sampler2D SpecSampler = sampler2D(in_samplers1.zw);
+		sampler2D SpecSampler = sampler2D(in_samplers2.xy);
 		vec4 spec_sample = texture(SpecSampler, uv);
 		spec_map_value = (in_specular.z > 1.5) ? (1.0 - spec_sample.a) : spec_sample.r;
 	}
@@ -601,7 +604,11 @@ void main()
 		vec3 geom_normal = surface_normal;
 		vec3 tangent = in_tangent.xyz;
 		float tlen = length(tangent);
+#if BINDLESS
+		vec3 sampled_n = texture(NormalSampler, in_uv).xyz * 2.0 - 1.0;
+#else
 		vec3 sampled_n = texture(NormalTex, in_uv).xyz * 2.0 - 1.0;
+#endif
 		bool has_nm = dot(sampled_n.xy, sampled_n.xy) > 1e-5;
 		if (tlen > 1e-5 && has_nm)
 		{
