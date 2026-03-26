@@ -669,16 +669,19 @@ static void R_Froxel_InjectPPDLights (void)
 		float fog_intensity = 1.f;
 		int before_count;
 		vec3_t scaled_color;
+		R_PPdlights_RecordConsumerConsidered (RL_CONSUMER_FOG, src->source_id);
 
 		if ((src->flags & RL_LIGHT_VOLUMETRIC_CONTRIB) == 0u)
 		{
 			r_froxel_ppd_stats.rejected_nonvolumetric++;
+			R_PPdlights_RecordConsumerReject (RL_CONSUMER_FOG, src->source_id, RL_REJECT_NON_CONTRIB);
 			continue;
 		}
 		r_froxel_ppd_stats.fog_eligible_count++;
 		if (r_froxel_ppd_stats.injected_count >= fog_budget)
 		{
 			r_froxel_ppd_stats.rejected_local_budget++;
+			R_PPdlights_RecordConsumerReject (RL_CONSUMER_FOG, src->source_id, RL_REJECT_LOCAL_BUDGET);
 			continue;
 		}
 		before_count = r_froxel.light_count;
@@ -690,19 +693,24 @@ static void R_Froxel_InjectPPDLights (void)
 		R_Froxel_AddLight (src->origin, fog_radius, scaled_color, fog_intensity, fog_type);
 		if (r_froxel.light_count > before_count)
 		{
+			float energy;
 			r_froxel_ppd_stats.injected_count++;
 			r_froxel_ppd_stats.injected_radiance +=
 				scaled_color[0] * 0.2126f + scaled_color[1] * 0.7152f + scaled_color[2] * 0.0722f;
+			energy = scaled_color[0] * 0.2126f + scaled_color[1] * 0.7152f + scaled_color[2] * 0.0722f;
+			R_PPdlights_RecordConsumerAccept (RL_CONSUMER_FOG, src->source_id, energy);
 		}
 		else
 		{
 			r_froxel_ppd_stats.rejected_budget++;
+			R_PPdlights_RecordConsumerReject (RL_CONSUMER_FOG, src->source_id, RL_REJECT_HW_BUDGET);
 		}
 	}
 	R_Froxel_InjectPPDGIHelper (lights, light_count);
 
 	if ((r_ppdlights_fog_debug.value > 0.f || r_ppdlights_gi_debug.value > 0.f) && (r_framecount % 60) == 0)
 	{
+		rl_consumer_stats_t consumer_stats;
 		Con_DPrintf ("r_ppdlights_fog: src=%d eligible=%d injected=%d reject(nonvol=%d distance=%d local_budget=%d hw_budget=%d) radiance=%.3f gi(candidates=%d injected=%d distance=%d budget=%d radiance=%.3f) caps(fog=%d gi=%d)\n",
 			r_froxel_ppd_stats.source_count,
 			r_froxel_ppd_stats.fog_eligible_count,
@@ -719,6 +727,17 @@ static void R_Froxel_InjectPPDLights (void)
 			r_froxel_ppd_stats.gi_radiance,
 			fog_budget,
 			CLAMP (0, (int)Q_rint (r_ppdlights_gi_budget.value), MAX_FROXEL_GPU_LIGHTS));
+		if (R_PPdlights_GetConsumerStats (RL_CONSUMER_FOG, &consumer_stats))
+		{
+			Con_DPrintf ("r_ppdlights_fog_consumer: considered=%d accepted=%d energy=%.3f reject(non_contrib=%d distance=%d local_budget=%d hw_budget=%d)\n",
+				consumer_stats.considered,
+				consumer_stats.accepted,
+				consumer_stats.accepted_energy,
+				consumer_stats.rejected[RL_REJECT_NON_CONTRIB],
+				consumer_stats.rejected[RL_REJECT_DISTANCE],
+				consumer_stats.rejected[RL_REJECT_LOCAL_BUDGET],
+				consumer_stats.rejected[RL_REJECT_HW_BUDGET]);
+		}
 	}
 }
 

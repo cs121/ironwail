@@ -1277,6 +1277,7 @@ void R_DrawAliasModels (entity_t **ents, int count)
 	if (use_shared_model_lights)
 	{
 		int pp_count;
+		rl_consumer_stats_t consumer_stats;
 		memcpy (&saved_lightbuffer, &r_lightbuffer, sizeof (saved_lightbuffer));
 		memcpy (saved_sources, r_dlight_sources, sizeof (saved_sources));
 
@@ -1286,6 +1287,16 @@ void R_DrawAliasModels (entity_t **ents, int count)
 
 		if (r_ppdlights_debug.value >= 1.f && (r_framecount % 60) == 0)
 			Con_DPrintf ("r_ppdlights_models: active (lights=%d)\n", pp_count);
+		if (r_ppdlights_debug.value >= 2.f && (r_framecount % 60) == 0
+			&& R_PPdlights_GetConsumerStats (RL_CONSUMER_MODEL, &consumer_stats))
+		{
+			Con_DPrintf ("r_ppdlights_models: considered=%d accepted=%d energy=%.3f reject(non_contrib=%d local_budget=%d)\n",
+				consumer_stats.considered,
+				consumer_stats.accepted,
+				consumer_stats.accepted_energy,
+				consumer_stats.rejected[RL_REJECT_NON_CONTRIB],
+				consumer_stats.rejected[RL_REJECT_LOCAL_BUDGET]);
+		}
 	}
 
 	for (i = 0; i < count; i++)

@@ -51,6 +51,7 @@ void R_DrawDLightPass (void)
 	if (use_shared_world_lights)
 	{
 		int pp_count;
+		rl_consumer_stats_t consumer_stats;
 		memcpy (&saved_lightbuffer, &r_lightbuffer, sizeof (saved_lightbuffer));
 		memcpy (saved_sources, r_dlight_sources, sizeof (saved_sources));
 		pp_count = R_PPdlights_BuildWorldGpuLights (&r_lightbuffer, r_dlight_sources, DLIGHT_GPU_MAX);
@@ -65,6 +66,16 @@ void R_DrawDLightPass (void)
 		if (r_ppdlights_debug.value >= 1.f && (r_framecount % 60) == 0)
 			Con_DPrintf ("r_ppdlights_world: active (lights=%d scale=%.3f)\n", pp_count,
 				CLAMP (0.f, r_ppdlights_world_scale.value, 4.f));
+		if (r_ppdlights_debug.value >= 2.f && (r_framecount % 60) == 0
+			&& R_PPdlights_GetConsumerStats (RL_CONSUMER_WORLD, &consumer_stats))
+		{
+			Con_DPrintf ("r_ppdlights_world: considered=%d accepted=%d energy=%.3f reject(non_contrib=%d local_budget=%d)\n",
+				consumer_stats.considered,
+				consumer_stats.accepted,
+				consumer_stats.accepted_energy,
+				consumer_stats.rejected[RL_REJECT_NON_CONTRIB],
+				consumer_stats.rejected[RL_REJECT_LOCAL_BUDGET]);
+		}
 
 		pp_debug_mode = CLAMP (0.f, r_ppdlights_debug_mode.value, 4.f);
 		if (pp_debug_mode > 0.f && r_ppdlights_debug.value >= 1.f && (r_framecount % 60) == 0)

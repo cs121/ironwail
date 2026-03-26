@@ -56,6 +56,31 @@ typedef struct rl_light_collect_stats_s
 	int rejected_emissive_budget;
 } rl_light_collect_stats_t;
 
+typedef enum rl_light_consumer_e
+{
+	RL_CONSUMER_WORLD = 0,
+	RL_CONSUMER_MODEL,
+	RL_CONSUMER_FOG,
+	RL_CONSUMER_COUNT
+} rl_light_consumer_t;
+
+typedef enum rl_consumer_reject_reason_e
+{
+	RL_REJECT_NON_CONTRIB = 0,
+	RL_REJECT_DISTANCE,
+	RL_REJECT_LOCAL_BUDGET,
+	RL_REJECT_HW_BUDGET,
+	RL_REJECT_COUNT
+} rl_consumer_reject_reason_t;
+
+typedef struct rl_consumer_stats_s
+{
+	int considered;
+	int accepted;
+	int rejected[RL_REJECT_COUNT];
+	float accepted_energy;
+} rl_consumer_stats_t;
+
 extern cvar_t r_ppdlights;
 extern cvar_t r_ppdlights_world;
 extern cvar_t r_ppdlights_world_scale;
@@ -81,5 +106,9 @@ qboolean R_PPdlights_WorldPathEnabled (void);
 int R_PPdlights_BuildWorldGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights);
 qboolean R_PPdlights_ModelPathEnabled (void);
 int R_PPdlights_BuildModelGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights);
+void R_PPdlights_RecordConsumerConsidered (rl_light_consumer_t consumer, unsigned int source_id);
+void R_PPdlights_RecordConsumerAccept (rl_light_consumer_t consumer, unsigned int source_id, float energy);
+void R_PPdlights_RecordConsumerReject (rl_light_consumer_t consumer, unsigned int source_id, rl_consumer_reject_reason_t reason);
+qboolean R_PPdlights_GetConsumerStats (rl_light_consumer_t consumer, rl_consumer_stats_t *out_stats);
 
 #endif /* R_REALTIMELIGHT_H */
