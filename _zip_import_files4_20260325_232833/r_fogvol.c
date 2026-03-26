@@ -188,9 +188,7 @@ enum
 	FOGVOL_U_SUN_SHADOW_VIEWPROJ = 50,
 	FOGVOL_U_SUN_SHADOW_PARAMS = 54,
 	FOGVOL_U_SUN_SHADOW_SPLITS = 55,
-	FOGVOL_U_SUN_SHADOW_CASCADE_COUNT = 56,
-	FOGVOL_U_COLOR_SCALE = 57,
-	FOGVOL_U_DEPTH_BIAS = 58
+	FOGVOL_U_SUN_SHADOW_CASCADE_COUNT = 56
 };
 
 static fog_volume_t r_fogvolumes[MAX_FOGVOLUMES];
@@ -207,14 +205,6 @@ static GLuint r_fogvol_godray_shafts_tex = 0;
 static GLuint r_fogvol_godray_mask_tex = 0;
 static GLuint r_fogvol_godray_source_tex = 0;
 static qboolean r_fogvol_godray_ready = false;
-
-static qboolean FogVol_ShouldPrintStats (void)
-{
-	if (r_fogvol_stats.value <= 0.f)
-		return false;
-	/* Keep stats readable: one sample per second at 60fps. */
-	return (r_framecount % 60) == 0;
-}
 
 static int FogVol_NormalizeShape (int shape)
 {
@@ -401,7 +391,7 @@ void R_FogVol_BuildList (void)
 	if (r_fogvolume_count > 1)
 		qsort (r_fogvolumes, r_fogvolume_count, sizeof (r_fogvolumes[0]), FogVol_ComparePriority);
 
-	if (FogVol_ShouldPrintStats ())
+	if (r_fogvol_stats.value > 0.f)
 	{
 		Con_DPrintf ("fogvol_list: global=%d entity=%d total=%d\n",
 			r_fogvol_global_active ? 1 : 0, r_fogvolume_entity_count, r_fogvolume_count);
@@ -706,8 +696,6 @@ static void R_FogVol_UploadVolumeRange (const fog_volume_t *volumes, int count)
 static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfres,
 	int fog_width, int fog_height,
 	float depth_scale_x, float depth_scale_y,
-	float depth_bias_x, float depth_bias_y,
-	float color_scale_x, float color_scale_y,
 	const float inv_viewproj[16],
 	float view_x, float view_y, float view_w, float view_h,
 	float depth_near, float depth_far, float depth_sky_cutoff)
@@ -818,8 +806,6 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform3fFunc (FOGVOL_U_CAMERA_POS_WS, r_refdef.vieworg[0], r_refdef.vieworg[1], r_refdef.vieworg[2]);
 	GL_Uniform4fFunc (FOGVOL_U_VIEWPORT_PARAMS, (float)native_w, (float)native_h, 1.f / q_max (1.f, (float)native_w), 1.f / q_max (1.f, (float)native_h));
 	GL_Uniform2fFunc (FOGVOL_U_DEPTH_SCALE, depth_scale_x, depth_scale_y);
-	GL_Uniform2fFunc (FOGVOL_U_DEPTH_BIAS, depth_bias_x, depth_bias_y);
-	GL_Uniform2fFunc (FOGVOL_U_COLOR_SCALE, color_scale_x, color_scale_y);
 	GL_Uniform4fFunc (FOGVOL_U_VIEW_PARAMS, view_x, view_y, 1.f / q_max (1.f, view_w), 1.f / q_max (1.f, view_h));
 	GL_Uniform4fFunc (FOGVOL_U_DEPTH_PARAMS, depth_near, depth_far, reverse_z_flag, depth_sky_cutoff);
 	GL_Uniform4fFunc (FOGVOL_U_DENSITY_PARAMS, fog_density, sigma_max, noise_scale, noise_bias);
@@ -868,14 +854,10 @@ void R_FogVol_Render (void)
 	qboolean use_native_pingpong = false;
 	int fog_width, fog_height;
 	float view_x, view_y, view_w, view_h;
-	float depth_view_x, depth_view_y, depth_view_w, depth_view_h;
 	float depth_scale_x, depth_scale_y;
-	float depth_bias_x = 0.f, depth_bias_y = 0.f;
-	float color_scale_x, color_scale_y;
 	float depth_near, depth_far, depth_sky_cutoff;
 	int steps;
 	GLuint src_tex, src_fbo;
-	GLuint depth_tex;
 	int fog_src = 0;
 	qboolean has_drawn = false;
 	GLuint final_tex, final_fbo;
@@ -892,9 +874,6 @@ void R_FogVol_Render (void)
 	qboolean scissor_valid[MAX_FOGVOLUMES];
 	const int native_w = R_GetNativeRenderWidth ();
 	const int native_h = R_GetNativeRenderHeight ();
-	int depth_tex_w = native_w;
-	int depth_tex_h = native_h;
-	qboolean use_scene_depth_for_fog = false;
 	const int expected_half_w = q_max (1, native_w / 2);
 	const int expected_half_h = q_max (1, native_h / 2);
 	static int last_size_mismatch_frame = -1;
@@ -904,19 +883,19 @@ void R_FogVol_Render (void)
 
 	if (!R_FogVol_IsEnabledForFrame ())
 	{
-		if (FogVol_ShouldPrintStats ())
+		if (r_fogvol_stats.value > 0.f)
 			Con_DPrintf ("fogvol_render: skipped (disabled or shader missing)\n");
 		return;
 	}
 	if (r_fogvolume_count <= 0)
 	{
-		if (FogVol_ShouldPrintStats ())
+		if (r_fogvol_stats.value > 0.f)
 			Con_DPrintf ("fogvol_render: skipped (no volumes)\n");
 		return;
 	}
 	if (!Mat4_Inverse (r_matviewproj, inv_viewproj))
 	{
-		if (FogVol_ShouldPrintStats ())
+		if (r_fogvol_stats.value > 0.f)
 			Con_DPrintf ("fogvol_render: skipped (inverse viewproj failed)\n");
 		return;
 	}
@@ -927,11 +906,10 @@ void R_FogVol_Render (void)
 	if (r_fogvol_debug_froxel_random.value > 0.f)
 		use_halfres = false;
 
-	/* Global (camera-following) fog always covers the full view. Rendering any
-	 * frame that includes this path in halfres makes the baseline medium read
-	 * like a post-process overlay instead of volumetric depth. Keep all global
-	 * fog frames native-res by ping-ponging between composite and finalcopy. */
-	if (use_halfres && r_fogvol_global_active)
+	/* Global (camera-following) fog covers the whole view. Rendering that path in
+	 * halfres turns the full scene into an upscaled fog pass. Keep it native-res
+	 * by ping-ponging between composite and finalcopy instead. */
+	if (use_halfres && r_fogvol_global_active && r_fogvolume_count == 1)
 	{
 		use_halfres = false;
 		use_native_pingpong = true;
@@ -966,49 +944,13 @@ void R_FogVol_Render (void)
 	view_y = (float)(gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height);
 	view_w = (float)r_refdef.vrect.width;
 	view_h = (float)r_refdef.vrect.height;
-	depth_view_x = view_x;
-	depth_view_y = view_y;
-	depth_view_w = view_w;
-	depth_view_h = view_h;
-	depth_tex = framebufs.composite.depth_stencil_tex;
 
 	if (fog_width <= 0 || fog_height <= 0 || view_w <= 0.f || view_h <= 0.f)
 		return;
 
-	/* Prefer scene-depth in non-halfres path when sampleable to avoid composite-depth
-	 * domain ambiguity; this keeps fog ray reconstruction in the canonical scene domain. */
-	if (!use_halfres
-		&& framebufs.scene.samples <= 1
-		&& framebufs.scene.depth_stencil_tex)
-	{
-		depth_tex = framebufs.scene.depth_stencil_tex;
-		depth_tex_w = q_max (1, framebufs.scene.width > 0 ? framebufs.scene.width : R_GetSceneRenderWidth ());
-		depth_tex_h = q_max (1, framebufs.scene.height > 0 ? framebufs.scene.height : R_GetSceneRenderHeight ());
-		depth_view_x = 0.f;
-		depth_view_y = 0.f;
-		depth_view_w = (float)depth_tex_w;
-		depth_view_h = (float)depth_tex_h;
-		use_scene_depth_for_fog = true;
-	}
-
-	color_scale_x = (float)native_w / (float)q_max (1, fog_width);
-	color_scale_y = (float)native_h / (float)q_max (1, fog_height);
-	if (use_scene_depth_for_fog)
-	{
-		/* gl_FragCoord is in native window space for non-halfres fog viewport.
-		 * Rebase into scene-depth texel space explicitly (scale + bias). */
-		depth_scale_x = (float)depth_tex_w / q_max (1.f, view_w);
-		depth_scale_y = (float)depth_tex_h / q_max (1.f, view_h);
-		depth_bias_x = -view_x * depth_scale_x;
-		depth_bias_y = -view_y * depth_scale_y;
-	}
-	else
-	{
-		depth_scale_x = (float)depth_tex_w / (float)q_max (1, fog_width);
-		depth_scale_y = (float)depth_tex_h / (float)q_max (1, fog_height);
-		depth_bias_x = 0.f;
-		depth_bias_y = 0.f;
-	}
+	/* Protect against division by zero when fog render targets are unavailable. */
+	depth_scale_x = (float)native_w / (float)q_max (1, fog_width);
+	depth_scale_y = (float)native_h / (float)q_max (1, fog_height);
 	depth_near = R_GetViewZNear ();
 	depth_far = R_GetViewZFar ();
 	/* Treat only clear-depth as sky. A broad cutoff (e.g. 0.001 in reverse-Z)
@@ -1034,19 +976,12 @@ void R_FogVol_Render (void)
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_SetScissorEnabled (false);
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, depth_tex);
+	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_3D, froxel_tex);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D_ARRAY, framebufs.shadow.sun_depth_tex);
 	R_FogVol_SetShaderUniforms (steps, mode, use_halfres, fog_width, fog_height,
-		depth_scale_x, depth_scale_y, depth_bias_x, depth_bias_y, color_scale_x, color_scale_y,
-		inv_viewproj, depth_view_x, depth_view_y, depth_view_w, depth_view_h,
+		depth_scale_x, depth_scale_y, inv_viewproj, view_x, view_y, view_w, view_h,
 		depth_near, depth_far, depth_sky_cutoff);
-
-	if (use_scene_depth_for_fog && FogVol_ShouldPrintStats ())
-	{
-		Con_DPrintf ("fogvol_depth: source=scene %dx%d color=native %dx%d fog=%dx%d bias=(%.2f %.2f)\n",
-			depth_tex_w, depth_tex_h, native_w, native_h, fog_width, fog_height, depth_bias_x, depth_bias_y);
-	}
 
 	src_tex = framebufs.composite.color_tex;
 	src_fbo = framebufs.composite.fbo;
@@ -1117,7 +1052,7 @@ void R_FogVol_Render (void)
 
 	if (!has_drawn)
 	{
-		if (FogVol_ShouldPrintStats ())
+		if (r_fogvol_stats.value > 0.f)
 			Con_DPrintf ("fogvol_render: skipped (all volumes disabled)\n");
 		return;
 	}
@@ -1168,7 +1103,7 @@ void R_FogVol_Render (void)
 	r_fogvol_composite_valid = true;
 	r_fogvol_composite_tex = final_tex;
 
-	if (FogVol_ShouldPrintStats ())
+	if (r_fogvol_stats.value > 0.f)
 	{
 		Con_DPrintf ("fogvol_stats: mode=%d volumes=%d froxelLights=%d steps=%d halfres=%d\n",
 			mode, r_fogvolume_count, froxel_light_count, steps, use_halfres ? 1 : 0);

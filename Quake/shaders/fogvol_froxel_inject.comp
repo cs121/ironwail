@@ -52,12 +52,14 @@ void main()
 		float radius2 = radius * radius;
 		float dist2 = dot(delta, delta);
 		// PERF: cheap squared-distance reject before any sqrt/normalization.
-		if (dist2 >= radius2)
+		if (dist2 >= radius2 * 1.001)
 			continue;
-		float normDist2 = dist2 / max(radius2, 1e-6);
-		float window = 1.0 - smoothstep(0.0, 1.0, normDist2);
-		float invSq = 1.0 / (1.0 + normDist2 * 6.0);
-		float atten = window * invSq;
+		float normDist = sqrt(dist2) / max(radius, 1e-3);
+		// Smooth cubic window: 1 at center, 0 at radius, C1-continuous.
+		float w = clamp(1.0 - normDist, 0.0, 1.0);
+		float atten = w * w * (3.0 - 2.0 * w);
+		// Physical inverse-square inside the window.
+		atten *= 1.0 / max(1.0 + dist2 / max(radius2 * 0.25, 1e-6), 1.0);
 		if (atten <= 1e-5)
 			continue;
 		accum += max(lights[i].color_intensity.rgb, vec3(0.0)) * (max(lights[i].color_intensity.w, 0.0) * atten);

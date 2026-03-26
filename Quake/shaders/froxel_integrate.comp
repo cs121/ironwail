@@ -1,7 +1,7 @@
 layout(local_size_x=8, local_size_y=8, local_size_z=1) in;
 
 layout(binding=0) uniform sampler3D FogFroxelLightTex;
-layout(rgba16f, binding=0) uniform image2D FogFroxelIntegratedTex;
+layout(rgba16f, binding=1) uniform image2D FogFroxelIntegratedTex;
 
 layout(location=0) uniform vec4 FogIntegrateSize; // xy = output size
 

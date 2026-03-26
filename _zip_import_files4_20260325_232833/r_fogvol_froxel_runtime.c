@@ -83,14 +83,6 @@ typedef struct froxel_debug_state_s
 static froxel_debug_state_t r_froxel_debug;
 static float r_froxel_debug_random_slice[192 * 128 * 4];
 
-static qboolean R_Froxel_ShouldPrintStats (void)
-{
-	if (r_fogvol_stats.value <= 0.f)
-		return false;
-	/* Keep stats readable: one sample per second at 60fps. */
-	return (r_framecount % 60) == 0;
-}
-
 typedef struct froxel_lava_candidate_s
 {
 	vec3_t center;
@@ -481,7 +473,7 @@ static void R_Froxel_DebugRefreshState (void)
 	r_froxel_debug.sun_color[2] = R_Froxel_DebugRandRange (0.3f, 1.6f);
 	R_Froxel_DebugBuildRandomLights ();
 	R_Froxel_DebugUploadRandomGrid ();
-	if (R_Froxel_ShouldPrintStats () || r_fogvol_debug.value >= 8.f)
+	if (r_fogvol_stats.value > 0.f || r_fogvol_debug.value >= 8.f)
 	{
 		Con_DPrintf ("fogvol_debug_froxel: phase=%d d=%.2f sun=%.2f em=%.2f lights=%d\n",
 			r_froxel_debug.phase, r_froxel_debug.dlight_scale, r_froxel_debug.sun_scale,
@@ -653,13 +645,6 @@ static void R_Froxel_InjectPPDLights (void)
 	int light_count = 0;
 	int i;
 
-	/*
-	 * Shared-light architecture:
-	 * - Reads the frame list produced by R_PPdlights_CollectFrame.
-	 * - Consumes only volumetric-flagged lights for froxel fog injection.
-	 * - Optionally derives broad GI helper lights from the same source list.
-	 * World/model forward passes consume their own subsets independently.
-	 */
 	memset (&r_froxel_ppd_stats, 0, sizeof (r_froxel_ppd_stats));
 	if (!r_froxel.valid)
 		return;
@@ -677,19 +662,16 @@ static void R_Froxel_InjectPPDLights (void)
 		float fog_intensity = 1.f;
 		int before_count;
 		vec3_t scaled_color;
-		R_PPdlights_RecordConsumerConsidered (RL_CONSUMER_FOG, src->source_id);
 
 		if ((src->flags & RL_LIGHT_VOLUMETRIC_CONTRIB) == 0u)
 		{
 			r_froxel_ppd_stats.rejected_nonvolumetric++;
-			R_PPdlights_RecordConsumerReject (RL_CONSUMER_FOG, src->source_id, RL_REJECT_NON_CONTRIB);
 			continue;
 		}
 		r_froxel_ppd_stats.fog_eligible_count++;
 		if (r_froxel_ppd_stats.injected_count >= fog_budget)
 		{
 			r_froxel_ppd_stats.rejected_local_budget++;
-			R_PPdlights_RecordConsumerReject (RL_CONSUMER_FOG, src->source_id, RL_REJECT_LOCAL_BUDGET);
 			continue;
 		}
 		before_count = r_froxel.light_count;
@@ -701,24 +683,19 @@ static void R_Froxel_InjectPPDLights (void)
 		R_Froxel_AddLight (src->origin, fog_radius, scaled_color, fog_intensity, fog_type);
 		if (r_froxel.light_count > before_count)
 		{
-			float energy;
 			r_froxel_ppd_stats.injected_count++;
 			r_froxel_ppd_stats.injected_radiance +=
 				scaled_color[0] * 0.2126f + scaled_color[1] * 0.7152f + scaled_color[2] * 0.0722f;
-			energy = scaled_color[0] * 0.2126f + scaled_color[1] * 0.7152f + scaled_color[2] * 0.0722f;
-			R_PPdlights_RecordConsumerAccept (RL_CONSUMER_FOG, src->source_id, energy);
 		}
 		else
 		{
 			r_froxel_ppd_stats.rejected_budget++;
-			R_PPdlights_RecordConsumerReject (RL_CONSUMER_FOG, src->source_id, RL_REJECT_HW_BUDGET);
 		}
 	}
 	R_Froxel_InjectPPDGIHelper (lights, light_count);
 
 	if ((r_ppdlights_fog_debug.value > 0.f || r_ppdlights_gi_debug.value > 0.f) && (r_framecount % 60) == 0)
 	{
-		rl_consumer_stats_t consumer_stats;
 		Con_DPrintf ("r_ppdlights_fog: src=%d eligible=%d injected=%d reject(nonvol=%d distance=%d local_budget=%d hw_budget=%d) radiance=%.3f gi(candidates=%d injected=%d distance=%d budget=%d radiance=%.3f) caps(fog=%d gi=%d)\n",
 			r_froxel_ppd_stats.source_count,
 			r_froxel_ppd_stats.fog_eligible_count,
@@ -735,17 +712,6 @@ static void R_Froxel_InjectPPDLights (void)
 			r_froxel_ppd_stats.gi_radiance,
 			fog_budget,
 			CLAMP (0, (int)Q_rint (r_ppdlights_gi_budget.value), MAX_FROXEL_GPU_LIGHTS));
-		if (R_PPdlights_GetConsumerStats (RL_CONSUMER_FOG, &consumer_stats))
-		{
-			Con_DPrintf ("r_ppdlights_fog_consumer: considered=%d accepted=%d energy=%.3f reject(non_contrib=%d distance=%d local_budget=%d hw_budget=%d)\n",
-				consumer_stats.considered,
-				consumer_stats.accepted,
-				consumer_stats.accepted_energy,
-				consumer_stats.rejected[RL_REJECT_NON_CONTRIB],
-				consumer_stats.rejected[RL_REJECT_DISTANCE],
-				consumer_stats.rejected[RL_REJECT_LOCAL_BUDGET],
-				consumer_stats.rejected[RL_REJECT_HW_BUDGET]);
-		}
 	}
 }
 
@@ -806,7 +772,7 @@ static void R_Froxel_InjectLavaSurfaceLights (void)
 		return;
 	if (lava_emissive_cvar < 0.f)
 	{
-		if (R_Froxel_ShouldPrintStats () || r_fogvol_debug.value >= 8.f)
+		if (r_fogvol_stats.value > 0.f || r_fogvol_debug.value >= 8.f)
 			Con_DPrintf ("fogvol_lava: disabled (r_fogvol_lava_emissive=%.2f)\n", lava_emissive_cvar);
 		return;
 	}
@@ -872,7 +838,7 @@ static void R_Froxel_InjectLavaSurfaceLights (void)
 	if (candidate_count <= 0)
 		probe_injected = R_Froxel_InjectLavaProbeFallbackLights (world, lava_emissive);
 
-	if (R_Froxel_ShouldPrintStats () || r_fogvol_debug.value >= 8.f)
+	if (r_fogvol_stats.value > 0.f || r_fogvol_debug.value >= 8.f)
 	{
 		Con_DPrintf ("fogvol_lava: injected=%d probe=%d lava=%d liquid=%d emissive=%.2f(cvar=%.2f) max_dist=%.0f\n",
 			candidate_count, probe_injected, lava_surface_count, liquid_surface_count, lava_emissive, lava_emissive_cvar, max_dist);
@@ -944,12 +910,8 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 	if (mode <= 0)
 		return;
 
-	{
-		const int scene_w = q_max (1, R_GetSceneRenderWidth ());
-		const int scene_h = q_max (1, R_GetSceneRenderHeight ());
-		nx = CLAMP (16, (scene_w + 15) / 16, 192);
-		ny = CLAMP (12, (scene_h + 15) / 16, 128);
-	}
+	nx = CLAMP (16, (r_refdef.vrect.width + 15) / 16, 192);
+	ny = CLAMP (12, (r_refdef.vrect.height + 15) / 16, 128);
 	nz = 32;
 
 	r_froxel.near_clip = q_max (near_clip, 1.f);

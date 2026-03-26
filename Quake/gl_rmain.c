@@ -642,6 +642,12 @@ cvar_t	r_drs_guard_mode = { "r_drs_guard_mode", "0", CVAR_ARCHIVE };
 static float view_znear;
 static float view_zfar;
 
+typedef enum scene_scale_source_e
+{
+	SCENE_SCALE_SOURCE_MANUAL = 0,
+	SCENE_SCALE_SOURCE_DYNAMIC
+} scene_scale_source_t;
+
 typedef struct render_scene_size_state_s {
 	int native_width;
 	int native_height;
@@ -650,6 +656,12 @@ typedef struct render_scene_size_state_s {
 	int scene_scale;
 	int prev_scene_width;
 	int prev_scene_height;
+	int prev_scene_scale;
+	scene_scale_source_t scale_source;
+	scene_scale_source_t prev_scale_source;
+	qboolean size_changed;
+	qboolean scale_changed;
+	qboolean source_changed;
 	qboolean initialized;
 } render_scene_size_state_t;
 
@@ -692,6 +704,11 @@ static int R_ClampDRSScale (int scale)
 	int min_scale = q_max (1, R_GetDRSMinScale ());
 	int max_scale = q_max (min_scale, R_GetDRSMaxScale (min_scale));
 	return CLAMP (min_scale, scale, max_scale);
+}
+
+static const char *R_GetSceneScaleSourceNameInternal (scene_scale_source_t source)
+{
+	return source == SCENE_SCALE_SOURCE_DYNAMIC ? "dynamic" : "manual";
 }
 
 static void R_UpdateDynamicResolutionScale (void)
@@ -801,13 +818,20 @@ static void R_UpdateDynamicResolutionScale (void)
 static void R_UpdateSceneSizeState (void)
 {
 	int debug = (int)Q_rint (r_scene_scale_debug.value);
+	int drs_debug = (int)Q_rint (r_drs_debug.value);
 	int requested_scale = q_max (1, r_refdef.scale);
 	int native_width = q_max (1, vid.width);
 	int native_height = q_max (1, vid.height);
 	int base_scene_width = q_max (1, r_refdef.vrect.width);
 	int base_scene_height = q_max (1, r_refdef.vrect.height);
+	scene_scale_source_t scale_source = SCENE_SCALE_SOURCE_MANUAL;
+	qboolean was_initialized = r_scene_size_state.initialized;
+
 	if (r_drs.value > 0.f && r_drs_state.dynamic_scale > 0)
+	{
 		requested_scale = r_drs_state.dynamic_scale;
+		scale_source = SCENE_SCALE_SOURCE_DYNAMIC;
+	}
 	requested_scale = R_ClampSceneScaleSupported (q_max (1, requested_scale));
 	if (r_drs.value > 0.f)
 		requested_scale = R_ClampDRSScale (requested_scale);
@@ -816,25 +840,32 @@ static void R_UpdateSceneSizeState (void)
 	int scene_height = (base_scene_height + requested_scale - 1) / requested_scale;
 	qboolean size_changed;
 	qboolean scale_changed;
+	qboolean source_changed;
 
-	if (!r_scene_size_state.initialized)
+	if (!was_initialized)
 	{
 		r_scene_size_state.prev_scene_width = scene_width;
 		r_scene_size_state.prev_scene_height = scene_height;
+		r_scene_size_state.prev_scene_scale = requested_scale;
+		r_scene_size_state.prev_scale_source = scale_source;
 	}
 
-	size_changed = !r_scene_size_state.initialized
+	size_changed = !was_initialized
 		|| r_scene_size_state.scene_width != scene_width
 		|| r_scene_size_state.scene_height != scene_height
 		|| r_scene_size_state.native_width != native_width
 		|| r_scene_size_state.native_height != native_height;
-	scale_changed = !r_scene_size_state.initialized
+	scale_changed = !was_initialized
 		|| r_scene_size_state.scene_scale != requested_scale;
+	source_changed = !was_initialized
+		|| r_scene_size_state.scale_source != scale_source;
 
-	if (size_changed || scale_changed)
+	if (size_changed || scale_changed || source_changed)
 	{
-		r_scene_size_state.prev_scene_width = r_scene_size_state.initialized ? r_scene_size_state.scene_width : scene_width;
-		r_scene_size_state.prev_scene_height = r_scene_size_state.initialized ? r_scene_size_state.scene_height : scene_height;
+		r_scene_size_state.prev_scene_width = was_initialized ? r_scene_size_state.scene_width : scene_width;
+		r_scene_size_state.prev_scene_height = was_initialized ? r_scene_size_state.scene_height : scene_height;
+		r_scene_size_state.prev_scene_scale = was_initialized ? r_scene_size_state.scene_scale : requested_scale;
+		r_scene_size_state.prev_scale_source = was_initialized ? r_scene_size_state.scale_source : scale_source;
 		r_scene_resize_generation++;
 		r_scene_resize_pending_invalidation = true;
 	}
@@ -844,16 +875,30 @@ static void R_UpdateSceneSizeState (void)
 	r_scene_size_state.scene_width = scene_width;
 	r_scene_size_state.scene_height = scene_height;
 	r_scene_size_state.scene_scale = requested_scale;
+	r_scene_size_state.scale_source = scale_source;
+	r_scene_size_state.size_changed = size_changed;
+	r_scene_size_state.scale_changed = scale_changed;
+	r_scene_size_state.source_changed = source_changed;
 	r_scene_size_state.initialized = true;
 
-	if (debug > 0 && (debug > 1 || size_changed || scale_changed))
+	if ((drs_debug > 0 || debug > 0) && was_initialized && (scale_changed || source_changed))
 	{
-		Con_DPrintf ("scene_size: output=%dx%d view=%dx%d scale=%d scene=%dx%d prev=%dx%d\n",
+		Con_DPrintf ("scene_scale: 1/%d(%s) -> 1/%d(%s)\n",
+			r_scene_size_state.prev_scene_scale,
+			R_GetSceneScaleSourceNameInternal (r_scene_size_state.prev_scale_source),
+			r_scene_size_state.scene_scale,
+			R_GetSceneScaleSourceNameInternal (r_scene_size_state.scale_source));
+	}
+
+	if (debug > 0 && (debug > 1 || size_changed || scale_changed || source_changed))
+	{
+		Con_DPrintf ("scene_size: output=%dx%d view=%dx%d scale=%d(%s) scene=%dx%d prev=%dx%d changed(size=%d scale=%d source=%d)\n",
 			r_scene_size_state.native_width, r_scene_size_state.native_height,
 			base_scene_width, base_scene_height,
-			r_scene_size_state.scene_scale,
+			r_scene_size_state.scene_scale, R_GetSceneScaleSourceNameInternal (r_scene_size_state.scale_source),
 			r_scene_size_state.scene_width, r_scene_size_state.scene_height,
-			r_scene_size_state.prev_scene_width, r_scene_size_state.prev_scene_height);
+			r_scene_size_state.prev_scene_width, r_scene_size_state.prev_scene_height,
+			size_changed ? 1 : 0, scale_changed ? 1 : 0, source_changed ? 1 : 0);
 	}
 }
 
@@ -911,6 +956,31 @@ int R_GetSceneResizeGeneration (void)
 {
 	R_UpdateSceneSizeState ();
 	return r_scene_resize_generation;
+}
+
+void R_GetSceneSizeInfo (scene_size_info_t *out_info)
+{
+	R_UpdateSceneSizeState ();
+	if (!out_info)
+		return;
+
+	out_info->native_width = r_scene_size_state.native_width;
+	out_info->native_height = r_scene_size_state.native_height;
+	out_info->scene_width = r_scene_size_state.scene_width;
+	out_info->scene_height = r_scene_size_state.scene_height;
+	out_info->scene_scale = r_scene_size_state.scene_scale;
+	out_info->size_changed = r_scene_size_state.size_changed;
+	out_info->scale_changed = r_scene_size_state.scale_changed;
+	out_info->source_changed = r_scene_size_state.source_changed;
+	out_info->dynamic_scale_source = (r_scene_size_state.scale_source == SCENE_SCALE_SOURCE_DYNAMIC);
+}
+
+qboolean R_HasSceneSizeChanged (void)
+{
+	R_UpdateSceneSizeState ();
+	return r_scene_size_state.size_changed
+		|| r_scene_size_state.scale_changed
+		|| r_scene_size_state.source_changed;
 }
 
 float R_GetViewZNear (void)
@@ -5872,3 +5942,4 @@ void R_RenderView (void)
 	R_DLightContract_DebugOverlay ();
 	//johnfitz
 }
+

@@ -939,6 +939,21 @@ qboolean GL_NeedsSceneEffects (void);
 qboolean GL_NeedsPostprocess (void);
 void GL_PostProcess (const RenderGraphResourceHandle *resources);
 
+typedef struct scene_size_info_s
+{
+	int native_width;
+	int native_height;
+	int scene_width;
+	int scene_height;
+	int scene_scale;
+	qboolean size_changed;
+	qboolean scale_changed;
+	qboolean source_changed;
+	qboolean dynamic_scale_source;
+} scene_size_info_t;
+
+void R_GetSceneSizeInfo (scene_size_info_t *out_info);
+qboolean R_HasSceneSizeChanged (void);
 int R_GetNativeRenderWidth (void);
 int R_GetNativeRenderHeight (void);
 int R_GetSceneRenderWidth (void);

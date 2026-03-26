@@ -493,6 +493,18 @@ static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
 
         name = ent->model->name;
 
+        /*
+         * Resolve explicit model-name driven colors first.
+         * Some projectiles (e.g. lavaball variants) can carry tracer flags;
+         * evaluating tracer flags first would incorrectly tint them blue/purple.
+         */
+        if (name && q_strcasestr (name, "lava"))
+        {
+                dl->color[0] = 1.00f; dl->color[1] = 0.15f; dl->color[2] = 0.05f;
+                dl->type = DLIGHT_LAVA;
+                return;
+        }
+
         if (ent->model->flags & EF_TRACER3)
         {
                 dl->color[0] = 0.60f; dl->color[1] = 0.25f; dl->color[2] = 0.80f;
@@ -520,13 +532,6 @@ static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
         if (name && (q_strcasestr (name, "fire") || q_strcasestr (name, "flame") || q_strcasestr (name, "torch")))
         {
                 dl->type = DLIGHT_TORCH;
-                return;
-        }
-
-        if (name && q_strcasestr (name, "lava"))
-        {
-                dl->color[0] = 1.00f; dl->color[1] = 0.15f; dl->color[2] = 0.05f;
-                dl->type = DLIGHT_LAVA;
                 return;
         }
 

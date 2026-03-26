@@ -82,6 +82,8 @@ uniform mat4  FogSunShadowViewProj[4];
 layout(location=54) uniform vec4  FogSunShadowParams; // x enabled, y depthBias, z pcfUv, w reserved
 layout(location=55) uniform vec4  FogSunShadowSplits;
 layout(location=56) uniform int   FogSunShadowCascadeCount;
+layout(location=57) uniform vec2  FogColorScale;
+layout(location=58) uniform vec2  FogDepthBias;
 
 layout(location=0) out vec4 FragColor;
 
@@ -387,13 +389,15 @@ void main()
 	/* Reproject fog-target pixels into native depth-space using pixel centers.
 	 * This avoids depth quantization/collapse when fog runs at half resolution
 	 * or under dynamic viewport scaling. */
-	vec2 screenPos = gl_FragCoord.xy * FogDepthScale;
-	ivec2 screenPixel = ivec2(floor(screenPos));
+	ivec2 depthPixel = ivec2(floor(gl_FragCoord.xy * FogDepthScale));
+	ivec2 colorPixel = ivec2(gl_FragCoord.xy);
 	ivec2 depthSize = textureSize(SceneDepth, 0);
-	screenPixel = clamp(screenPixel, ivec2(0), max(depthSize - ivec2(1), ivec2(0)));
-	screenPos = vec2(screenPixel) + vec2(0.5);
-	vec2 screenUv = screenPos * FogViewportParams.zw;
-	vec2 viewUv = ScreenUvToViewUv(screenUv);
+	ivec2 colorSize = textureSize(SceneColor, 0);
+	depthPixel = clamp(depthPixel, ivec2(0), max(depthSize - ivec2(1), ivec2(0)));
+	colorPixel = clamp(colorPixel, ivec2(0), max(colorSize - ivec2(1), ivec2(0)));
+	vec2 depthPos = vec2(depthPixel) + vec2(0.5);
+	vec2 screenUv = (vec2(colorPixel) + vec2(0.5)) / vec2(max(colorSize, ivec2(1)));
+	vec2 viewUv = ScreenUvToViewUv(depthPos * FogViewportParams.zw);
 	vec3 scene = texture(SceneColor, screenUv).rgb;
 
 	if (FogCheckerboard != 0)
@@ -416,7 +420,7 @@ void main()
 		return;
 	}
 
-	float depth = texelFetch(SceneDepth, screenPixel, 0).r;
+	float depth = texelFetch(SceneDepth, depthPixel, 0).r;
 	if (IsSkyDepthSample(depth))
 	{
 		FragColor = vec4(scene, 0.0);
@@ -496,6 +500,10 @@ void main()
 	// Keep ambient contribution capped so lit scattering remains dominant.
 	float lightContrast = clamp(FogLightSourceScales.w, 0.5, 4.0);
 	float extinctionRelief = clamp(FogClusterParams.w, 0.0, 0.95);
+	/* Global camera-follow fog should read as depth volume, not as
+	 * light-dependent dark-area lift. */
+	if (isCameraFollowGlobalFog)
+		extinctionRelief = 0.0;
 
 	for (int i = 0; i < FogSteps; ++i)
 	{
@@ -612,6 +620,10 @@ void main()
 	int blendMode = int(floor(volume.misc.z + 0.5));
 	if (volume.misc.z < 0.0)
 		blendMode = FogBlendModeDefault;
+	/* Global camera-follow fog must preserve volumetric extinction.
+	 * Additive compositing turns it into a flat dark-area lift. */
+	if (isCameraFollowGlobalFog)
+		blendMode = 0;
 
 	vec3 outColor;
 	if (blendMode == 1)
@@ -623,3 +635,4 @@ void main()
 
 	FragColor = vec4(outColor, 1.0 - transmittance);
 }
+
