@@ -36,6 +36,19 @@ static rl_light_t rl_frame_lights[RL_FRAME_LIGHTS_MAX];
 static dlight_t *rl_frame_light_sources[RL_FRAME_LIGHTS_MAX];
 static int rl_frame_light_count = 0;
 static rl_light_collect_stats_t rl_frame_stats;
+static rl_consumer_stats_t rl_consumer_stats[RL_CONSUMER_COUNT];
+
+typedef struct rl_source_summary_s
+{
+	unsigned int source_id;
+	int offered_count;
+	int accepted[RL_CONSUMER_COUNT];
+	float energy[RL_CONSUMER_COUNT];
+	int rejected[RL_CONSUMER_COUNT][RL_REJECT_COUNT];
+} rl_source_summary_t;
+
+static rl_source_summary_t rl_source_summaries[RL_FRAME_LIGHTS_MAX];
+static int rl_source_summary_count = 0;
 
 #define RL_EMISSIVE_BUDGET_DEFAULT 24
 
@@ -108,6 +121,92 @@ static void R_PPdlights_Stats_f (void)
 		rl_frame_stats.rejected_emissive_budget);
 }
 
+static const char *R_PPdlights_ConsumerName (rl_light_consumer_t consumer)
+{
+	switch (consumer)
+	{
+	case RL_CONSUMER_WORLD: return "world";
+	case RL_CONSUMER_MODEL: return "model";
+	case RL_CONSUMER_FOG: return "fog";
+	default: return "unknown";
+	}
+}
+
+static const char *R_PPdlights_RejectReasonName (rl_consumer_reject_reason_t reason)
+{
+	switch (reason)
+	{
+	case RL_REJECT_NON_CONTRIB: return "non_contrib";
+	case RL_REJECT_DISTANCE: return "distance";
+	case RL_REJECT_LOCAL_BUDGET: return "local_budget";
+	case RL_REJECT_HW_BUDGET: return "hw_budget";
+	default: return "unknown";
+	}
+}
+
+static rl_source_summary_t *R_PPdlights_GetSourceSummary (unsigned int source_id, qboolean create_if_missing)
+{
+	int i;
+
+	for (i = 0; i < rl_source_summary_count; ++i)
+	{
+		if (rl_source_summaries[i].source_id == source_id)
+			return &rl_source_summaries[i];
+	}
+
+	if (!create_if_missing || rl_source_summary_count >= RL_FRAME_LIGHTS_MAX)
+		return NULL;
+
+	memset (&rl_source_summaries[rl_source_summary_count], 0, sizeof (rl_source_summaries[rl_source_summary_count]));
+	rl_source_summaries[rl_source_summary_count].source_id = source_id;
+	rl_source_summary_count++;
+	return &rl_source_summaries[rl_source_summary_count - 1];
+}
+
+static void R_PPdlights_Participation_f (void)
+{
+	int i, c;
+
+	Con_Printf ("r_ppdlights participation summary:\n");
+	for (c = 0; c < RL_CONSUMER_COUNT; ++c)
+	{
+		const rl_consumer_stats_t *s = &rl_consumer_stats[c];
+		Con_Printf ("  %s: considered=%d accepted=%d energy=%.3f reject(%s=%d %s=%d %s=%d %s=%d)\n",
+			R_PPdlights_ConsumerName ((rl_light_consumer_t)c),
+			s->considered,
+			s->accepted,
+			s->accepted_energy,
+			R_PPdlights_RejectReasonName (RL_REJECT_NON_CONTRIB), s->rejected[RL_REJECT_NON_CONTRIB],
+			R_PPdlights_RejectReasonName (RL_REJECT_DISTANCE), s->rejected[RL_REJECT_DISTANCE],
+			R_PPdlights_RejectReasonName (RL_REJECT_LOCAL_BUDGET), s->rejected[RL_REJECT_LOCAL_BUDGET],
+			R_PPdlights_RejectReasonName (RL_REJECT_HW_BUDGET), s->rejected[RL_REJECT_HW_BUDGET]);
+	}
+
+	Con_Printf ("  source participation (source_id offered world model fog | reject reasons):\n");
+	for (i = 0; i < rl_source_summary_count; ++i)
+	{
+		const rl_source_summary_t *e = &rl_source_summaries[i];
+		Con_Printf ("    0x%08x offer=%d world=%d(%.3f) model=%d(%.3f) fog=%d(%.3f) reject[w:%d/%d/%d/%d m:%d/%d/%d/%d f:%d/%d/%d/%d]\n",
+			e->source_id,
+			e->offered_count,
+			e->accepted[RL_CONSUMER_WORLD], e->energy[RL_CONSUMER_WORLD],
+			e->accepted[RL_CONSUMER_MODEL], e->energy[RL_CONSUMER_MODEL],
+			e->accepted[RL_CONSUMER_FOG], e->energy[RL_CONSUMER_FOG],
+			e->rejected[RL_CONSUMER_WORLD][RL_REJECT_NON_CONTRIB],
+			e->rejected[RL_CONSUMER_WORLD][RL_REJECT_DISTANCE],
+			e->rejected[RL_CONSUMER_WORLD][RL_REJECT_LOCAL_BUDGET],
+			e->rejected[RL_CONSUMER_WORLD][RL_REJECT_HW_BUDGET],
+			e->rejected[RL_CONSUMER_MODEL][RL_REJECT_NON_CONTRIB],
+			e->rejected[RL_CONSUMER_MODEL][RL_REJECT_DISTANCE],
+			e->rejected[RL_CONSUMER_MODEL][RL_REJECT_LOCAL_BUDGET],
+			e->rejected[RL_CONSUMER_MODEL][RL_REJECT_HW_BUDGET],
+			e->rejected[RL_CONSUMER_FOG][RL_REJECT_NON_CONTRIB],
+			e->rejected[RL_CONSUMER_FOG][RL_REJECT_DISTANCE],
+			e->rejected[RL_CONSUMER_FOG][RL_REJECT_LOCAL_BUDGET],
+			e->rejected[RL_CONSUMER_FOG][RL_REJECT_HW_BUDGET]);
+	}
+}
+
 static unsigned int R_PPdlights_EmissiveSourceId (const entity_t *ent, unsigned int tag)
 {
 	unsigned int ent_id = 0u;
@@ -163,6 +262,11 @@ static qboolean R_PPdlights_AddFrameLight (const vec3_t origin, float radius, co
 		? (unsigned int)source->type
 		: 0u;
 	rl_frame_light_sources[rl_frame_light_count - 1] = source;
+	{
+		rl_source_summary_t *sum = R_PPdlights_GetSourceSummary (source_id, true);
+		if (sum)
+			sum->offered_count++;
+	}
 	rl_frame_stats.accepted++;
 	if (from_emissive)
 		rl_frame_stats.accepted_emissive++;
@@ -308,6 +412,7 @@ void R_PPdlights_RegisterCvars (void)
 	Cmd_AddCommand ("r_ppdlights_debug_mode", R_PPdlights_DebugModeCompat_f);
 	Cmd_AddCommand ("r_ppd_emissive", R_PPdlights_EmissiveShortAlias_f);
 	Cmd_AddCommand ("r_ppd_emisdbg", R_PPdlights_EmissiveDebugShortAlias_f);
+	Cmd_AddCommand ("r_ppdlights_participation", R_PPdlights_Participation_f);
 }
 
 void R_PPdlights_CollectFrame (void)
@@ -320,6 +425,9 @@ void R_PPdlights_CollectFrame (void)
 	rl_frame_light_count = 0;
 	memset (rl_frame_light_sources, 0, sizeof (rl_frame_light_sources));
 	memset (&rl_frame_stats, 0, sizeof (rl_frame_stats));
+	memset (rl_consumer_stats, 0, sizeof (rl_consumer_stats));
+	memset (rl_source_summaries, 0, sizeof (rl_source_summaries));
+	rl_source_summary_count = 0;
 
 	collect_enabled = (r_dynamic.value > 0.f)
 		&& (r_ppdlights.value > 0.f
@@ -409,7 +517,7 @@ qboolean R_PPdlights_WorldPathEnabled (void)
 		&& r_ppdlights_world.value > 0.f);
 }
 
-static int R_PPdlights_BuildGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights, unsigned int required_flags)
+int R_PPdlights_BuildWorldGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights)
 {
 	int i;
 	int count = 0;
@@ -417,14 +525,22 @@ static int R_PPdlights_BuildGpuLights (gpulightbuffer_t *out_buffer, dlight_t **
 	if (!out_buffer || !out_sources || max_lights <= 0)
 		return 0;
 
-	for (i = 0; i < rl_frame_light_count && count < max_lights; ++i)
+	for (i = 0; i < rl_frame_light_count; ++i)
 	{
 		const rl_light_t *src = &rl_frame_lights[i];
 		gpulight_t *dst = &out_buffer->lights[count];
-
-		if ((src->flags & required_flags) != required_flags)
+		float energy;
+		R_PPdlights_RecordConsumerConsidered (RL_CONSUMER_WORLD, src->source_id);
+		if ((src->flags & RL_LIGHT_SURFACE_CONTRIB) == 0u)
+		{
+			R_PPdlights_RecordConsumerReject (RL_CONSUMER_WORLD, src->source_id, RL_REJECT_NON_CONTRIB);
 			continue;
-
+		}
+		if (count >= max_lights)
+		{
+			R_PPdlights_RecordConsumerReject (RL_CONSUMER_WORLD, src->source_id, RL_REJECT_LOCAL_BUDGET);
+			continue;
+		}
 		dst->pos[0] = src->origin[0];
 		dst->pos[1] = src->origin[1];
 		dst->pos[2] = src->origin[2];
@@ -434,15 +550,12 @@ static int R_PPdlights_BuildGpuLights (gpulightbuffer_t *out_buffer, dlight_t **
 		dst->color[2] = src->color[2] * src->intensity;
 		dst->minlight = 0.f;
 		out_sources[count] = rl_frame_light_sources[i];
+		energy = dst->color[0] * 0.2126f + dst->color[1] * 0.7152f + dst->color[2] * 0.0722f;
+		R_PPdlights_RecordConsumerAccept (RL_CONSUMER_WORLD, src->source_id, energy);
 		count++;
 	}
 
 	return count;
-}
-
-int R_PPdlights_BuildWorldGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights)
-{
-	return R_PPdlights_BuildGpuLights (out_buffer, out_sources, max_lights, RL_LIGHT_SURFACE_CONTRIB);
 }
 
 qboolean R_PPdlights_ModelPathEnabled (void)
@@ -454,5 +567,87 @@ qboolean R_PPdlights_ModelPathEnabled (void)
 
 int R_PPdlights_BuildModelGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights)
 {
-	return R_PPdlights_BuildGpuLights (out_buffer, out_sources, max_lights, RL_LIGHT_SURFACE_CONTRIB);
+	int i;
+	int count = 0;
+
+	if (!out_buffer || !out_sources || max_lights <= 0)
+		return 0;
+
+	for (i = 0; i < rl_frame_light_count; ++i)
+	{
+		const rl_light_t *src = &rl_frame_lights[i];
+		gpulight_t *dst = &out_buffer->lights[count];
+		float energy;
+		R_PPdlights_RecordConsumerConsidered (RL_CONSUMER_MODEL, src->source_id);
+		if ((src->flags & RL_LIGHT_SURFACE_CONTRIB) == 0u)
+		{
+			R_PPdlights_RecordConsumerReject (RL_CONSUMER_MODEL, src->source_id, RL_REJECT_NON_CONTRIB);
+			continue;
+		}
+		if (count >= max_lights)
+		{
+			R_PPdlights_RecordConsumerReject (RL_CONSUMER_MODEL, src->source_id, RL_REJECT_LOCAL_BUDGET);
+			continue;
+		}
+		dst->pos[0] = src->origin[0];
+		dst->pos[1] = src->origin[1];
+		dst->pos[2] = src->origin[2];
+		dst->radius = src->radius;
+		dst->color[0] = src->color[0] * src->intensity;
+		dst->color[1] = src->color[1] * src->intensity;
+		dst->color[2] = src->color[2] * src->intensity;
+		dst->minlight = 0.f;
+		out_sources[count] = rl_frame_light_sources[i];
+		energy = dst->color[0] * 0.2126f + dst->color[1] * 0.7152f + dst->color[2] * 0.0722f;
+		R_PPdlights_RecordConsumerAccept (RL_CONSUMER_MODEL, src->source_id, energy);
+		count++;
+	}
+
+	return count;
+}
+
+void R_PPdlights_RecordConsumerAccept (rl_light_consumer_t consumer, unsigned int source_id, float energy)
+{
+	rl_source_summary_t *sum;
+
+	if ((int)consumer < 0 || consumer >= RL_CONSUMER_COUNT)
+		return;
+	rl_consumer_stats[consumer].accepted++;
+	rl_consumer_stats[consumer].accepted_energy += q_max (0.f, energy);
+	sum = R_PPdlights_GetSourceSummary (source_id, true);
+	if (!sum)
+		return;
+	sum->accepted[consumer]++;
+	sum->energy[consumer] += q_max (0.f, energy);
+}
+
+void R_PPdlights_RecordConsumerReject (rl_light_consumer_t consumer, unsigned int source_id, rl_consumer_reject_reason_t reason)
+{
+	rl_source_summary_t *sum;
+
+	if ((int)consumer < 0 || consumer >= RL_CONSUMER_COUNT)
+		return;
+	if ((int)reason < 0 || reason >= RL_REJECT_COUNT)
+		return;
+	rl_consumer_stats[consumer].rejected[reason]++;
+	sum = R_PPdlights_GetSourceSummary (source_id, true);
+	if (!sum)
+		return;
+	sum->rejected[consumer][reason]++;
+}
+
+qboolean R_PPdlights_GetConsumerStats (rl_light_consumer_t consumer, rl_consumer_stats_t *out_stats)
+{
+	if ((int)consumer < 0 || consumer >= RL_CONSUMER_COUNT || !out_stats)
+		return false;
+	*out_stats = rl_consumer_stats[consumer];
+	return true;
+}
+
+void R_PPdlights_RecordConsumerConsidered (rl_light_consumer_t consumer, unsigned int source_id)
+{
+	if ((int)consumer < 0 || consumer >= RL_CONSUMER_COUNT)
+		return;
+	rl_consumer_stats[consumer].considered++;
+	(void)R_PPdlights_GetSourceSummary (source_id, true);
 }
