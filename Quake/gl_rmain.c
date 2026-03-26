@@ -213,6 +213,60 @@ static void R_DebugDRSNativeEffects (qboolean bloom_enabled, qboolean ssao_enabl
 		motion_enabled ? 1 : 0);
 }
 
+static void R_DLightContract_EnforceGuards (void)
+{
+	struct dlight_guard_s
+	{
+		cvar_t *var;
+		const char *category;
+		const char *path;
+	} guards[] = {
+		{ &r_legacy_dlight_world_translucent, "world translucent", "legacy" },
+		{ &r_legacy_dlight_water, "water", "legacy" },
+		{ &r_legacy_dlight_decals, "decals", "legacy" },
+		{ &r_legacy_dlight_particles, "particles", "legacy" },
+		{ &r_legacy_dlight_fog, "fog", "legacy" },
+		{ &r_pp_dlight_world_translucent, "world translucent", "pp" },
+		{ &r_pp_dlight_water, "water", "pp" },
+		{ &r_pp_dlight_decals, "decals", "pp" },
+		{ &r_pp_dlight_particles, "particles", "pp" }
+	};
+	int i;
+
+	for (i = 0; i < (int)countof (guards); ++i)
+	{
+		if (guards[i].var->value > 0.f)
+		{
+			if ((r_framecount % 60) == 0)
+				Con_Warning ("dlight contract: %s receiver path for %s is intentionally excluded; forcing %s 0\n",
+					guards[i].path, guards[i].category, guards[i].var->name);
+			Cvar_SetValueQuick (guards[i].var, 0.f);
+		}
+	}
+}
+
+static void R_DLightContract_DebugOverlay (void)
+{
+	const qboolean legacy_world_opaque = (r_dynamic.value > 0.f && r_drawworld_cheatsafe);
+	const qboolean legacy_alias = (r_dynamic.value > 0.f && r_dlight_entities.value > 0.f && r_drawentities.value > 0.f);
+	const qboolean pp_world_opaque = R_PPdlights_WorldPathEnabled () && CLAMP (0.f, r_ppdlights_world_scale.value, 4.f) > 0.f;
+	const qboolean pp_alias = R_PPdlights_ModelPathEnabled () && r_drawentities.value > 0.f;
+	const qboolean pp_fog = (r_ppdlights.value > 0.f && r_ppdlights_fog.value > 0.f);
+
+	if (r_dlight_receive_overlay.value <= 0.f || (r_framecount % 60) != 0)
+		return;
+
+	Con_Printf ("dlight recv legacy{wo:%d wt:0 wa:0 de:0 pa:0 ao:%d at:%d fg:0} "
+		"pp{wo:%d wt:0 wa:0 de:0 pa:0 ao:%d at:%d fg:%d}\n",
+		legacy_world_opaque ? 1 : 0,
+		legacy_alias ? 1 : 0,
+		legacy_alias ? 1 : 0,
+		pp_world_opaque ? 1 : 0,
+		pp_alias ? 1 : 0,
+		pp_alias ? 1 : 0,
+		pp_fog ? 1 : 0);
+}
+
 
 static qboolean R_IsUnderwaterContents (int contents)
 {
@@ -305,6 +359,17 @@ cvar_t  r_gl_state_validate = { "r_gl_state_validate", "0", CVAR_NONE };
 cvar_t  r_framegraph_autobind = { "r_framegraph_autobind", "0", CVAR_NONE };
 cvar_t  r_framegraph_debug = { "r_framegraph_debug", "0", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
+cvar_t	r_dlight_receive_overlay = { "r_dlight_receive_overlay", "0", CVAR_NONE };
+/* Guard cvars for categories intentionally excluded from dynamic-light receiver paths. */
+cvar_t	r_legacy_dlight_world_translucent = { "r_legacy_dlight_world_translucent", "0", CVAR_ARCHIVE };
+cvar_t	r_legacy_dlight_water = { "r_legacy_dlight_water", "0", CVAR_ARCHIVE };
+cvar_t	r_legacy_dlight_decals = { "r_legacy_dlight_decals", "0", CVAR_ARCHIVE };
+cvar_t	r_legacy_dlight_particles = { "r_legacy_dlight_particles", "0", CVAR_ARCHIVE };
+cvar_t	r_legacy_dlight_fog = { "r_legacy_dlight_fog", "0", CVAR_ARCHIVE };
+cvar_t	r_pp_dlight_world_translucent = { "r_pp_dlight_world_translucent", "0", CVAR_ARCHIVE };
+cvar_t	r_pp_dlight_water = { "r_pp_dlight_water", "0", CVAR_ARCHIVE };
+cvar_t	r_pp_dlight_decals = { "r_pp_dlight_decals", "0", CVAR_ARCHIVE };
+cvar_t	r_pp_dlight_particles = { "r_pp_dlight_particles", "0", CVAR_ARCHIVE };
 cvar_t	r_quality = { "r_quality", "high", CVAR_ARCHIVE };
 cvar_t  r_shadow = { "r_shadow", "1", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
@@ -5200,11 +5265,17 @@ void R_RenderScene (const RenderGraphResourceHandle *resources)
 	(void)resources;
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_Clear ();
+	R_DLightContract_EnforceGuards ();
 	
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.
 	R_UploadFrameData ();
 	S_ExtraUpdate (); // don't let sound get messed up if going slow
+	/* Dynamic-light receiver contract (legacy + pp):
+	 * world opaque=on; world translucent/water/decals/particles=off;
+	 * alias opaque=on; alias translucent=on; fog=pp-only.
+	 * Pass order below keeps intentionally excluded categories outside the
+	 * world dlight pass to make these exclusions explicit by construction. */
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 	R_DrawDecals ();
 	R_DrawDLightPass ();
@@ -5797,5 +5868,7 @@ void R_RenderView (void)
 			rs_brushpolys,
 			rs_aliaspolys,
 			rs_dynamiclightmaps);
+
+	R_DLightContract_DebugOverlay ();
 	//johnfitz
 }
