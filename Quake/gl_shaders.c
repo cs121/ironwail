@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "q_ctype.h"
+#include <setjmp.h>
 
 #define GLSL_PATH_PREFIX "shaders/"
 #define GLSL_PATH(name)   GLSL_PATH_PREFIX name
@@ -49,6 +50,25 @@ typedef struct shader_cache_s
 static shader_cache_t *shader_cache;
 static int shader_cache_count;
 static int shader_cache_capacity;
+
+typedef struct shader_hot_file_s
+{
+	char path[MAX_QPATH];
+	time_t timestamp;
+	qboolean has_timestamp;
+} shader_hot_file_t;
+
+static shader_hot_file_t *shader_hot_files;
+static int shader_hot_file_count;
+static int shader_hot_file_capacity;
+static qboolean shader_hot_reload_pending;
+static qboolean shader_hot_reload_initialized;
+static double shader_hot_next_poll_time;
+static char shader_hot_trigger_path[MAX_QPATH];
+static char shader_hot_last_error[4096];
+static qboolean shader_hot_commands_registered;
+static jmp_buf shader_build_abort_jmp;
+static qboolean shader_build_abort_enabled;
 
 static qboolean GL_IsShaderIncludePathSafe (const char *path, const char **reason)
 {
@@ -239,6 +259,26 @@ static void GL_EnsureShaderCacheCapacity (int needed)
 	shader_cache_capacity = newcapacity;
 }
 
+static void GL_EnsureHotFileCapacity (int needed)
+{
+	int newcapacity;
+	shader_hot_file_t *newfiles;
+
+	if (needed <= shader_hot_file_capacity)
+		return;
+
+	newcapacity = shader_hot_file_capacity ? shader_hot_file_capacity : 64;
+	while (newcapacity < needed)
+		newcapacity *= 2;
+
+	newfiles = (shader_hot_file_t *)q_realloc (shader_hot_files, newcapacity * sizeof (*shader_hot_files));
+	if (!newfiles)
+		Sys_Error ("GL_EnsureHotFileCapacity: out of memory");
+
+	shader_hot_files = newfiles;
+	shader_hot_file_capacity = newcapacity;
+}
+
 /*
 =============
 GL_InitError
@@ -254,6 +294,12 @@ static void GL_InitError (const char *message, ...)
 	va_start (argptr, message);
 	q_vsnprintf (buf, sizeof (buf), message, argptr);
 	va_end (argptr);
+
+	if (shader_build_abort_enabled)
+	{
+		q_strlcpy (shader_hot_last_error, buf, sizeof (shader_hot_last_error));
+		longjmp (shader_build_abort_jmp, 1);
+	}
 
 	len = strlen (buf);
 	while (len && q_isspace (buf[len - 1]))
@@ -633,6 +679,67 @@ static char *GL_LoadShaderFile (const char *path)
         return GL_LoadShaderFile_Internal (path, 0, include_stack, 0);
 }
 
+static qboolean GL_GetShaderTimestamp (const char *qpath, time_t *out_timestamp)
+{
+	searchpath_t *search;
+	time_t timestamp = 0;
+
+	if (!qpath || !*qpath || !out_timestamp)
+		return false;
+
+	for (search = com_searchpaths; search; search = search->next)
+	{
+		if (!search->filename[0])
+			continue;
+		if (search->pack)
+			continue;
+
+		{
+			char ospath[MAX_OSPATH];
+			q_snprintf (ospath, sizeof (ospath), "%s/%s", search->filename, qpath);
+			if (Sys_GetFileTime (ospath, &timestamp))
+			{
+				*out_timestamp = timestamp;
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+static void GL_RebuildHotReloadFileList (void)
+{
+	int i;
+
+	shader_hot_file_count = 0;
+	for (i = 0; i < shader_cache_count; ++i)
+	{
+		time_t timestamp = 0;
+		shader_hot_file_t *entry;
+
+		GL_EnsureHotFileCapacity (shader_hot_file_count + 1);
+		entry = &shader_hot_files[shader_hot_file_count++];
+		q_strlcpy (entry->path, shader_cache[i].path, sizeof (entry->path));
+		entry->has_timestamp = GL_GetShaderTimestamp (entry->path, &timestamp);
+		entry->timestamp = timestamp;
+	}
+
+	shader_hot_reload_initialized = true;
+}
+
+static void GL_MarkHotReloadAttemptComplete (void)
+{
+	int i;
+
+	for (i = 0; i < shader_hot_file_count; ++i)
+	{
+		time_t timestamp = 0;
+		shader_hot_files[i].has_timestamp = GL_GetShaderTimestamp (shader_hot_files[i].path, &timestamp);
+		shader_hot_files[i].timestamp = timestamp;
+	}
+}
+
 static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GLenum *types, const char *name, va_list argptr)
 {
         char macros[1024];
@@ -774,6 +881,105 @@ static FUNC_PRINTF(2,3) GLuint GL_CreateComputeProgram (const char *path, const 
         return program;
 }
 
+typedef struct shader_build_state_s
+{
+	glprogs_t progs;
+	GLuint *programs;
+	int num_programs;
+	int programs_capacity;
+	shader_cache_t *cache;
+	int cache_count;
+	int cache_capacity;
+} shader_build_state_t;
+
+static void GL_CaptureBuildState (shader_build_state_t *state)
+{
+	if (!state)
+		return;
+
+	state->progs = glprogs;
+	state->programs = gl_programs;
+	state->num_programs = gl_num_programs;
+	state->programs_capacity = gl_programs_capacity;
+	state->cache = shader_cache;
+	state->cache_count = shader_cache_count;
+	state->cache_capacity = shader_cache_capacity;
+}
+
+static void GL_ApplyBuildState (const shader_build_state_t *state)
+{
+	if (!state)
+		return;
+
+	glprogs = state->progs;
+	gl_programs = state->programs;
+	gl_num_programs = state->num_programs;
+	gl_programs_capacity = state->programs_capacity;
+	shader_cache = state->cache;
+	shader_cache_count = state->cache_count;
+	shader_cache_capacity = state->cache_capacity;
+}
+
+static void GL_FreeBuildState (shader_build_state_t *state)
+{
+	int i;
+
+	if (!state)
+		return;
+
+	for (i = 0; i < state->num_programs; ++i)
+		GL_DeleteProgramFunc (state->programs[i]);
+	q_free (state->programs);
+	state->programs = NULL;
+	state->num_programs = 0;
+	state->programs_capacity = 0;
+
+	for (i = 0; i < state->cache_count; ++i)
+		q_free (state->cache[i].data);
+	q_free (state->cache);
+	state->cache = NULL;
+	state->cache_count = 0;
+	state->cache_capacity = 0;
+	memset (&state->progs, 0, sizeof (state->progs));
+}
+
+static qboolean GL_RebuildShadersTransactional (const char *reason)
+{
+	shader_build_state_t live, building;
+
+	memset (&live, 0, sizeof (live));
+	memset (&building, 0, sizeof (building));
+	shader_hot_last_error[0] = '\0';
+
+	GL_CaptureBuildState (&live);
+	GL_ApplyBuildState (&building);
+
+	shader_build_abort_enabled = true;
+	if (setjmp (shader_build_abort_jmp) == 0)
+	{
+		Con_Printf ("GLSL hot reload: rebuilding programs (%s)\n", reason ? reason : "manual");
+		GL_CreateShaders ();
+		GL_CaptureBuildState (&building);
+		shader_build_abort_enabled = false;
+
+		GL_ClearCachedProgram ();
+		R_Shadow_ClearProgramUniformCaches ();
+		GL_FreeBuildState (&live);
+		GL_RebuildHotReloadFileList ();
+		return true;
+	}
+
+	shader_build_abort_enabled = false;
+	GL_CaptureBuildState (&building);
+	GL_FreeBuildState (&building);
+	GL_ApplyBuildState (&live);
+
+	Con_Warning ("GLSL hot reload failed, keeping previous programs.\n");
+	if (shader_hot_last_error[0])
+		Con_SafePrintf ("%s\n", shader_hot_last_error);
+	return false;
+}
+
 /*
 ====================
 GL_UseProgram
@@ -881,6 +1087,82 @@ void GL_CreateShaders (void)
         glprogs.palette_postprocess = GL_CreateComputeProgram (GLSL_PATH("palette_postprocess.comp"), "palette postprocess");
 
 	Con_Printf ("Loaded %d GLSL programs (%d shader cache entries)\n", gl_num_programs, shader_cache_count);
+	GL_RebuildHotReloadFileList ();
+}
+
+static void GL_ShaderReloadAll_f (void)
+{
+	if (!gl_glsl_able)
+	{
+		Con_Warning ("shader_reload_all: GLSL is not available.\n");
+		return;
+	}
+
+	if (Cmd_Argc () > 1)
+	{
+		Con_Printf ("usage: shader_reload_all\n");
+		return;
+	}
+
+	if (GL_RebuildShadersTransactional ("manual command"))
+		Con_Printf ("GLSL hot reload succeeded.\n");
+}
+
+void GL_RegisterShaderCommands (void)
+{
+	if (shader_hot_commands_registered)
+		return;
+
+	Cmd_AddCommand ("shader_reload_all", GL_ShaderReloadAll_f);
+	shader_hot_commands_registered = true;
+}
+
+void GL_PollShaderHotReload (void)
+{
+	int i;
+	time_t timestamp = 0;
+	double now;
+
+	if (!gl_glsl_able)
+		return;
+	if (developer.value == 0.f)
+		return;
+	if (!shader_hot_reload_initialized)
+		return;
+
+	now = Sys_DoubleTime ();
+	if (now < shader_hot_next_poll_time)
+		return;
+	shader_hot_next_poll_time = now + 0.25;
+
+	for (i = 0; i < shader_hot_file_count; ++i)
+	{
+		shader_hot_file_t *entry = &shader_hot_files[i];
+		qboolean has_timestamp = GL_GetShaderTimestamp (entry->path, &timestamp);
+
+		if (has_timestamp != entry->has_timestamp || (has_timestamp && entry->timestamp != timestamp))
+		{
+			q_strlcpy (shader_hot_trigger_path, entry->path, sizeof (shader_hot_trigger_path));
+			shader_hot_reload_pending = true;
+			Con_Printf ("GLSL hot reload: detected changed shader file %s\n", entry->path);
+			break;
+		}
+	}
+
+	if (!shader_hot_reload_pending)
+		return;
+
+	if (GL_RebuildShadersTransactional (shader_hot_trigger_path))
+	{
+		Con_Printf ("GLSL hot reload succeeded (%s)\n", shader_hot_trigger_path);
+	}
+	else
+	{
+		Con_Warning ("GLSL hot reload failed for %s\n", shader_hot_trigger_path);
+		GL_MarkHotReloadAttemptComplete ();
+	}
+
+	shader_hot_reload_pending = false;
 }
 
 /*
@@ -913,4 +1195,14 @@ void GL_DeleteShaders (void)
         shader_cache = NULL;
         shader_cache_count = 0;
         shader_cache_capacity = 0;
+
+	q_free (shader_hot_files);
+	shader_hot_files = NULL;
+	shader_hot_file_count = 0;
+	shader_hot_file_capacity = 0;
+	shader_hot_reload_pending = false;
+	shader_hot_reload_initialized = false;
+	shader_hot_next_poll_time = 0.0;
+	shader_hot_trigger_path[0] = '\0';
+	shader_hot_last_error[0] = '\0';
 }

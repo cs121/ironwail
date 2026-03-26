@@ -5756,8 +5756,10 @@ void R_RenderView (void)
 		rs_brushpolys = rs_aliaspolys = rs_skypolys =
 			rs_dynamiclightmaps = rs_aliaspasses = rs_skypasses = rs_brushpasses = 0;
 	}
-        else if (gl_finish.value)
+	else if (gl_finish.value)
                 glFinish ();
+
+	GL_PollShaderHotReload ();
 
 	R_InvalidateGodraysFrameCache ();
 	R_FrameGraph_RenderView ();

@@ -617,6 +617,7 @@ void R_Shadow_ApplyWorldReceiverUniforms (GLuint program);
 void R_Shadow_ApplyAliasReceiverUniforms (GLuint program);
 void R_Shadow_ApplyWorldCasterUniforms (GLuint program);
 void R_Shadow_ApplyAliasCasterUniforms (GLuint program);
+void R_Shadow_ClearProgramUniformCaches (void);
 
 entity_t **R_GetVisEntities (modtype_t type, qboolean translucent, int *outcount);
 
@@ -754,6 +755,8 @@ GLuint GL_GetCurrentProgram (void);
 void GL_ClearCachedProgram (void);
 void GL_CreateShaders (void);
 void GL_DeleteShaders (void);
+void GL_RegisterShaderCommands (void);
+void GL_PollShaderHotReload (void);
 void R_DebugDrawWireBox (const vec3_t mins, const vec3_t maxs, const vec3_t color, qboolean ztest);
 void R_DebugFlushGeometry (void);
 

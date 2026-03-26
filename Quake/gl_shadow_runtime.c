@@ -317,6 +317,14 @@ void R_Shadow_SelectDlights (shadow_runtime_t *state)
 	}
 }
 
+void R_Shadow_ClearProgramUniformCaches (void)
+{
+	r_shadow_receiver_uniforms_count = 0;
+	r_shadow_caster_uniforms_count = 0;
+	memset (r_shadow_receiver_uniforms, 0, sizeof (r_shadow_receiver_uniforms));
+	memset (r_shadow_caster_uniforms, 0, sizeof (r_shadow_caster_uniforms));
+}
+
 void R_Shadow_UpdateSunMatrix (shadow_runtime_t *state)
 {
 	const sun_t *sun = R_GetSun ();
