@@ -15,7 +15,8 @@ layout(binding=8) uniform samplerCubeArray DLightShadowTex;
 #endif
 
 layout(location=0) uniform float DLightScale;
-layout(location=1) uniform float DLightBlendMode; // 0=linear add, 1=soft-add
+layout(location=1) uniform float DLightLumaClamp;
+layout(location=2) uniform float DLightSoftKnee;
 
 layout(location=30) uniform mat4 ShadowSunViewProj;
 layout(location=34) uniform vec4 ShadowEnableDebug;   // x=enabled, y=sun, z=dlight, w=debug mode
@@ -42,6 +43,18 @@ vec3 SanitizeColor(vec3 color)
 		SanitizeScalar(color.x),
 		SanitizeScalar(color.y),
 		SanitizeScalar(color.z));
+}
+
+vec3 ApplyLumaClamp(vec3 color, float lumaClamp)
+{
+	float max_luma = max(lumaClamp, 0.0);
+	if (max_luma <= 0.0)
+		return vec3(0.0);
+
+	float luma = dot(color, vec3(0.299, 0.587, 0.114));
+	if (luma <= max_luma || luma <= 1e-6)
+		return color;
+	return color * (max_luma / luma);
 }
 
 #define MAX_LIGHTS    64
@@ -265,13 +278,11 @@ void main()
 	 */
 	vec3 contrib_raw = SanitizeColor(dynamic_light * DLightScale);
 	vec3 contrib_legacy_raw = SanitizeColor(dynamic_light_legacy * DLightScale);
-	vec3 contrib_linear = clamp(contrib_raw, 0.0, 1.0);
-	vec3 contrib_legacy_linear = clamp(contrib_legacy_raw, 0.0, 1.0);
-	vec3 contrib_soft = clamp(contrib_raw / (vec3(1.0) + contrib_raw), 0.0, 1.0);
-	vec3 contrib_legacy_soft = clamp(contrib_legacy_raw / (vec3(1.0) + contrib_legacy_raw), 0.0, 1.0);
-	float blend_mode = clamp(DLightBlendMode, 0.0, 1.0);
-	vec3 contrib = mix(contrib_linear, contrib_soft, blend_mode);
-	vec3 contrib_legacy = mix(contrib_legacy_linear, contrib_legacy_soft, blend_mode);
+	vec3 contrib_clamped = ApplyLumaClamp(contrib_raw, DLightLumaClamp);
+	vec3 contrib_legacy_clamped = ApplyLumaClamp(contrib_legacy_raw, DLightLumaClamp);
+	float soft_knee = max(DLightSoftKnee, 1e-4);
+	vec3 contrib = clamp(contrib_clamped / (vec3(soft_knee) + contrib_clamped), 0.0, 1.0);
+	vec3 contrib_legacy = clamp(contrib_legacy_clamped / (vec3(soft_knee) + contrib_legacy_clamped), 0.0, 1.0);
 	/* BUGFIX: keep full material response in RT-lighting. Luma-mixing the albedo
 	 * washed out texture contrast and made light look "painted on". */
 	vec3 color = albedo * contrib;
@@ -302,6 +313,14 @@ void main()
 			/* Debug hook: split the new shaping model against a legacy-style approximation. */
 			float split = mod(floor(gl_FragCoord.x / 16.0), 2.0);
 			color = (split < 1.0) ? (albedo * contrib) : (albedo * contrib_legacy);
+		}
+		else if (pp_debug_mode == 5)
+		{
+			color = clamp(contrib_raw, 0.0, 1.0);
+		}
+		else if (pp_debug_mode == 6)
+		{
+			color = contrib;
 		}
 	}
 
