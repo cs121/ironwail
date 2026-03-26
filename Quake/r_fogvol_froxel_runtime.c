@@ -645,6 +645,13 @@ static void R_Froxel_InjectPPDLights (void)
 	int light_count = 0;
 	int i;
 
+	/*
+	 * Shared-light architecture:
+	 * - Reads the frame list produced by R_PPdlights_CollectFrame.
+	 * - Consumes only volumetric-flagged lights for froxel fog injection.
+	 * - Optionally derives broad GI helper lights from the same source list.
+	 * World/model forward passes consume their own subsets independently.
+	 */
 	memset (&r_froxel_ppd_stats, 0, sizeof (r_froxel_ppd_stats));
 	if (!r_froxel.valid)
 		return;

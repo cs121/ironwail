@@ -20,15 +20,23 @@ void R_DrawDLightPass (void)
 	int count = 0;
 	float pp_debug_mode = 0.f;
 	entity_t **ents;
-	qboolean use_pp_world = R_PPdlights_WorldPathEnabled ();
+	qboolean use_shared_world_lights = R_PPdlights_WorldPathEnabled ();
 	unsigned int saved_numlights = r_framedata.numlights;
 	gpulightbuffer_t saved_lightbuffer = {0};
 	dlight_t *saved_sources[DLIGHT_GPU_MAX] = {0};
 
+	/*
+	 * Shared-light architecture:
+	 * - R_PPdlights_CollectFrame builds one frame list (dynamic + emissive).
+	 * - This pass consumes the world/surface subset and repacks it into the
+	 *   standard GPU light buffer expected by forward world shaders.
+	 * - Alias/model and froxel passes read the same collected list separately.
+	 */
+
 	if (r_framedata.numlights == 0 || !r_drawworld_cheatsafe)
 	{
 		/* Optional per-pixel world path can still feed lights even if legacy list is empty. */
-		if (!use_pp_world)
+		if (!use_shared_world_lights)
 			return;
 	}
 	if (CLAMP (0.f, r_ppdlights_world_scale.value, 4.f) <= 0.f)
@@ -40,7 +48,7 @@ void R_DrawDLightPass (void)
 	if (count <= 0)
 		return;
 
-	if (use_pp_world)
+	if (use_shared_world_lights)
 	{
 		int pp_count;
 		memcpy (&saved_lightbuffer, &r_lightbuffer, sizeof (saved_lightbuffer));
@@ -93,7 +101,7 @@ void R_DrawDLightPass (void)
 
 	GL_EndGroup ();
 
-	if (use_pp_world)
+	if (use_shared_world_lights)
 	{
 		r_framedata.numlights = saved_numlights;
 		memcpy (&r_lightbuffer, &saved_lightbuffer, sizeof (saved_lightbuffer));

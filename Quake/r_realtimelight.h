@@ -2,14 +2,17 @@
 #define R_REALTIMELIGHT_H
 
 /*
- * Optional per-pixel realtime lighting scaffold.
+ * Shared realtime light collection for forward surface + volumetric consumers.
  *
- * Intended data flow (incremental rollout):
- * 1) Collect runtime lights on CPU from existing dlight/emissive/GI sources.
- * 2) Upload a shared GPU-friendly light list once per frame.
- * 3) Reuse the same list for world/model surface lighting and froxel/fog injection.
+ * Frame flow:
+ * 1) Collect runtime lights on CPU from existing dlight/emissive sources.
+ * 2) Cache one shared frame light list.
+ * 3) Fan the same list out to each consumer:
+ *    - forward world dlight pass
+ *    - forward alias/model pass
+ *    - froxel fog + GI injection
  *
- * Milestone 1 intentionally adds only type/cvar scaffolding with no behavior change.
+ * This is not a fullscreen postprocess pass; it is shared scene-light plumbing.
  */
 
 typedef enum rl_light_type_e
