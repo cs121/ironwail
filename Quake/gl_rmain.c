@@ -1825,9 +1825,24 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		ssao_logged = true;
 	}
 
+	/* Drain stale GL errors so the SSAO bind check reports the actual failing call. */
+	while (glGetError () != GL_NO_ERROR)
+		;
+
 	GL_BeginGroup ("SSAO");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
-	GL_LogErrorIfDeveloper ("SSAO bind FBO");
+	{
+		GLenum bind_err = glGetError ();
+		if (bind_err != GL_NO_ERROR)
+		{
+			Con_DPrintf ("GL error after SSAO bind FBO: 0x%04X\n", bind_err);
+			Con_DPrintf ("SSAO disabled: GL error 0x%04X while binding ao_fbo[%d]=%u\n",
+				bind_err, index, framebufs.ssao.ao_fbo[index]);
+			framebufs.ssao.valid = false;
+			GL_EndGroup ();
+			return 0;
+		}
+	}
 	if (r_ssao_validate.value > 0.f)
 	{
 		GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);

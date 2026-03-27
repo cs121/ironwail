@@ -84,6 +84,7 @@ layout(location=55) uniform vec4  FogSunShadowSplits;
 layout(location=56) uniform int   FogSunShadowCascadeCount;
 layout(location=57) uniform vec2  FogColorScale;
 layout(location=58) uniform vec2  FogDepthBias;
+layout(location=59) uniform vec2  FogColorBias;
 
 layout(location=0) out vec4 FragColor;
 
@@ -258,7 +259,11 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, vec3 flow, int lod, float noise
 	float noiseFactor = 1.0;
 	if (FogNoiseEnabled != 0)
 	{
-		float scale = clamp(max(volume.noise_params.x, 1e-4) * max(FogDensityParams.z, 1e-4), NOISE_SCALE_MIN, NOISE_SCALE_MAX);
+		/* FogDensityParams.z is a global noise-frequency multiplier cvar with a
+		 * default of 0.05. Normalize around that default to avoid multiplying two
+		 * absolute scales (which collapses detail for global fog). */
+		float globalNoiseMul = clamp(max(FogDensityParams.z, 1e-4) / 0.05, 0.01, 32.0);
+		float scale = clamp(max(volume.noise_params.x, 1e-4) * globalNoiseMul, NOISE_SCALE_MIN, NOISE_SCALE_MAX);
 		float amount = clamp(volume.noise_params.y * max(FogNoiseDetailStrength, 0.0) * max(noiseAmountScale, 0.0), 0.0, 2.0);
 		float bias = clamp(volume.noise_params.z + FogDensityParams.w, -1.5, 1.5);
 		vec3 noisePos = p * scale + flow * Time * scale;
@@ -389,16 +394,19 @@ void main()
 	/* Reproject fog-target pixels into native depth-space using pixel centers.
 	 * This avoids depth quantization/collapse when fog runs at half resolution
 	 * or under dynamic viewport scaling. */
-	ivec2 depthPixel = ivec2(floor(gl_FragCoord.xy * FogDepthScale));
-	ivec2 colorPixel = ivec2(gl_FragCoord.xy);
+	/* Map pixel centers between fog target and source buffers without +1 texel drift:
+	 * dstCenter -> srcCenter = ((dstCenter - 0.5) * scale + 0.5) + bias. */
+	vec2 depthSamplePos = ((gl_FragCoord.xy - vec2(0.5)) * FogDepthScale + vec2(0.5)) + FogDepthBias;
+	vec2 colorSamplePos = ((gl_FragCoord.xy - vec2(0.5)) * FogColorScale + vec2(0.5)) + FogColorBias;
+	ivec2 depthPixel = ivec2(floor(depthSamplePos));
+	ivec2 colorPixel = ivec2(floor(colorSamplePos));
 	ivec2 depthSize = textureSize(SceneDepth, 0);
 	ivec2 colorSize = textureSize(SceneColor, 0);
 	depthPixel = clamp(depthPixel, ivec2(0), max(depthSize - ivec2(1), ivec2(0)));
 	colorPixel = clamp(colorPixel, ivec2(0), max(colorSize - ivec2(1), ivec2(0)));
 	vec2 depthPos = vec2(depthPixel) + vec2(0.5);
-	vec2 screenUv = (vec2(colorPixel) + vec2(0.5)) / vec2(max(colorSize, ivec2(1)));
 	vec2 viewUv = ScreenUvToViewUv(depthPos * FogViewportParams.zw);
-	vec3 scene = texture(SceneColor, screenUv).rgb;
+	vec3 scene = texelFetch(SceneColor, colorPixel, 0).rgb;
 
 	if (FogCheckerboard != 0)
 	{
@@ -412,7 +420,7 @@ void main()
 
 	FogVolume volume = FogVolumes[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
 	bool isCameraFollowGlobalFog = IsCameraFollowGlobalFog(volume);
-	float noiseAmountScale = isCameraFollowGlobalFog ? 0.35 : 1.0;
+	float noiseAmountScale = 1.0;
 	// extra.z mirrors the CPU-side enabled flag for this volume.
 	if (volume.extra.z <= 0.0)
 	{
