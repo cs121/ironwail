@@ -1,18 +1,12 @@
 @echo off
-setlocal EnableExtensions
-
-echo ==========================================
-echo Build + Deploy Ironwail (Release x64)
-echo ==========================================
+setlocal EnableExtensions EnableDelayedExpansion
 
 REM ========== Basis ==========
-
-REM Ordner, in dem dieses Script liegt
 set "BASE=%~dp0"
 cd /d "%BASE%"
 
-REM Projektstruktur relativ vom BASE-Pfad
 set "SLN=Windows\VisualStudio\ironwail.sln"
+set "VCXPROJ=Windows\VisualStudio\ironwail.vcxproj"
 
 set "SRC_SHADERS=Quake\shaders"
 set "SRC_GAME=Quake\game"
@@ -33,83 +27,187 @@ set "SRC_SDL2=%SRC_BASE%\..\SDL2\lib64"
 set "SRC_CURL=%SRC_BASE%\..\curl\lib\x64"
 set "SRC_ZLIB=%SRC_BASE%\..\zlib\x64"
 
+REM ========== Logs ==========
+set "LOG_DIR=%BASE%build-logs"
+set "LOG_FILE=%LOG_DIR%\latest-build.log"
+set "DIAG_FILE=%LOG_DIR%\latest-diagnostics.log"
+
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+break > "%LOG_FILE%"
+break > "%DIAG_FILE%"
+
+call :log_banner "Build + Deploy Ironwail (Release x64)"
+call :log "[INFO] Repo-Basis: %BASE%"
+call :log "[INFO] Build-Log: %LOG_FILE%"
+call :log "[INFO] Diagnose-Log: %DIAG_FILE%"
+call :log "[INFO] Arbeitsverzeichnis: %CD%"
+
+call :assert_exists "%SLN%" "Solution-Datei"
+if errorlevel 1 exit /b 10
+call :assert_exists "%VCXPROJ%" "Projektdatei"
+if errorlevel 1 exit /b 11
+
+call :collect_diagnostics
 
 REM ========== MSBuild finden ==========
 set "MSBUILD="
-for /f "usebackq tokens=*" %%i in (`where vswhere 2^>nul`) do set "VSWHERE=%%i"
+set "VSWHERE="
+
+if exist "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe" (
+  set "VSWHERE=C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+)
+if not defined VSWHERE if exist "C:\Program Files\Microsoft Visual Studio\Installer\vswhere.exe" (
+  set "VSWHERE=C:\Program Files\Microsoft Visual Studio\Installer\vswhere.exe"
+)
+if not defined VSWHERE (
+  for /f "usebackq tokens=*" %%i in (`where vswhere 2^>nul`) do set "VSWHERE=%%i"
+)
+
 if defined VSWHERE (
-  for /f "usebackq tokens=*" %%p in (`
-    "%VSWHERE%" -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe
-  `) do set "MSBUILD=%%p"
+  call :log "[INFO] vswhere gefunden: %VSWHERE%"
+  >> "%DIAG_FILE%" echo ==== vswhere products ====
+  "%VSWHERE%" -products * -format text >> "%DIAG_FILE%" 2>&1
+  for /f "usebackq delims=" %%p in (`"%VSWHERE%" -latest -products * -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe`) do set "MSBUILD=%%p"
+) else (
+  call :log "[WARN] vswhere wurde nicht gefunden."
 )
 
-REM Fester Standard-Installationspfad VS 2022 Community
-if not defined MSBUILD if exist "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" (
-  set "MSBUILD=C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
-)
-
-REM Fallback: MSBuild.exe aus PATH
-if not defined MSBUILD for /f "usebackq tokens=*" %%m in (`where MSBuild.exe 2^>nul`) do set "MSBUILD=%%m"
+if not defined MSBUILD if exist "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files\Microsoft Visual Studio\18\Professional\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files\Microsoft Visual Studio\18\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files\Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files\Microsoft Visual Studio\18\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files (x86)\Microsoft Visual Studio\2019\Professional\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
+if not defined MSBUILD if exist "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\MSBuild\Current\Bin\MSBuild.exe" set "MSBUILD=C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\MSBuild\Current\Bin\MSBuild.exe"
 
 if not defined MSBUILD (
-  echo [ERROR] MSBuild.exe nicht gefunden.
+  for /f "usebackq tokens=*" %%m in (`where MSBuild.exe 2^>nul`) do set "MSBUILD=%%m"
+)
+
+if not defined MSBUILD (
+  call :log "[ERROR] MSBuild.exe nicht gefunden."
+  call :log "[INFO] Erwartete Installationen: Visual Studio 2022/2019 oder Build Tools mit MSBuild-Komponente."
+  call :log "[INFO] Details stehen in %DIAG_FILE%"
   exit /b 2
 )
 
-echo [1/5] Clean + Build "%SLN%" (Release x64)...
-"%MSBUILD%" "%SLN%" /t:Clean;Build /p:Configuration=Release;Platform=x64 /m /v:m
+call :log "[INFO] Verwende MSBuild: %MSBUILD%"
+call :log "[INFO] MSBuild-Version:"
+"%MSBUILD%" -version >> "%DIAG_FILE%" 2>&1
+for /f "usebackq delims=" %%v in (`"%MSBUILD%" -version 2^>nul`) do call :log "        %%v"
+
+call :log "[1/5] Clean + Build \"%SLN%\" (Release x64)..."
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+  "$ErrorActionPreference='Stop';" ^
+  "& '%MSBUILD%' '%SLN%' '/t:Clean;Build' '/p:Configuration=Release;Platform=x64' '/m' '/v:m' 2>&1 | Tee-Object -FilePath '%LOG_FILE%'" 
 if errorlevel 1 (
-  echo [ERROR] Build fehlgeschlagen.
+  call :log "[ERROR] Build fehlgeschlagen."
+  call :log "[INFO] Vollstaendiges Build-Log: %LOG_FILE%"
+  call :log "[INFO] Diagnose-Log: %DIAG_FILE%"
+  findstr /C:"error MSB8020" "%LOG_FILE%" >nul 2>&1 && call :log "[HINT] Die installierte MSBuild-Version hat die benoetigten C++ Buildtools/PlatformToolsets nicht."
   exit /b 3
 )
 
-
 REM ========== Ordner anlegen ==========
-if not exist "%DST_DIR%\id1"       mkdir "%DST_DIR%\id1"
-if not exist "%DST_SHADERS%"       mkdir "%DST_SHADERS%"
-if not exist "%DST_GAME%"          mkdir "%DST_GAME%"
-
+call :log "[2/5] Stelle Deploy-Ordner sicher..."
+if not exist "%DST_DIR%\id1" mkdir "%DST_DIR%\id1"
+if not exist "%DST_SHADERS%" mkdir "%DST_SHADERS%"
+if not exist "%DST_GAME%" mkdir "%DST_GAME%"
 
 REM ========== EXE ==========
-echo [2/5] Kopiere Executable...
+call :log "[3/5] Kopiere Executable..."
 if not exist "%SRC_EXE%" (
-  echo [ERROR] EXE fehlt: %SRC_EXE%
+  call :log "[ERROR] EXE fehlt: %SRC_EXE%"
   exit /b 4
 )
 copy /Y "%SRC_EXE%" "%DST_EXE%" >nul
 if errorlevel 1 (
-  echo [ERROR] Kopieren von ironwail.exe fehlgeschlagen.
+  call :log "[ERROR] Kopieren von ironwail.exe fehlgeschlagen."
   exit /b 5
 )
 
-
 REM ========== DLLs (optional) ==========
-echo [3/5] Kopiere Runtime-DLLs (optional)...
-if exist "%SRC_CODECS%\libFLAC-8.dll"     copy /Y "%SRC_CODECS%\*.dll" "%DST_DIR%" >nul
-if exist "%SRC_SDL2%\SDL2.dll"            copy /Y "%SRC_SDL2%\SDL2.dll" "%DST_DIR%" >nul
-if exist "%SRC_CURL%\libcurl.dll"         copy /Y "%SRC_CURL%\libcurl.dll" "%DST_DIR%" >nul
-if exist "%SRC_ZLIB%\zlib1.dll"           copy /Y "%SRC_ZLIB%\zlib1.dll" "%DST_DIR%" >nul
+call :log "[4/5] Kopiere Runtime-DLLs (optional)..."
+if exist "%SRC_CODECS%\libFLAC-8.dll" copy /Y "%SRC_CODECS%\*.dll" "%DST_DIR%" >nul
+if exist "%SRC_SDL2%\SDL2.dll" copy /Y "%SRC_SDL2%\SDL2.dll" "%DST_DIR%" >nul
+if exist "%SRC_CURL%\libcurl.dll" copy /Y "%SRC_CURL%\libcurl.dll" "%DST_DIR%" >nul
+if exist "%SRC_ZLIB%\zlib1.dll" copy /Y "%SRC_ZLIB%\zlib1.dll" "%DST_DIR%" >nul
 
-
-REM ========== Shader ==========
-echo [4/5] Kopiere Shader...
+REM ========== Shader / Game ==========
+call :log "[5/5] Kopiere Shader..."
 robocopy "%SRC_SHADERS%" "%DST_SHADERS%" *.* /E /R:1 /W:1 >nul
-if errorlevel 16 echo [ERROR] Robocopy Shader: Schwerer Fehler& exit /b 16
-if errorlevel 8  echo [ERROR] Robocopy Shader: Kopierfehler       & exit /b 8
+if errorlevel 16 (
+  call :log "[ERROR] Robocopy Shader: Schwerer Fehler"
+  exit /b 16
+)
+if errorlevel 8 (
+  call :log "[ERROR] Robocopy Shader: Kopierfehler"
+  exit /b 8
+)
 
-
-REM ========== Game ==========
-echo [5/5] Kopiere Game...
+call :log "[6/6] Kopiere Game..."
 if not exist "%SRC_GAME%" (
-  echo [WARN] Game-Ordner fehlt, ueberspringe: %SRC_GAME%
+  call :log "[WARN] Game-Ordner fehlt, ueberspringe: %SRC_GAME%"
   goto :done
 )
 robocopy "%SRC_GAME%" "%DST_GAME%" *.* /E /R:1 /W:1 >nul
-if errorlevel 16 echo [ERROR] Robocopy Game: Schwerer Fehler& exit /b 16
-if errorlevel 8  echo [ERROR] Robocopy Game: Kopierfehler       & exit /b 8
-
+if errorlevel 16 (
+  call :log "[ERROR] Robocopy Game: Schwerer Fehler"
+  exit /b 16
+)
+if errorlevel 8 (
+  call :log "[ERROR] Robocopy Game: Kopierfehler"
+  exit /b 8
+)
 
 :done
-echo Fertig. Deploy unter: %DST_DIR%
-pause
+call :log "[OK] Fertig. Deploy unter: %DST_DIR%"
+exit /b 0
+
+:assert_exists
+if exist "%~1" (
+  call :log "[INFO] %~2 gefunden: %~1"
+  exit /b 0
+)
+call :log "[ERROR] %~2 fehlt: %~1"
+exit /b 1
+
+:collect_diagnostics
+call :log "[INFO] Sammle Diagnosedaten..."
+>> "%DIAG_FILE%" echo ==== Environment ====
+>> "%DIAG_FILE%" echo DATE=%DATE%
+>> "%DIAG_FILE%" echo TIME=%TIME%
+>> "%DIAG_FILE%" echo CD=%CD%
+>> "%DIAG_FILE%" echo PROCESSOR_ARCHITECTURE=%PROCESSOR_ARCHITECTURE%
+>> "%DIAG_FILE%" echo VisualStudioVersion=%VisualStudioVersion%
+>> "%DIAG_FILE%" echo VSINSTALLDIR=%VSINSTALLDIR%
+>> "%DIAG_FILE%" echo PATH=%PATH%
+>> "%DIAG_FILE%" echo.
+>> "%DIAG_FILE%" echo ==== Toolset hints from %VCXPROJ% ====
+findstr /N /C:"<PlatformToolset>" /C:"<WindowsTargetPlatformVersion>" "%VCXPROJ%" >> "%DIAG_FILE%" 2>&1
+>> "%DIAG_FILE%" echo.
+>> "%DIAG_FILE%" echo ==== where cl ====
+where cl >> "%DIAG_FILE%" 2>&1
+>> "%DIAG_FILE%" echo.
+>> "%DIAG_FILE%" echo ==== where link ====
+where link >> "%DIAG_FILE%" 2>&1
+exit /b 0
+
+:log_banner
+echo ==========================================
+echo %~1
+echo ==========================================
+>> "%DIAG_FILE%" echo ==========================================
+>> "%DIAG_FILE%" echo %~1
+>> "%DIAG_FILE%" echo ==========================================
+exit /b 0
+
+:log
+echo %~1
+>> "%DIAG_FILE%" echo %~1
 exit /b 0

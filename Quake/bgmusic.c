@@ -76,6 +76,8 @@ static music_handler_t *music_handlers = NULL;
 static snd_stream_t *bgmstream = NULL;
 static float bgm_volume_scale = 1.f;
 
+static snd_stream_t *BGM_TryOpen (const char *filename);
+
 static void BGM_Play_f (void)
 {
 	if (Cmd_Argc() == 2) {
@@ -198,10 +200,11 @@ void BGM_Shutdown (void)
 	music_handlers = NULL;
 }
 
-static void BGM_Play_noext (const char *filename, unsigned int allowed_types)
+static snd_stream_t *BGM_TryOpen_noext (const char *filename, unsigned int allowed_types)
 {
 	char tmp[MAX_QPATH];
 	music_handler_t *handler;
+	snd_stream_t *stream;
 
 	handler = music_handlers;
 	while (handler)
@@ -224,9 +227,9 @@ static void BGM_Play_noext (const char *filename, unsigned int allowed_types)
 		/* not supported in quake */
 			break;
 		case BGM_STREAMER:
-			bgmstream = S_CodecOpenStreamType(tmp, handler->type, bgmloop);
-			if (bgmstream)
-				return;		/* success */
+			stream = S_CodecOpenStreamType(tmp, handler->type, bgmloop);
+			if (stream)
+				return stream;		/* success */
 			break;
 		case BGM_NONE:
 		default:
@@ -236,31 +239,27 @@ static void BGM_Play_noext (const char *filename, unsigned int allowed_types)
 	}
 
 	Con_Printf("Couldn't handle music file %s\n", filename);
+	return NULL;
 }
 
-void BGM_Play (const char *filename)
+static snd_stream_t *BGM_TryOpen (const char *filename)
 {
 	char tmp[MAX_QPATH];
 	const char *ext;
 	music_handler_t *handler;
 
-	BGM_Stop();
-
 	if (music_handlers == NULL)
-		return;
+		return NULL;
 
 	if (!filename || !*filename)
 	{
 		Con_DPrintf("null music file name\n");
-		return;
+		return NULL;
 	}
 
 	ext = COM_FileGetExtension(filename);
 	if (! *ext)	/* try all things */
-	{
-		BGM_Play_noext(filename, ANY_CODECTYPE);
-		return;
-	}
+		return BGM_TryOpen_noext(filename, ANY_CODECTYPE);
 
 	handler = music_handlers;
 	while (handler)
@@ -273,7 +272,7 @@ void BGM_Play (const char *filename)
 	if (!handler)
 	{
 		Con_Printf("Unhandled extension for %s\n", filename);
-		return;
+		return NULL;
 	}
 	q_snprintf(tmp, sizeof(tmp), "%s/%s", handler->dir, filename);
 	switch (handler->player)
@@ -282,16 +281,33 @@ void BGM_Play (const char *filename)
 	/* not supported in quake */
 		break;
 	case BGM_STREAMER:
-		bgmstream = S_CodecOpenStreamType(tmp, handler->type, bgmloop);
-		if (bgmstream)
-			return;		/* success */
-		break;
+		return S_CodecOpenStreamType(tmp, handler->type, bgmloop);
 	case BGM_NONE:
 	default:
 		break;
 	}
 
 	Con_Printf("Couldn't handle music file %s\n", filename);
+	return NULL;
+}
+
+void BGM_Play (const char *filename)
+{
+	BGM_Stop();
+	bgmstream = BGM_TryOpen(filename);
+}
+
+qboolean BGM_TryPlay (const char *filename)
+{
+	snd_stream_t *newstream;
+
+	newstream = BGM_TryOpen(filename);
+	if (!newstream)
+		return false;
+
+	BGM_Stop();
+	bgmstream = newstream;
+	return true;
 }
 
 void BGM_PlayCDtrack (byte track, qboolean looping)

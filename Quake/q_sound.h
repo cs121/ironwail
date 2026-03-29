@@ -67,14 +67,28 @@ typedef struct
 	sfx_t	*sfx;			/* sfx number					*/
 	int	leftvol;		/* 0-255 volume					*/
 	int	rightvol;		/* 0-255 volume					*/
+	int	start;			/* start time in global paintsamples		*/
 	int	end;			/* end time in global paintsamples		*/
-	int	pos;			/* sample position in sfx			*/
+	float	pos;			/* sample position in sfx			*/
 	int	looping;		/* where to loop, -1 = no looping		*/
 	int	entnum;			/* to allow overriding a specific sound		*/
 	int	entchannel;
 	vec3_t	origin;			/* origin of sound effect			*/
 	vec_t	dist_mult;		/* distance multiplier (attenuation/clipK)	*/
 	int	master_vol;		/* 0-255 master volume				*/
+	vec3_t	velocity;		/* source velocity for doppler			*/
+	float	base_step;		/* authored/sample playback base step		*/
+	float	step;			/* playback rate multiplier			*/
+	qboolean spatialize;		/* true = apply positional pan/attenuation	*/
+	qboolean doppler;		/* apply doppler pitch shift			*/
+	qboolean lowpass_by_distance;	/* apply simple distance lowpass			*/
+	float	reverb_send;		/* wet send amount, currently metadata		*/
+	float	lowpass_alpha;		/* one-pole lowpass coefficient			*/
+	float	lowpass_history;	/* one-pole lowpass state				*/
+	int	bus_id;			/* authored target bus				*/
+	int	voice_id;		/* stable runtime handle				*/
+	int	def_id;			/* authored sound definition id			*/
+	int	def_instance_id;	/* multi-layer instance grouping			*/
 } channel_t;
 
 #define WAV_FORMAT_PCM	1
@@ -88,6 +102,36 @@ typedef struct
 	int	samples;
 	int	dataofs;		/* chunk starts this many bytes from file start	*/
 } wavinfo_t;
+
+typedef int audio_voice_handle_t;
+
+typedef struct
+{
+	int		entnum;
+	int		entchannel;
+	vec3_t	origin;
+	vec3_t	velocity;
+	float		gain;
+	float		pitch;
+	float		attenuation;
+	qboolean	loop;
+	qboolean	no_spatialize;
+	qboolean	doppler;
+	qboolean	lowpass_by_distance;
+	float		reverb_send;
+	int		bus_id;
+	int		delay_ms;
+	int		start_offset_ms;
+} audio_play_params_t;
+
+typedef struct
+{
+	int	active_voices;
+	int	active_looped_voices;
+	int	active_static_voices;
+	unsigned int dropped_voices;
+	double	last_mix_time_ms;
+} audio_debug_stats_t;
 
 void S_Init (void);
 void S_Startup (void);
@@ -184,11 +228,16 @@ extern	cvar_t		bgmvolume;
 
 void S_LocalSound (const char *name);
 sfxcache_t *S_LoadSound (sfx_t *s);
+audio_voice_handle_t Audio_PlayRaw (const char *name, const audio_play_params_t *params);
+audio_voice_handle_t Audio_PlayRawSfx (sfx_t *sfx, const audio_play_params_t *params);
+void Audio_StopVoice (audio_voice_handle_t handle);
+void Audio_GetDebugStats (audio_debug_stats_t *stats);
 
 wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength);
 void S_InitWavinfoMutex (void);
 void S_ShutdownWavinfoMutex (void);
 
 void SND_InitScaletable (void);
+float S_GetBusVolume (int bus_id);
 
 #endif	/* __QUAKE_SOUND__ */

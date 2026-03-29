@@ -22,76 +22,80 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // snd_mix.c -- portable code to mix sounds for snd_dma.c
 
 #include "quakedef.h"
+#include "sounddef.h"
 
 #define	PAINTBUFFER_SIZE	2048
 portable_samplepair_t paintbuffer[PAINTBUFFER_SIZE];
 int		snd_scaletable[32][256];
-int		*snd_p, snd_linear_count;
-short		*snd_out;
 
 static int	snd_vol;
 
 static float	snd_lofreqlevel;
 static float	snd_hifreqlevel;
 
-static void Snd_WriteLinearBlastStereo16 (void)
+static float S_SoftClipSample (float sample)
 {
-	int		i;
-	int		val;
+	if (fabsf (sample) <= 1.f)
+		return sample;
 
-	for (i = 0; i < snd_linear_count; i += 2)
-	{
-		val = snd_p[i] / 256;
-		if (val > 32767)
-			snd_out[i] = 32767;
-		else if (val < -32768)
-			snd_out[i] = -32768;
-		else
-			snd_out[i] = val;
+	return sample / (1.f + fabsf (sample));
+}
 
-		val = snd_p[i+1] / 256;
-		if (val > 32767)
-			snd_out[i+1] = 32767;
-		else if (val < -32768)
-			snd_out[i+1] = -32768;
-		else
-			snd_out[i+1] = val;
-	}
+static short S_OutputSample16 (int sample)
+{
+	float normalized = sample / (32768.f * 256.f);
+	return (short) lrintf (S_SoftClipSample (normalized) * 32767.f);
+}
+
+static signed char S_OutputSample8Signed (int sample)
+{
+	float normalized = sample / (32768.f * 256.f);
+	return (signed char) lrintf (S_SoftClipSample (normalized) * 127.f);
+}
+
+static unsigned char S_OutputSample8Unsigned (int sample)
+{
+	float normalized = S_SoftClipSample (sample / (32768.f * 256.f));
+	return (unsigned char) lrintf ((normalized * 127.f) + 128.f);
 }
 
 static void S_TransferStereo16 (int endtime)
 {
 	int		lpos;
 	int		lpaintedtime;
-
-	snd_p = (int *) paintbuffer;
+	int		sample_offset;
 	lpaintedtime = paintedtime;
 
 	while (lpaintedtime < endtime)
 	{
 	// handle recirculating buffer issues
 		lpos = lpaintedtime & ((shm->samples >> 1) - 1);
+		sample_offset = lpaintedtime - paintedtime;
 
-		snd_out = (short *)shm->buffer + (lpos << 1);
+		{
+			short *out = (short *)shm->buffer + (lpos << 1);
+			int sample_count = (shm->samples >> 1) - lpos;
+			int i;
 
-		snd_linear_count = (shm->samples >> 1) - lpos;
-		if (lpaintedtime + snd_linear_count > endtime)
-			snd_linear_count = endtime - lpaintedtime;
+			if (lpaintedtime + sample_count > endtime)
+				sample_count = endtime - lpaintedtime;
 
-		snd_linear_count <<= 1;
+			for (i = 0; i < sample_count; ++i)
+			{
+				const portable_samplepair_t *sample = &paintbuffer[sample_offset + i];
+				out[i * 2 + 0] = S_OutputSample16 (sample->left);
+				out[i * 2 + 1] = S_OutputSample16 (sample->right);
+			}
 
-	// write a linear blast of samples
-		Snd_WriteLinearBlastStereo16 ();
-
-		snd_p += snd_linear_count;
-		lpaintedtime += (snd_linear_count >> 1);
+			lpaintedtime += sample_count;
+		}
 	}
 }
 
 static void S_TransferPaintBuffer (int endtime)
 {
 	int	out_idx, out_mask;
-	int	count, step, val;
+	int	count, step;
 	int	*p;
 
 	if (shm->samplebits == 16 && shm->channels == 2)
@@ -111,13 +115,9 @@ static void S_TransferPaintBuffer (int endtime)
 		short *out = (short *)shm->buffer;
 		while (count--)
 		{
-			val = *p / 256;
+			const int sample = *p;
 			p+= step;
-			if (val > 32767)
-				val = 32767;
-			else if (val < -32768)
-				val = -32768;
-			out[out_idx] = val;
+			out[out_idx] = S_OutputSample16 (sample);
 			out_idx = (out_idx + 1) & out_mask;
 		}
 	}
@@ -126,13 +126,9 @@ static void S_TransferPaintBuffer (int endtime)
 		unsigned char *out = shm->buffer;
 		while (count--)
 		{
-			val = *p / 256;
+			const int sample = *p;
 			p+= step;
-			if (val > 32767)
-				val = 32767;
-			else if (val < -32768)
-				val = -32768;
-			out[out_idx] = (val / 256) + 128;
+			out[out_idx] = S_OutputSample8Unsigned (sample);
 			out_idx = (out_idx + 1) & out_mask;
 		}
 	}
@@ -141,13 +137,9 @@ static void S_TransferPaintBuffer (int endtime)
 		signed char *out = (signed char *) shm->buffer;
 		while (count--)
 		{
-			val = *p / 256;
+			const int sample = *p;
 			p+= step;
-			if (val > 32767)
-				val = 32767;
-			else if (val < -32768)
-				val = -32768;
-			out[out_idx] = (val / 256);
+			out[out_idx] = S_OutputSample8Signed (sample);
 			out_idx = (out_idx + 1) & out_mask;
 		}
 	}
@@ -423,8 +415,22 @@ CHANNEL MIXING
 ===============================================================================
 */
 
-static void SND_PaintChannelFrom8 (channel_t *ch, sfxcache_t *sc, int endtime, int paintbufferstart);
-static void SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int endtime, int paintbufferstart);
+static int SND_PaintChannelFrom8 (channel_t *ch, sfxcache_t *sc, int endtime, int paintbufferstart);
+static int SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int endtime, int paintbufferstart);
+
+static int SND_ChannelSamplesUntilEndLocal (const channel_t *ch, const sfxcache_t *sc)
+{
+	float remaining;
+
+	if (!sc || ch->step <= 0.f)
+		return 0;
+
+	remaining = (float) sc->length - ch->pos;
+	if (remaining <= 0.f)
+		return 0;
+
+	return q_max (1, (int) ceilf (remaining / ch->step));
+}
 
 void S_PaintChannels (int endtime)
 {
@@ -461,36 +467,55 @@ void S_PaintChannels (int endtime)
 
 			while (ltime < end)
 			{	// paint up to end
-				if (ch->end < end)
+				if (ltime < ch->start)
+				{
+					if (ch->start >= end)
+						break;
+					ltime = ch->start;
+					continue;
+				}
+
+				count = end - ltime;
+				if (ch->end < ltime + count)
 					count = ch->end - ltime;
-				else
-					count = end - ltime;
 
 				if (count > 0)
 				{
+					int mixed;
+
 					// the last param to SND_PaintChannelFrom is the index
 					// to start painting to in the paintbuffer, usually 0.
 					if (sc->width == 1)
-						SND_PaintChannelFrom8(ch, sc, count, ltime - paintedtime);
+						mixed = SND_PaintChannelFrom8(ch, sc, count, ltime - paintedtime);
 					else
-						SND_PaintChannelFrom16(ch, sc, count, ltime - paintedtime);
+						mixed = SND_PaintChannelFrom16(ch, sc, count, ltime - paintedtime);
 
-					ltime += count;
+					ltime += mixed;
+					count = mixed;
 				}
 
 			// if at end of loop, restart
-				if (ltime >= ch->end)
+				if ((count <= 0 || ch->pos >= sc->length) && ch->looping >= 0)
 				{
-					if (sc->loopstart >= 0)
-					{
-						ch->pos = sc->loopstart;
-						ch->end = ltime + sc->length - ch->pos;
-					}
-					else
-					{	// channel just stopped
-						ch->sfx = NULL;
-						break;
-					}
+					ch->pos = ch->looping;
+					ch->end = ltime + SND_ChannelSamplesUntilEndLocal (ch, sc);
+				}
+				else if (count <= 0 || ch->pos >= sc->length)
+				{	// channel just stopped
+					ch->sfx = NULL;
+					ch->start = 0;
+					ch->step = 1.f;
+					ch->base_step = 1.f;
+					ch->lowpass_alpha = 1.f;
+					ch->lowpass_history = 0.f;
+					ch->voice_id = 0;
+					ch->def_id = 0;
+					ch->def_instance_id = 0;
+					break;
+				}
+				else
+				{
+					ch->end = ltime + SND_ChannelSamplesUntilEndLocal (ch, sc);
 				}
 			}
 		}
@@ -520,15 +545,17 @@ void S_PaintChannels (int endtime)
 		{	// copy from the streaming sound source
 			int		s;
 			int		stop;
+			float		music_bus_volume;
 
 			stop = (end < s_rawend) ? end : s_rawend;
+			music_bus_volume = S_GetBusVolume (SOUND_BUS_MUSIC);
 
 			for (i = paintedtime; i < stop; i++)
 			{
 				s = i & (MAX_RAW_SAMPLES - 1);
 			// lower music by 6db to match sfx
-				paintbuffer[i - paintedtime].left += s_rawsamples[s].left / 2;
-				paintbuffer[i - paintedtime].right += s_rawsamples[s].right / 2;
+				paintbuffer[i - paintedtime].left += (int) lrintf ((s_rawsamples[s].left / 2.0f) * music_bus_volume);
+				paintbuffer[i - paintedtime].right += (int) lrintf ((s_rawsamples[s].right / 2.0f) * music_bus_volume);
 			}
 			//	if (i != end)
 			//		Con_Printf ("partial stream\n");
@@ -565,11 +592,11 @@ void SND_InitScaletable (void)
 }
 
 
-static void SND_PaintChannelFrom8 (channel_t *ch, sfxcache_t *sc, int count, int paintbufferstart)
+static int SND_PaintChannelFrom8 (channel_t *ch, sfxcache_t *sc, int count, int paintbufferstart)
 {
-	int	data;
-	int		*lscale, *rscale;
-	unsigned char	*sfx;
+	float	data;
+	int leftscale, rightscale;
+	float bus_volume;
 	int		i;
 
 	if (ch->leftvol > 255)
@@ -577,46 +604,66 @@ static void SND_PaintChannelFrom8 (channel_t *ch, sfxcache_t *sc, int count, int
 	if (ch->rightvol > 255)
 		ch->rightvol = 255;
 
-	lscale = snd_scaletable[ch->leftvol >> 3];
-	rscale = snd_scaletable[ch->rightvol >> 3];
-	sfx = (unsigned char *)sc->data + ch->pos;
+	leftscale = ch->leftvol * snd_vol;
+	rightscale = ch->rightvol * snd_vol;
+	leftscale /= 256;
+	rightscale /= 256;
+	bus_volume = S_GetBusVolume (ch->bus_id);
+	leftscale = (int) lrintf (leftscale * bus_volume);
+	rightscale = (int) lrintf (rightscale * bus_volume);
 
 	for (i = 0; i < count; i++)
 	{
-		data = sfx[i];
-		paintbuffer[paintbufferstart + i].left += lscale[data];
-		paintbuffer[paintbufferstart + i].right += rscale[data];
+		int sample_index = (int) ch->pos;
+		if (sample_index >= sc->length)
+			break;
+
+		data = ((signed char *)sc->data)[sample_index];
+		ch->lowpass_history += ch->lowpass_alpha * (data - ch->lowpass_history);
+		data = ch->lowpass_history;
+		paintbuffer[paintbufferstart + i].left += data * leftscale;
+		paintbuffer[paintbufferstart + i].right += data * rightscale;
+		ch->pos += ch->step;
 	}
 
-	ch->pos += count;
+	return i;
 }
 
-static void SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int count, int paintbufferstart)
+static int SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int count, int paintbufferstart)
 {
-	int	data;
+	float	data;
 	int	left, right;
 	int	leftvol, rightvol;
-	signed short	*sfx;
+	float bus_volume;
 	int	i;
 
 	leftvol = ch->leftvol * snd_vol;
 	rightvol = ch->rightvol * snd_vol;
 	leftvol /= 256;
 	rightvol /= 256;
-	sfx = (signed short *)sc->data + ch->pos;
+	bus_volume = S_GetBusVolume (ch->bus_id);
+	leftvol = (int) lrintf (leftvol * bus_volume);
+	rightvol = (int) lrintf (rightvol * bus_volume);
 
 	for (i = 0; i < count; i++)
 	{
-		data = sfx[i];
+		int sample_index = (int) ch->pos;
+		if (sample_index >= sc->length)
+			break;
+
+		data = ((signed short *)sc->data)[sample_index];
+		ch->lowpass_history += ch->lowpass_alpha * (data - ch->lowpass_history);
+		data = ch->lowpass_history;
 	// this was causing integer overflow as observed in quakespasm
 	// with the warpspasm mod moved >>8 to left/right volume above.
 	//	left = (data * leftvol) >> 8;
 	//	right = (data * rightvol) >> 8;
-		left = data * leftvol;
-		right = data * rightvol;
+		left = (int) lrintf (data * leftvol);
+		right = (int) lrintf (data * rightvol);
 		paintbuffer[paintbufferstart + i].left += left;
 		paintbuffer[paintbufferstart + i].right += right;
+		ch->pos += ch->step;
 	}
 
-	ch->pos += count;
+	return i;
 }

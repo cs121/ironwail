@@ -38,7 +38,7 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <CharacterSet>NotSet</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
   </PropertyGroup>
@@ -348,6 +348,8 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\snd_mikmod.c" />
     <ClCompile Include="..\..\Quake\snd_mix.c" />
     <ClCompile Include="..\..\Quake\snd_modplug.c" />
+    <ClCompile Include="..\..\Quake\sounddef_parser.c" />
+    <ClCompile Include="..\..\Quake\sounddef_registry.c" />
     <ClCompile Include="..\..\Quake\snd_mp3.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
@@ -456,6 +458,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\snd_modplug.h" />
     <ClInclude Include="..\..\Quake\snd_mp3.h" />
     <ClInclude Include="..\..\Quake\snd_opus.h" />
+    <ClInclude Include="..\..\Quake\sounddef.h" />
     <ClInclude Include="..\..\Quake\snd_umx.h" />
     <ClInclude Include="..\..\Quake\snd_vorbis.h" />
     <ClInclude Include="..\..\Quake\snd_wave.h" />

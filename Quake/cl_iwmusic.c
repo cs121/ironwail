@@ -38,6 +38,7 @@ typedef struct
 
 typedef enum
 {
+	IWR_INVALID = -1,
 	IWR_ALWAYS,
 	IWR_CVAR,
 	IWR_TIME_SINCE_DAMAGE_GT
@@ -130,11 +131,13 @@ static void CL_IWMusic_ResetRuntime (void)
 	iwm_has_defaults = false;
 	iwm_enter_serial_counter = 1;
 	iwm_zone_duck_current = 1.f;
+	iwm_last_damage_realtime = 0;
 	iwm_forced_active = false;
 	iwm_forced_state[0] = 0;
 	iwm_forced_track[0] = 0;
 	iwm_forced_volume = 1.f;
 	iwm_forced_fade_ms = 500;
+	iwm_pending_track[0] = 0;
 	iwm_current_track[0] = 0;
 	iwm_current_state[0] = 0;
 	iwm_switch_pending = false;
@@ -285,12 +288,15 @@ static void CL_IWMusic_ParseRuleBlock (const char **p)
 {
 	const char *data = *p;
 	iwm_rule_t *r;
+	qboolean valid = true;
+	qboolean saw_when = false;
 	if (iwm_num_rules >= IWM_MAX_RULES)
 		return;
 	if (!(data = COM_Parse(data)) || strcmp(com_token, "{"))
 		return;
-	r = &iwm_rules[iwm_num_rules++];
+	r = &iwm_rules[iwm_num_rules];
 	memset(r, 0, sizeof(*r));
+	r->type = IWR_INVALID;
 	r->priority = 0;
 	while ((data = COM_Parse(data)) != NULL)
 	{
@@ -298,6 +304,7 @@ static void CL_IWMusic_ParseRuleBlock (const char **p)
 			break;
 		if (!q_strcasecmp(com_token, "when"))
 		{
+			saw_when = true;
 			if (!(data = COM_Parse(data))) break;
 			if (!q_strcasecmp(com_token, "always")) r->type = IWR_ALWAYS;
 			else if (!q_strcasecmp(com_token, "cvar"))
@@ -315,11 +322,23 @@ static void CL_IWMusic_ParseRuleBlock (const char **p)
 				if (!(data = COM_Parse(data))) break;
 				r->threshold_ms = atoi(com_token);
 			}
+			else
+			{
+				Con_DWarning("iwmusic: unknown rule condition '%s'; ignoring rule\n", com_token);
+				valid = false;
+			}
 		}
 		else if (!q_strcasecmp(com_token, "then_state")) { if (!(data = COM_Parse(data))) break; q_strlcpy(r->then_state, com_token, sizeof(r->then_state)); }
 		else if (!q_strcasecmp(com_token, "priority")) { if (!(data = COM_Parse(data))) break; r->priority = atoi(com_token); }
 		else { if (!(data = COM_Parse(data))) break; }
 	}
+	if (valid && (!saw_when || r->type == IWR_INVALID))
+	{
+		Con_DWarning("iwmusic: rule missing valid when clause; ignoring rule\n");
+		valid = false;
+	}
+	if (valid)
+		++iwm_num_rules;
 	*p = data;
 }
 
@@ -425,8 +444,15 @@ static void CL_IWMusic_UpdateSwitch (void)
 	{
 		if (iwm_music_gain > 0.001f)
 			return;
-		BGM_Play(iwm_pending_track);
-		if (!BGM_HasStream())
+		if (!iwm_pending_track[0])
+		{
+			BGM_Stop();
+			iwm_current_track[0] = 0;
+			iwm_switch_pending = false;
+			CL_IWMusic_DPrintf("switched to silence\n");
+			return;
+		}
+		if (!BGM_TryPlay(iwm_pending_track))
 		{
 			CL_IWMusic_DPrintf("failed to load %s, staying on current stream\n", iwm_pending_track);
 			iwm_switch_pending = false;
@@ -626,13 +652,22 @@ void CL_IWMusic_Update (void)
 		}
 	}
 
-	if (desired_state && desired_state[0] && q_strcasecmp(iwm_current_state, desired_state))
+	if (!!iwm_current_state[0] != !!(desired_state && desired_state[0]) || (desired_state && desired_state[0] && q_strcasecmp(iwm_current_state, desired_state)))
 	{
-		q_strlcpy(iwm_current_state, desired_state, sizeof(iwm_current_state));
-		CL_IWMusic_DPrintf("state => %s (pri %d)\n", iwm_current_state, best_pri);
+		if (desired_state && desired_state[0])
+		{
+			q_strlcpy(iwm_current_state, desired_state, sizeof(iwm_current_state));
+			CL_IWMusic_DPrintf("state => %s (pri %d)\n", iwm_current_state, best_pri);
+		}
+		else
+		{
+			iwm_current_state[0] = 0;
+			CL_IWMusic_DPrintf("state => <none>\n");
+		}
 	}
 
-	if (desired_track && desired_track[0] && q_strcasecmp(desired_track, iwm_current_track) && !iwm_switch_pending)
+	if (!iwm_switch_pending
+		&& ((!desired_track || !desired_track[0]) ? (iwm_current_track[0] || BGM_HasStream()) : q_strcasecmp(desired_track, iwm_current_track)))
 		CL_IWMusic_StartSwitch(desired_track, desired_fade, desired_volume);
 
 	attack_lerp = CLAMP(0.f, host_frametime / 0.150f, 1.f);
