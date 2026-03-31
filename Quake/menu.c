@@ -26,6 +26,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include <time.h>
 
+void VID_ApplyLegacyMenuImageSettings (void);
+
 cvar_t ui_mouse	= {"ui_mouse", "1", CVAR_ARCHIVE};
 cvar_t ui_live_preview = {"ui_live_preview", "1", CVAR_ARCHIVE};
 cvar_t ui_mouse_sound = {"ui_mouse_sound", "0", CVAR_ARCHIVE};
@@ -3728,12 +3730,14 @@ void M_AdjustSliders (int dir)
 		if (f < 0.5)	f = 0.5;
 		else if (f > 1)	f = 1;
 		Cvar_SetValue ("gamma", f);
+		VID_ApplyLegacyMenuImageSettings ();
 		break;
 	case OPT_CONTRAST:	// contrast
 		f = vid_contrast.value + dir * 0.1;
 		if (f < 1)	f = 1;
 		else if (f > 2)	f = 2;
 		Cvar_SetValue ("contrast", f);
+		VID_ApplyLegacyMenuImageSettings ();
 		break;
 	case OPT_MOUSESPEED:	// mouse speed
 		f = sensitivity.value + dir * 0.5;
@@ -4126,10 +4130,12 @@ qboolean M_SetSliderValue (int option, float f)
 	case OPT_GAMMA:	// gamma
 		f = 1.f - f * 0.5f;
 		Cvar_SetValue ("gamma", f);
+		VID_ApplyLegacyMenuImageSettings ();
 		return true;
 	case OPT_CONTRAST:	// contrast
 		f += 1.f;
 		Cvar_SetValue ("contrast", f);
+		VID_ApplyLegacyMenuImageSettings ();
 		return true;
 	case OPT_RENDERSCALE:
 		f = floor (1 + f * (vid.maxscale - 1) + 0.5);

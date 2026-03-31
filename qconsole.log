@@ -1,0 +1,35 @@
+LOG started on: 03/29/2026 14:56:14 
+Loaded Steam API library
+Steam not running
+Steam is still not running
+Couldn't initialize Steam API
+Unloaded Steam API
+
+Using add-on server "https://kexquake.s3.amazonaws.com"
+Playing registered version.
+Using renderer/network isolation.
+Console initialized.
+UDP Initialized
+WIPX_OpenSocket: Address family not supported by protocol family
+WIPX_Init: Unable to open control socket, IPX disabled
+Server using protocol 999 (RMQ)
+Exe: 13:54:32 Mar 29 2026 (Windows 64-bit)
+384.0 megabyte heap
+
+Video initialization
+Video mode: 1920 x 1080 24bit Z24 S8 120Hz
+GL_VENDOR:   Intel
+GL_RENDERER: Intel(R) UHD Graphics 620
+GL_VERSION:  4.3.0 - Build 31.0.101.2121
+FOUND: EXT_texture_filter_anisotropic
+FOUND: ARB_buffer_storage
+FOUND: ARB_multi_bind
+FOUND: ARB_bindless_texture
+FOUND: ARB_shader_draw_parameters
+FOUND: ARB_clip_control
+Intel Display Adapter detected, enabling gl_clear
+
+Add-on server status:
+ 29 add-ons available for download
+  0 add-ons already installed
+

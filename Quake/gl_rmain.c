@@ -108,6 +108,7 @@ static godrays_stabilization_t r_godrays_stabilization;
 static int r_godrays_generated_frame = -1;
 static GLuint r_godrays_cached_shafts = 0;
 static GLuint r_godrays_cached_mask = 0;
+
 static GLuint r_godrays_cached_source = 0;
 static qboolean r_godrays_cached_debug_source_generated = false;
 
@@ -3469,10 +3470,34 @@ void GL_DepthRange (zrange_t range)
 R_GetAlphaMode
 =============
 */
+static qboolean R_OITBlockedByDriver (void)
+{
+	return gl_vendor && !strcmp (gl_vendor, "Intel");
+}
+
+static void R_WarnOITBlockedByDriver (void)
+{
+	static qboolean warned = false;
+
+	if (!R_OITBlockedByDriver () || warned)
+		return;
+
+	Con_Warning ("Intel driver detected: disabling OIT alpha mode for compatibility\n");
+	warned = true;
+}
+
 alphamode_t R_GetAlphaMode (void)
 {
 	if (r_oit.value)
+	{
+		if (R_OITBlockedByDriver ())
+		{
+			R_WarnOITBlockedByDriver ();
+			return r_alphasort.value ? ALPHAMODE_SORTED : ALPHAMODE_BASIC;
+		}
+
 		return ALPHAMODE_OIT;
+	}
 	return r_alphasort.value ? ALPHAMODE_SORTED : ALPHAMODE_BASIC;
 }
 
@@ -3495,6 +3520,14 @@ R_SetAlphaMode
 */
 void R_SetAlphaMode (alphamode_t mode)
 {
+	if (mode == ALPHAMODE_OIT && R_OITBlockedByDriver ())
+	{
+		R_WarnOITBlockedByDriver ();
+		Cvar_SetValueQuick (&r_oit, 0.f);
+		Cvar_SetValueQuick (&r_alphasort, 1.f);
+		return;
+	}
+
 	Cvar_SetValueQuick (&r_oit, mode == ALPHAMODE_OIT);
 	if (mode != ALPHAMODE_OIT)
 		Cvar_SetValueQuick (&r_alphasort, mode == ALPHAMODE_SORTED);

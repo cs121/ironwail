@@ -25,13 +25,22 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "sounddef.h"
 
 #define	PAINTBUFFER_SIZE	2048
+#define S_REVERB_BUFFER_SAMPLES	32768
 portable_samplepair_t paintbuffer[PAINTBUFFER_SIZE];
+static portable_samplepair_t reverbbuffer[PAINTBUFFER_SIZE];
 int		snd_scaletable[32][256];
 
 static int	snd_vol;
 
 static float	snd_lofreqlevel;
 static float	snd_hifreqlevel;
+
+static struct
+{
+	float	left[S_REVERB_BUFFER_SAMPLES];
+	float	right[S_REVERB_BUFFER_SAMPLES];
+	int	index;
+} reverb_state;
 
 static float S_SoftClipSample (float sample)
 {
@@ -407,6 +416,12 @@ float S_GetHiFreqLevel (void)
 	return snd_hifreqlevel;
 }
 
+void S_ResetReverbState (void)
+{
+	memset (&reverb_state, 0, sizeof (reverb_state));
+	memset (reverbbuffer, 0, sizeof (reverbbuffer));
+}
+
 /*
 ===============================================================================
 
@@ -417,6 +432,49 @@ CHANNEL MIXING
 
 static int SND_PaintChannelFrom8 (channel_t *ch, sfxcache_t *sc, int endtime, int paintbufferstart);
 static int SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int endtime, int paintbufferstart);
+
+static void S_ReverbAccumulateSample (int index, float left, float right, float send)
+{
+	send = CLAMP (0.f, send, 1.f);
+	if (send <= 0.f)
+		return;
+
+	reverbbuffer[index].left += (int) lrintf (left * send);
+	reverbbuffer[index].right += (int) lrintf (right * send);
+}
+
+static void S_ApplyReverb (int count)
+{
+	const float output_gain = S_GetReverbVolume ();
+	const int delay_a = q_min (S_REVERB_BUFFER_SAMPLES - 1, q_max (1, (int) ((double) shm->speed * 0.029)));
+	const int delay_b = q_min (S_REVERB_BUFFER_SAMPLES - 1, q_max (1, (int) ((double) shm->speed * 0.037)));
+	const int delay_c = q_min (S_REVERB_BUFFER_SAMPLES - 1, q_max (1, (int) ((double) shm->speed * 0.041)));
+	const int mask = S_REVERB_BUFFER_SAMPLES - 1;
+	const float scale = 32768.f * 256.f;
+	int i;
+
+	for (i = 0; i < count; i++)
+	{
+		const int index = reverb_state.index;
+		const int tap_a = (index - delay_a) & mask;
+		const int tap_b = (index - delay_b) & mask;
+		const int tap_c = (index - delay_c) & mask;
+		const float input_l = reverbbuffer[i].left / scale;
+		const float input_r = reverbbuffer[i].right / scale;
+		const float wet_l = reverb_state.left[tap_a] * 0.55f + reverb_state.left[tap_b] * 0.25f + reverb_state.right[tap_c] * 0.20f;
+		const float wet_r = reverb_state.right[tap_a] * 0.55f + reverb_state.right[tap_b] * 0.25f + reverb_state.left[tap_c] * 0.20f;
+
+		reverb_state.left[index] = CLAMP (-1.f, input_l + wet_l * 0.45f, 1.f);
+		reverb_state.right[index] = CLAMP (-1.f, input_r + wet_r * 0.45f, 1.f);
+		reverb_state.index = (index + 1) & mask;
+
+		if (output_gain > 0.f)
+		{
+			paintbuffer[i].left += (int) lrintf (wet_l * output_gain * scale);
+			paintbuffer[i].right += (int) lrintf (wet_r * output_gain * scale);
+		}
+	}
+}
 
 static int SND_ChannelSamplesUntilEndLocal (const channel_t *ch, const sfxcache_t *sc)
 {
@@ -430,6 +488,22 @@ static int SND_ChannelSamplesUntilEndLocal (const channel_t *ch, const sfxcache_
 		return 0;
 
 	return q_max (1, (int) ceilf (remaining / ch->step));
+}
+
+static void SND_StopChannelLocal (channel_t *ch)
+{
+	ch->sfx = NULL;
+	ch->start = 0;
+	ch->end = 0;
+	ch->pos = 0.f;
+	ch->looping = -1;
+	ch->step = 1.f;
+	ch->base_step = 1.f;
+	ch->lowpass_alpha = 1.f;
+	ch->lowpass_history = 0.f;
+	ch->voice_id = 0;
+	ch->def_id = 0;
+	ch->def_instance_id = 0;
 }
 
 void S_PaintChannels (int endtime)
@@ -450,6 +524,7 @@ void S_PaintChannels (int endtime)
 
 	// clear the paint buffer
 		memset(paintbuffer, 0, (end - paintedtime) * sizeof(portable_samplepair_t));
+		memset(reverbbuffer, 0, (end - paintedtime) * sizeof(portable_samplepair_t));
 
 	// paint in the channels.
 		ch = snd_channels;
@@ -494,23 +569,26 @@ void S_PaintChannels (int endtime)
 					count = mixed;
 				}
 
-			// if at end of loop, restart
+				// if at end of loop, restart
 				if ((count <= 0 || ch->pos >= sc->length) && ch->looping >= 0)
 				{
+					if (ch->step <= 0.f || ch->looping >= sc->length)
+					{
+						SND_StopChannelLocal (ch);
+						break;
+					}
+
 					ch->pos = ch->looping;
 					ch->end = ltime + SND_ChannelSamplesUntilEndLocal (ch, sc);
+					if (ch->end <= ltime)
+					{
+						SND_StopChannelLocal (ch);
+						break;
+					}
 				}
 				else if (count <= 0 || ch->pos >= sc->length)
 				{	// channel just stopped
-					ch->sfx = NULL;
-					ch->start = 0;
-					ch->step = 1.f;
-					ch->base_step = 1.f;
-					ch->lowpass_alpha = 1.f;
-					ch->lowpass_history = 0.f;
-					ch->voice_id = 0;
-					ch->def_id = 0;
-					ch->def_instance_id = 0;
+					SND_StopChannelLocal (ch);
 					break;
 				}
 				else
@@ -562,6 +640,8 @@ void S_PaintChannels (int endtime)
 			//	else
 			//		Con_Printf ("full stream\n");
 		}
+
+		S_ApplyReverb (end - paintedtime);
 
 	// transfer out according to DMA format
 		S_TransferPaintBuffer(end);
@@ -615,14 +695,20 @@ static int SND_PaintChannelFrom8 (channel_t *ch, sfxcache_t *sc, int count, int 
 	for (i = 0; i < count; i++)
 	{
 		int sample_index = (int) ch->pos;
+		float sample_left;
+		float sample_right;
+
 		if (sample_index >= sc->length)
 			break;
 
 		data = ((signed char *)sc->data)[sample_index];
 		ch->lowpass_history += ch->lowpass_alpha * (data - ch->lowpass_history);
 		data = ch->lowpass_history;
-		paintbuffer[paintbufferstart + i].left += data * leftscale;
-		paintbuffer[paintbufferstart + i].right += data * rightscale;
+		sample_left = data * leftscale;
+		sample_right = data * rightscale;
+		paintbuffer[paintbufferstart + i].left += (int) lrintf (sample_left);
+		paintbuffer[paintbufferstart + i].right += (int) lrintf (sample_right);
+		S_ReverbAccumulateSample (paintbufferstart + i, sample_left, sample_right, ch->reverb_send);
 		ch->pos += ch->step;
 	}
 
@@ -648,6 +734,9 @@ static int SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int count, int
 	for (i = 0; i < count; i++)
 	{
 		int sample_index = (int) ch->pos;
+		float sample_left;
+		float sample_right;
+
 		if (sample_index >= sc->length)
 			break;
 
@@ -662,6 +751,9 @@ static int SND_PaintChannelFrom16 (channel_t *ch, sfxcache_t *sc, int count, int
 		right = (int) lrintf (data * rightvol);
 		paintbuffer[paintbufferstart + i].left += left;
 		paintbuffer[paintbufferstart + i].right += right;
+		sample_left = (float) left;
+		sample_right = (float) right;
+		S_ReverbAccumulateSample (paintbufferstart + i, sample_left, sample_right, ch->reverb_send);
 		ch->pos += ch->step;
 	}
 

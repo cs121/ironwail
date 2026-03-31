@@ -76,6 +76,11 @@ static qboolean	vid_locked = false; //johnfitz
 static qboolean vid_changed = false;
 
 void VID_Menu_Init (void); //johnfitz
+extern cvar_t r_oit;
+extern cvar_t r_color_midtone;
+extern cvar_t r_color_contrast;
+extern cvar_t r_viewmodel_light_boost;
+extern cvar_t r_viewmodel_minlight;
 
 static void ClearAllStates (void);
 static void GL_Init (void);
@@ -228,6 +233,23 @@ void VID_SetMouseCursor (mousecursor_t cursor)
 #define MIN_GAMMA		0.1f
 
 static int fsaa;
+static void VID_ImageAdjust_f (cvar_t *var);
+
+void VID_ApplyLegacyMenuImageSettings (void)
+{
+	const float gamma = CLAMP (0.5f, vid_gamma.value, 1.f);
+	const float contrast = CLAMP (1.f, vid_contrast.value, 2.f);
+	const float gamma_t = CLAMP (-1.f, (0.95f - gamma) / 0.45f, 1.f);
+	const float post_midtone = CLAMP (0.8f, 1.f + gamma_t * 0.75f, 1.75f);
+	const float post_contrast = CLAMP (0.75f, 1.f + (contrast - 1.2f) * 0.75f, 1.6f);
+	const float viewmodel_boost = CLAMP (1.5f, 1.5f + gamma_t * 0.9f + (post_contrast - 1.f) * 0.35f, 3.25f);
+	const float viewmodel_minlight = CLAMP (72.f, 72.f + gamma_t * 48.f + (post_contrast - 1.f) * 16.f, 160.f);
+
+	Cvar_SetValueQuick (&r_color_midtone, post_midtone);
+	Cvar_SetValueQuick (&r_color_contrast, post_contrast);
+	Cvar_SetValueQuick (&r_viewmodel_light_boost, viewmodel_boost);
+	Cvar_SetValueQuick (&r_viewmodel_minlight, viewmodel_minlight);
+}
 
 /*
 ================
@@ -241,6 +263,14 @@ static void VID_Gamma_f (cvar_t *var)
 		Con_SafePrintf ("%s %g is too low, clamping to %g\n", var->name, var->value, MIN_GAMMA);
 		Cvar_SetValueQuick (var, MIN_GAMMA);
 	}
+
+	VID_ImageAdjust_f (var);
+}
+
+static void VID_ImageAdjust_f (cvar_t *var)
+{
+	(void)var;
+	VID_ApplyLegacyMenuImageSettings ();
 }
 
 /*
@@ -253,6 +283,8 @@ static void VID_Gamma_Init (void)
 	Cvar_RegisterVariable (&vid_gamma);
 	Cvar_SetCallback (&vid_gamma, VID_Gamma_f);
 	Cvar_RegisterVariable (&vid_contrast);
+	Cvar_SetCallback (&vid_contrast, VID_ImageAdjust_f);
+	VID_ImageAdjust_f (NULL);
 }
 
 /*
@@ -1419,6 +1451,11 @@ static void GL_Init (void)
 	{
 		Con_SafePrintf ("Intel Display Adapter detected, enabling gl_clear\n");
 		Cbuf_AddText ("gl_clear 1");
+		if (r_oit.value > 0.f)
+		{
+			Con_Warning ("Intel driver detected: disabling r_oit to avoid driver instability during gameplay/demo playback\n");
+			Cvar_SetValueQuick (&r_oit, 0.f);
+		}
 	}
 	//johnfitz
 

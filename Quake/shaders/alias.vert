@@ -166,5 +166,12 @@ void main()
 	out_dlight_vis = clamp(dot(litDlight, vec3(0.2126, 0.7152, 0.0722)), 0.0, 1.0);
 	out_dlight_color = litDlight;
 	out_normal = world_normal;
+	{
+		vec3 tangent = (mat3(inst.NormalMatrix[0].xyz, inst.NormalMatrix[1].xyz, inst.NormalMatrix[2].xyz) * in_tangent.xyz);
+		float tangent_len = length(tangent);
+		if (tangent_len > 0.0)
+			tangent /= tangent_len;
+		out_tangent = vec4(tangent, in_tangent.w);
+	}
 	out_sky_visibility = clamp(inst.SkyVisibility, 0.0, 1.0);
 }

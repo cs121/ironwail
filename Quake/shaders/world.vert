@@ -220,6 +220,13 @@ void main()
 	// the rebuild via TransformDirection. Now reusing world_mat directly guarantees
 	// consistent results. normalize() still required — non-uniform scale possible.
 	out_normal    = normalize(world_normal);
+	{
+		vec3 world_tangent = (world_mat * vec4(in_tangent.xyz, 0.0)).xyz;
+		float tangent_len = length(world_tangent);
+		if (tangent_len > 0.0)
+			world_tangent /= tangent_len;
+		out_tangent = vec4(world_tangent, in_tangent.w);
+	}
 	out_lightgrid = in_lightgrid;
 	out_skyvisibility = in_skyvisibility;
 	out_bmodel_relight = vec3(instance.pad0, instance.pad1, instance.pad2);

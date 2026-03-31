@@ -76,13 +76,14 @@ typedef struct
 	vec3_t	origin;			/* origin of sound effect			*/
 	vec_t	dist_mult;		/* distance multiplier (attenuation/clipK)	*/
 	int	master_vol;		/* 0-255 master volume				*/
+	int	priority;		/* runtime voice priority				*/
 	vec3_t	velocity;		/* source velocity for doppler			*/
 	float	base_step;		/* authored/sample playback base step		*/
 	float	step;			/* playback rate multiplier			*/
 	qboolean spatialize;		/* true = apply positional pan/attenuation	*/
 	qboolean doppler;		/* apply doppler pitch shift			*/
 	qboolean lowpass_by_distance;	/* apply simple distance lowpass			*/
-	float	reverb_send;		/* wet send amount, currently metadata		*/
+	float	reverb_send;		/* wet send amount				*/
 	float	lowpass_alpha;		/* one-pole lowpass coefficient			*/
 	float	lowpass_history;	/* one-pole lowpass state				*/
 	int	bus_id;			/* authored target bus				*/
@@ -120,6 +121,7 @@ typedef struct
 	qboolean	lowpass_by_distance;
 	float		reverb_send;
 	int		bus_id;
+	int		priority;
 	int		delay_ms;
 	int		start_offset_ms;
 } audio_play_params_t;
@@ -157,9 +159,10 @@ void S_PaintChannels (int endtime);
 void S_InitPaintChannels (void);
 float S_GetLoFreqLevel (void);
 float S_GetHiFreqLevel (void);
+void S_ResetReverbState (void);
 
 /* picks a channel based on priorities, empty slots, number of channels */
-channel_t *SND_PickChannel (int entnum, int entchannel);
+channel_t *SND_PickChannel (int entnum, int entchannel, int priority);
 
 /* spatializes a channel */
 void SND_Spatialize (channel_t *ch);
@@ -239,5 +242,6 @@ void S_ShutdownWavinfoMutex (void);
 
 void SND_InitScaletable (void);
 float S_GetBusVolume (int bus_id);
+float S_GetReverbVolume (void);
 
 #endif	/* __QUAKE_SOUND__ */

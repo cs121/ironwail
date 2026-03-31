@@ -34,11 +34,14 @@ static void S_PlayVol (void);
 static void S_SoundList (void);
 static void S_ListActiveVoices_f (void);
 static void S_ListDefUsage_f (void);
+static void S_ListLegacyMappings_f (void);
+static audio_voice_handle_t S_TryPlayLegacySoundDef (const char *def_name, const audio_play_params_t *params);
 static void S_Update_ (void);
 static float SND_ClampPlaybackStep (float pitch);
 static const char *S_LegacySoundDefNameForSample (const char *name);
 static int SND_ChannelSamplesUntilEnd (const channel_t *ch, const sfxcache_t *sc);
 static int SND_CalcChannelEndTime (int starttime, const channel_t *ch, const sfxcache_t *sc);
+static qboolean S_InitAmbientChannel (channel_t *chan, sfx_t *sfx);
 static audio_voice_handle_t SND_PlaySfxInternal (sfx_t *sfx, const audio_play_params_t *params, int def_id, int def_instance_id);
 void S_StopAllSounds (qboolean clear);
 static void S_StopAllSoundsC (void);
@@ -104,6 +107,7 @@ static	cvar_t	snd_bus_sfxvolume = {"snd_bus_sfxvolume", "1", CVAR_ARCHIVE};
 static	cvar_t	snd_bus_uivolume = {"snd_bus_uivolume", "1", CVAR_ARCHIVE};
 static	cvar_t	snd_bus_ambientvolume = {"snd_bus_ambientvolume", "1", CVAR_ARCHIVE};
 static	cvar_t	snd_bus_musicvolume = {"snd_bus_musicvolume", "1", CVAR_ARCHIVE};
+static	cvar_t	snd_reverbvolume = {"snd_reverbvolume", "0.2", CVAR_ARCHIVE};
 
 static struct
 {
@@ -114,6 +118,27 @@ static struct
 static int snd_next_voice_id = 1;
 static int snd_next_def_instance_id = 1;
 static vec3_t snd_listener_velocity;
+
+typedef struct legacy_sounddef_map_s
+{
+	const char *sample_name;
+	const char *def_name;
+} legacy_sounddef_map_t;
+
+static const legacy_sounddef_map_t snd_legacy_sounddef_maps[] =
+{
+	{"misc/menu1.wav", "ui/menu_move"},
+	{"misc/menu2.wav", "ui/menu_accept"},
+	{"misc/menu3.wav", "ui/menu_back"},
+	{"misc/talk.wav", "ui/talk"},
+	{"weapons/tink1.wav", "weapons/bullet_tink"},
+	{"weapons/ric1.wav", "weapons/ricochet"},
+	{"weapons/ric2.wav", "weapons/ricochet"},
+	{"weapons/ric3.wav", "weapons/ricochet"},
+	{"weapons/r_exp3.wav", "weapons/rocket_explode"},
+	{"wizard/hit.wav", "monsters/wizard_hit"},
+	{"hknight/hit.wav", "monsters/hellknight_hit"}
+};
 
 
 static void S_SoundInfo_f (void)
@@ -158,6 +183,7 @@ static void S_SoundInfo_f (void)
 			Con_Printf("%5d bus_%s\n", bus_counts[i], SoundDef_BusName ((sound_bus_id_t) i));
 			Con_Printf("%8.3f bus_%s_volume\n", S_GetBusVolume (i), SoundDef_BusName ((sound_bus_id_t) i));
 		}
+		Con_Printf("%8.3f reverb_volume\n", S_GetReverbVolume ());
 	}
 }
 
@@ -182,8 +208,8 @@ static void S_ListActiveVoices_f (void)
 		sample_name = ch->sfx->name[0] ? ch->sfx->name : "<unknown>";
 		bus_name = SoundDef_BusName ((sound_bus_id_t) ch->bus_id);
 
-		Con_Printf ("voice %4d ch %3d bus %-7s gain %3d pitch %.3f loop %d wet %.2f delay %d %s%s | %s | %s\n",
-			ch->voice_id, i, bus_name, ch->master_vol, ch->step, ch->looping >= 0,
+		Con_Printf ("voice %4d ch %3d bus %-7s prio %3d gain %3d pitch %.3f loop %d wet %.2f delay %d %s%s | %s | %s\n",
+			ch->voice_id, i, bus_name, ch->priority, ch->master_vol, ch->step, ch->looping >= 0,
 			ch->reverb_send, q_max (0, ch->start - paintedtime),
 			ch->doppler ? "doppler " : "", ch->lowpass_by_distance ? "lowpass" : "",
 			def_name, sample_name);
@@ -264,6 +290,35 @@ static void S_ListDefUsage_f (void)
 		Con_Printf ("No active sound defs\n");
 }
 
+static void S_ListLegacyMappings_f (void)
+{
+	size_t i;
+
+	Con_Printf ("Legacy sound mappings: %d\n", (int) countof (snd_legacy_sounddef_maps));
+	for (i = 0; i < countof (snd_legacy_sounddef_maps); i++)
+	{
+		const legacy_sounddef_map_t *map = &snd_legacy_sounddef_maps[i];
+		const sound_def_t *def = SoundDef_Find (map->def_name);
+
+		Con_Printf (" %-24s -> %-28s [%s]\n",
+			map->sample_name, map->def_name, def ? "present" : "missing");
+	}
+}
+
+static audio_voice_handle_t S_TryPlayLegacySoundDef (const char *def_name, const audio_play_params_t *params)
+{
+	const sound_def_t *def;
+
+	if (!def_name)
+		return 0;
+
+	def = SoundDef_Find (def_name);
+	if (!def)
+		return 0;
+
+	return Audio_PlayDefById (def->id, params);
+}
+
 
 static void SND_Callback_sfxvolume (cvar_t *var)
 {
@@ -319,6 +374,11 @@ float S_GetBusVolume (int bus_id)
 	}
 }
 
+float S_GetReverbVolume (void)
+{
+	return CLAMP (0.f, snd_reverbvolume.value, 4.f);
+}
+
 
 /*
 ================
@@ -350,6 +410,7 @@ void S_Init (void)
 	Cvar_RegisterVariable(&snd_bus_uivolume);
 	Cvar_RegisterVariable(&snd_bus_ambientvolume);
 	Cvar_RegisterVariable(&snd_bus_musicvolume);
+	Cvar_RegisterVariable(&snd_reverbvolume);
 	Cvar_RegisterVariable(&sndspeed);
 	Cvar_RegisterVariable(&snd_mixspeed);
 	Cvar_RegisterVariable(&snd_filterquality);
@@ -367,6 +428,7 @@ void S_Init (void)
 	Cmd_AddCommand("soundinfo", S_SoundInfo_f);
 	Cmd_AddCommand("snd_list_active", S_ListActiveVoices_f);
 	Cmd_AddCommand("snd_list_def_usage", S_ListDefUsage_f);
+	Cmd_AddCommand("snd_list_legacy_mappings", S_ListLegacyMappings_f);
 
 	i = COM_CheckParm("-sndspeed");
 	if (i && i < com_argc-1)
@@ -532,17 +594,22 @@ SND_PickChannel
 picks a channel based on priorities, empty slots, number of channels
 =================
 */
-channel_t *SND_PickChannel (int entnum, int entchannel)
+channel_t *SND_PickChannel (int entnum, int entchannel, int priority)
 {
 	int	ch_idx;
 	int	first_to_die;
+	int	best_priority;
 	int	life_left;
 
 // Check for replacement sound, or find the best one to replace
 	first_to_die = -1;
+	best_priority = 0x7fffffff;
 	life_left = 0x7fffffff;
 	for (ch_idx = NUM_AMBIENTS; ch_idx < NUM_AMBIENTS + MAX_DYNAMIC_CHANNELS; ch_idx++)
 	{
+		int candidate_priority;
+		int candidate_life;
+
 		if (entchannel != 0		// channel 0 never overrides
 			&& snd_channels[ch_idx].entnum == entnum
 			&& (snd_channels[ch_idx].entchannel == entchannel || entchannel == -1) )
@@ -555,9 +622,22 @@ channel_t *SND_PickChannel (int entnum, int entchannel)
 		if (snd_channels[ch_idx].entnum == cl.viewentity && entnum != cl.viewentity && snd_channels[ch_idx].sfx)
 			continue;
 
-		if (snd_channels[ch_idx].end - paintedtime < life_left)
+		if (!snd_channels[ch_idx].sfx)
 		{
-			life_left = snd_channels[ch_idx].end - paintedtime;
+			first_to_die = ch_idx;
+			break;
+		}
+
+		candidate_priority = CLAMP (0, snd_channels[ch_idx].priority, 255);
+		if (candidate_priority > priority)
+			continue;
+
+		candidate_life = snd_channels[ch_idx].end - paintedtime;
+		if (candidate_priority < best_priority
+			|| (candidate_priority == best_priority && candidate_life < life_left))
+		{
+			best_priority = candidate_priority;
+			life_left = candidate_life;
 			first_to_die = ch_idx;
 		}
 	}
@@ -709,6 +789,14 @@ static float SND_ClampPlaybackStep (float pitch)
 	return CLAMP (0.125f, pitch, 8.f);
 }
 
+static int SND_ResolvePriority (const audio_play_params_t *params, int default_priority)
+{
+	if (!params || params->priority <= 0)
+		return CLAMP (0, default_priority, 255);
+
+	return CLAMP (0, params->priority, 255);
+}
+
 static int SND_ChannelSamplesUntilEnd (const channel_t *ch, const sfxcache_t *sc)
 {
 	float remaining;
@@ -763,6 +851,7 @@ static audio_voice_handle_t SND_PlaySfxInternal (sfx_t *sfx, const audio_play_pa
 	float		gain, pitch, attenuation;
 	float		old_vol;
 	float		old_atten;
+	int		priority;
 	int		entnum, entchannel;
 	int		ch_idx;
 	int		skip;
@@ -775,13 +864,14 @@ static audio_voice_handle_t SND_PlaySfxInternal (sfx_t *sfx, const audio_play_pa
 	gain = params ? params->gain : 1.f;
 	pitch = params ? params->pitch : 1.f;
 	attenuation = params ? params->attenuation : 1.f;
+	priority = SND_ResolvePriority (params, 128);
 	if (params)
 		VectorCopy (params->origin, origin);
 	else
 		VectorCopy (vec3_origin, origin);
 
 // pick a channel to play on
-	target_chan = SND_PickChannel(entnum, entchannel);
+	target_chan = SND_PickChannel(entnum, entchannel, priority);
 	if (!target_chan)
 	{
 		snd_metrics.dropped_voices++;
@@ -806,6 +896,7 @@ static audio_voice_handle_t SND_PlaySfxInternal (sfx_t *sfx, const audio_play_pa
 	VectorCopy(origin, target_chan->origin);
 	target_chan->dist_mult = attenuation / sound_nominal_clip_dist;
 	target_chan->master_vol = (int) (CLAMP (0.f, gain, 4.f) * 255.f);
+	target_chan->priority = priority;
 	target_chan->entnum = entnum;
 	target_chan->entchannel = entchannel;
 	target_chan->start = paintedtime;
@@ -843,7 +934,7 @@ static audio_voice_handle_t SND_PlaySfxInternal (sfx_t *sfx, const audio_play_pa
 		return 0;		// couldn't load the sound's data
 	}
 
-// if this is a looping sound and we're not rewinding, keep track of the previous sound playing
+	// if this is a looping sound and we're not rewinding, keep track of the previous sound playing
 // on the same ent/channel so that when we do rewind past this frame we start playing it instead
 	if (cls.demoplayback && cls.demospeed > 0.f && (sc->loopstart != -1 || (params && params->loop)))
 		CL_AddDemoRewindSound (entnum, entchannel, old_sfx, old_origin, old_vol, old_atten);
@@ -985,6 +1076,7 @@ audio_voice_handle_t Audio_PlayDefById (sound_def_id_t id, const audio_play_para
 		layer_params.lowpass_by_distance = def->lowpass_by_distance;
 		layer_params.reverb_send = def->reverb_send;
 		layer_params.bus_id = layer->bus_id;
+		layer_params.priority = params && params->priority > 0 ? params->priority : def->priority;
 		layer_params.delay_ms = layer->delay_ms;
 		layer_params.start_offset_ms = layer->start_offset_ms;
 		if (!def->spatialize)
@@ -1087,13 +1179,14 @@ void S_StartSound (int entnum, int entchannel, sfx_t *sfx, vec3_t origin, float 
 	params.lowpass_by_distance = false;
 	params.reverb_send = 0.f;
 	params.bus_id = SOUND_BUS_SFX;
+	params.priority = 128;
 	params.delay_ms = 0;
 	params.start_offset_ms = 0;
 
 	if (sfx)
 	{
 		const char *def_name = S_LegacySoundDefNameForSample (sfx->name);
-		if (def_name && Audio_PlayDef (def_name, &params))
+		if (S_TryPlayLegacySoundDef (def_name, &params))
 			return;
 	}
 
@@ -1165,6 +1258,7 @@ void S_ClearBuffer (void)
 
 	memset (shm->buffer, clear, shm->samples * shm->samplebits / 8);
 	memset (s_rawsamples, 0, sizeof (s_rawsamples));
+	S_ResetReverbState ();
 
 	SNDDMA_Submit ();
 }
@@ -1205,6 +1299,7 @@ void S_StaticSound (sfx_t *sfx, vec3_t origin, float vol, float attenuation)
 	ss->sfx = sfx;
 	VectorCopy (origin, ss->origin);
 	ss->master_vol = (int)vol;
+	ss->priority = 255;
 	ss->dist_mult = (attenuation / 64) / sound_nominal_clip_dist;
 	VectorCopy (vec3_origin, ss->velocity);
 	ss->base_step = 1.f;
@@ -1289,8 +1384,14 @@ static void S_UpdateAmbientSounds (void)
 	for (ambient_channel = 0; ambient_channel < NUM_AMBIENTS; ambient_channel++)
 	{
 		chan = &snd_channels[ambient_channel];
-		chan->sfx = ambient_sfx[ambient_channel];
-		chan->bus_id = SOUND_BUS_AMBIENT;
+		if (chan->sfx != ambient_sfx[ambient_channel] || chan->step <= 0.f || chan->base_step <= 0.f)
+		{
+			if (!S_InitAmbientChannel (chan, ambient_sfx[ambient_channel]))
+			{
+				memset (chan, 0, sizeof (*chan));
+				continue;
+			}
+		}
 
 		vol = (int) (ambient_level.value * l->ambient_sound_level[ambient_channel]);
 		if (vol < 8.f)
@@ -1574,7 +1675,7 @@ static void S_Update_ (void)
 	if (! shm->buffer)
 		return;
 
-// Updates DMA time
+	// Updates DMA time
 	GetSoundtime();
 
 // check to make sure that we haven't overshot
@@ -1593,6 +1694,41 @@ static void S_Update_ (void)
 	snd_metrics.last_mix_time_ms = (Sys_DoubleTime () - mix_start) * 1000.0;
 
 	SNDDMA_Submit ();
+}
+
+static qboolean S_InitAmbientChannel (channel_t *chan, sfx_t *sfx)
+{
+	sfxcache_t *sc;
+
+	if (!chan || !sfx)
+		return false;
+
+	sc = S_LoadSound (sfx);
+	if (!sc || sc->loopstart < 0)
+		return false;
+
+	chan->sfx = sfx;
+	chan->start = paintedtime;
+	chan->end = SND_CalcChannelEndTime (paintedtime, chan, sc);
+	chan->pos = 0.f;
+	chan->looping = sc->loopstart;
+	chan->base_step = 1.f;
+	chan->step = 1.f;
+	chan->spatialize = false;
+	chan->doppler = false;
+	chan->lowpass_by_distance = false;
+	chan->reverb_send = 0.f;
+	chan->lowpass_alpha = 1.f;
+	chan->lowpass_history = 0.f;
+	chan->bus_id = SOUND_BUS_AMBIENT;
+	if (chan->voice_id <= 0)
+	{
+		chan->voice_id = snd_next_voice_id++;
+		if (snd_next_voice_id <= 0)
+			snd_next_voice_id = 1;
+	}
+
+	return true;
 }
 
 void S_BlockSound (void)
@@ -1706,29 +1842,16 @@ static void S_SoundList (void)
 
 static const char *S_LegacySoundDefNameForSample (const char *name)
 {
+	size_t i;
+
 	if (!name)
 		return NULL;
 
-	if (!q_strcasecmp (name, "misc/menu1.wav"))
-		return "ui/menu_move";
-	if (!q_strcasecmp (name, "misc/menu2.wav"))
-		return "ui/menu_accept";
-	if (!q_strcasecmp (name, "misc/menu3.wav"))
-		return "ui/menu_back";
-	if (!q_strcasecmp (name, "misc/talk.wav"))
-		return "ui/talk";
-	if (!q_strcasecmp (name, "weapons/tink1.wav"))
-		return "weapons/bullet_tink";
-	if (!q_strcasecmp (name, "weapons/ric1.wav")
-		|| !q_strcasecmp (name, "weapons/ric2.wav")
-		|| !q_strcasecmp (name, "weapons/ric3.wav"))
-		return "weapons/ricochet";
-	if (!q_strcasecmp (name, "weapons/r_exp3.wav"))
-		return "weapons/rocket_explode";
-	if (!q_strcasecmp (name, "wizard/hit.wav"))
-		return "monsters/wizard_hit";
-	if (!q_strcasecmp (name, "hknight/hit.wav"))
-		return "monsters/hellknight_hit";
+	for (i = 0; i < countof (snd_legacy_sounddef_maps); i++)
+	{
+		if (!q_strcasecmp (name, snd_legacy_sounddef_maps[i].sample_name))
+			return snd_legacy_sounddef_maps[i].def_name;
+	}
 
 	return NULL;
 }
@@ -1761,10 +1884,11 @@ void S_LocalSound (const char *name)
 		params.lowpass_by_distance = false;
 		params.reverb_send = 0.f;
 		params.bus_id = SOUND_BUS_UI;
+		params.priority = 192;
 		params.delay_ms = 0;
 		params.start_offset_ms = 0;
 
-		if (Audio_PlayDef (def_name, &params))
+		if (S_TryPlayLegacySoundDef (def_name, &params))
 			return;
 	}
 

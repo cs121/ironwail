@@ -324,7 +324,6 @@ static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer)
 	sfxcache_t	*sc;
 
 //	Con_Printf ("loading %s\n",namebuffer);
-
 	data = COM_LoadMallocFile (namebuffer, NULL);
 
 	if (!data)

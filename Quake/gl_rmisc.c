@@ -176,6 +176,25 @@ static qboolean r_gl_nocolors_enabled;
 extern char r_showbboxes_filter_strings[MAXCMDLINE];
 extern qboolean r_showbboxes_filter_byindex;
 
+static void R_OIT_Compat_f (cvar_t *var)
+{
+	static qboolean warned = false;
+
+	if (!gl_vendor || strcmp (gl_vendor, "Intel"))
+		return;
+
+	if (var->value <= 0.f)
+		return;
+
+	if (!warned)
+	{
+		Con_Warning ("Intel driver detected: forcing r_oit 0 for compatibility\n");
+		warned = true;
+	}
+
+	Cvar_SetValueQuick (var, 0.f);
+}
+
 /*
 ====================
 R_ShowbboxesFilter_f
@@ -540,6 +559,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_pos);
 	Cvar_RegisterVariable (&r_alphasort);
 	Cvar_RegisterVariable (&r_oit);
+	Cvar_SetCallback (&r_oit, R_OIT_Compat_f);
 	Cvar_RegisterVariable (&r_dither);
 	Cvar_RegisterVariable (&r_dof);
         Cvar_RegisterVariable (&r_dof_autofocus);
@@ -1425,6 +1445,38 @@ void GL_DeleteFrameResources (void)
 
 /*
 ====================
+GL_WaitFrameFence
+====================
+*/
+static void GL_WaitFrameFence (GLsync *fence, const char *label)
+{
+	GLuint64 timeout = 1ull * 1000 * 1000 * 1000; // 1 second
+	GLenum result;
+
+	if (!*fence)
+		return;
+
+	result = GL_ClientWaitSyncFunc (*fence, GL_SYNC_FLUSH_COMMANDS_BIT, timeout);
+	if (result == GL_TIMEOUT_EXPIRED)
+	{
+		Con_DWarning ("GL_WaitFrameFence: %s fence wait timed out, forcing glFinish\n", label);
+		glFinish ();
+		result = GL_ClientWaitSyncFunc (*fence, GL_SYNC_FLUSH_COMMANDS_BIT, 0);
+	}
+
+	if (result == GL_WAIT_FAILED)
+		Sys_Error ("GL_WaitFrameFence: %s wait failed (0x%04X)", label, glGetError ());
+	if (result == GL_TIMEOUT_EXPIRED)
+		Sys_Error ("GL_WaitFrameFence: %s fence remained unsignaled after glFinish", label);
+	if (result != GL_CONDITION_SATISFIED && result != GL_ALREADY_SIGNALED)
+		Sys_Error ("GL_WaitFrameFence: %s sync failed (0x%04X)", label, result);
+
+	GL_DeleteSyncFunc (*fence);
+	*fence = NULL;
+}
+
+/*
+====================
 GL_AcquireFrameResources
 ====================
 */
@@ -1434,22 +1486,8 @@ void GL_AcquireFrameResources (void)
 	frameres_t *frame = &frameres[frameres_idx];
 	size_t i, num_garbage_bufs;
 
-	if (prev_frame->fence)
-		GL_WaitSyncFunc (prev_frame->fence, 0, GL_TIMEOUT_IGNORED);
-
-	if (frame->fence)
-	{
-		GLuint64 timeout = 1ull * 1000 * 1000 * 1000; // 1 second
-		GLenum result = GL_ClientWaitSyncFunc (frame->fence, GL_SYNC_FLUSH_COMMANDS_BIT, timeout);
-		if (result == GL_TIMEOUT_EXPIRED)
-			glFinish ();
-		else if (result == GL_WAIT_FAILED)
-			Sys_Error ("GL_AcquireFrameResources: wait failed (0x%04X)", glGetError ());
-		else if (result != GL_CONDITION_SATISFIED && result != GL_ALREADY_SIGNALED)
-			Sys_Error ("GL_AcquireFrameResources: sync failed (0x%04X)", result);
-		GL_DeleteSyncFunc (frame->fence);
-		frame->fence = NULL;
-	}
+	GL_WaitFrameFence (&prev_frame->fence, "previous frame");
+	GL_WaitFrameFence (&frame->fence, "current frame");
 
 	num_garbage_bufs = VEC_SIZE (frame->garbage);
 	for (i = 0; i < num_garbage_bufs; i++)
