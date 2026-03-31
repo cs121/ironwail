@@ -1041,8 +1041,16 @@ audio_voice_handle_t Audio_PlayDefById (sound_def_id_t id, const audio_play_para
 		if (layer->sample_count <= 0)
 			continue;
 
-		if (layer->chance < 1.f && SND_RandomRange (0.f, 1.f) > layer->chance)
+		/* Edge-case intent: chance <= 0 never plays, chance >= 1 always plays. */
+		if (layer->chance <= 0.f)
 			continue;
+		if (layer->chance < 1.f)
+		{
+			const float chance_roll = (float) rand () / ((float) RAND_MAX + 1.f); /* [0, 1) */
+
+			if (!(chance_roll < layer->chance))
+				continue;
+		}
 
 		sample_index = (layer->sample_count == 1) ? 0 : rand () % layer->sample_count;
 		sample_sfx = layer->samples[sample_index].sfx;
