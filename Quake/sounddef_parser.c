@@ -1,6 +1,7 @@
 #include "quakedef.h"
 #include "sounddef.h"
 #include "miniz.h"
+#include <math.h>
 
 typedef struct sounddef_parse_state_s
 {
@@ -21,6 +22,7 @@ static const char *SoundDef_SkipBlockContents (const char *cursor, sounddef_pars
 static qboolean SoundDef_ParseBoolToken (const char *token, qboolean *out_value);
 static qboolean SoundDef_ParseIntToken (const char *token, int *out_value);
 static qboolean SoundDef_ParseFloatToken (const char *token, float *out_value);
+static qboolean SoundDef_IsFinite (float value);
 static qboolean SoundDef_IsTopLevelLayerKey (const char *token);
 static qboolean SoundDef_ParseLayerProperty (const char *key, sound_def_layer_desc_t *layer, const char **cursor, sounddef_parse_state_t *state);
 static qboolean SoundDef_ParseDefProperty (const char *key, sound_def_desc_t *desc, const char **cursor, sounddef_parse_state_t *state);
@@ -222,9 +224,20 @@ static qboolean SoundDef_ParseFloatToken (const char *token, float *out_value)
 	value = (float) strtod (token, &end);
 	if (!end || *end)
 		return false;
+	if (!SoundDef_IsFinite (value))
+		return false;
 
 	*out_value = value;
 	return true;
+}
+
+static qboolean SoundDef_IsFinite (float value)
+{
+#if defined(_MSC_VER)
+	return _finite (value) != 0;
+#else
+	return isfinite (value);
+#endif
 }
 
 static qboolean SoundDef_IsTopLevelLayerKey (const char *token)
