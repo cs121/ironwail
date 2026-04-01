@@ -8,13 +8,13 @@ cd /d "%BASE%"
 set "SLN=Windows\VisualStudio\ironwail.sln"
 set "VCXPROJ=Windows\VisualStudio\ironwail.vcxproj"
 
-set "SRC_SHADERS=Quake\shaders"
-set "SRC_GAME=Quake\game"
+set "SRC_ID1_ASSET_ROOT=Quake"
+set "ID1_ASSET_DIRS=game shaders sounddefs materials particles music"
+set "ROOT_ASSET_FILES=ironwail.pak"
 
 REM Deploy-Ziel: FIX nach C:\Quake\rerelease
 set "DST_DIR=C:\Quake\rerelease"
-set "DST_SHADERS=%DST_DIR%\id1\shaders"
-set "DST_GAME=%DST_DIR%\id1\game"
+set "DST_ID1_ASSET_ROOT=%DST_DIR%\id1"
 
 REM Release-EXE Pfad relativ
 set "SRC_EXE=Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exe"
@@ -101,7 +101,7 @@ call :log "[INFO] MSBuild-Version:"
 "%MSBUILD%" -version >> "%DIAG_FILE%" 2>&1
 for /f "usebackq delims=" %%v in (`"%MSBUILD%" -version 2^>nul`) do call :log "        %%v"
 
-call :log "[1/5] Clean + Build \"%SLN%\" (Release x64)..."
+call :log "[1/6] Clean + Build \"%SLN%\" (Release x64)..."
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$ErrorActionPreference='Stop';" ^
   "& '%MSBUILD%' '%SLN%' '/t:Clean;Build' '/p:Configuration=Release;Platform=x64' '/m' '/v:m' 2>&1 | Tee-Object -FilePath '%LOG_FILE%'" 
@@ -114,13 +114,11 @@ if errorlevel 1 (
 )
 
 REM ========== Ordner anlegen ==========
-call :log "[2/5] Stelle Deploy-Ordner sicher..."
-if not exist "%DST_DIR%\id1" mkdir "%DST_DIR%\id1"
-if not exist "%DST_SHADERS%" mkdir "%DST_SHADERS%"
-if not exist "%DST_GAME%" mkdir "%DST_GAME%"
+call :log "[2/6] Stelle Deploy-Ordner sicher..."
+if not exist "%DST_ID1_ASSET_ROOT%" mkdir "%DST_ID1_ASSET_ROOT%"
 
 REM ========== EXE ==========
-call :log "[3/5] Kopiere Executable..."
+call :log "[3/6] Kopiere Executable..."
 if not exist "%SRC_EXE%" (
   call :log "[ERROR] EXE fehlt: %SRC_EXE%"
   exit /b 4
@@ -132,41 +130,58 @@ if errorlevel 1 (
 )
 
 REM ========== DLLs (optional) ==========
-call :log "[4/5] Kopiere Runtime-DLLs (optional)..."
+call :log "[4/6] Kopiere Runtime-DLLs (optional)..."
 if exist "%SRC_CODECS%\libFLAC-8.dll" copy /Y "%SRC_CODECS%\*.dll" "%DST_DIR%" >nul
 if exist "%SRC_SDL2%\SDL2.dll" copy /Y "%SRC_SDL2%\SDL2.dll" "%DST_DIR%" >nul
 if exist "%SRC_CURL%\libcurl.dll" copy /Y "%SRC_CURL%\libcurl.dll" "%DST_DIR%" >nul
 if exist "%SRC_ZLIB%\zlib1.dll" copy /Y "%SRC_ZLIB%\zlib1.dll" "%DST_DIR%" >nul
 
-REM ========== Shader / Game ==========
-call :log "[5/5] Kopiere Shader..."
-robocopy "%SRC_SHADERS%" "%DST_SHADERS%" *.* /E /R:1 /W:1 >nul
-if errorlevel 16 (
-  call :log "[ERROR] Robocopy Shader: Schwerer Fehler"
-  exit /b 16
-)
-if errorlevel 8 (
-  call :log "[ERROR] Robocopy Shader: Kopierfehler"
-  exit /b 8
+REM ========== Runtime Assets ==========
+call :log "[5/6] Kopiere id1-Assets..."
+for %%D in (%ID1_ASSET_DIRS%) do (
+  call :copy_tree "%SRC_ID1_ASSET_ROOT%\%%D" "%DST_ID1_ASSET_ROOT%\%%D" "id1/%%D"
+  if errorlevel 1 exit /b !errorlevel!
 )
 
-call :log "[6/6] Kopiere Game..."
-if not exist "%SRC_GAME%" (
-  call :log "[WARN] Game-Ordner fehlt, ueberspringe: %SRC_GAME%"
-  goto :done
-)
-robocopy "%SRC_GAME%" "%DST_GAME%" *.* /E /R:1 /W:1 >nul
-if errorlevel 16 (
-  call :log "[ERROR] Robocopy Game: Schwerer Fehler"
-  exit /b 16
-)
-if errorlevel 8 (
-  call :log "[ERROR] Robocopy Game: Kopierfehler"
-  exit /b 8
+call :log "[6/6] Kopiere Root-Assets..."
+for %%F in (%ROOT_ASSET_FILES%) do (
+  call :copy_file "Quake\%%F" "%DST_DIR%\%%F" "%%F"
+  if errorlevel 1 exit /b !errorlevel!
 )
 
 :done
 call :log "[OK] Fertig. Deploy unter: %DST_DIR%"
+exit /b 0
+
+:copy_tree
+if not exist "%~1" (
+  call :log "[WARN] Asset-Ordner fehlt, ueberspringe: %~1"
+  exit /b 0
+)
+if not exist "%~2" mkdir "%~2"
+call :log "[INFO] Kopiere %~3..."
+robocopy "%~1" "%~2" *.* /E /R:1 /W:1 >nul
+if errorlevel 16 (
+  call :log "[ERROR] Robocopy %~3: Schwerer Fehler"
+  exit /b 16
+)
+if errorlevel 8 (
+  call :log "[ERROR] Robocopy %~3: Kopierfehler"
+  exit /b 8
+)
+exit /b 0
+
+:copy_file
+if not exist "%~1" (
+  call :log "[WARN] Asset-Datei fehlt, ueberspringe: %~1"
+  exit /b 0
+)
+call :log "[INFO] Kopiere %~3..."
+copy /Y "%~1" "%~2" >nul
+if errorlevel 1 (
+  call :log "[ERROR] Kopieren von %~3 fehlgeschlagen."
+  exit /b 5
+)
 exit /b 0
 
 :assert_exists

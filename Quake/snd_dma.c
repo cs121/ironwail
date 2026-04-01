@@ -31,6 +31,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 static void S_Play (void);
 static void S_PlayVol (void);
+static void S_PlayDef_f (void);
 static void S_SoundList (void);
 static void S_ListActiveVoices_f (void);
 static void S_ListDefUsage_f (void);
@@ -423,6 +424,7 @@ void S_Init (void)
 
 	Cmd_AddCommand("play", S_Play);
 	Cmd_AddCommand("playvol", S_PlayVol);
+	Cmd_AddCommand("snd_play_def", S_PlayDef_f);
 	Cmd_AddCommand("stopsound", S_StopAllSoundsC);
 	Cmd_AddCommand("soundlist", S_SoundList);
 	Cmd_AddCommand("soundinfo", S_SoundInfo_f);
@@ -1822,6 +1824,49 @@ static void S_PlayVol (void)
 		S_StartSound(hash++, 0, sfx, listener_origin, vol, 1.0);
 		i += 2;
 	}
+}
+
+static void S_PlayDef_f (void)
+{
+	audio_play_params_t params;
+	audio_voice_handle_t handle;
+	float distance = 256.f;
+	float speed = 0.f;
+
+	if (Cmd_Argc () < 2 || Cmd_Argc () > 4)
+	{
+		Con_Printf ("snd_play_def <name> [distance] [speed]\n");
+		Con_Printf ("  distance: units in front of listener (default 256)\n");
+		Con_Printf ("  speed: source velocity along listener forward, negative approaches (default 0)\n");
+		return;
+	}
+
+	if (Cmd_Argc () >= 3)
+		distance = (float) atof (Cmd_Argv (2));
+	if (Cmd_Argc () >= 4)
+		speed = (float) atof (Cmd_Argv (3));
+
+	memset (&params, 0, sizeof (params));
+	params.entnum = -1;
+	params.entchannel = 0;
+	VectorMA (listener_origin, distance, listener_forward, params.origin);
+	VectorScale (listener_forward, speed, params.velocity);
+	params.gain = 1.f;
+	params.pitch = 1.f;
+	params.attenuation = 1.f;
+	params.loop = false;
+	params.no_spatialize = false;
+	params.doppler = false;
+	params.lowpass_by_distance = false;
+	params.reverb_send = 0.f;
+	params.bus_id = SOUND_BUS_SFX;
+	params.priority = 0;
+	params.delay_ms = 0;
+	params.start_offset_ms = 0;
+
+	handle = Audio_PlayDef (Cmd_Argv (1), &params);
+	if (!handle)
+		Con_Printf ("snd_play_def: '%s' did not start a voice\n", Cmd_Argv (1));
 }
 
 static void S_SoundList (void)
