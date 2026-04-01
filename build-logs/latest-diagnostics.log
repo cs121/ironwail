@@ -3,18 +3,19 @@ Build + Deploy Ironwail (Release x64)
 ==========================================
 [INFO] Repo-Basis: C:\projects\ironwail\
 [INFO] Build-Log: C:\projects\ironwail\build-logs\latest-build.log
+[INFO] Diagnose-Log: C:\projects\ironwail\build-logs\latest-diagnostics.log
 [INFO] Arbeitsverzeichnis: C:\projects\ironwail
 [INFO] Solution-Datei gefunden: Windows\VisualStudio\ironwail.sln
 [INFO] Projektdatei gefunden: Windows\VisualStudio\ironwail.vcxproj
 [INFO] Sammle Diagnosedaten...
 ==== Environment ====
-DATE=31.03.2026
-TIME=13:43:50,45
+DATE=01.04.2026
+TIME=13:01:29,53
 CD=C:\projects\ironwail
 PROCESSOR_ARCHITECTURE=AMD64
 VisualStudioVersion=
 VSINSTALLDIR=
-PATH=C:\Program Files (x86)\Common Files\Oracle\Java\java8path;C:\Program Files (x86)\Common Files\Oracle\Java\javapath;C:\Program Files\Microsoft\jdk-25.0.1.8-hotspot\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\Git\cmd;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Program Files\dotnet\;C:\Users\Chris\AppData\Local\Microsoft\WindowsApps
+PATH=C:\Program Files (x86)\Common Files\Oracle\Java\java8path;C:\Program Files (x86)\Common Files\Oracle\Java\javapath;C:\Program Files\Microsoft\jdk-25.0.1.8-hotspot\bin;C:\WINDOWS\system32;C:\WINDOWS;C:\WINDOWS\System32\Wbem;C:\WINDOWS\System32\WindowsPowerShell\v1.0\;C:\WINDOWS\System32\OpenSSH\;C:\Program Files\Git\cmd;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Users\Chris\AppData\Local\Microsoft\WindowsApps;
 
 ==== Toolset hints from Windows\VisualStudio\ironwail.vcxproj ====
 25:    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
@@ -90,6 +91,8 @@ properties_setupEngineFilePath: C:\Program Files (x86)\Microsoft Visual Studio\I
 [INFO] MSBuild-Version:
 MSBuild-Version 18.4.0+6e61e96ac für .NET Framework
 18.4.0.7901
+        MSBuild-Version 18.4.0+6e61e96ac für .NET Framework
+        18.4.0.7901
 [1/6] Clean + Build \"Windows\VisualStudio\ironwail.sln\" (Release x64)...
 [2/6] Stelle Deploy-Ordner sicher...
 [3/6] Kopiere Executable...
