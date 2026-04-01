@@ -969,7 +969,8 @@ static audio_voice_handle_t SND_PlaySfxInternal (sfx_t *sfx, const audio_play_pa
 			if (skip > 0)
 				skip = rand() % skip;
 			target_chan->pos += (float) skip;
-			target_chan->end = SND_CalcChannelEndTime (paintedtime, target_chan, sc);
+			// Recalculate from the channel's actual start so delayed voices keep their delay.
+			target_chan->end = SND_CalcChannelEndTime (target_chan->start, target_chan, sc);
 			break;
 		}
 	}
