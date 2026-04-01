@@ -680,6 +680,7 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 qboolean R_SampleLightmapAtPoint(const vec3_t pos, vec3_t out_rgb);
 qboolean R_SampleLightmapAndDeluxemapAtPoint(const vec3_t pos, vec3_t out_rgb, vec3_t out_dir);
 qboolean R_LightgridEnabled (void);
+void R_SampleReceiverLighting (const vec3_t pos, vec3_t out_color);
 void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao);
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t lightcolor);
 void R_AccumulateEntityDLights (const vec3_t pos, vec3_t out_color, vec3_t out_dir);

@@ -774,6 +774,8 @@ void R_FlushAliasInstances (qboolean showtris)
 		mode = r_softemu_mdl_warp.value > 0.f ? ALIASSHADER_NOPERSP : ALIASSHADER_STANDARD;
 		break;
 	}
+	if (mode == ALIASSHADER_NOPERSP && gl_vendor && !strcmp (gl_vendor, "Intel"))
+		mode = ALIASSHADER_STANDARD;
 	GL_UseProgram (glprogs.alias[oit][mode][alphatest][md5]);
 	R_Shadow_ApplyAliasReceiverUniforms (glprogs.alias[oit][mode][alphatest][md5]);
 

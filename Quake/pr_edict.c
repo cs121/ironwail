@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_edict.c -- entity dictionary
 
 #include "quakedef.h"
+#include "phys_interact.h"
 
 extern edict_t **bbox_linked;
 
@@ -185,6 +186,7 @@ void ED_ClearEdict (edict_t *e)
 		SV_UnlinkEdict (e);
 	else
 		ED_RemoveFromFreeList (e);
+	PhysInteract_OnEdictCleared (e);
 	memset (&e->v, 0, qcvm->progs->entityfields * 4);
 }
 
@@ -239,6 +241,7 @@ void ED_Free (edict_t *ed)
 {
 	SV_UnlinkEdict (ed);		// unlink from world bsp
 	ED_AddToFreeList (ed);
+	PhysInteract_OnEdictFreed (ed);
 
 	ed->v.model = 0;
 	ed->v.takedamage = 0;
@@ -1341,6 +1344,7 @@ const char *ED_ParseEdict (const char *data, edict_t *ent)
 	// clear it
 	if (ent != qcvm->edicts)	// hack
 		memset (&ent->v, 0, qcvm->progs->entityfields * 4);
+	PhysInteract_BeginParseEntity (ent);
 
 	// go through all the dictionary pairs
 	while (1)
@@ -1393,6 +1397,8 @@ const char *ED_ParseEdict (const char *data, edict_t *ent)
 		// and are immediately discarded by quake
 		if (keyname[0] == '_')
 			continue;
+
+		PhysInteract_ParseEntityKey (ent, keyname, com_token);
 
 		//johnfitz -- hack to support .alpha even when progs.dat doesn't know about it
 		if (!strcmp(keyname, "alpha"))
@@ -1575,6 +1581,8 @@ void ED_LoadFromFile (const char *data)
 
 		pr_global_struct->self = EDICT_TO_PROG(ent);
 		PR_ExecuteProgram (func - qcvm->functions);
+		if (!ent->free)
+			PhysInteract_OnEntitySpawned (ent);
 	}
 
 	Con_DPrintf ("%i entities inhibited\n", inhibit);
@@ -1795,6 +1803,11 @@ static void PR_MergeEngineFieldDefs (void)
 		//{"drawflags",		ev_float},	//hexen2 compat
 		//{"abslight",		ev_float},	//hexen2 compat
 		{"colormod",		ev_vector},	//lighting tints
+		{"physics",			ev_float},	//engine-side lightweight interaction opt-in
+		{"mass",			ev_float},	//engine-side interactive physics mass
+		{"friction",		ev_float},	//engine-side interactive physics friction
+		{"restitution",		ev_float},	//engine-side interactive physics restitution
+		{"phys_type",		ev_string},	//engine-side interaction preset id
 		//{"glowmod",		ev_vector},	//fullbright tints
 		//{"fatness",		ev_float},	//bloated rendering...
 		//{"gravitydir",	ev_vector},	//says which direction gravity should act for this ent...

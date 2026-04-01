@@ -48,171 +48,84 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 	return (curr_ndc - prev_ndc) * 0.5;
 }
 
-vec3 hash(vec3 p)
+float hash1(float n)
 {
-	vec3 q = vec3(
-		dot(p, vec3(127.1, 311.7, 109.2)),
-		dot(p, vec3(269.5, 183.3, 432.6)),
-		dot(p, vec3(419.2, 371.9, 304.4))
-	);
-	return fract(sin(q) * 43758.5453);
+	return fract(sin(n) * 43758.5453123);
 }
 
-float noised(vec3 x)
+vec2 hash2(float n)
 {
-	vec3 i = floor(x);
-	vec3 f = fract(x);
-	vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-	vec3 ga = hash(i + vec3(0.0, 0.0, 0.0));
-	vec3 gb = hash(i + vec3(1.0, 0.0, 0.0));
-	vec3 gc = hash(i + vec3(0.0, 1.0, 0.0));
-	vec3 gd = hash(i + vec3(1.0, 1.0, 0.0));
-	vec3 ge = hash(i + vec3(0.0, 0.0, 1.0));
-	vec3 gf = hash(i + vec3(1.0, 0.0, 1.0));
-	vec3 gg = hash(i + vec3(0.0, 1.0, 1.0));
-	vec3 gh = hash(i + vec3(1.0, 1.0, 1.0));
-	float va = dot(ga, f - vec3(0.0, 0.0, 0.0));
-	float vb = dot(gb, f - vec3(1.0, 0.0, 0.0));
-	float vc = dot(gc, f - vec3(0.0, 1.0, 0.0));
-	float vd = dot(gd, f - vec3(1.0, 1.0, 0.0));
-	float ve = dot(ge, f - vec3(0.0, 0.0, 1.0));
-	float vf = dot(gf, f - vec3(1.0, 0.0, 1.0));
-	float vg = dot(gg, f - vec3(0.0, 1.0, 1.0));
-	float vh = dot(gh, f - vec3(1.0, 1.0, 1.0));
-
-	return va
-		+ u.x * (vb - va)
-		+ u.y * (vc - va)
-		+ u.z * (ve - va)
-		+ u.x * u.y * (va - vb - vc + vd)
-		+ u.y * u.z * (va - vc - ve + vg)
-		+ u.z * u.x * (va - vb - ve + vf)
-		+ u.x * u.y * u.z * (-va + vb + vc - vd + ve - vf - vg + vh);
+	return vec2(hash1(n), hash1(n + 17.371));
 }
 
-float fbm(vec3 x)
+mat2 rot2(float a)
 {
-	float a = 1.0;
-	float t = 0.0;
-
-	for (int i = 0; i < 7; ++i)
-	{
-		t += a * noised(x);
-		x *= 2.0;
-		a *= 0.5;
-	}
-
-	return t;
+	float c = cos(a);
+	float s = sin(a);
+	return mat2(c, -s, s, c);
 }
 
 void main()
 {
 	vec2 uv = in_uv * 2.0 - 1.0;
 	float r2 = dot(uv, uv);
-	float a = sin(Time * 0.10) + cos(Time * 0.0331) * 3.14;
-	float c = cos(a);
-	float s = sin(a);
-	mat2 R = mat2(c, s, -s, c);
-	vec2 warp_uv = uv;
+	vec2 swirl_uv;
 	vec3 color = vec3(0.0);
-	vec3 dots = vec3(0.0);
-	vec3 final_color;
-	float t;
 	float alpha;
 
-	warp_uv += vec2(-uv.y, uv.x) * (0.12 * sin(10.0 * length(uv) - Time * 2.2));
-	warp_uv += 0.055 * vec2(
-		sin(uv.y * 12.0 + Time * 1.8),
-		cos(uv.x * 11.0 - Time * 1.6)
+	swirl_uv = rot2(0.12 * sin(Time * 0.45)) * uv;
+	swirl_uv += 0.025 * vec2(
+		sin(uv.y * 8.0 + Time * 0.9),
+		cos(uv.x * 7.0 - Time * 0.8)
 	);
 
-	{
-		vec3 ro = vec3(0.0, 0.0, 3.0 + 2.0 * sin(Time * 0.5));
-		vec3 rd = normalize(vec3(warp_uv, -2.0));
-
-		ro.xy *= R;
-		rd.xy *= R;
-		ro.zx *= R;
-		rd.zx *= R;
-
-		t = 0.15 * fract(Time * 61.123 + r2);
-
-		for (int i = 0; i < 20; ++i)
-		{
-			vec3 p = rd * t + ro;
-			vec3 q = p;
-			float Td = Time - length(p) * 0.15;
-
-			for (float f = 0.08; f < 8.0; f += f)
-			{
-				p.xy *= R;
-				p = sin(p * 0.2) * 4.25;
-				p += sin(Td / f * 0.6 + p.xzy / f) * f * 0.07;
-				p.zx *= R;
-				p /= dot(p, p) + 0.08;
-			}
-
-			{
-				float sdf = max(0.99 - length(p), abs(fbm(p) - 0.25));
-				float dt;
-				vec3 k;
-				vec3 cmap;
-				float kernel;
-
-				sdf = max(sdf, -3.8 + length(q));
-				dt = abs(sdf) * 0.44 + 0.0035;
-				t += dt;
-
-				k = 3.14 * sdf + vec3(0.375, 1.05, 1.4);
-				cmap = 0.5 + 0.5 * cos(k * k);
-				kernel = tanh(0.003 / dt);
-
-				color += cmap * kernel;
-				color += vec3(1.0, 3.0, 2.0) * (0.0012 / dot(q, q));
-			}
-		}
-	}
-
-	for (int i = 0; i < 10; ++i)
+	for (int i = 0; i < 12; ++i)
 	{
 		float fi = float(i);
-		float ang = fi * 1.723 + sin(Time * 0.32 + fi * 0.71) * 0.55;
-		float rad = 0.12 + 0.34 * fract(sin(fi * 19.37) * 43758.5453);
-		vec2 center = vec2(cos(ang), sin(ang)) * rad;
-		float d;
-		float blob;
+		vec2 seed = hash2(fi * 11.173);
+		float orbit = Time * (0.23 + 0.09 * seed.x) + 6.2831853 * seed.y;
+		float drift = Time * (0.41 + 0.15 * hash1(fi * 5.91));
+		float radius = 0.10 + 0.58 * hash1(fi * 9.17);
+		float depth = 0.55 + 0.45 * hash1(fi * 13.7);
+		float size = mix(0.030, 0.085, hash1(fi * 3.27)) / depth;
+		float streak = mix(0.9, 1.6, hash1(fi * 15.41));
+		vec2 center = vec2(cos(orbit), sin(orbit)) * radius;
+		vec2 drift_dir = normalize(vec2(seed.x - 0.5, seed.y - 0.5) + vec2(0.0001, 0.0));
+		vec2 d;
+		float core;
+		float halo;
 		float flicker;
-		vec3 tint;
+		float particle;
 
-		center += 0.075 * vec2(
-			sin(Time * (1.2 + 0.07 * fi) + fi * 2.1),
-			cos(Time * (1.5 + 0.05 * fi) + fi * 1.3)
-		);
+		center += drift_dir * sin(drift + fi) * (0.08 / depth);
+		center += vec2(
+			sin(Time * (0.55 + 0.07 * fi) + fi * 1.91),
+			cos(Time * (0.48 + 0.05 * fi) + fi * 2.37)
+		) * (0.035 / depth);
 
-		d = length(warp_uv - center);
-		blob = exp(-28.0 * d * d);
-		flicker = 0.65 + 0.35 * sin(Time * (3.0 + fi * 0.35) + fi * 4.13);
-		tint = mix(vec3(0.85, 0.9, 1.0), vec3(1.0, 1.0, 1.0), fract(fi * 0.37));
-		dots += tint * blob * flicker;
+		d = swirl_uv - center;
+		d.x *= streak;
+		core = exp(-dot(d, d) / max(size * size, 1e-4));
+		halo = exp(-dot(d, d) / max((size * 2.8) * (size * 2.8), 1e-4));
+		flicker = 0.70 + 0.30 * sin(Time * (2.2 + seed.x * 2.0) + fi * 4.1);
+		particle = (core + 0.35 * halo) * depth * flicker;
+		color += vec3(particle);
 	}
 
-	final_color = 1.0 - exp(-1.15 * sqrt(max(color, 0.0)));
-	final_color = mix(vec3(dot(final_color, vec3(0.333))), final_color, 0.25);
-	final_color *= vec3(0.45, 0.48, 0.5);
-	final_color += dots * 0.9;
-	final_color *= 1.0 - r2 * 0.23;
-	final_color *= 0.58;
-	final_color += vec3(0.01, 0.012, 0.015) * (1.0 - smoothstep(0.0, 1.0, r2));
+	color *= 0.82;
+	color *= 1.0 - smoothstep(0.55, 1.20, r2);
+	color += vec3(0.02) * (1.0 - smoothstep(0.0, 0.75, r2));
+	color = min(color, vec3(1.0));
 
 	{
 		float fog = exp2(-abs(Fog.w) * dot(in_pos - EyePos, in_pos - EyePos));
 		fog = clamp(fog, 0.0, 1.0);
-		alpha = clamp(max(max(final_color.r, final_color.g), final_color.b) * 1.15, 0.0, 1.0);
+		alpha = clamp(max(max(color.r, color.g), color.b) * 1.1, 0.0, 1.0);
 		alpha *= in_alpha * fog;
-		final_color = mix(Fog.rgb, final_color, fog);
+		color = mix(Fog.rgb, color, fog);
 	}
 
-	OUT_COLOR = vec4(final_color, alpha);
+	OUT_COLOR = vec4(color, alpha);
 
 #if !OIT
 	{

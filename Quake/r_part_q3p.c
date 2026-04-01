@@ -75,6 +75,11 @@ static q3p_particlevert_t *q3p_partverts;
 static int q3p_numdrawitems;
 static int q3p_numpartverts;
 
+static GLubyte Q3P_ParticleLitByte (GLubyte value, float light)
+{
+	return (GLubyte)CLAMP (0.f, floorf ((float)value * light + 0.5f), 255.f);
+}
+
 #define Q3P_GPU_LOCAL_SIZE 64
 
 typedef struct q3p_particle_gpu_s {
@@ -1727,6 +1732,7 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 			q3p_drawitem_t *drawitem = &q3p_drawitems[i];
 			q3p_particle_t *p = &q3p_particles[q3p_drawitems[i].particle_index];
 			q3p_particlevert_t *v;
+			vec3_t particle_light;
 			const GLubyte *c = showtris ? white : (const GLubyte *)&d_8to24table[p->color & 0xff];
 			const q3p_material_cache_entry_t *entry = drawitem->material_entry;
 
@@ -1758,6 +1764,13 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 			v->color[0] = c[0];
 			v->color[1] = c[1];
 			v->color[2] = c[2];
+			if (!showtris)
+			{
+				R_SampleReceiverLighting (p->org, particle_light);
+				v->color[0] = Q3P_ParticleLitByte (v->color[0], particle_light[0]);
+				v->color[1] = Q3P_ParticleLitByte (v->color[1], particle_light[1]);
+				v->color[2] = Q3P_ParticleLitByte (v->color[2], particle_light[2]);
+			}
 			v->color[3] = (GLubyte)(CLAMP (0.f, p->alpha, 1.f) * 255.f);
 		}
 

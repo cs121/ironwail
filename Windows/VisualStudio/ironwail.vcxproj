@@ -311,6 +311,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\pr_cmds.c" />
     <ClCompile Include="..\..\Quake\pr_edict.c" />
     <ClCompile Include="..\..\Quake\pr_exec.c" />
+    <ClCompile Include="..\..\Quake\phys_interact.c" />
     <ClCompile Include="..\..\Quake\quakedef.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">quakedef.h</PrecompiledHeaderFile>
@@ -428,6 +429,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\modelgen.h" />
     <ClInclude Include="..\..\Quake\net.h" />
     <ClInclude Include="..\..\Quake\net_defs.h" />
+    <ClInclude Include="..\..\Quake\phys_interact.h" />
     <ClInclude Include="..\..\Quake\net_dgrm.h" />
     <ClInclude Include="..\..\Quake\net_loop.h" />
     <ClInclude Include="..\..\Quake\net_sys.h" />

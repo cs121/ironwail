@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_phys.c
 
 #include "quakedef.h"
+#include "phys_interact.h"
 
 /*
 
@@ -861,6 +862,8 @@ void SV_WalkMove (edict_t *ent)
 	VectorCopy (ent->v.velocity, oldvel);
 
 	clip = SV_FlyMove (ent, host_frametime, &steptrace);
+	if (clip & 2)
+		PhysInteract_PlayerContactPush (ent, steptrace.ent, oldvel, steptrace.plane.normal);
 
 	if ( !(clip & 2) )
 		return;		// move didn't block on a step
@@ -898,6 +901,8 @@ void SV_WalkMove (edict_t *ent)
 	ent->v. velocity[1] = oldvel[1];
 	ent->v. velocity[2] = 0;
 	clip = SV_FlyMove (ent, host_frametime, &steptrace);
+	if (clip & 2)
+		PhysInteract_PlayerContactPush (ent, steptrace.ent, oldvel, steptrace.plane.normal);
 
 // check for stuckness, possibly due to the limited precision of floats
 // in the clipping hulls
@@ -1247,6 +1252,8 @@ void SV_Physics (void)
 	else
 	  entity_cap = qcvm->num_edicts;
 
+	PhysInteract_BeginFrame ();
+
 	//for (i=0 ; i<sv.num_edicts ; i++, ent = NEXT_EDICT(ent))
 	for (i=0 ; i<entity_cap ; i++, ent = NEXT_EDICT(ent))
 	{
@@ -1260,6 +1267,8 @@ void SV_Physics (void)
 
 		if (i > 0 && i <= svs.maxclients)
 			SV_Physics_Client (ent, i);
+		else if (PhysInteract_ShouldHandleEntity (ent, i))
+			;
 		else if (ent->v.movetype == MOVETYPE_PUSH)
 			SV_Physics_Pusher (ent);
 		else if (ent->v.movetype == MOVETYPE_NONE)
@@ -1289,6 +1298,8 @@ void SV_Physics (void)
 		}
 	//johnfitz
 	}
+
+	PhysInteract_Frame ();
 
 	if (pr_global_struct->force_retouch)
 		pr_global_struct->force_retouch--;

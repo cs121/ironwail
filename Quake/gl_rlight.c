@@ -665,6 +665,8 @@ void R_LightgridLighting (const vec3_t pos, vec3_t out_color, float *out_ao)
 R_AddDynamicLights_Lightgrid
 ==================
 */
+static void R_ClampSampleColor(vec3_t color);
+
 void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t out_lightcolor)
 {
 	if (!r_dynamic.value)
@@ -674,6 +676,31 @@ void R_AddDynamicLights_Lightgrid (const vec3_t pos, vec3_t out_lightcolor)
 	const dlight_t *const *active = DLightPool_GetActiveList (&count);
 	if (active && count > 0)
 		R_AccumulateEntityDLightsArray (active, count, pos, out_lightcolor, NULL);
+}
+
+void R_SampleReceiverLighting (const vec3_t pos, vec3_t out_color)
+{
+	lightcache_t cache;
+	vec3_t sample_pos;
+
+	if (!out_color)
+		return;
+
+	if (r_fullbright_cheatsafe || r_lightmap_cheatsafe || !cl.worldmodel)
+	{
+		VectorSet (out_color, 1.f, 1.f, 1.f);
+		return;
+	}
+
+	memset (&cache, 0, sizeof (cache));
+	VectorCopy (pos, sample_pos);
+	R_LightPoint (cl.worldmodel, sample_pos, 0.f, &cache);
+
+	if (!cache.lightgrid_has_sample && r_dynamic.value > 0.f)
+		R_AccumulateEntityDLights (pos, lightcolor, NULL);
+
+	R_ClampSampleColor (lightcolor);
+	VectorScale (lightcolor, 1.f / 255.f, out_color);
 }
 
 

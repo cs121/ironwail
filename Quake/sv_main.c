@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sv_main.c -- server main program
 
 #include "quakedef.h"
+#include "phys_interact.h"
 #include "bot_main.h"
 
 server_t	sv;
@@ -178,6 +179,7 @@ void SV_Init (void)
 	Cvar_RegisterVariable (&sv_autoload);
 	Cvar_RegisterVariable (&sv_autosave);
 	Cvar_RegisterVariable (&sv_autosave_interval);
+	PhysInteract_Init ();
 
 	Cmd_AddCommand ("sv_protocol", &SV_Protocol_f); //johnfitz
 	Bot_Init ();
@@ -1989,6 +1991,7 @@ void SV_SpawnServer (const char *server)
 	if (!qcvm->edicts)
 		Sys_Error ("SV_SpawnServer: out of memory (%d edicts x %d bytes)", qcvm->max_edicts, qcvm->edict_size);
 	ClearLink (&qcvm->free_edicts);
+	PhysInteract_OnServerSpawned ();
 
 	sv.datagram.maxsize = sizeof(sv.datagram_buf);
 	sv.datagram.cursize = 0;

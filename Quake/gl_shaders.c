@@ -826,15 +826,15 @@ static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GL
 	name = eval;
 
 	realcount = 0;
-        for (i = 0; i < count; i++)
-        {
-                if (paths[i])
-                {
-                        char *source = GL_LoadShaderFile (paths[i]);
-                        shaders[realcount] = GL_CreateShader (types[i], source, macros, name);
-                        realcount++;
-                }
-        }
+	for (i = 0; i < count; i++)
+	{
+		if (paths[i])
+		{
+			char *source = GL_LoadShaderFile (paths[i]);
+			shaders[realcount] = GL_CreateShader (types[i], source, macros, name);
+			realcount++;
+		}
+	}
 
         program = GL_CreateProgramFromShaders (shaders, realcount, name);
 
@@ -1021,6 +1021,13 @@ GL_CreateShaders
 void GL_CreateShaders (void)
 {
 	int palettize, dither, mode, alphatest, warp, oit, md5;
+	qboolean skip_intel_oit_variants = !strcmp (gl_vendor, "Intel") && r_oit.value <= 0.f;
+	qboolean skip_intel_alias_nopersp = !strcmp (gl_vendor, "Intel");
+
+	if (skip_intel_oit_variants)
+		Con_Printf ("Intel driver detected: skipping OIT shader variants during startup\n");
+	if (skip_intel_alias_nopersp)
+		Con_Printf ("Intel driver detected: skipping alias noperspective shader variants during startup\n");
 
 	glprogs.gui = GL_CreateProgram (GLSL_PATH("gui.vert"), GLSL_PATH("gui.frag"), "gui");
 	glprogs.viewblend = GL_CreateProgram (GLSL_PATH("viewblend.vert"), GLSL_PATH("viewblend.frag"), "viewblend");
@@ -1038,10 +1045,14 @@ void GL_CreateShaders (void)
         for (mode = 0; mode < 2; mode++)
                 glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
 
-        for (oit = 0; oit < 2; oit++)
+        for (oit = 0; oit < (skip_intel_oit_variants ? 1 : 2); oit++)
                 for (dither = 0; dither < 3; dither++)
                         for (mode = 0; mode < 3; mode++)
                                 glprogs.world[oit][dither][mode] = GL_CreateProgram (GLSL_PATH("world.vert"), GLSL_PATH("world.frag"), "world|OIT %d; DITHER %d; MODE %d", oit, dither, mode);
+        if (skip_intel_oit_variants)
+                for (dither = 0; dither < 3; dither++)
+                        for (mode = 0; mode < 3; mode++)
+                                glprogs.world[1][dither][mode] = glprogs.world[0][dither][mode];
 
         for (alphatest = 0; alphatest < 2; alphatest++)
                 glprogs.world_dlight[alphatest] = GL_CreateProgram (GLSL_PATH("world_dlight.vert"), GLSL_PATH("world_dlight.frag"), "world dlight|ALPHATEST %d", alphatest);
@@ -1050,11 +1061,17 @@ void GL_CreateShaders (void)
 
 	for (dither = 0; dither < 2; dither++)
 	{
-		for (oit = 0; oit < 2; oit++)
+		for (oit = 0; oit < (skip_intel_oit_variants ? 1 : 2); oit++)
 		{
                         glprogs.water[oit][dither] = GL_CreateProgram (GLSL_PATH("water.vert"), GLSL_PATH("water.frag"), "water|OIT %d; DITHER %d", oit, dither);
                         glprogs.teleport[oit][dither] = GL_CreateProgram (GLSL_PATH("water.vert"), GLSL_PATH("teleport_fbm.frag"), "teleport fbm|OIT %d; DITHER %d", oit, dither);
                         glprogs.particles[oit][dither] = GL_CreateProgram (GLSL_PATH("particles.vert"), GLSL_PATH("particles.frag"), "particles|OIT %d; DITHER %d", oit, dither);
+		}
+		if (skip_intel_oit_variants)
+		{
+                        glprogs.water[1][dither] = glprogs.water[0][dither];
+                        glprogs.teleport[1][dither] = glprogs.teleport[0][dither];
+                        glprogs.particles[1][dither] = glprogs.particles[0][dither];
 		}
                 for (mode = 0; mode < 2; mode++)
                         glprogs.skycubemap[mode][dither] = GL_CreateProgram (GLSL_PATH("sky_cubemap.vert"), GLSL_PATH("sky_cubemap.frag"), "sky cubemap|ANIM %d; DITHER %d", mode, dither);
@@ -1066,12 +1083,23 @@ void GL_CreateShaders (void)
 	glprogs.decal_instanced = GL_CreateProgram (GLSL_PATH("decal_instanced.vert"), GLSL_PATH("decal.frag"), "decal instanced");
         glprogs.skystencil = GL_CreateProgram (GLSL_PATH("skystencil.vert"), NULL, "sky stencil");
 
-        for (oit = 0; oit < 2; oit++)
-                for (mode = 0; mode < 3; mode++)
+        for (oit = 0; oit < (skip_intel_oit_variants ? 1 : 2); oit++)
+                for (mode = 0; mode < (skip_intel_alias_nopersp ? 2 : 3); mode++)
                         for (alphatest = 0; alphatest < 2; alphatest++)
                                 for (md5 = 0; md5 < 2; md5++)
                                         glprogs.alias[oit][mode][alphatest][md5] =
                                                 GL_CreateProgram (GLSL_PATH("alias.vert"), GLSL_PATH("alias.frag"), "alias|OIT %d; MODE %d; ALPHATEST %d; MD5 %d", oit, mode, alphatest, md5);
+        if (skip_intel_alias_nopersp)
+                for (oit = 0; oit < (skip_intel_oit_variants ? 1 : 2); oit++)
+                        for (alphatest = 0; alphatest < 2; alphatest++)
+                                for (md5 = 0; md5 < 2; md5++)
+                                        glprogs.alias[oit][ALIASSHADER_NOPERSP][alphatest][md5] =
+                                                glprogs.alias[oit][ALIASSHADER_STANDARD][alphatest][md5];
+        if (skip_intel_oit_variants)
+                for (mode = 0; mode < 3; mode++)
+                        for (alphatest = 0; alphatest < 2; alphatest++)
+                                for (md5 = 0; md5 < 2; md5++)
+                                        glprogs.alias[1][mode][alphatest][md5] = glprogs.alias[0][mode][alphatest][md5];
 	for (md5 = 0; md5 < 2; md5++)
 		glprogs.alias_shadow[md5] = GL_CreateProgram (GLSL_PATH("alias_shadow.vert"), GLSL_PATH("alias_shadow.frag"), "alias shadow|MD5 %d", md5);
 

@@ -400,7 +400,6 @@ static qboolean SoundDef_ValidateLayer (sound_def_layer_t *out_layer, const soun
 				SoundDef_SourceFileOrRuntime (source_file), source_line, def_name, layer_index, asset_path);
 			return false;
 		}
-
 		q_strlcpy (out_layer->samples[sample_index].path, sample_path, sizeof (out_layer->samples[sample_index].path));
 		out_layer->samples[sample_index].sfx = sfx;
 	}

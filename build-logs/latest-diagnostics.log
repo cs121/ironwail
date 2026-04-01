@@ -10,7 +10,7 @@ Build + Deploy Ironwail (Release x64)
 [INFO] Sammle Diagnosedaten...
 ==== Environment ====
 DATE=01.04.2026
-TIME=13:01:29,53
+TIME=23:18:50,05
 CD=C:\projects\ironwail
 PROCESSOR_ARCHITECTURE=AMD64
 VisualStudioVersion=

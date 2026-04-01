@@ -15,7 +15,7 @@ struct DecalInstance
 	uint first_vert;
 	uint num_verts;
 	float fade_alpha;
-	float pad0;
+	uint light_rgba;
 	vec4 atlas;
 };
 
@@ -57,6 +57,7 @@ void main()
 	vec2 base_uv = vec2(v.u, v.v);
 	out_uv = inst.atlas.xy + base_uv * (inst.atlas.zw - inst.atlas.xy);
 	out_color = unpackUnorm4x8(v.color);
+	out_color.rgb *= unpackUnorm4x8(inst.light_rgba).rgb;
 	out_color.a *= inst.fade_alpha;
 
 	if (!valid || out_color.a <= 0.0)

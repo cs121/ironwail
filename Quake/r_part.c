@@ -539,6 +539,11 @@ typedef struct particlevert_t {
 static particlevert_t partverts[MAX_PARTICLES];
 static int numpartverts = 0;
 
+static GLubyte R_ParticleLitByte (GLubyte value, float light)
+{
+	return (GLubyte)CLAMP (0.f, floorf ((float)value * light + 0.5f), 255.f);
+}
+
 /*
 ===============
 R_SetParticleTexture_f -- johnfitz
@@ -1399,6 +1404,8 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	numpartverts = 0;
 	for (i = 0, p = particles; i < r_numactiveparticles; i++, p++)
 	{
+		vec3_t particle_light;
+
 		if (numpartverts == countof(partverts))
 			R_FlushParticleBatch ();
 
@@ -1411,6 +1418,13 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 		v->color[0] = c[0];
 		v->color[1] = c[1];
 		v->color[2] = c[2];
+		if (!showtris)
+		{
+			R_SampleReceiverLighting (p->org, particle_light);
+			v->color[0] = R_ParticleLitByte (v->color[0], particle_light[0]);
+			v->color[1] = R_ParticleLitByte (v->color[1], particle_light[1]);
+			v->color[2] = R_ParticleLitByte (v->color[2], particle_light[2]);
+		}
 		//alpha = CLAMP(0, p->die + 0.5 - cl.time, 1);
 		v->color[3] = c[3]; //(int)(alpha * 255);
 		//johnfitz

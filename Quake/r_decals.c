@@ -92,7 +92,7 @@ typedef struct
 	uint32_t first_vert;
 	uint32_t num_verts;
 	float fade_alpha;
-	float pad0;
+	uint32_t light_rgba;
 	float atlas[4];
 } decalgpuinst_t;
 
@@ -153,6 +153,27 @@ static cvar_t r_decals_instanced = {"r_decals_instanced", "1", CVAR_ARCHIVE};
 #define DECAL_BLOOD_STREAK_CHANCE 0.35f
 #define DECAL_BLOOD_POOL_CHANCE 0.20f
 #define DECAL_TRI_VERTS_PER_INSTANCE ((MAX_POLY_VERTS - 2) * 3)
+
+static byte R_ModulateLitByte (byte value, float light)
+{
+	return (byte)CLAMP (0.f, floorf ((float)value * light + 0.5f), 255.f);
+}
+
+static void R_ModulateLitRGB (byte *dst, const byte *src, const vec3_t light)
+{
+	dst[0] = R_ModulateLitByte (src[0], light[0]);
+	dst[1] = R_ModulateLitByte (src[1], light[1]);
+	dst[2] = R_ModulateLitByte (src[2], light[2]);
+}
+
+static uint32_t R_PackLitColorRGBA (const vec3_t light)
+{
+	const byte r = R_ModulateLitByte (255, light[0]);
+	const byte g = R_ModulateLitByte (255, light[1]);
+	const byte b = R_ModulateLitByte (255, light[2]);
+
+	return (uint32_t)r | ((uint32_t)g << 8) | ((uint32_t)b << 16) | (255u << 24);
+}
 
 typedef struct
 {
@@ -1379,12 +1400,15 @@ static qboolean R_DrawDecalsLegacy (decalinst_t **draw, int draw_count)
 		int j;
 		int batch_base;
 		decaldef_t *def = &decal_defs[draw[i]->def_index];
+		vec3_t decal_light;
 		float uscale = def->atlas_u1 - def->atlas_u0;
 		float vscale = def->atlas_v1 - def->atlas_v0;
 		float fade_alpha = R_DecalFadeAlpha (draw[i], &decal_defs[draw[i]->def_index]);
 
 		if (vcount < 3)
 			continue;
+
+		R_SampleReceiverLighting (draw[i]->center, decal_light);
 
 		local_icount = (vcount - 2) * 3;
 		if (batch_vcount + vcount > MAX_DECAL_VERTS || batch_icount + local_icount > MAX_DECAL_INDEXES)
@@ -1410,6 +1434,7 @@ static qboolean R_DrawDecalsLegacy (decalinst_t **draw, int draw_count)
 			*dst = *src;
 			dst->uv[0] = def->atlas_u0 + src->uv[0] * uscale;
 			dst->uv[1] = def->atlas_v0 + src->uv[1] * vscale;
+			R_ModulateLitRGB (dst->color, src->color, decal_light);
 			dst->color[3] = (byte) (src->color[3] * fade_alpha);
 		}
 		batch_vcount += vcount;
@@ -1485,11 +1510,14 @@ static qboolean R_DrawDecalsInstanced (decalinst_t **draw, int draw_count)
 	{
 		decaldef_t *def = &decal_defs[draw[i]->def_index];
 		decalgpuinst_t *gpuinst;
+		vec3_t decal_light;
 
 		if (draw[i]->num_verts < 3)
 			continue;
 		if (instance_count >= MAX_DECAL_INSTANCES)
 			break;
+
+		R_SampleReceiverLighting (draw[i]->center, decal_light);
 
 		if (cmd_count == 0
 			|| cmds[cmd_count - 1].blend != draw[i]->blend
@@ -1506,7 +1534,7 @@ static qboolean R_DrawDecalsInstanced (decalinst_t **draw, int draw_count)
 		gpuinst->first_vert = (uint32_t) draw[i]->first_vert;
 		gpuinst->num_verts = (uint32_t) draw[i]->num_verts;
 		gpuinst->fade_alpha = R_DecalFadeAlpha (draw[i], def);
-		gpuinst->pad0 = 0.f;
+		gpuinst->light_rgba = R_PackLitColorRGBA (decal_light);
 		gpuinst->atlas[0] = def->atlas_u0;
 		gpuinst->atlas[1] = def->atlas_v0;
 		gpuinst->atlas[2] = def->atlas_u1;
