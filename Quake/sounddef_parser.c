@@ -1,7 +1,8 @@
 #include "quakedef.h"
 #include "sounddef.h"
 #include "miniz.h"
-#include <math.h>
+#include <errno.h>
+#include <limits.h>
 
 typedef struct sounddef_parse_state_s
 {
@@ -205,8 +206,12 @@ static qboolean SoundDef_ParseIntToken (const char *token, int *out_value)
 	if (!token || !token[0] || !out_value)
 		return false;
 
+	errno = 0;
 	value = strtol (token, &end, 10);
-	if (!end || *end)
+	if (end == token || !end || *end)
+		return false;
+
+	if (errno == ERANGE || value < INT_MIN || value > INT_MAX)
 		return false;
 
 	*out_value = (int) value;
