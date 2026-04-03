@@ -118,6 +118,8 @@ extern cvar_t r_color_saturation;
 extern cvar_t r_lightmap_colorspace;
 extern cvar_t r_lightmap_colorspace_debug;
 extern cvar_t r_bloom;
+extern cvar_t r_bloom_knee;
+extern cvar_t r_bloom_quality;
 extern void TexMgr_SRGBTextures_f (cvar_t *var);
 extern void TexMgr_LightmapColorspace_f (cvar_t *var);
 extern void TexMgr_LightmapLinearCompat_f (cvar_t *var);
@@ -598,6 +600,8 @@ Cvar_SetCallback (&r_srgb_textures, TexMgr_SRGBTextures_f);
 	Cvar_RegisterVariable (&r_color_saturation);
 	Cvar_RegisterVariable (&r_bloom);
 	Cvar_RegisterVariable (&r_bloom_threshold);
+	Cvar_RegisterVariable (&r_bloom_knee);
+	Cvar_RegisterVariable (&r_bloom_quality);
 	R_PPdlights_RegisterCvars ();
 	/* CVar owners: r_postfx* in r_postfx.c, r_ssao* in r_ssao.c, r_godray* and r_godrays* in r_godrays.c. */
 	R_PostFX_RegisterCvars ();

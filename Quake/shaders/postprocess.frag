@@ -138,7 +138,7 @@ layout(location=12) uniform float u_saturation;
 layout(location=17) uniform vec4 SSAOParams; // x: intensity, y: debug mode, z: upscale nearest, w: fog damp strength
 layout(location=18) uniform vec4 SSAOBlurParams; // x: blur sigma, y: blur radius, z: depth threshold scale, w: fog damp power
 layout(location=20) uniform float u_midtone;
-layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: bloom boost, z: emissive boost, w: damage tint
+layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: reserved, z: emissive boost, w: damage tint
 layout(location=22) uniform vec4 PostFXParams4; // x: lut strength, y: underwater grade strength, z: underwater fog strength, w: vignette softness
 layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: unused, w: unused
 layout(location=24) uniform vec4 PostFXFogColor; // rgb: underwater fog color, w: scene fog density (saved before Fog_DisableGFog)
@@ -681,7 +681,7 @@ void main()
         vec3 hdrColor = color.rgb;
         float emissiveBoost = 1.0 + max(PostFXParams3.z, 0.0);
         hdrColor *= emissiveBoost;
-        float bloomIntensity = max(HDRParams.x + PostFXParams3.y, 0.0);
+        float bloomIntensity = max(HDRParams.x, 0.0);
         vec3 bloomColor = vec3(0.0);
         if (bloomIntensity > 0.0)
         {

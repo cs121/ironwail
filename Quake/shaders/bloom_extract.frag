@@ -1,15 +1,28 @@
 layout(binding=0) uniform sampler2D SceneTexture;
 layout(binding=1) uniform sampler2D MaskTexture;
 
-layout(location=0) uniform vec4 ThresholdParams; // x: threshold, y: mask enabled
+layout(location=0) uniform vec4 ThresholdParams; // x: threshold, y: soft knee, z: mask enabled
 layout(location=1) uniform vec4 DownsampleParams; // xy: source size, zw: scale from target to source
 
 layout(location=0) out vec4 outColor;
 
+float BloomThresholdFactor(float brightness, float threshold, float softKnee)
+{
+        float diff = max(brightness - threshold, 0.0);
+        if (softKnee > 1e-4)
+        {
+                float soft = clamp(brightness - threshold + softKnee, 0.0, 2.0 * softKnee);
+                soft = (soft * soft) / max(4.0 * softKnee, 1e-4);
+                diff = max(diff, soft);
+        }
+        return (brightness > 0.0) ? (diff / brightness) : 0.0;
+}
+
 void main()
 {
         float threshold = ThresholdParams.x;
-        float maskEnabled = ThresholdParams.y;
+        float softKnee = max(ThresholdParams.y, 0.0);
+        float maskEnabled = ThresholdParams.z;
         vec2 sourceSize = DownsampleParams.xy;
         vec2 scale = DownsampleParams.zw;
         vec2 base = (gl_FragCoord.xy + 0.5) * scale - 0.5;
@@ -56,16 +69,14 @@ void main()
                 vec3 emissiveColor = (weight_emissive > 0.0) ? (accum_emissive / weight_emissive) : vec3(0.0);
                 vec3 bloomColor = (weight_bloom > 0.0) ? (accum_bloom / weight_bloom) : vec3(0.0);
                 float brightness = dot(bloomColor, vec3(0.2126, 0.7152, 0.0722));
-                float diff = max(brightness - threshold, 0.0);
-                float factor = brightness > 0.0 ? diff / brightness : 0.0;
+                float factor = BloomThresholdFactor(brightness, threshold, softKnee);
                 bloomColor *= factor;
                 color = emissiveColor + bloomColor;
         }
         else
         {
                 float brightness = dot(color, vec3(0.2126, 0.7152, 0.0722));
-                float diff = max(brightness - threshold, 0.0);
-                float factor = brightness > 0.0 ? diff / brightness : 0.0;
+                float factor = BloomThresholdFactor(brightness, threshold, softKnee);
                 color *= factor;
         }
         outColor = vec4(color, 1.0);

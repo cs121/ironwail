@@ -1036,7 +1036,8 @@ void GL_CreateShaders (void)
 	for (palettize = 0; palettize < 3; palettize++)
             glprogs.postprocess[palettize] = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("postprocess.frag"), "postprocess|PALETTIZE %d", palettize);
 	glprogs.bloom_extract = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_extract.frag"), "bloom extract");
-    glprogs.bloom_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_blur.frag"), "bloom blur");
+	glprogs.bloom_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_blur.frag"), "bloom blur");
+	glprogs.bloom_combine = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_combine.frag"), "bloom combine");
 	glprogs.ssao = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao.frag"), "ssao");
 	glprogs.ssao_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao_blur.frag"), "ssao blur");
 	glprogs.fogvol = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes");

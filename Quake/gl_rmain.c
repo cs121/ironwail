@@ -447,6 +447,8 @@ cvar_t	r_exposure_debug = { "r_exposure_debug", "0", CVAR_NONE };
 
 cvar_t	r_bloom = { "r_bloom", "3.00", CVAR_ARCHIVE };
 cvar_t	r_bloom_threshold = { "r_bloom_threshold", "1.0", CVAR_ARCHIVE };
+cvar_t	r_bloom_knee = { "r_bloom_knee", "0.30", CVAR_ARCHIVE };
+cvar_t	r_bloom_quality = { "r_bloom_quality", "1", CVAR_ARCHIVE };
 
 cvar_t	r_postfx = { "r_postfx", "1", CVAR_ARCHIVE };
 cvar_t	r_polyblend_legacy = { "r_polyblend_legacy", "0", CVAR_ARCHIVE };
@@ -504,7 +506,7 @@ cvar_t	r_postfx_quad_emissive_boost = { "r_postfx_quad_emissive_boost", "0.5", C
 cvar_t	r_postfx_quad_bloom_boost = { "r_postfx_quad_bloom_boost", "0.4", CVAR_ARCHIVE };
 cvar_t	r_postfx_quad_pulse_speed = { "r_postfx_quad_pulse_speed", "2.0", CVAR_ARCHIVE };
 cvar_t	r_postfx_quad_pulse_intensity = { "r_postfx_quad_pulse_intensity", "0.1", CVAR_ARCHIVE };
-cvar_t	r_postfx_bloom_mode = { "r_postfx_bloom_mode", "0", CVAR_ARCHIVE };
+cvar_t	r_postfx_bloom_mode = { "r_postfx_bloom_mode", "1", CVAR_ARCHIVE };
 cvar_t	r_postfx_lut = { "r_postfx_lut", "1", CVAR_ARCHIVE };
 cvar_t	r_postfx_lut_strength_powerup = { "r_postfx_lut_strength_powerup", "0.6", CVAR_ARCHIVE };
 cvar_t	r_postfx_lut_strength_underwater = { "r_postfx_lut_strength_underwater", "0.5", CVAR_ARCHIVE };
@@ -1351,14 +1353,35 @@ void GL_CreateFrameBuffers (void)
 	framebufs.autoexposure.fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.autoexposure.tex, 0, 0, "autoexposure fbo");
 	GL_AutoExposureInitPBOs ();
 
-	framebufs.bloom.width = q_max (1, native_w / 2);
-	framebufs.bloom.height = q_max (1, native_h / 2);
-	framebufs.bloom.extract_tex = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom extract");
-	framebufs.bloom.pingpong_tex[0] = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom blur 0");
-	framebufs.bloom.pingpong_tex[1] = GL_CreateTexture2D (GL_RGBA16F, framebufs.bloom.width, framebufs.bloom.height, GL_LINEAR, "bloom blur 1");
-	framebufs.bloom.extract_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.extract_tex, 0, 0, "bloom extract fbo");
-	framebufs.bloom.pingpong_fbo[0] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.pingpong_tex[0], 0, 0, "bloom blur fbo 0");
-	framebufs.bloom.pingpong_fbo[1] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.pingpong_tex[1], 0, 0, "bloom blur fbo 1");
+	framebufs.bloom.levels = BLOOM_MAX_LEVELS;
+	for (int level = 0; level < BLOOM_MAX_LEVELS; ++level)
+	{
+		int div = 1 << (level + 1);
+		int width = q_max (1, native_w / div);
+		int height = q_max (1, native_h / div);
+		char extract_name[32];
+		char extract_fbo_name[32];
+		char blur0_name[32];
+		char blur1_name[32];
+		char blur0_fbo_name[32];
+		char blur1_fbo_name[32];
+
+		q_snprintf (extract_name, sizeof (extract_name), "bloom extract %d", level);
+		q_snprintf (extract_fbo_name, sizeof (extract_fbo_name), "bloom extract fbo %d", level);
+		q_snprintf (blur0_name, sizeof (blur0_name), "bloom blur %d 0", level);
+		q_snprintf (blur1_name, sizeof (blur1_name), "bloom blur %d 1", level);
+		q_snprintf (blur0_fbo_name, sizeof (blur0_fbo_name), "bloom blur fbo %d 0", level);
+		q_snprintf (blur1_fbo_name, sizeof (blur1_fbo_name), "bloom blur fbo %d 1", level);
+
+		framebufs.bloom.width[level] = width;
+		framebufs.bloom.height[level] = height;
+		framebufs.bloom.extract_tex[level] = GL_CreateTexture2D (GL_RGBA16F, width, height, GL_LINEAR, extract_name);
+		framebufs.bloom.pingpong_tex[level][0] = GL_CreateTexture2D (GL_RGBA16F, width, height, GL_LINEAR, blur0_name);
+		framebufs.bloom.pingpong_tex[level][1] = GL_CreateTexture2D (GL_RGBA16F, width, height, GL_LINEAR, blur1_name);
+		framebufs.bloom.extract_fbo[level] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.extract_tex[level], 0, 0, extract_fbo_name);
+		framebufs.bloom.pingpong_fbo[level][0] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.pingpong_tex[level][0], 0, 0, blur0_fbo_name);
+		framebufs.bloom.pingpong_fbo[level][1] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.bloom.pingpong_tex[level][1], 0, 0, blur1_fbo_name);
+	}
 
 	framebufs.godrays.width = q_max (1, native_w / 2);
 	framebufs.godrays.height = q_max (1, native_h / 2);
@@ -1486,9 +1509,12 @@ void GL_DeleteFrameBuffers (void)
 	R_Froxel_ResetResources ();
 	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
 	GL_AutoExposureDeletePBOs ();
-	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo);
-	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[0]);
-	GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[1]);
+	for (int level = 0; level < BLOOM_MAX_LEVELS; ++level)
+	{
+		GL_DeleteFramebuffersFunc (1, &framebufs.bloom.extract_fbo[level]);
+		GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[level][0]);
+		GL_DeleteFramebuffersFunc (1, &framebufs.bloom.pingpong_fbo[level][1]);
+	}
 	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.source_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.mask_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.godrays.shafts_fbo);
@@ -1514,9 +1540,12 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.scene.color_tex);
 	GL_DeleteNativeTexture (framebufs.scene.velocity_tex);
 	GL_DeleteNativeTexture (framebufs.autoexposure.tex);
-	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[0]);
-	GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[1]);
-	GL_DeleteNativeTexture (framebufs.bloom.extract_tex);
+	for (int level = 0; level < BLOOM_MAX_LEVELS; ++level)
+	{
+		GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[level][0]);
+		GL_DeleteNativeTexture (framebufs.bloom.pingpong_tex[level][1]);
+		GL_DeleteNativeTexture (framebufs.bloom.extract_tex[level]);
+	}
 	GL_DeleteNativeTexture (framebufs.godrays.source_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.mask_tex);
 	GL_DeleteNativeTexture (framebufs.godrays.shafts_tex);
@@ -1566,108 +1595,183 @@ static void GL_OrthoMatrix (float matrix[16], float left, float right, float bot
 }
 
 
-static GLuint GL_GenerateBloomTexture (void)
+static GLuint GL_BloomGetFallbackTexture (void)
 {
-	int width = framebufs.bloom.width;
-	int height = framebufs.bloom.height;
-	GLuint fallback = framebufs.bloom.pingpong_tex[0] ? framebufs.bloom.pingpong_tex[0] : framebufs.bloom.extract_tex;
-	if (fallback == 0)
-		fallback = framebufs.bloom.extract_tex;
-	if (width <= 0 || height <= 0)
-		return fallback;
-	if (!glprogs.bloom_extract || !glprogs.bloom_blur)
-		return fallback;
-
-	float threshold = q_max (0.f, r_bloom_threshold.value);
-
-	GL_BeginGroup ("Bloom extract");
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
-	glViewport (0, 0, width, height);
-	GL_UseProgram (glprogs.bloom_extract);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.color_tex);
-	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, 0);
-	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
-	GL_Uniform4fFunc (1, (float)R_GetNativeRenderWidth (), (float)R_GetNativeRenderHeight (),
-		(float)R_GetNativeRenderWidth () / (float)width,
-		(float)R_GetNativeRenderHeight () / (float)height);
-	glDrawArrays (GL_TRIANGLES, 0, 3);
-	GL_EndGroup ();
-
-	GLuint input_tex = framebufs.bloom.extract_tex;
-	const int passes = 4;
-	GL_BeginGroup ("Bloom blur");
-	for (int pass = 0; pass < passes; ++pass)
-	{
-		int target_index = pass & 1;
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[target_index]);
-		glViewport (0, 0, width, height);
-		GL_UseProgram (glprogs.bloom_blur);
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
-		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, input_tex);
-		float dirx = (pass & 1) ? 0.f : 1.f;
-		float diry = (pass & 1) ? 1.f : 0.f;
-		GL_Uniform4fFunc (0, 1.f / (float)width, 1.f / (float)height, dirx, diry);
-		glDrawArrays (GL_TRIANGLES, 0, 3);
-		input_tex = framebufs.bloom.pingpong_tex[target_index];
-	}
-	GL_EndGroup ();
-
-	return input_tex;
+	if (framebufs.bloom.extract_tex[0])
+		return framebufs.bloom.extract_tex[0];
+	if (framebufs.bloom.pingpong_tex[0][0])
+		return framebufs.bloom.pingpong_tex[0][0];
+	return 0;
 }
 
-static GLuint GL_GenerateBloomTextureFrom (GLuint source_tex, float threshold, float radius_scale)
+static int GL_BloomGetActiveLevels (void)
 {
-	int width = framebufs.bloom.width;
-	int height = framebufs.bloom.height;
-	GLuint fallback = framebufs.bloom.pingpong_tex[0] ? framebufs.bloom.pingpong_tex[0] : framebufs.bloom.extract_tex;
+	int quality = CLAMP (0, (int)Q_rint (r_bloom_quality.value), 3);
+	int levels = 2 + quality;
+	levels = q_min (levels, framebufs.bloom.levels);
+	return CLAMP (1, levels, BLOOM_MAX_LEVELS);
+}
 
-	if (fallback == 0)
-		fallback = framebufs.bloom.extract_tex;
-	if (width <= 0 || height <= 0 || source_tex == 0)
-		return fallback;
-	if (!glprogs.bloom_extract || !glprogs.bloom_blur)
-		return fallback;
+static int GL_BloomGetBlurPasses (void)
+{
+	int quality = CLAMP (0, (int)Q_rint (r_bloom_quality.value), 3);
+	switch (quality)
+	{
+	default:
+	case 0: return 2;
+	case 1: return 4;
+	case 2: return 4;
+	case 3: return 6;
+	}
+}
 
-	threshold = q_max (0.f, threshold);
-	float radius = q_max (0.f, radius_scale);
-	if (radius <= 0.f)
-		radius = 1.f;
+static void GL_BloomExtractLevel (int level, GLuint source_tex, int source_width, int source_height, float threshold, float soft_knee)
+{
+	int width = framebufs.bloom.width[level];
+	int height = framebufs.bloom.height[level];
 
-	GL_BeginGroup ("Dlight bloom extract");
-	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo[level]);
 	glViewport (0, 0, width, height);
 	GL_UseProgram (glprogs.bloom_extract);
 	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, source_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, 0);
-	GL_Uniform4fFunc (0, threshold, 0.f, 0.f, 0.f);
-	GL_Uniform4fFunc (1, (float)R_GetNativeRenderWidth (), (float)R_GetNativeRenderHeight (),
-		(float)R_GetNativeRenderWidth () / (float)width,
-		(float)R_GetNativeRenderHeight () / (float)height);
+	GL_Uniform4fFunc (0, threshold, soft_knee, 0.f, 0.f);
+	GL_Uniform4fFunc (1, (float)source_width, (float)source_height,
+		(float)source_width / (float)width,
+		(float)source_height / (float)height);
 	glDrawArrays (GL_TRIANGLES, 0, 3);
-	GL_EndGroup ();
+}
 
-	GLuint input_tex = framebufs.bloom.extract_tex;
-	const int passes = 4;
-	GL_BeginGroup ("Dlight bloom blur");
+static GLuint GL_BloomBlurLevel (int level, int passes, float radius_scale)
+{
+	int width = framebufs.bloom.width[level];
+	int height = framebufs.bloom.height[level];
+	GLuint input_tex = framebufs.bloom.extract_tex[level];
+
 	for (int pass = 0; pass < passes; ++pass)
 	{
 		int target_index = pass & 1;
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[target_index]);
+		float dirx = (pass & 1) ? 0.f : 1.f;
+		float diry = (pass & 1) ? 1.f : 0.f;
+
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[level][target_index]);
 		glViewport (0, 0, width, height);
 		GL_UseProgram (glprogs.bloom_blur);
 		GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, input_tex);
-		float dirx = (pass & 1) ? 0.f : 1.f;
-		float diry = (pass & 1) ? 1.f : 0.f;
-		GL_Uniform4fFunc (0, radius / (float)width, radius / (float)height, dirx, diry);
+		GL_Uniform4fFunc (0, radius_scale / (float)width, radius_scale / (float)height, dirx, diry);
 		glDrawArrays (GL_TRIANGLES, 0, 3);
-		input_tex = framebufs.bloom.pingpong_tex[target_index];
+		input_tex = framebufs.bloom.pingpong_tex[level][target_index];
+	}
+
+	return input_tex;
+}
+
+static float GL_BloomGetRecombineWeight (int level, int levels)
+{
+	static const float weights[3][BLOOM_MAX_LEVELS] = {
+		{ 0.72f, 0.28f, 0.00f, 0.00f }, /* 2 levels */
+		{ 0.62f, 0.26f, 0.12f, 0.00f }, /* 3 levels */
+		{ 0.56f, 0.24f, 0.13f, 0.07f }  /* 4 levels */
+	};
+	int row = CLAMP (0, levels - 2, 2);
+	return weights[row][CLAMP (0, level, BLOOM_MAX_LEVELS - 1)];
+}
+
+static GLuint GL_GenerateBloomTexture (void)
+{
+	GLuint fallback = GL_BloomGetFallbackTexture ();
+	GLuint blurred[BLOOM_MAX_LEVELS] = { 0 };
+	int levels;
+	int passes;
+	float threshold;
+	float soft_knee;
+	GLuint source_tex;
+	int source_width;
+	int source_height;
+
+	if (!glprogs.bloom_extract || !glprogs.bloom_blur || !glprogs.bloom_combine)
+		return fallback;
+	if (!framebufs.composite.color_tex)
+		return fallback;
+
+	levels = GL_BloomGetActiveLevels ();
+	passes = GL_BloomGetBlurPasses ();
+	threshold = q_max (0.f, r_bloom_threshold.value);
+	soft_knee = CLAMP (0.f, r_bloom_knee.value, 4.f);
+	source_tex = framebufs.composite.color_tex;
+	source_width = R_GetNativeRenderWidth ();
+	source_height = R_GetNativeRenderHeight ();
+
+	GL_BeginGroup ("Bloom pyramid");
+	for (int level = 0; level < levels; ++level)
+	{
+		float radius_scale = 1.f + 0.35f * (float)level;
+
+		if (framebufs.bloom.width[level] <= 0 || framebufs.bloom.height[level] <= 0)
+			continue;
+
+		GL_BloomExtractLevel (level, source_tex, source_width, source_height, threshold, soft_knee);
+		blurred[level] = GL_BloomBlurLevel (level, passes, radius_scale);
+
+		source_tex = framebufs.bloom.extract_tex[level];
+		source_width = framebufs.bloom.width[level];
+		source_height = framebufs.bloom.height[level];
+	}
+
+	if (!blurred[0])
+	{
+		GL_EndGroup ();
+		return fallback;
+	}
+
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo[0]);
+	glViewport (0, 0, framebufs.bloom.width[0], framebufs.bloom.height[0]);
+	GL_UseProgram (glprogs.bloom_combine);
+	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, blurred[0]);
+	GL_Uniform4fFunc (0, GL_BloomGetRecombineWeight (0, levels), 0.f, 0.f, 0.f);
+	glDrawArrays (GL_TRIANGLES, 0, 3);
+
+	for (int level = 1; level < levels; ++level)
+	{
+		float weight = GL_BloomGetRecombineWeight (level, levels);
+		if (!blurred[level] || weight <= 0.f)
+			continue;
+
+		GL_SetState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, blurred[level]);
+		GL_Uniform4fFunc (0, weight, 0.f, 0.f, 0.f);
+		glDrawArrays (GL_TRIANGLES, 0, 3);
 	}
 	GL_EndGroup ();
 
-	return input_tex;
+	return framebufs.bloom.extract_tex[0] ? framebufs.bloom.extract_tex[0] : fallback;
+}
+
+static GLuint GL_GenerateBloomTextureFrom (GLuint source_tex, float threshold, float radius_scale)
+{
+	GLuint fallback = GL_BloomGetFallbackTexture ();
+	GLuint blurred;
+	int width = framebufs.bloom.width[0];
+	int height = framebufs.bloom.height[0];
+	float soft_knee = CLAMP (0.f, r_bloom_knee.value, 4.f);
+
+	if (!glprogs.bloom_extract || !glprogs.bloom_blur)
+		return fallback;
+	if (width <= 0 || height <= 0 || source_tex == 0)
+		return fallback;
+
+	threshold = q_max (0.f, threshold);
+	radius_scale = q_max (0.5f, radius_scale);
+
+	GL_BeginGroup ("Dlight bloom");
+	GL_BloomExtractLevel (0, source_tex, R_GetNativeRenderWidth (), R_GetNativeRenderHeight (), threshold, soft_knee);
+	blurred = GL_BloomBlurLevel (0, GL_BloomGetBlurPasses (), radius_scale);
+	GL_EndGroup ();
+
+	return blurred ? blurred : fallback;
 }
 
 static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width, int ssao_height, float view_min_x, float view_min_y, float view_max_x, float view_max_y)
@@ -2930,9 +3034,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 			}
 		}
 	}
-	GLuint bloom_texture = framebufs.bloom.extract_tex ? framebufs.bloom.extract_tex : 0;
-	if (framebufs.bloom.pingpong_tex[0])
-		bloom_texture = framebufs.bloom.pingpong_tex[0];
+	GLuint bloom_texture = GL_BloomGetFallbackTexture ();
 	if (bloom_intensity_effective > 0.f)
 		bloom_texture = GL_GenerateBloomTexture ();
 
@@ -3107,7 +3209,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		if (colorspace_params_loc >= 0)
 			GL_Uniform4fFunc (colorspace_params_loc, (float)debug_mode, 0.f, output_srgb ? 1.f : 0.f, 0.f);
 	}
-	GL_Uniform3fFunc (5, bloom_intensity, exposure, tonemap_mode);
+	GL_Uniform3fFunc (5, bloom_intensity_effective, exposure, tonemap_mode);
 	GL_Uniform4fFunc (6, motion_enabled ? 1.f : 0.f, motion_effective_shutter, motion_min_velocity, motion_depth_threshold);
 	GL_Uniform4fFunc (7, motion_max_radius, (float)motion_max_samples, velocity_texture ? 1.f : 0.f, 0.f);
 	GL_Uniform4fFunc (8,
@@ -3133,7 +3235,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 
 
 
-	GL_Uniform4fFunc (21, postfx_exposure_add, postfx_bloom_boost, postfx_emissive_boost, postfx_desat);
+	GL_Uniform4fFunc (21, postfx_exposure_add, 0.f, postfx_emissive_boost, postfx_desat);
 	GL_Uniform4fFunc (22,
 		postfx_lut_strength,
 		postfx_state.underwater_postfx_active ? postfx_state.underwater_grade_strength : 0.f,

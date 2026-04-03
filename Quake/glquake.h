@@ -716,6 +716,7 @@ typedef struct glprogs_s {
 	GLuint		postprocess[3];		// [palettize:off/dithered/direct]
 	GLuint		bloom_extract;
 	GLuint		bloom_blur;
+	GLuint		bloom_combine;
 	GLuint		ssao;
 	GLuint		ssao_blur;
 	GLuint		godrays_mask;
@@ -771,6 +772,8 @@ void GL_PollShaderHotReload (void);
 void R_DebugDrawWireBox (const vec3_t mins, const vec3_t maxs, const vec3_t color, qboolean ztest);
 void R_DebugFlushGeometry (void);
 
+#define BLOOM_MAX_LEVELS 4
+
 typedef struct glframebufs_s {
 	GLint			max_color_tex_samples;
 	GLint			max_depth_tex_samples;
@@ -814,12 +817,13 @@ typedef struct glframebufs_s {
 	}				fogvol;
 
 	struct {
-		GLuint		extract_tex;
-		GLuint		pingpong_tex[2];
-		GLuint		extract_fbo;
-		GLuint		pingpong_fbo[2];
-		int			width;
-		int			height;
+		GLuint		extract_tex[BLOOM_MAX_LEVELS];
+		GLuint		pingpong_tex[BLOOM_MAX_LEVELS][2];
+		GLuint		extract_fbo[BLOOM_MAX_LEVELS];
+		GLuint		pingpong_fbo[BLOOM_MAX_LEVELS][2];
+		int			width[BLOOM_MAX_LEVELS];
+		int			height[BLOOM_MAX_LEVELS];
+		int			levels;
 	}				bloom;
 
 	struct {

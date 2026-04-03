@@ -50,6 +50,8 @@ extern cvar_t r_ssao_fog_power;
 
 extern cvar_t r_bloom;
 extern cvar_t r_bloom_threshold;
+extern cvar_t r_bloom_knee;
+extern cvar_t r_bloom_quality;
 extern cvar_t r_dof;
 extern cvar_t r_dof_focus;
 extern cvar_t r_dof_range;
@@ -70,6 +72,7 @@ extern cvar_t r_postfx_lut;
 extern cvar_t r_postfx_underwater;
 extern cvar_t r_postfx_damage;
 extern cvar_t r_postfx_powerup;
+extern cvar_t r_postfx_bloom_mode;
 extern cvar_t r_oit;
 extern cvar_t r_dither;
 extern cvar_t r_lightmap16f;
@@ -135,6 +138,8 @@ static quality_binding_t r_quality_bindings[] = {
 	{ &r_ssao_fog_power, { "0.8", "0.9", "1.0", "1.1" } },
 	{ &r_bloom, { "0.75", "1.5", "3.0", "3.5" } },
 	{ &r_bloom_threshold, { "1.25", "1.1", "1.0", "0.95" } },
+	{ &r_bloom_knee, { "0.15", "0.25", "0.30", "0.40" } },
+	{ &r_bloom_quality, { "0", "1", "1", "2" } },
 	{ &r_dof, { "0", "0", "1", "1" } },
 	{ &r_dof_focus, { "48", "56", "64", "72" } },
 	{ &r_dof_range, { "192", "224", "255", "300" } },
@@ -155,6 +160,7 @@ static quality_binding_t r_quality_bindings[] = {
 	{ &r_postfx_underwater, { "0", "1", "1", "1" } },
 	{ &r_postfx_damage, { "1", "1", "1", "1" } },
 	{ &r_postfx_powerup, { "1", "1", "1", "1" } },
+	{ &r_postfx_bloom_mode, { "1", "1", "1", "1" } },
 	{ &r_oit, { "0", "0", "1", "1" } },
 	{ &r_dither, { "0.5", "0.75", "1.0", "1.0" } },
 	{ &r_lightmap16f, { "0", "1", "1", "1" } },
