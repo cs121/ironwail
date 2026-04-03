@@ -473,6 +473,8 @@ const char *BotAI_StateName (bot_ai_state_t state)
 
 void BotAI_ResetState (bot_state_t *bot)
 {
+	double now = (sv.active && sv.qcvm.progs) ? sv.qcvm.time : 0.0;
+
 	if (!bot)
 		return;
 
@@ -488,7 +490,7 @@ void BotAI_ResetState (bot_state_t *bot)
 	bot->path_index = 0;
 	bot->next_repath_time = 0.0;
 	VectorCopy (vec3_origin, bot->last_origin);
-	bot->last_progress_time = qcvm->time;
+	bot->last_progress_time = now;
 	bot->stuck_until = 0.0;
 	bot->next_item_scan_time = 0.0;
 	bot->next_debug_time = 0.0;

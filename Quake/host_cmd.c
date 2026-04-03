@@ -3070,6 +3070,12 @@ static void Host_BotSpawn_f (void)
 	dfunction_t *func;
 	edict_t *self;
 
+	if (cmd_source == src_command)
+	{
+		Cmd_ForwardToServer ();
+		return;
+	}
+
 	if (!sv.active || sv.state != ss_active)
 	{
 		Con_Printf ("botspawn is only available while a server is active\n");
@@ -3083,8 +3089,14 @@ static void Host_BotSpawn_f (void)
 		return;
 	}
 
+	if (!sv_player)
+	{
+		Con_Printf ("botspawn requires a valid player context\n");
+		return;
+	}
+
 	pr_global_struct->time = qcvm->time;
-	self = (cmd_source == src_command) ? qcvm->edicts : sv_player;
+	self = sv_player;
 	pr_global_struct->self = EDICT_TO_PROG(self);
 
 	PR_ExecuteProgram (func - qcvm->functions);
