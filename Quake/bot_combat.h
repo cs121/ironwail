@@ -6,6 +6,7 @@
 struct bot_state_s;
 
 qboolean BotCombat_HasAmmoForWeapon (edict_t *self, int weapon);
+qboolean BotCombat_HasAnyRangedAmmo (edict_t *self);
 int BotCombat_SelectWeapon (edict_t *self, float enemy_dist, qboolean line_of_sight);
 int BotCombat_WeaponImpulse (int weapon);
 void BotCombat_ComputeAim (struct bot_state_s *bot, edict_t *self, edict_t *enemy, vec3_t out_angles);

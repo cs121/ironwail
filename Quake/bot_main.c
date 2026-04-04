@@ -225,7 +225,6 @@ static qboolean Bot_AddClient (int requested_team)
 {
 	int i;
 	int clientnum = -1;
-	int first_client_slot;
 	int team;
 	client_t *client;
 	bot_state_t *state;
@@ -237,14 +236,7 @@ static qboolean Bot_AddClient (int requested_team)
 		return false;
 	}
 
-	/*
-	 * In listen servers slot 0 belongs to the local host player.
-	 * Startup command buffers can invoke bot_add before that slot becomes active,
-	 * so reserve it to avoid corrupting local-client setup.
-	 */
-	first_client_slot = (cls.state == ca_dedicated) ? 0 : 1;
-
-	for (i = first_client_slot; i < svs.maxclients; ++i)
+	for (i = 0; i < svs.maxclients; ++i)
 	{
 		if (!svs.clients[i].active)
 		{
@@ -267,6 +259,7 @@ static qboolean Bot_AddClient (int requested_team)
 	client->active = true;
 	client->spawned = false;
 	client->isbot = true;
+	client->edict = EDICT_NUM (clientnum + 1);
 	client->message.data = client->msgbuf;
 	client->message.maxsize = sizeof (client->msgbuf);
 	client->message.allowoverflow = true;
@@ -277,14 +270,9 @@ static qboolean Bot_AddClient (int requested_team)
 		qcvm_t *saved_vm = qcvm;
 		PR_SwitchQCVM (NULL);
 		PR_SwitchQCVM (&sv.qcvm);
-		client->edict = EDICT_NUM (clientnum + 1);
-		memset (client->spawn_parms, 0, sizeof (client->spawn_parms));
-		if (pr_global_struct->SetNewParms)
-		{
-			PR_ExecuteProgram (pr_global_struct->SetNewParms);
-			for (i = 0; i < NUM_SPAWN_PARMS; ++i)
-				client->spawn_parms[i] = (&pr_global_struct->parm1)[i];
-		}
+		PR_ExecuteProgram (pr_global_struct->SetNewParms);
+		for (i = 0; i < NUM_SPAWN_PARMS; ++i)
+			client->spawn_parms[i] = (&pr_global_struct->parm1)[i];
 		PR_SwitchQCVM (NULL);
 		PR_SwitchQCVM (saved_vm);
 	}

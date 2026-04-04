@@ -30,6 +30,11 @@ typedef enum bot_ammo_type_e
 static vec3_t g_roam_points[BOT_MAX_ROAM_POINTS];
 static int g_roam_count;
 
+static qboolean BotAI_ShouldUseNav2 (void)
+{
+	return BotNav_IsLoaded ();
+}
+
 static float BotAI_Noise01 (uint32_t seed)
 {
 	seed ^= seed >> 16;
@@ -235,7 +240,7 @@ static qboolean BotAI_ItemPotentiallyReachable (edict_t *self, edict_t *item)
 	if (!self || !item)
 		return false;
 
-	if (BotNav_IsLoaded () && bot_use_nav2.value)
+	if (BotAI_ShouldUseNav2 ())
 	{
 		int from = BotNav_FindNearestNode (self->v.origin);
 		int to = BotNav_FindNearestNode (item->v.origin);
@@ -278,6 +283,8 @@ static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, co
 			score = has_weapon ? 50.f : 170.f;
 			if (weapon == IT_ROCKET_LAUNCHER || weapon == IT_LIGHTNING || weapon == IT_SUPER_NAILGUN)
 				score += has_weapon ? 20.f : 70.f;
+			if (!BotCombat_HasAnyRangedAmmo (self))
+				score += has_weapon ? 15.f : 90.f;
 		}
 		break;
 	}
@@ -303,6 +310,8 @@ static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, co
 			score = 35.f;
 			break;
 		}
+		if (!BotCombat_HasAnyRangedAmmo (self))
+			score += 120.f;
 		break;
 	}
 
@@ -338,6 +347,10 @@ static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, co
 		score *= 0.2f;
 	if (bot->state == BOT_STATE_RETREAT && item_type == BOT_ITEM_HEALTH)
 		score += 80.f;
+	if (bot->state == BOT_STATE_RETREAT && item_type == BOT_ITEM_AMMO)
+		score += 70.f;
+	if (bot->state == BOT_STATE_RETREAT && item_type == BOT_ITEM_WEAPON)
+		score += 40.f;
 
 	return score;
 }
@@ -504,7 +517,46 @@ void BotAI_ResetState (bot_state_t *bot)
 
 static void BotAI_SelectRoamGoal (bot_state_t *bot, edict_t *self)
 {
+	int nav_node_count;
 	int index;
+
+	nav_node_count = BotAI_ShouldUseNav2 () ? BotNav_NodeCount () : 0;
+	if (self && nav_node_count > 0)
+	{
+		int start = BotNav_FindNearestNode (self->v.origin);
+		int tries;
+
+		if (start >= 0)
+		{
+			for (tries = 0; tries < 12; ++tries)
+			{
+				vec3_t candidate_pos;
+				vec3_t delta;
+				int candidate;
+				bot_path_t path;
+
+				candidate = ((int) (BotAI_Random01 (bot, 101u + (uint32_t) tries) * nav_node_count)) % nav_node_count;
+				if (nav_node_count > 1 && candidate == start)
+					continue;
+				if (!BotNav_GetNodePosition (candidate, candidate_pos))
+					continue;
+				VectorSubtract (candidate_pos, self->v.origin, delta);
+				if (tries < 8 && VectorLength (delta) < 192.f)
+					continue;
+				if (!BotNav_FindPath (start, candidate, &path) || path.count <= 1)
+					continue;
+
+				VectorCopy (candidate_pos, bot->goal_pos);
+				bot->goal_pos[2] += 20.f;
+				bot->has_goal = true;
+				bot->has_path = false;
+				bot->next_repath_time = 0.0;
+				bot->goal_item = NULL;
+				bot->roam_point = candidate;
+				return;
+			}
+		}
+	}
 
 	if (!g_roam_count)
 		return;
@@ -515,7 +567,7 @@ static void BotAI_SelectRoamGoal (bot_state_t *bot, edict_t *self)
 
 	bot->roam_point = index;
 	VectorCopy (g_roam_points[index], bot->goal_pos);
-	if (self && BotNav_IsLoaded () && bot_use_nav2.value)
+	if (self && BotAI_ShouldUseNav2 ())
 		bot->next_repath_time = 0.0;
 }
 
@@ -527,7 +579,7 @@ static void BotAI_UpdatePath (bot_state_t *bot, edict_t *self)
 		return;
 	}
 
-	if (!BotNav_IsLoaded () || !bot_use_nav2.value)
+	if (!BotAI_ShouldUseNav2 ())
 	{
 		bot->has_path = false;
 		return;
@@ -559,6 +611,7 @@ static qboolean BotAI_GetMoveTarget (bot_state_t *bot, edict_t *self, vec3_t out
 	{
 		while (bot->path_index < bot->path.count)
 		{
+			trace_t tr;
 			vec3_t node_pos;
 			vec3_t delta;
 
@@ -567,6 +620,13 @@ static qboolean BotAI_GetMoveTarget (bot_state_t *bot, edict_t *self, vec3_t out
 
 			VectorSubtract (node_pos, self->v.origin, delta);
 			if (VectorLength (delta) < 64.f && bot->path_index < bot->path.count - 1)
+			{
+				bot->path_index++;
+				continue;
+			}
+
+			tr = SV_Move (self->v.origin, self->v.mins, self->v.maxs, node_pos, MOVE_NOMONSTERS, self);
+			if (!tr.startsolid && tr.fraction < 0.98f && bot->path_index < bot->path.count - 1)
 			{
 				bot->path_index++;
 				continue;
@@ -607,11 +667,15 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 	edict_t *visible_enemy;
 	edict_t *best_item = NULL;
 	qboolean enemy_visible = false;
+	qboolean no_combat_ammo = false;
 	vec3_t move_target;
 	vec3_t move_dir;
 	vec3_t move_angles;
 	float move_speed = 0.f;
+	float weapon_eval_dist = 0.f;
 	qboolean has_move_target;
+	int desired_weapon = IT_AXE;
+	int current_weapon = IT_AXE;
 
 	memset (outcmd, 0, sizeof (*outcmd));
 	*out_attack = false;
@@ -643,6 +707,8 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 	if (bot_nav_debug.value)
 		BotNav_DebugDraw ();
+
+	no_combat_ammo = !BotCombat_HasAnyRangedAmmo (self);
 
 	if (bot->last_progress_time <= 0.0)
 	{
@@ -695,14 +761,14 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		bot->state = BOT_STATE_STUCK_RECOVERY;
 	else if (enemy_visible && bot->enemy)
 	{
-		if (self->v.health < 30.f)
+		if (self->v.health < 35.f || no_combat_ammo)
 			bot->state = BOT_STATE_RETREAT;
 		else
 			bot->state = BOT_STATE_ATTACK;
 	}
 	else if (bot->enemy && (qcvm->time - bot->enemy_last_seen_time) <= BOT_ENEMY_FORGET_TIME)
 	{
-		bot->state = BOT_STATE_CHASE_ENEMY;
+		bot->state = no_combat_ammo ? BOT_STATE_RETREAT : BOT_STATE_CHASE_ENEMY;
 		bot->has_goal = true;
 		VectorCopy (bot->enemy_last_pos, bot->goal_pos);
 		bot->goal_pos[2] += 20.f;
@@ -743,6 +809,21 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 	if (bot->has_goal)
 		BotAI_UpdatePath (bot, self);
 
+	if (bot->enemy)
+	{
+		vec3_t enemy_delta;
+		VectorSubtract (bot->enemy->v.origin, self->v.origin, enemy_delta);
+		weapon_eval_dist = VectorLength (enemy_delta);
+	}
+	desired_weapon = BotCombat_SelectWeapon (self, weapon_eval_dist, enemy_visible);
+	current_weapon = (int) self->v.weapon;
+	if (desired_weapon != current_weapon && qcvm->time - bot->last_weapon_switch_time > 0.35)
+	{
+		*out_impulse = BotCombat_WeaponImpulse (desired_weapon);
+		bot->last_weapon_switch_time = qcvm->time;
+		bot->last_requested_weapon = desired_weapon;
+	}
+
 	has_move_target = BotAI_GetMoveTarget (bot, self, move_target);
 	if (!has_move_target)
 		VectorCopy (self->v.origin, move_target);
@@ -769,8 +850,6 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 			vec3_t enemy_dir;
 			vec3_t strafe;
 			float dist;
-			int desired_weapon;
-			int current_weapon;
 			vec3_t aim_angles;
 
 			VectorSubtract (bot->enemy->v.origin, self->v.origin, enemy_dir);
@@ -796,15 +875,6 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 			VectorNormalize (move_dir);
 			move_speed = 290.f;
 
-			desired_weapon = BotCombat_SelectWeapon (self, dist, enemy_visible);
-			current_weapon = (int) self->v.weapon;
-			if (desired_weapon != current_weapon && qcvm->time - bot->last_weapon_switch_time > 0.35)
-			{
-				*out_impulse = BotCombat_WeaponImpulse (desired_weapon);
-				bot->last_weapon_switch_time = qcvm->time;
-				bot->last_requested_weapon = desired_weapon;
-			}
-
 			BotCombat_ComputeAim (bot, self, bot->enemy, aim_angles);
 			out_vangle[YAW] = BotAI_ApproachAngle (out_vangle[YAW], aim_angles[YAW], 720.f * host_frametime);
 			out_vangle[PITCH] = BotAI_ApproachAngle (out_vangle[PITCH], aim_angles[PITCH], 540.f * host_frametime);
@@ -822,9 +892,11 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 	case BOT_STATE_STUCK_RECOVERY:
 		move_speed = 180.f;
-		outcmd->forwardmove = 180.f;
-		outcmd->sidemove = (BotAI_Random01 (bot, 23U) > 0.5f ? 1.f : -1.f) * 320.f;
-		outcmd->upmove = 200.f;
+		bot->strafe_dir = (BotAI_Random01 (bot, 23U) > 0.5f ? 1.f : -1.f);
+		outcmd->forwardmove = -120.f;
+		outcmd->sidemove = bot->strafe_dir * 260.f;
+		if ((int) self->v.flags & FL_ONGROUND)
+			outcmd->upmove = 200.f;
 		break;
 
 	case BOT_STATE_CHASE_ENEMY:
@@ -868,9 +940,13 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		else if (cmd_mag > 80.f && (qcvm->time - bot->last_progress_time) > 1.25)
 		{
 			bot->stuck_until = qcvm->time + 0.75;
+			bot->next_repath_time = 0.0;
+			bot->goal_item = NULL;
+			if (bot->has_path && bot->path_index < bot->path.count - 1)
+				bot->path_index++;
 			bot->has_path = false;
-			bot->has_goal = false;
-			bot->roam_point = -1;
+			if (!bot->has_goal)
+				bot->roam_point = -1;
 			BotAI_SelectRoamGoal (bot, self);
 		}
 	}

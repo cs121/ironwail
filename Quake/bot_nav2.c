@@ -454,6 +454,17 @@ void BotNav_LoadForMap (const char *mapname)
 	char *text_copy;
 	size_t len;
 	char path[MAX_QPATH];
+	char loaded_path[MAX_QPATH];
+	const char *candidates[] =
+	{
+		"maps/%s.nav2",
+		"bots/navigation/%s.nav2",
+		"bots/navigation/%s.nav",
+		"bots/nav/%s.nav2",
+		"bots/nav/%s.nav",
+		"maps/%s.nav"
+	};
+	int ci;
 	qboolean parsed;
 
 	BotNav_ResetGraph ();
@@ -461,12 +472,22 @@ void BotNav_LoadForMap (const char *mapname)
 	if (!mapname || !mapname[0])
 		return;
 
-	q_snprintf (path, sizeof (path), "maps/%s.nav2", mapname);
-	data = COM_LoadMallocFile (path, NULL);
+	data = NULL;
+	loaded_path[0] = '\0';
+	for (ci = 0; ci < (int) countof (candidates); ++ci)
+	{
+		q_snprintf (path, sizeof (path), candidates[ci], mapname);
+		data = COM_LoadMallocFile (path, NULL);
+		if (data)
+		{
+			q_strlcpy (loaded_path, path, sizeof (loaded_path));
+			break;
+		}
+	}
 	if (!data)
 	{
 		if (bot_nav_debug.value)
-			Con_Printf ("BotNav: no nav2 found for %s\n", mapname);
+			Con_Printf ("BotNav: no nav/nav2 found for %s\n", mapname);
 		return;
 	}
 
@@ -489,11 +510,11 @@ void BotNav_LoadForMap (const char *mapname)
 			if (parsed)
 				g_bot_nav.version = 1;
 		}
-		else if (bot_nav_debug.value)
-		{
-			Con_Printf ("BotNav: out of memory while parsing %s\n", path);
+			else if (bot_nav_debug.value)
+			{
+				Con_Printf ("BotNav: out of memory while parsing %s\n", loaded_path);
+			}
 		}
-	}
 
 	if (parsed && BotNav_FinalizeLoad (mapname))
 	{
@@ -501,7 +522,7 @@ void BotNav_LoadForMap (const char *mapname)
 		{
 			Con_Printf (
 				"BotNav: loaded %s (%d nodes, %d links, v%d)\n",
-				path,
+				loaded_path,
 				g_bot_nav.node_count,
 				g_bot_nav.link_count,
 				g_bot_nav.version
@@ -511,7 +532,7 @@ void BotNav_LoadForMap (const char *mapname)
 	else
 	{
 		if (bot_nav_debug.value)
-			Con_Printf ("BotNav: failed to parse %s, fallback roaming active\n", path);
+			Con_Printf ("BotNav: failed to parse %s, fallback roaming active\n", loaded_path);
 		BotNav_ResetGraph ();
 	}
 

@@ -52,6 +52,20 @@ qboolean BotCombat_HasAmmoForWeapon (edict_t *self, int weapon)
 	}
 }
 
+qboolean BotCombat_HasAnyRangedAmmo (edict_t *self)
+{
+	if (!self)
+		return false;
+	return
+		(BotCombat_HasWeapon (self, IT_SHOTGUN) && self->v.ammo_shells >= 1) ||
+		(BotCombat_HasWeapon (self, IT_SUPER_SHOTGUN) && self->v.ammo_shells >= 2) ||
+		(BotCombat_HasWeapon (self, IT_NAILGUN) && self->v.ammo_nails >= 1) ||
+		(BotCombat_HasWeapon (self, IT_SUPER_NAILGUN) && self->v.ammo_nails >= 2) ||
+		(BotCombat_HasWeapon (self, IT_GRENADE_LAUNCHER) && self->v.ammo_rockets >= 1) ||
+		(BotCombat_HasWeapon (self, IT_ROCKET_LAUNCHER) && self->v.ammo_rockets >= 1) ||
+		(BotCombat_HasWeapon (self, IT_LIGHTNING) && self->v.ammo_cells >= 1);
+}
+
 static float BotCombat_WeaponScore (edict_t *self, int weapon, float dist, qboolean line_of_sight)
 {
 	float score = -10000.f;
@@ -104,36 +118,36 @@ static float BotCombat_WeaponScore (edict_t *self, int weapon, float dist, qbool
 
 int BotCombat_SelectWeapon (edict_t *self, float enemy_dist, qboolean line_of_sight)
 {
-	static const int weapons[] =
+	static const int weapons_by_power[] =
 	{
 		IT_LIGHTNING,
 		IT_ROCKET_LAUNCHER,
 		IT_SUPER_NAILGUN,
+		IT_GRENADE_LAUNCHER,
 		IT_NAILGUN,
 		IT_SUPER_SHOTGUN,
-		IT_GRENADE_LAUNCHER,
 		IT_SHOTGUN,
 		IT_AXE
 	};
 	int i;
 	int best_weapon = IT_AXE;
-	float best_score = -10000.f;
 
 	if (!self)
 		return IT_AXE;
 
-	for (i = 0; i < (int) countof (weapons); ++i)
-	{
-		float score = BotCombat_WeaponScore (self, weapons[i], enemy_dist, line_of_sight);
-		if (score > best_score)
-		{
-			best_score = score;
-			best_weapon = weapons[i];
-		}
-	}
+	(void) enemy_dist;
+	(void) line_of_sight;
 
-	if (!BotCombat_HasAmmoForWeapon (self, best_weapon))
-		best_weapon = IT_AXE;
+	for (i = 0; i < (int) countof (weapons_by_power); ++i)
+	{
+		int weapon = weapons_by_power[i];
+		if (!BotCombat_HasWeapon (self, weapon))
+			continue;
+		if (!BotCombat_HasAmmoForWeapon (self, weapon))
+			continue;
+		best_weapon = weapon;
+		break;
+	}
 
 	return best_weapon;
 }
@@ -237,8 +251,8 @@ qboolean BotCombat_ShouldFire (edict_t *self, edict_t *enemy, int weapon, vec3_t
 	if (dot < 0.92f)
 		return false;
 
-	tr = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, self);
-	if (tr.fraction < 1.f)
+	tr = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NORMAL, self);
+	if (tr.fraction < 1.f && tr.ent != enemy)
 		return false;
 
 	if (weapon == IT_ROCKET_LAUNCHER || weapon == IT_GRENADE_LAUNCHER)
