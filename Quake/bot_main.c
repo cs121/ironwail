@@ -500,6 +500,11 @@ void Bot_OnClientDropped (client_t *client)
 	Bot_UpdateCountCvar ();
 }
 
+qboolean Bot_RespawnClient (client_t *client)
+{
+	return Bot_PerformClientSpawn (client, false);
+}
+
 void Bot_Init (void)
 {
 	if (g_bot_initialized)

@@ -541,7 +541,10 @@ static int numpartverts = 0;
 
 static GLubyte R_ParticleLitByte (GLubyte value, float light)
 {
-	return (GLubyte)CLAMP (0.f, floorf ((float)value * light + 0.5f), 255.f);
+	const float clamped_light = CLAMP (0.f, light, 4.f);
+	/* Keep particle source hue readable; apply incoming light as a gentle tint. */
+	const float soft_light = CLAMP (0.75f, 1.f + (clamped_light - 1.f) * 0.35f, 2.0f);
+	return (GLubyte)CLAMP (0.f, floorf ((float)value * soft_light + 0.5f), 255.f);
 }
 
 /*

@@ -1472,8 +1472,19 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 	if (!BotAI_IsAlivePlayer (self))
 	{
+		const qboolean force_respawn = (deathmatch.value != 0.f) || BotAI_IsCompanionMode (bot);
 		if (bot->respawn_time <= qcvm->time)
-			*out_attack = true;
+		{
+			if (force_respawn)
+			{
+				if (!Bot_RespawnClient (client))
+					*out_attack = true;
+			}
+			else
+			{
+				*out_attack = true;
+			}
+		}
 		bot->respawn_time = qcvm->time + 0.45;
 		bot->state = BOT_STATE_ROAM;
 		bot->enemy = NULL;

@@ -156,7 +156,10 @@ static cvar_t r_decals_instanced = {"r_decals_instanced", "1", CVAR_ARCHIVE};
 
 static byte R_ModulateLitByte (byte value, float light)
 {
-	return (byte)CLAMP (0.f, floorf ((float)value * light + 0.5f), 255.f);
+	const float clamped_light = CLAMP (0.f, light, 4.f);
+	/* Keep decal base tint dominant; dynamic lighting should be a subtle shift. */
+	const float soft_light = CLAMP (0.75f, 1.f + (clamped_light - 1.f) * 0.35f, 2.0f);
+	return (byte)CLAMP (0.f, floorf ((float)value * soft_light + 0.5f), 255.f);
 }
 
 static void R_ModulateLitRGB (byte *dst, const byte *src, const vec3_t light)

@@ -101,5 +101,6 @@ qboolean Bot_IsClientBot (const client_t *client);
 void Bot_RunFrameForClient (client_t *client);
 void Bot_OnClientDropped (client_t *client);
 int Bot_GetActiveCount (void);
+qboolean Bot_RespawnClient (client_t *client);
 
 #endif /* BOT_MAIN_H */
