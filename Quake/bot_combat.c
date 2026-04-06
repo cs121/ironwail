@@ -116,40 +116,63 @@ static float BotCombat_WeaponScore (edict_t *self, int weapon, float dist, qbool
 	return score;
 }
 
-int BotCombat_SelectWeapon (edict_t *self, float enemy_dist, qboolean line_of_sight)
+static float BotCombat_WeaponTierBonus (int weapon)
 {
-	static const int weapons_by_power[] =
+	switch (weapon)
 	{
-		IT_LIGHTNING,
-		IT_ROCKET_LAUNCHER,
-		IT_SUPER_NAILGUN,
-		IT_GRENADE_LAUNCHER,
-		IT_NAILGUN,
-		IT_SUPER_SHOTGUN,
-		IT_SHOTGUN,
-		IT_AXE
-	};
+	case IT_LIGHTNING:
+		return 32.f;
+	case IT_ROCKET_LAUNCHER:
+		return 28.f;
+	case IT_SUPER_NAILGUN:
+		return 24.f;
+	case IT_GRENADE_LAUNCHER:
+		return 20.f;
+	case IT_NAILGUN:
+		return 16.f;
+	case IT_SUPER_SHOTGUN:
+		return 12.f;
+	case IT_SHOTGUN:
+		return 8.f;
+	default:
+		return 0.f;
+	}
+}
+
+int BotCombat_SelectWeaponAvoid (edict_t *self, float enemy_dist, qboolean line_of_sight, int avoid_weapon)
+{
+	static const int weapons[] = {IT_LIGHTNING, IT_ROCKET_LAUNCHER, IT_SUPER_NAILGUN, IT_GRENADE_LAUNCHER, IT_NAILGUN, IT_SUPER_SHOTGUN, IT_SHOTGUN, IT_AXE};
 	int i;
 	int best_weapon = IT_AXE;
+	float best_score = -10000.f;
 
 	if (!self)
 		return IT_AXE;
 
-	(void) enemy_dist;
-	(void) line_of_sight;
-
-	for (i = 0; i < (int) countof (weapons_by_power); ++i)
+	for (i = 0; i < (int) countof (weapons); ++i)
 	{
-		int weapon = weapons_by_power[i];
-		if (!BotCombat_HasWeapon (self, weapon))
+		int weapon = weapons[i];
+		float score;
+
+		if (weapon == avoid_weapon)
 			continue;
-		if (!BotCombat_HasAmmoForWeapon (self, weapon))
+		score = BotCombat_WeaponScore (self, weapon, enemy_dist, line_of_sight);
+		if (score <= -9000.f)
 			continue;
-		best_weapon = weapon;
-		break;
+		score += BotCombat_WeaponTierBonus (weapon);
+		if (score > best_score)
+		{
+			best_score = score;
+			best_weapon = weapon;
+		}
 	}
 
 	return best_weapon;
+}
+
+int BotCombat_SelectWeapon (edict_t *self, float enemy_dist, qboolean line_of_sight)
+{
+	return BotCombat_SelectWeaponAvoid (self, enemy_dist, line_of_sight, 0);
 }
 
 int BotCombat_WeaponImpulse (int weapon)
@@ -223,15 +246,20 @@ void BotCombat_ComputeAim (bot_state_t *bot, edict_t *self, edict_t *enemy, vec3
 	}
 }
 
-qboolean BotCombat_ShouldFire (edict_t *self, edict_t *enemy, int weapon, vec3_t aim_angles)
+qboolean BotCombat_ShouldFire (edict_t *self, edict_t *enemy, int weapon, vec3_t aim_angles, qboolean *out_blocked)
 {
 	vec3_t start;
 	vec3_t end;
 	vec3_t dir;
 	vec3_t forward;
+	vec3_t right;
 	trace_t tr;
+	trace_t world_tr;
 	float dist;
 	float dot;
+
+	if (out_blocked)
+		*out_blocked = false;
 
 	if (!self || !enemy)
 		return false;
@@ -248,25 +276,65 @@ qboolean BotCombat_ShouldFire (edict_t *self, edict_t *enemy, int weapon, vec3_t
 
 	AngleVectors (aim_angles, forward, NULL, NULL);
 	dot = DotProduct (forward, dir);
-	if (dot < 0.92f)
+	if (dot < 0.95f)
 		return false;
+
+	world_tr = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, self);
+	if (world_tr.startsolid || world_tr.fraction < 0.99f)
+	{
+		if (out_blocked)
+			*out_blocked = true;
+		return false;
+	}
 
 	tr = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NORMAL, self);
 	if (tr.fraction < 1.f && tr.ent != enemy)
+	{
+		if (out_blocked)
+			*out_blocked = true;
 		return false;
+	}
 
 	if (weapon == IT_ROCKET_LAUNCHER || weapon == IT_GRENADE_LAUNCHER)
 	{
 		vec3_t near_end;
+		vec3_t side_start;
+		vec3_t side_end;
 		trace_t near_tr;
+		trace_t side_tr;
 
-		if (dist < 145.f)
+		if (dist < 170.f)
 			return false;
 
+		AngleVectors (aim_angles, forward, right, NULL);
 		VectorMA (start, 96.f, forward, near_end);
 		near_tr = SV_Move (start, vec3_origin, vec3_origin, near_end, MOVE_NORMAL, self);
-		if (near_tr.fraction < 0.35f)
+		if (near_tr.fraction < 0.55f)
+		{
+			if (out_blocked)
+				*out_blocked = true;
 			return false;
+		}
+
+		VectorMA (start, 10.f, right, side_start);
+		VectorMA (side_start, 80.f, forward, side_end);
+		side_tr = SV_Move (side_start, vec3_origin, vec3_origin, side_end, MOVE_NORMAL, self);
+		if (side_tr.fraction < 0.55f)
+		{
+			if (out_blocked)
+				*out_blocked = true;
+			return false;
+		}
+
+		VectorMA (start, -10.f, right, side_start);
+		VectorMA (side_start, 80.f, forward, side_end);
+		side_tr = SV_Move (side_start, vec3_origin, vec3_origin, side_end, MOVE_NORMAL, self);
+		if (side_tr.fraction < 0.55f)
+		{
+			if (out_blocked)
+				*out_blocked = true;
+			return false;
+		}
 	}
 
 	return true;

@@ -250,6 +250,94 @@ static void BotNav_AutoLinkNodes (void)
 	}
 }
 
+static qboolean BotNav_IsLinkPassable (int from, int to)
+{
+	vec3_t start;
+	vec3_t end;
+	trace_t tr;
+
+	if ((unsigned int) from >= (unsigned int) g_bot_nav.node_count || (unsigned int) to >= (unsigned int) g_bot_nav.node_count)
+		return false;
+
+	VectorCopy (g_bot_nav.nodes[from].pos, start);
+	VectorCopy (g_bot_nav.nodes[to].pos, end);
+	start[2] += 18.f;
+	end[2] += 18.f;
+
+	tr = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, NULL);
+	return !tr.startsolid && !tr.allsolid && tr.fraction >= 0.98f;
+}
+
+static void BotNav_PruneBlockedLinks (void)
+{
+	int *old_first;
+	bot_nav_link_t *old_links;
+	int old_link_count;
+	int from;
+	int removed = 0;
+
+	if (g_bot_nav.node_count <= 0 || g_bot_nav.link_count <= 0)
+		return;
+
+	old_first = (int *) q_malloc ((size_t) g_bot_nav.node_count * sizeof (int));
+	old_links = (bot_nav_link_t *) q_malloc ((size_t) g_bot_nav.link_count * sizeof (bot_nav_link_t));
+	if (!old_first || !old_links)
+	{
+		if (old_first)
+			q_free(old_first);
+		if (old_links)
+			q_free(old_links);
+		return;
+	}
+
+	Q_memcpy (old_first, &g_bot_nav.nodes[0].first_link, (size_t) g_bot_nav.node_count * sizeof (int));
+	Q_memcpy (old_links, g_bot_nav.links, (size_t) g_bot_nav.link_count * sizeof (bot_nav_link_t));
+	old_link_count = g_bot_nav.link_count;
+	g_bot_nav.link_count = 0;
+
+	for (from = 0; from < g_bot_nav.node_count; ++from)
+		g_bot_nav.nodes[from].first_link = -1;
+
+	for (from = 0; from < g_bot_nav.node_count; ++from)
+	{
+		int li;
+		for (li = old_first[from]; li >= 0; li = old_links[li].next)
+		{
+			int to;
+			bot_nav_link_t *dst;
+
+			if ((unsigned int) li >= (unsigned int) old_link_count)
+				break;
+			to = old_links[li].to;
+			if ((unsigned int) to >= (unsigned int) g_bot_nav.node_count)
+			{
+				removed++;
+				continue;
+			}
+			if (!BotNav_IsLinkPassable (from, to))
+			{
+				removed++;
+				continue;
+			}
+			if (BotNav_LinkExists (from, to))
+				continue;
+			if (g_bot_nav.link_count >= BOT_NAV_MAX_LINKS)
+				break;
+
+			dst = &g_bot_nav.links[g_bot_nav.link_count++];
+			*dst = old_links[li];
+			dst->next = g_bot_nav.nodes[from].first_link;
+			g_bot_nav.nodes[from].first_link = g_bot_nav.link_count - 1;
+		}
+	}
+
+	q_free(old_first);
+	q_free(old_links);
+
+	if (bot_nav_debug.value && removed > 0)
+		Con_Printf ("BotNav: pruned %d blocked/invalid links\n", removed);
+}
+
 static qboolean BotNav_FinalizeLoad (const char *mapname)
 {
 	if (g_bot_nav.node_count < 2)
@@ -555,7 +643,9 @@ int BotNav_FindNearestNode (const vec3_t pos)
 {
 	int i;
 	int nearest = -1;
+	int nearest_reachable = -1;
 	float best_dist2 = BOT_NAV_INF;
+	float best_reachable_dist2 = BOT_NAV_INF;
 
 	if (!g_bot_nav.loaded || g_bot_nav.node_count <= 0)
 		return -1;
@@ -572,7 +662,30 @@ int BotNav_FindNearestNode (const vec3_t pos)
 			best_dist2 = dist2;
 			nearest = i;
 		}
+
+		if (dist2 < best_reachable_dist2)
+		{
+			vec3_t mins = {-16.f, -16.f, -24.f};
+			vec3_t maxs = {16.f, 16.f, 32.f};
+			vec3_t start;
+			vec3_t end;
+			trace_t tr;
+
+			VectorCopy (pos, start);
+			start[2] += 18.f;
+			VectorCopy (g_bot_nav.nodes[i].pos, end);
+			end[2] += 18.f;
+			tr = SV_Move (start, mins, maxs, end, MOVE_NOMONSTERS, NULL);
+			if (!tr.startsolid && !tr.allsolid && tr.fraction >= 0.98f)
+			{
+				best_reachable_dist2 = dist2;
+				nearest_reachable = i;
+			}
+		}
 	}
+
+	if (nearest_reachable >= 0)
+		return nearest_reachable;
 
 	return nearest;
 }
@@ -679,8 +792,14 @@ qboolean BotNav_FindPath (int start_node, int goal_node, bot_path_t *out_path)
 
 		for (i = g_bot_nav.nodes[current].first_link; i >= 0; i = g_bot_nav.links[i].next)
 		{
-			int neighbor = g_bot_nav.links[i].to;
+			int neighbor;
 			float tentative;
+
+			if ((unsigned int) i >= (unsigned int) g_bot_nav.link_count)
+				break;
+			neighbor = g_bot_nav.links[i].to;
+			if ((unsigned int) neighbor >= (unsigned int) g_bot_nav.node_count)
+				continue;
 
 			if (g_bot_nav.closed[neighbor])
 				continue;

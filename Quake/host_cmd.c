@@ -3062,6 +3062,89 @@ static void Host_Kill_f (void)
 
 /*
 ==================
+Host_Spectate_f
+==================
+*/
+static void Host_Spectate_f (void)
+{
+	qboolean enable = true;
+
+	if (cmd_source == src_command)
+	{
+		Cmd_ForwardToServer ();
+		return;
+	}
+
+	if (Cmd_Argc () >= 2)
+	{
+		const char *arg = Cmd_Argv (1);
+		if (!q_strcasecmp (arg, "0") || !q_strcasecmp (arg, "off") || !q_strcasecmp (arg, "false"))
+			enable = false;
+		else if (!q_strcasecmp (arg, "1") || !q_strcasecmp (arg, "on") || !q_strcasecmp (arg, "true"))
+			enable = true;
+		else
+		{
+			SV_ClientPrintf ("usage: spectate [0|1]\n");
+			return;
+		}
+	}
+	else
+		enable = !host_client->spectator;
+
+	SV_ClientSetSpectatorMode (host_client, enable);
+	if (enable)
+	{
+		if (host_client->spectator_target >= 0 && host_client->spectator_target < svs.maxclients)
+			SV_ClientPrintf ("Spectating %s\n", svs.clients[host_client->spectator_target].name);
+		else
+			SV_ClientPrintf ("No valid players to spectate\n");
+	}
+	else
+		SV_ClientPrintf ("Spectator mode off\n");
+}
+
+/*
+==================
+Host_SpecNext_f
+==================
+*/
+static void Host_SpecNext_f (void)
+{
+	if (cmd_source == src_command)
+	{
+		Cmd_ForwardToServer ();
+		return;
+	}
+
+	SV_ClientCycleSpectatorTarget (host_client, 1);
+	if (host_client->spectator_target >= 0 && host_client->spectator_target < svs.maxclients)
+		SV_ClientPrintf ("Spectating %s\n", svs.clients[host_client->spectator_target].name);
+	else
+		SV_ClientPrintf ("No valid players to spectate\n");
+}
+
+/*
+==================
+Host_SpecPrev_f
+==================
+*/
+static void Host_SpecPrev_f (void)
+{
+	if (cmd_source == src_command)
+	{
+		Cmd_ForwardToServer ();
+		return;
+	}
+
+	SV_ClientCycleSpectatorTarget (host_client, -1);
+	if (host_client->spectator_target >= 0 && host_client->spectator_target < svs.maxclients)
+		SV_ClientPrintf ("Spectating %s\n", svs.clients[host_client->spectator_target].name);
+	else
+		SV_ClientPrintf ("No valid players to spectate\n");
+}
+
+/*
+==================
 Host_BotSpawn_f
 ==================
 */
@@ -3882,6 +3965,9 @@ void Host_InitCommands (void)
 	Cmd_AddCommand_ClientCommand ("tell", Host_Tell_f);
 	Cmd_AddCommand_ClientCommand ("color", Host_Color_f);
 	Cmd_AddCommand_ClientCommand ("kill", Host_Kill_f);
+	Cmd_AddCommand_ClientCommand ("spectate", Host_Spectate_f);
+	Cmd_AddCommand_ClientCommand ("spec_next", Host_SpecNext_f);
+	Cmd_AddCommand_ClientCommand ("spec_prev", Host_SpecPrev_f);
 	Cmd_AddCommand_ClientCommand ("pause", Host_Pause_f);
 	Cmd_AddCommand_ClientCommand ("spawn", Host_Spawn_f);
 	Cmd_AddCommand_ClientCommand ("begin", Host_Begin_f);

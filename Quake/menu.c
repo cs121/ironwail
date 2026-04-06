@@ -208,6 +208,12 @@ void M_SetSkillMenuMap (const char *name);
 void M_Options_SelectMods (void);
 void M_Options_Init (enum m_state_e state);
 
+static void M_StopDemoForMultiplayerMenu (void)
+{
+	if (cls.demoplayback)
+		Cbuf_InsertText ("stopdemo\n");
+}
+
 #define PREVIEW_FADEIN_TIME				0.125
 #define PREVIEW_FADEOUT_TIME			0.125
 #define PREVIEW_HOLD_TIME				1.25
@@ -2238,6 +2244,7 @@ int	m_multiplayer_cursor;
 
 void M_Menu_MultiPlayer_f (void)
 {
+	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_multiplayer;
@@ -2335,6 +2342,7 @@ int		setup_bottom;
 
 void M_Menu_Setup_f (void)
 {
+	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_setup;
@@ -2538,6 +2546,7 @@ const char *net_helpMessage [] =
 
 void M_Menu_Net_f (void)
 {
+	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_net;
@@ -5586,6 +5595,7 @@ char	lanConfig_joinname[22];
 
 void M_Menu_LanConfig_f (void)
 {
+	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_lanconfig;
@@ -5959,6 +5969,7 @@ double m_serverInfoMessageTime;
 
 void M_Menu_GameOptions_f (void)
 {
+	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_gameoptions;
@@ -6338,6 +6349,7 @@ double		searchCompleteTime;
 
 void M_Menu_Search_f (void)
 {
+	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_search;
@@ -6399,6 +6411,7 @@ qboolean slist_sorted;
 
 void M_Menu_ServerList_f (void)
 {
+	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_slist;

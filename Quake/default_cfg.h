@@ -53,6 +53,8 @@ static const char default_cfg[] =
 "bind F4 \"menu_options\"\n"
 "bind F5 \"menu_multiplayer\"\n"
 "bind F6 \"echo Quicksaving...; wait; save quick\"\n"
+"bind F7 \"spec_prev\"\n"
+"bind F8 \"spec_next\"\n"
 "bind F9 \"echo Quickloading...; wait; load quick\"\n"
 "bind F10 \"quit\"\n"
 "bind F12 \"screenshot\"\n"

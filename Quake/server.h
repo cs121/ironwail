@@ -131,9 +131,12 @@ typedef struct client_s
 	qboolean		active;				// false = client is free
 	qboolean		isbot;				// synthetic local bot client
 	qboolean		spawned;			// false = don't send datagrams
+	qboolean		spectator;			// spectator camera enabled
 	qboolean		dropasap;			// has been told to go to another level
 	enum sendsignon_e	sendsignon;			// only valid before spawned
 	int				signonidx;
+	int				viewentity;			// current view entity sent to the client
+	int				spectator_target;	// client index currently being spectated
 
 	double			last_message;		// reliable messages must be sent
 										// periodically
@@ -294,6 +297,8 @@ void SV_AddClientToServer (struct qsocket_s	*ret);
 
 void SV_ClientPrintf (const char *fmt, ...) FUNC_PRINTF(1,2);
 void SV_BroadcastPrintf (const char *fmt, ...) FUNC_PRINTF(1,2);
+void SV_ClientSetSpectatorMode (client_t *client, qboolean enable);
+void SV_ClientCycleSpectatorTarget (client_t *client, int dir);
 
 void SV_Physics (void);
 qboolean SV_RunThink (edict_t *ent);

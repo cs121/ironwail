@@ -9,6 +9,8 @@ typedef enum bot_ai_state_e
 	BOT_STATE_ROAM = 0,
 	BOT_STATE_SEEK_ITEM,
 	BOT_STATE_CHASE_ENEMY,
+	BOT_STATE_FOLLOW,
+	BOT_STATE_SEARCH,
 	BOT_STATE_ATTACK,
 	BOT_STATE_RETREAT,
 	BOT_STATE_STUCK_RECOVERY
@@ -30,6 +32,10 @@ typedef struct bot_state_s
 	vec3_t		goal_pos;
 	qboolean	has_goal;
 	double		goal_timeout;
+	edict_t		*failed_goal_item;
+	double		failed_goal_item_until;
+	int		failed_goal_node;
+	double		failed_goal_node_until;
 
 	bot_path_t	path;
 	qboolean	has_path;
@@ -42,14 +48,42 @@ typedef struct bot_state_s
 	double		next_item_scan_time;
 	double		next_debug_time;
 	double		respawn_time;
+	float		last_health;
+	float		last_leader_health;
+	double		alert_until;
+	vec3_t		alert_pos;
 
 	float		strafe_dir;
 	double		next_strafe_change;
+	double		next_jump_time;
 
 	double		last_weapon_switch_time;
 	int		last_requested_weapon;
 	int		roam_point;
-} bot_state_t;
+
+	double		retreat_hold_until;
+	int		fire_block_streak;
+	double		last_fire_block_time;
+
+	int		failed_edge_from[12];
+	int		failed_edge_to[12];
+	double		failed_edge_until[12];
+	int		failed_edge_cursor;
+
+	double		stuck_window_start;
+	int		stuck_window_count;
+	int		no_move_target_streak;
+	int		obstacle_avoid_streak;
+
+	int		dbg_stuck_events;
+	int		dbg_repaths;
+	int		dbg_blocked_shots;
+	int		dbg_weapon_downgrades;
+
+	edict_t		*follow_target;
+	double		follow_unreachable_since;
+	double		next_follow_teleport_time;
+	 } bot_state_t;
 
 extern cvar_t bot_debug;
 extern cvar_t bot_nav_debug;

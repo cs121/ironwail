@@ -9,7 +9,7 @@ cvar_t bot_think_debug = {"bot_think_debug", "0", CVAR_NONE};
 cvar_t bot_aim_debug = {"bot_aim_debug", "0", CVAR_NONE};
 cvar_t bot_skill = {"bot_skill", "0.55", CVAR_ARCHIVE};
 cvar_t bot_use_nav2 = {"bot_use_nav2", "1", CVAR_ARCHIVE};
-cvar_t bot_call_clientconnect = {"bot_call_clientconnect", "0", CVAR_ARCHIVE};
+cvar_t bot_call_clientconnect = {"bot_call_clientconnect", "1", CVAR_ARCHIVE};
 cvar_t bot_count = {"bot_count", "0", CVAR_NONE};
 
 static bot_state_t g_bot_states[MAX_SCOREBOARD];
@@ -83,6 +83,21 @@ static int Bot_PickTeam (int requested_team)
 	int best_team;
 	int best_count;
 	int team_counts[4] = {0, 0, 0, 0};
+
+	if (!deathmatch.value)
+	{
+		for (t = 0; t < svs.maxclients; ++t)
+		{
+			client_t *client = &svs.clients[t];
+			int team;
+
+			if (!client->active || client->isbot || !client->edict)
+				continue;
+			team = (int) client->edict->v.team;
+			if (team >= 1 && team <= 4)
+				return team;
+		}
+	}
 
 	if (requested_team >= 1 && requested_team <= 4)
 		return requested_team;
@@ -191,9 +206,8 @@ static qboolean Bot_PerformClientSpawn (client_t *client, qboolean announce)
 		pr_global_struct->time = qcvm->time;
 		pr_global_struct->self = EDICT_TO_PROG (ent);
 		/*
-		 * Bot-Spawn ist nicht an ein echtes Net-Client-Handshake gebunden.
-		 * Einige Mods nehmen in ClientConnect implizit eine gültige netconnection
-		 * an und können bei Bots hart abstürzen. Deshalb standardmäßig aus.
+		 * Bots should follow the same QC initialization path as normal clients
+		 * unless the user explicitly disables it for a problematic mod.
 		 */
 		if (bot_call_clientconnect.value != 0.f && pr_global_struct->ClientConnect)
 			PR_ExecuteProgram (pr_global_struct->ClientConnect);
@@ -259,7 +273,13 @@ static qboolean Bot_AddClient (int requested_team)
 	client->active = true;
 	client->spawned = false;
 	client->isbot = true;
-	client->edict = EDICT_NUM (clientnum + 1);
+	if (!sv.qcvm.progs || !sv.qcvm.edicts || sv.qcvm.edict_size <= 0 || (clientnum + 1) >= sv.qcvm.max_edicts)
+	{
+		Con_Printf ("bot_add failed: server edict state unavailable\n");
+		memset (client, 0, sizeof (*client));
+		return false;
+	}
+	client->edict = (edict_t *) ((byte *) sv.qcvm.edicts + (clientnum + 1) * sv.qcvm.edict_size);
 	client->message.data = client->msgbuf;
 	client->message.maxsize = sizeof (client->msgbuf);
 	client->message.allowoverflow = true;
@@ -419,6 +439,10 @@ void Bot_RunFrameForClient (client_t *client)
 	BotAI_BuildCommand (state, client, &cmd, v_angle, &attack, &impulse);
 	client->cmd = cmd;
 	VectorCopy (v_angle, client->edict->v.v_angle);
+	client->edict->v.fixangle = 1.0f;
+	client->edict->v.angles[PITCH] = 0.0f;
+	client->edict->v.angles[YAW] = v_angle[YAW];
+	client->edict->v.angles[ROLL] = 0.0f;
 	client->edict->v.button0 = attack ? 1.f : 0.f;
 	client->edict->v.button2 = 0.f;
 	if (impulse)

@@ -37,6 +37,99 @@ extern cvar_t nomonsters;
 
 static cvar_t sv_netsort = {"sv_netsort", "1", CVAR_NONE};
 
+static qboolean SV_IsSpectatorTargetValid (const client_t *viewer, int target_idx)
+{
+	const client_t *target;
+
+	if (!viewer || target_idx < 0 || target_idx >= svs.maxclients)
+		return false;
+	if (&svs.clients[target_idx] == viewer)
+		return false;
+
+	target = &svs.clients[target_idx];
+	if (!target->active || !target->spawned || !target->edict)
+		return false;
+	if (target->edict->free || target->edict->v.health <= 0.f)
+		return false;
+
+	return true;
+}
+
+static int SV_FindSpectatorTarget (const client_t *viewer, int start_idx, int dir)
+{
+	int i;
+	int idx;
+
+	if (!viewer || svs.maxclients <= 1)
+		return -1;
+
+	if (dir == 0)
+		dir = 1;
+	dir = (dir > 0) ? 1 : -1;
+
+	idx = start_idx;
+	for (i = 0; i < svs.maxclients; ++i)
+	{
+		idx += dir;
+		if (idx >= svs.maxclients)
+			idx = 0;
+		else if (idx < 0)
+			idx = svs.maxclients - 1;
+
+		if (SV_IsSpectatorTargetValid (viewer, idx))
+			return idx;
+	}
+
+	return -1;
+}
+
+void SV_ClientSetSpectatorMode (client_t *client, qboolean enable)
+{
+	if (!client)
+		return;
+
+	if (!enable)
+	{
+		client->spectator = false;
+		client->spectator_target = -1;
+		client->viewentity = 0;
+		return;
+	}
+
+	client->spectator = true;
+	if (!SV_IsSpectatorTargetValid (client, client->spectator_target))
+		client->spectator_target = SV_FindSpectatorTarget (client, client - svs.clients, 1);
+	client->viewentity = 0;
+}
+
+void SV_ClientCycleSpectatorTarget (client_t *client, int dir)
+{
+	int start;
+
+	if (!client)
+		return;
+
+	client->spectator = true;
+	start = client->spectator_target;
+	if (!SV_IsSpectatorTargetValid (client, start))
+		start = client - svs.clients;
+	client->spectator_target = SV_FindSpectatorTarget (client, start, dir);
+	client->viewentity = 0;
+}
+
+static edict_t *SV_GetClientViewEdict (client_t *client)
+{
+	if (client && client->spectator)
+	{
+		if (!SV_IsSpectatorTargetValid (client, client->spectator_target))
+			client->spectator_target = SV_FindSpectatorTarget (client, client->spectator_target >= 0 ? client->spectator_target : (client - svs.clients), 1);
+		if (SV_IsSpectatorTargetValid (client, client->spectator_target))
+			return svs.clients[client->spectator_target].edict;
+	}
+
+	return client ? client->edict : NULL;
+}
+
 //============================================================================
 
 void SV_CalcStats(client_t *client, int *statsi, float *statsf, const char **statss)
@@ -454,6 +547,7 @@ void SV_SendServerinfo (client_t *client)
 // set view
 	MSG_WriteByte (&client->message, svc_setview);
 	MSG_WriteShort (&client->message, NUM_FOR_EDICT(client->edict));
+	client->viewentity = NUM_FOR_EDICT(client->edict);
 
 	MSG_WriteByte (&client->message, svc_signonnum);
 	MSG_WriteByte (&client->message, 1);
@@ -494,6 +588,7 @@ void SV_ConnectClient (int clientnum)
 		memcpy (spawn_parms, client->spawn_parms, sizeof(spawn_parms));
 	memset (client, 0, sizeof(*client));
 	client->netconnection = netconnection;
+	client->spectator_target = -1;
 
 	q_strlcpy (client->name, "unconnected", sizeof (client->name));
 	client->active = true;
@@ -1188,6 +1283,8 @@ qboolean SV_SendClientDatagram (client_t *client)
 {
 	byte		buf[MAX_DATAGRAM];
 	sizebuf_t	msg;
+	edict_t		*viewent;
+	int		viewentity;
 
 	if (!client->netconnection || client->isbot)
 		return false;
@@ -1204,10 +1301,22 @@ qboolean SV_SendClientDatagram (client_t *client)
 	MSG_WriteByte (&msg, svc_time);
 	MSG_WriteFloat (&msg, qcvm->time);
 
-// add the client specific data to the datagram
-	SV_WriteClientdataToMessage (client->edict, &msg);
+	viewent = SV_GetClientViewEdict (client);
+	if (!viewent)
+		viewent = client->edict;
+	viewentity = viewent ? NUM_FOR_EDICT (viewent) : NUM_FOR_EDICT (client->edict);
 
-	SV_WriteEntitiesToClient (client->edict, &msg);
+	if (client->viewentity != viewentity)
+	{
+		MSG_WriteByte (&msg, svc_setview);
+		MSG_WriteShort (&msg, viewentity);
+		client->viewentity = viewentity;
+	}
+
+// add the client specific data to the datagram
+	SV_WriteClientdataToMessage (viewent, &msg);
+
+	SV_WriteEntitiesToClient (viewent, &msg);
 
 // copy the server datagram if there is space
 	if (msg.cursize + sv.datagram.cursize < msg.maxsize)
