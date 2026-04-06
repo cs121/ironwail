@@ -168,6 +168,8 @@ static qboolean BotAI_IsCompanionMode (const bot_state_t *bot)
 
 	if (!bot || cls.state == ca_dedicated)
 		return false;
+	if (deathmatch.value)
+		return false;
 
 	for (i = 0; i < svs.maxclients; ++i)
 	{
@@ -178,6 +180,9 @@ static qboolean BotAI_IsCompanionMode (const bot_state_t *bot)
 			continue;
 		humans++;
 	}
+
+	if (coop.value)
+		return humans > 0;
 
 	return humans == 1;
 }
