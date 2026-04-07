@@ -26,6 +26,14 @@ After adding emissive textures, launch the game normally. The renderer will
 automatically bind and apply the glow contribution when the matching base
 texture is loaded.
 
+## Runtime lighting proxy budget
+- `r_ppdlights_emissive` enables emissive proxy lights that feed into the shared
+  realtime frame-light list.
+- `r_ppdlights_emissive_budget` controls how many emissive proxy lights can be
+  accepted per frame (default `24`, clamped to `0..DLIGHT_GPU_MAX`).
+- Use `r_ppdlights_stats` and `r_ppdlights_emissive_debug 1` to inspect accepted
+  emissive proxies and budget-based rejections.
+
   path: when set to `1` (default), the material is used only if one of these names contains
   a light token (`light`, `lamp`, `glow`, `flare`, `neon`, `torch`, `lantern`):
   - BSP texture name,
