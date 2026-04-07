@@ -87,6 +87,8 @@ extern cvar_t r_ppdlights_world;
 extern cvar_t r_ppdlights_world_scale;
 extern cvar_t r_ppdlights_world_luma_clamp;
 extern cvar_t r_ppdlights_world_soft_knee;
+extern cvar_t r_ppdlights_world_tiles;
+extern cvar_t r_ppdlights_world_tiles_debug;
 extern cvar_t r_experimental_ppdlights_world_blendop;
 extern cvar_t r_ppdlights_models;
 extern cvar_t r_ppdlights_fog;
