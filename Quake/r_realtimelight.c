@@ -52,6 +52,7 @@ typedef struct rl_source_summary_s
 
 static rl_source_summary_t rl_source_summaries[RL_FRAME_LIGHTS_MAX];
 static int rl_source_summary_count = 0;
+static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights);
 
 static void R_PPdlights_DebugModeCompat_f (void)
 {
@@ -628,43 +629,7 @@ qboolean R_PPdlights_WorldPathEnabled (void)
 
 int R_PPdlights_BuildWorldGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights)
 {
-	int i;
-	int count = 0;
-
-	if (!out_buffer || !out_sources || max_lights <= 0)
-		return 0;
-
-	for (i = 0; i < rl_frame_light_count; ++i)
-	{
-		const rl_light_t *src = &rl_frame_lights[i];
-		gpulight_t *dst = &out_buffer->lights[count];
-		float energy;
-		R_PPdlights_RecordConsumerConsidered (RL_CONSUMER_WORLD, src->source_id);
-		if ((src->flags & RL_LIGHT_SURFACE_CONTRIB) == 0u)
-		{
-			R_PPdlights_RecordConsumerReject (RL_CONSUMER_WORLD, src->source_id, RL_REJECT_NON_CONTRIB);
-			continue;
-		}
-		if (count >= max_lights)
-		{
-			R_PPdlights_RecordConsumerReject (RL_CONSUMER_WORLD, src->source_id, RL_REJECT_LOCAL_BUDGET);
-			continue;
-		}
-		dst->pos[0] = src->origin[0];
-		dst->pos[1] = src->origin[1];
-		dst->pos[2] = src->origin[2];
-		dst->radius = src->radius;
-		dst->color[0] = src->color[0] * src->intensity;
-		dst->color[1] = src->color[1] * src->intensity;
-		dst->color[2] = src->color[2] * src->intensity;
-		dst->minlight = 0.f;
-		out_sources[count] = rl_frame_light_sources[i];
-		energy = dst->color[0] * 0.2126f + dst->color[1] * 0.7152f + dst->color[2] * 0.0722f;
-		R_PPdlights_RecordConsumerAccept (RL_CONSUMER_WORLD, src->source_id, energy);
-		count++;
-	}
-
-	return count;
+	return R_PPdlights_BuildGpuLightsForConsumer (RL_CONSUMER_WORLD, out_buffer, out_sources, max_lights);
 }
 
 qboolean R_PPdlights_ModelPathEnabled (void)
@@ -676,6 +641,15 @@ qboolean R_PPdlights_ModelPathEnabled (void)
 
 int R_PPdlights_BuildModelGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights)
 {
+	return R_PPdlights_BuildGpuLightsForConsumer (RL_CONSUMER_MODEL, out_buffer, out_sources, max_lights);
+}
+
+/*
+ * Keep world/model consumer behavior bit-for-bit aligned here; if they need to
+ * diverge later, branch from this helper in one explicit consumer-specific spot.
+ */
+static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights)
+{
 	int i;
 	int count = 0;
 
@@ -685,19 +659,20 @@ int R_PPdlights_BuildModelGpuLights (gpulightbuffer_t *out_buffer, dlight_t **ou
 	for (i = 0; i < rl_frame_light_count; ++i)
 	{
 		const rl_light_t *src = &rl_frame_lights[i];
-		gpulight_t *dst = &out_buffer->lights[count];
+		gpulight_t *dst;
 		float energy;
-		R_PPdlights_RecordConsumerConsidered (RL_CONSUMER_MODEL, src->source_id);
+		R_PPdlights_RecordConsumerConsidered (consumer, src->source_id);
 		if ((src->flags & RL_LIGHT_SURFACE_CONTRIB) == 0u)
 		{
-			R_PPdlights_RecordConsumerReject (RL_CONSUMER_MODEL, src->source_id, RL_REJECT_NON_CONTRIB);
+			R_PPdlights_RecordConsumerReject (consumer, src->source_id, RL_REJECT_NON_CONTRIB);
 			continue;
 		}
 		if (count >= max_lights)
 		{
-			R_PPdlights_RecordConsumerReject (RL_CONSUMER_MODEL, src->source_id, RL_REJECT_LOCAL_BUDGET);
+			R_PPdlights_RecordConsumerReject (consumer, src->source_id, RL_REJECT_LOCAL_BUDGET);
 			continue;
 		}
+		dst = &out_buffer->lights[count];
 		dst->pos[0] = src->origin[0];
 		dst->pos[1] = src->origin[1];
 		dst->pos[2] = src->origin[2];
@@ -708,7 +683,7 @@ int R_PPdlights_BuildModelGpuLights (gpulightbuffer_t *out_buffer, dlight_t **ou
 		dst->minlight = 0.f;
 		out_sources[count] = rl_frame_light_sources[i];
 		energy = dst->color[0] * 0.2126f + dst->color[1] * 0.7152f + dst->color[2] * 0.0722f;
-		R_PPdlights_RecordConsumerAccept (RL_CONSUMER_MODEL, src->source_id, energy);
+		R_PPdlights_RecordConsumerAccept (consumer, src->source_id, energy);
 		count++;
 	}
 
