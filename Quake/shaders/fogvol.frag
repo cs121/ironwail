@@ -596,8 +596,20 @@ void main()
 	float ambientWeight = clamp(FogClusterParams.x, 0.0, 1.0);
 	float ambientSkyVis = clamp(volume.params2.w, 0.0, 1.0);
 	float ambientSkyMod = 1.0;
-	bool noFogLights = (FogLightSourceScales.x <= 1e-4 && FogLightSourceScales.y <= 1e-4 && FogLightSourceScales.z <= 1e-4);
+	bool lightingEnabled = (FogLightEnabled != 0);
+	int lightingMode = clamp(FogLightingMode, 0, 2);
+	bool modeFroxelOnly = (lightingMode == 1);
+	bool modeMixedDetail = (lightingMode >= 2);
 	float ambientClamp = 0.15;
+	float ambientMin = 0.0;
+	bool hasActiveLightingTerms = false;
+	if (lightingEnabled)
+	{
+		if (modeFroxelOnly)
+			hasActiveLightingTerms = (FogLightSourceScales.x > 1e-4 || FogLightSourceScales.y > 1e-4);
+		else if (modeMixedDetail)
+			hasActiveLightingTerms = (FogLightSourceScales.x > 1e-4 || FogLightSourceScales.y > 1e-4 || FogLightSourceScales.z > 1e-4);
+	}
 	if (AmbientSkyEnabled() > 0.5)
 	{
 		float skyRoom = 1.0 - clamp(max(max(volume.color_density.r, volume.color_density.g), volume.color_density.b) * 0.6, 0.0, 1.0);
@@ -614,12 +626,19 @@ void main()
 		/* Keep global medium extinction-dominant; large ambient values flatten
 		 * depth cues into a fullscreen veil, especially when config overrides
 		 * push r_fogvol_light_ambient far above default. */
-		ambientClamp = noFogLights ? 0.0 : 0.04;
+		ambientClamp = hasActiveLightingTerms ? 0.04 : 0.0;
 		/* When fog lighting is disabled (r_fogvol_light 0), suppress ambient
 		 * in-scatter for global fog so distance extinction remains visible
 		 * instead of collapsing into a flat fullscreen veil. */
-		if (noFogLights)
+		if (!hasActiveLightingTerms)
 			ambientWeight = 0.0;
+	}
+	else if (!hasActiveLightingTerms && lightingMode == 0)
+	{
+		/* Unlit mode keeps a minimal baseline so fog remains readable
+		 * without forcing a broad ambient tint. */
+		ambientClamp = min(ambientClamp, 0.05);
+		ambientMin = 0.01;
 	}
 
 	for (int i = 0; i < FogSteps; ++i)
@@ -638,12 +657,17 @@ void main()
 		if (!IsFiniteFloat(sigma) || sigma <= 1e-6)
 			continue;
 
-		vec3 froxelScatter = SampleFroxelLight(p) * max(FogLightSourceScales.x, 0.0);
-		froxelScatter = pow(max(froxelScatter, vec3(0.0)), vec3(1.0 / max(lightContrast, 0.5)));
-		froxelScatter *= lightContrast;
-		vec3 sunScatter = SampleSunScatter(p, viewDir);
+		vec3 froxelScatter = vec3(0.0);
+		vec3 sunScatter = vec3(0.0);
 		vec3 emissiveScatter = vec3(0.0);
-		if (FogEmissiveEnabled != 0)
+		if (lightingEnabled && lightingMode > 0)
+		{
+			froxelScatter = SampleFroxelLight(p) * max(FogLightSourceScales.x, 0.0);
+			froxelScatter = pow(max(froxelScatter, vec3(0.0)), vec3(1.0 / max(lightContrast, 0.5)));
+			froxelScatter *= lightContrast;
+			sunScatter = SampleSunScatter(p, viewDir);
+		}
+		if (lightingEnabled && modeMixedDetail && FogEmissiveEnabled != 0)
 		{
 			float emissiveStrength = max(volume.misc.w, 0.0) * max(FogLightSourceScales.z, 0.0);
 			emissiveStrength = max(emissiveStrength, max(FogClusterParams.z, 0.0));
@@ -651,13 +675,16 @@ void main()
 				emissiveScatter = volume.color_density.rgb * emissiveStrength;
 		}
 
-		vec3 scattering = vec3(0.0);
-		// Keep only a small unlit baseline so lighting and shadows dominate.
 		vec3 ambientTint = mix(vec3(1.0), AmbientSkyTint(), clamp(ambientSkyMod, 0.0, 1.0));
-		scattering += volume.color_density.rgb * ambientTint * min(ambientWeight, ambientClamp);
-		scattering += froxelScatter;
-		scattering += sunScatter;
-		scattering += emissiveScatter;
+		float ambientTerm = clamp(min(ambientWeight, ambientClamp), ambientMin, ambientClamp);
+		vec3 scattering = volume.color_density.rgb * ambientTint * ambientTerm;
+		if (lightingEnabled)
+		{
+			if (modeFroxelOnly)
+				scattering += froxelScatter + sunScatter;
+			else if (modeMixedDetail)
+				scattering += froxelScatter + sunScatter + emissiveScatter;
+		}
 
 		float lightLuma = dot(max(froxelScatter + sunScatter + emissiveScatter, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
 		float relief = extinctionRelief * clamp(lightLuma * 0.75, 0.0, 1.0);
@@ -701,6 +728,21 @@ void main()
 	if (FogDebugMode == 6)
 	{
 		FragColor = vec4(vec3(clamp(transmittance, 0.0, 1.0)), 1.0);
+		return;
+	}
+	if (FogDebugMode == 7)
+	{
+		vec3 modeColor = vec3(0.15, 0.15, 0.15);
+		if (FogLightEnabled != 0)
+		{
+			if (FogLightingMode == 1)
+				modeColor = vec3(0.1, 0.35, 1.0);
+			else if (FogLightingMode >= 2)
+				modeColor = vec3(0.1, 0.9, 0.25);
+			else
+				modeColor = vec3(1.0, 0.5, 0.1);
+		}
+		FragColor = vec4(modeColor, 1.0);
 		return;
 	}
 	if (AmbientSkyDebugEnabled() > 0.5)
