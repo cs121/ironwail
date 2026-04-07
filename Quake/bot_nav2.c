@@ -32,11 +32,19 @@ typedef struct bot_nav_graph_s
 	bot_nav_node_t	nodes[BOT_NAV_MAX_NODES];
 	bot_nav_link_t	links[BOT_NAV_MAX_LINKS];
 
-	qboolean	open[BOT_NAV_MAX_NODES];
-	qboolean	closed[BOT_NAV_MAX_NODES];
+	uint32_t	search_gen;
+	uint32_t	visited_gen[BOT_NAV_MAX_NODES];
+	uint32_t	closed_gen[BOT_NAV_MAX_NODES];
 	float		gscore[BOT_NAV_MAX_NODES];
 	float		fscore[BOT_NAV_MAX_NODES];
 	int		came_from[BOT_NAV_MAX_NODES];
+	int		open_heap[BOT_NAV_MAX_NODES];
+	int		open_heap_size;
+	int		open_heap_index[BOT_NAV_MAX_NODES];
+
+	uint32_t	debug_search_calls;
+	uint32_t	debug_expanded_total;
+	uint32_t	debug_expanded_last;
 } bot_nav_graph_t;
 
 static bot_nav_graph_t g_bot_nav;
@@ -76,9 +84,139 @@ static void BotNav_ResetGraph (void)
 	g_bot_nav.version = 0;
 	g_bot_nav.node_count = 0;
 	g_bot_nav.link_count = 0;
+	g_bot_nav.search_gen = 0;
+	g_bot_nav.open_heap_size = 0;
+	g_bot_nav.debug_search_calls = 0;
+	g_bot_nav.debug_expanded_total = 0;
+	g_bot_nav.debug_expanded_last = 0;
 
 	for (i = 0; i < BOT_NAV_MAX_NODES; ++i)
+	{
 		g_bot_nav.nodes[i].first_link = -1;
+		g_bot_nav.open_heap_index[i] = -1;
+	}
+}
+
+static qboolean BotNav_OpenHeapNodeLess (int a, int b)
+{
+	if (g_bot_nav.fscore[a] < g_bot_nav.fscore[b])
+		return true;
+	if (g_bot_nav.fscore[a] > g_bot_nav.fscore[b])
+		return false;
+	if (g_bot_nav.gscore[a] < g_bot_nav.gscore[b])
+		return true;
+	if (g_bot_nav.gscore[a] > g_bot_nav.gscore[b])
+		return false;
+	return a < b;
+}
+
+static void BotNav_OpenHeapSwap (int a, int b)
+{
+	int tmp = g_bot_nav.open_heap[a];
+	g_bot_nav.open_heap[a] = g_bot_nav.open_heap[b];
+	g_bot_nav.open_heap[b] = tmp;
+	g_bot_nav.open_heap_index[g_bot_nav.open_heap[a]] = a;
+	g_bot_nav.open_heap_index[g_bot_nav.open_heap[b]] = b;
+}
+
+static void BotNav_OpenHeapSiftUp (int idx)
+{
+	while (idx > 0)
+	{
+		int parent = (idx - 1) >> 1;
+		if (!BotNav_OpenHeapNodeLess (g_bot_nav.open_heap[idx], g_bot_nav.open_heap[parent]))
+			break;
+		BotNav_OpenHeapSwap (idx, parent);
+		idx = parent;
+	}
+}
+
+static void BotNav_OpenHeapSiftDown (int idx)
+{
+	for (;;)
+	{
+		int left = (idx << 1) + 1;
+		int right = left + 1;
+		int best = idx;
+
+		if (left < g_bot_nav.open_heap_size
+			&& BotNav_OpenHeapNodeLess (g_bot_nav.open_heap[left], g_bot_nav.open_heap[best]))
+			best = left;
+		if (right < g_bot_nav.open_heap_size
+			&& BotNav_OpenHeapNodeLess (g_bot_nav.open_heap[right], g_bot_nav.open_heap[best]))
+			best = right;
+		if (best == idx)
+			break;
+		BotNav_OpenHeapSwap (idx, best);
+		idx = best;
+	}
+}
+
+static void BotNav_OpenHeapPushOrUpdate (int node)
+{
+	int idx = g_bot_nav.open_heap_index[node];
+
+	if (idx < 0)
+	{
+		if (g_bot_nav.open_heap_size >= BOT_NAV_MAX_NODES)
+			return;
+		idx = g_bot_nav.open_heap_size++;
+		g_bot_nav.open_heap[idx] = node;
+		g_bot_nav.open_heap_index[node] = idx;
+		BotNav_OpenHeapSiftUp (idx);
+	}
+	else
+	{
+		BotNav_OpenHeapSiftUp (idx);
+		BotNav_OpenHeapSiftDown (idx);
+	}
+}
+
+static int BotNav_OpenHeapPopMin (void)
+{
+	int min_node;
+
+	if (g_bot_nav.open_heap_size <= 0)
+		return -1;
+
+	min_node = g_bot_nav.open_heap[0];
+	g_bot_nav.open_heap_index[min_node] = -1;
+	--g_bot_nav.open_heap_size;
+
+	if (g_bot_nav.open_heap_size > 0)
+	{
+		g_bot_nav.open_heap[0] = g_bot_nav.open_heap[g_bot_nav.open_heap_size];
+		g_bot_nav.open_heap_index[g_bot_nav.open_heap[0]] = 0;
+		BotNav_OpenHeapSiftDown (0);
+	}
+
+	return min_node;
+}
+
+static uint32_t BotNav_BeginSearchGen (void)
+{
+	++g_bot_nav.search_gen;
+	if (!g_bot_nav.search_gen)
+	{
+		Q_memset (g_bot_nav.visited_gen, 0, sizeof (g_bot_nav.visited_gen));
+		Q_memset (g_bot_nav.closed_gen, 0, sizeof (g_bot_nav.closed_gen));
+		g_bot_nav.search_gen = 1;
+	}
+	g_bot_nav.open_heap_size = 0;
+	return g_bot_nav.search_gen;
+}
+
+static void BotNav_InitNodeForSearch (int node, uint32_t search_gen)
+{
+	if (g_bot_nav.visited_gen[node] == search_gen)
+		return;
+
+	g_bot_nav.visited_gen[node] = search_gen;
+	g_bot_nav.closed_gen[node] = 0;
+	g_bot_nav.gscore[node] = BOT_NAV_INF;
+	g_bot_nav.fscore[node] = BOT_NAV_INF;
+	g_bot_nav.came_from[node] = -1;
+	g_bot_nav.open_heap_index[node] = -1;
 }
 
 static qboolean BotNav_LinkExists (int from, int to)
@@ -705,6 +843,9 @@ qboolean BotNav_FindPath (int start_node, int goal_node, bot_path_t *out_path)
 {
 	int i;
 	int current;
+	uint32_t search_gen;
+	uint32_t expanded = 0;
+	qboolean collect_debug_stats;
 
 	if (!out_path)
 		return false;
@@ -718,6 +859,10 @@ qboolean BotNav_FindPath (int start_node, int goal_node, bot_path_t *out_path)
 	if ((unsigned int) start_node >= (unsigned int) g_bot_nav.node_count || (unsigned int) goal_node >= (unsigned int) g_bot_nav.node_count)
 		return false;
 
+	collect_debug_stats = bot_nav_debug.value != 0.f;
+	if (collect_debug_stats)
+		++g_bot_nav.debug_search_calls;
+
 	if (start_node == goal_node)
 	{
 		out_path->count = 1;
@@ -725,41 +870,23 @@ qboolean BotNav_FindPath (int start_node, int goal_node, bot_path_t *out_path)
 		return true;
 	}
 
-	for (i = 0; i < g_bot_nav.node_count; ++i)
-	{
-		g_bot_nav.open[i] = false;
-		g_bot_nav.closed[i] = false;
-		g_bot_nav.gscore[i] = BOT_NAV_INF;
-		g_bot_nav.fscore[i] = BOT_NAV_INF;
-		g_bot_nav.came_from[i] = -1;
-	}
-
-	g_bot_nav.open[start_node] = true;
+	search_gen = BotNav_BeginSearchGen ();
+	BotNav_InitNodeForSearch (start_node, search_gen);
 	g_bot_nav.gscore[start_node] = 0.f;
 	{
 		vec3_t delta;
 		VectorSubtract (g_bot_nav.nodes[goal_node].pos, g_bot_nav.nodes[start_node].pos, delta);
 		g_bot_nav.fscore[start_node] = VectorLength (delta);
 	}
+	BotNav_OpenHeapPushOrUpdate (start_node);
 
-	while (1)
+	while (g_bot_nav.open_heap_size > 0)
 	{
-		float best_f = BOT_NAV_INF;
-		current = -1;
-
-		for (i = 0; i < g_bot_nav.node_count; ++i)
-		{
-			if (!g_bot_nav.open[i])
-				continue;
-			if (g_bot_nav.fscore[i] < best_f)
-			{
-				best_f = g_bot_nav.fscore[i];
-				current = i;
-			}
-		}
-
+		current = BotNav_OpenHeapPopMin ();
 		if (current < 0)
 			break;
+		if (g_bot_nav.closed_gen[current] == search_gen)
+			continue;
 
 		if (current == goal_node)
 		{
@@ -784,11 +911,16 @@ qboolean BotNav_FindPath (int start_node, int goal_node, bot_path_t *out_path)
 			for (i = 0; i < reverse_count; ++i)
 				out_path->nodes[i] = reverse[reverse_count - 1 - i];
 			out_path->total_cost = g_bot_nav.gscore[goal_node];
+			if (collect_debug_stats)
+			{
+				g_bot_nav.debug_expanded_last = expanded;
+				g_bot_nav.debug_expanded_total += expanded;
+			}
 			return true;
 		}
 
-		g_bot_nav.open[current] = false;
-		g_bot_nav.closed[current] = true;
+		g_bot_nav.closed_gen[current] = search_gen;
+		++expanded;
 
 		for (i = g_bot_nav.nodes[current].first_link; i >= 0; i = g_bot_nav.links[i].next)
 		{
@@ -800,21 +932,28 @@ qboolean BotNav_FindPath (int start_node, int goal_node, bot_path_t *out_path)
 			neighbor = g_bot_nav.links[i].to;
 			if ((unsigned int) neighbor >= (unsigned int) g_bot_nav.node_count)
 				continue;
+			BotNav_InitNodeForSearch (neighbor, search_gen);
 
-			if (g_bot_nav.closed[neighbor])
+			if (g_bot_nav.closed_gen[neighbor] == search_gen)
 				continue;
 
 			tentative = g_bot_nav.gscore[current] + g_bot_nav.links[i].cost;
-			if (!g_bot_nav.open[neighbor] || tentative < g_bot_nav.gscore[neighbor])
+			if (tentative < g_bot_nav.gscore[neighbor])
 			{
 				vec3_t delta;
 				g_bot_nav.came_from[neighbor] = current;
 				g_bot_nav.gscore[neighbor] = tentative;
 				VectorSubtract (g_bot_nav.nodes[goal_node].pos, g_bot_nav.nodes[neighbor].pos, delta);
 				g_bot_nav.fscore[neighbor] = tentative + VectorLength (delta);
-				g_bot_nav.open[neighbor] = true;
+				BotNav_OpenHeapPushOrUpdate (neighbor);
 			}
 		}
+	}
+
+	if (collect_debug_stats)
+	{
+		g_bot_nav.debug_expanded_last = expanded;
+		g_bot_nav.debug_expanded_total += expanded;
 	}
 
 	return false;
@@ -833,5 +972,7 @@ void BotNav_DebugDraw (void)
 	if (!g_bot_nav.loaded)
 		Con_Printf ("BotNav: not loaded\n");
 	else
-		Con_Printf ("BotNav: map=%s nodes=%d links=%d version=%d\n", g_bot_nav.mapname, g_bot_nav.node_count, g_bot_nav.link_count, g_bot_nav.version);
+		Con_Printf ("BotNav: map=%s nodes=%d links=%d version=%d path_calls=%u expanded_last=%u expanded_total=%u\n",
+			g_bot_nav.mapname, g_bot_nav.node_count, g_bot_nav.link_count, g_bot_nav.version,
+			g_bot_nav.debug_search_calls, g_bot_nav.debug_expanded_last, g_bot_nav.debug_expanded_total);
 }
