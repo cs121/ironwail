@@ -85,8 +85,66 @@ layout(location=56) uniform int   FogSunShadowCascadeCount;
 layout(location=57) uniform vec2  FogColorScale;
 layout(location=58) uniform vec2  FogDepthBias;
 layout(location=59) uniform vec2  FogColorBias;
+layout(location=60) uniform vec2  FogDepthUvScale;
 
 layout(location=0) out vec4 FragColor;
+
+bool IsFiniteFloat(float v)
+{
+	return !isnan(v) && !isinf(v);
+}
+
+bool IsFiniteVec3(vec3 v)
+{
+	return !any(isnan(v)) && !any(isinf(v));
+}
+
+bool IsFiniteVec4(vec4 v)
+{
+	return !any(isnan(v)) && !any(isinf(v));
+}
+
+int FogVolumeShape(FogVolume volume)
+{
+	float s = volume.misc.y;
+	if (!IsFiniteFloat(s))
+		return FOGVOL_SHAPE_BOX;
+	return (int(floor(s + 0.5)) == FOGVOL_SHAPE_SPHERE) ? FOGVOL_SHAPE_SPHERE : FOGVOL_SHAPE_BOX;
+}
+
+bool FogVolumeDataSane(FogVolume volume)
+{
+	vec3 bmin;
+	vec3 bmax;
+	vec3 extents;
+	int shape;
+
+	if (!IsFiniteVec4(volume.mins) || !IsFiniteVec4(volume.maxs) || !IsFiniteVec4(volume.sphere))
+		return false;
+	if (!IsFiniteVec4(volume.color_density) || !IsFiniteVec4(volume.noise_params))
+		return false;
+	if (!IsFiniteVec4(volume.velocity_windspeed) || !IsFiniteVec4(volume.wind_turbulence))
+		return false;
+	if (!IsFiniteVec4(volume.misc) || !IsFiniteVec4(volume.extra) || !IsFiniteVec4(volume.params2))
+		return false;
+
+	shape = FogVolumeShape(volume);
+	bmin = min(volume.mins.xyz, volume.maxs.xyz);
+	bmax = max(volume.mins.xyz, volume.maxs.xyz);
+	extents = bmax - bmin;
+	if (!IsFiniteVec3(extents) || any(greaterThan(extents, vec3(2.0e6))))
+		return false;
+	if (!IsFiniteFloat(volume.color_density.w) || volume.color_density.w < 0.0)
+		return false;
+	if (shape == FOGVOL_SHAPE_SPHERE)
+	{
+		if (!IsFiniteVec3(volume.sphere.xyz))
+			return false;
+		if (!IsFiniteFloat(volume.sphere.w) || volume.sphere.w < 1.0 || volume.sphere.w > 2.0e6)
+			return false;
+	}
+	return true;
+}
 
 uint HashU32(ivec3 p)
 {
@@ -226,7 +284,7 @@ float HeightFactor(vec3 p, FogVolume volume)
 
 float EdgeFade(vec3 p, FogVolume volume, float falloff, out float edgeDist)
 {
-	if (int(volume.misc.y + 0.5) == FOGVOL_SHAPE_SPHERE)
+	if (FogVolumeShape(volume) == FOGVOL_SHAPE_SPHERE)
 	{
 		edgeDist = volume.sphere.w - length(p - volume.sphere.xyz);
 		if (falloff <= 0.0)
@@ -278,7 +336,7 @@ float EvaluateFogSigma(vec3 p, FogVolume volume, vec3 flow, int lod, float noise
 
 bool IsCameraFollowGlobalFog(FogVolume volume)
 {
-	if (int(volume.misc.y + 0.5) != FOGVOL_SHAPE_SPHERE)
+	if (FogVolumeShape(volume) != FOGVOL_SHAPE_SPHERE)
 		return false;
 	if (volume.sphere.w < 1024.0)
 		return false;
@@ -402,11 +460,23 @@ void main()
 	ivec2 colorPixel = ivec2(floor(colorSamplePos));
 	ivec2 depthSize = textureSize(SceneDepth, 0);
 	ivec2 colorSize = textureSize(SceneColor, 0);
+	if (depthSize.x <= 0 || depthSize.y <= 0 || colorSize.x <= 0 || colorSize.y <= 0)
+	{
+		FragColor = vec4(0.0, 0.0, 0.0, 0.0);
+		return;
+	}
 	depthPixel = clamp(depthPixel, ivec2(0), max(depthSize - ivec2(1), ivec2(0)));
 	colorPixel = clamp(colorPixel, ivec2(0), max(colorSize - ivec2(1), ivec2(0)));
 	vec2 depthPos = vec2(depthPixel) + vec2(0.5);
-	vec2 viewUv = ScreenUvToViewUv(depthPos * FogViewportParams.zw);
+	vec2 viewUv = ScreenUvToViewUv(depthPos * FogDepthUvScale);
 	vec3 scene = texelFetch(SceneColor, colorPixel, 0).rgb;
+	if (!IsFiniteVec3(scene))
+		scene = vec3(0.0);
+	if (!IsFiniteVec3(vec3(viewUv, 0.0)))
+	{
+		FragColor = vec4(scene, 0.0);
+		return;
+	}
 
 	if (FogCheckerboard != 0)
 	{
@@ -419,6 +489,12 @@ void main()
 	}
 
 	FogVolume volume = FogVolumes[clamp(FogVolumeIndex, 0, MAX_FOGVOLUMES - 1)];
+	int volumeShape = FogVolumeShape(volume);
+	if (!FogVolumeDataSane(volume))
+	{
+		FragColor = vec4(scene, 0.0);
+		return;
+	}
 	bool isCameraFollowGlobalFog = IsCameraFollowGlobalFog(volume);
 	float noiseAmountScale = 1.0;
 	// extra.z mirrors the CPU-side enabled flag for this volume.
@@ -429,6 +505,11 @@ void main()
 	}
 
 	float depth = texelFetch(SceneDepth, depthPixel, 0).r;
+	if (!IsFiniteFloat(depth) || depth < 0.0 || depth > 1.0)
+	{
+		FragColor = vec4(scene, 0.0);
+		return;
+	}
 	if (IsSkyDepthSample(depth))
 	{
 		FragColor = vec4(scene, 0.0);
@@ -440,22 +521,32 @@ void main()
 		FragColor = vec4(scene, 0.0);
 		return;
 	}
+	if (!IsFiniteVec3(worldPos))
+	{
+		FragColor = vec4(scene, 0.0);
+		return;
+	}
 
 	vec3 ro = FogCameraPosWS;
 	vec3 rayDelta = worldPos - ro;
 	float rayLen2 = dot(rayDelta, rayDelta);
-	if (!(rayLen2 > FOG_RAY_MIN_LEN2) || rayLen2 > FOG_RAY_MAX_LEN2)
+	if (!IsFiniteFloat(rayLen2) || !(rayLen2 > FOG_RAY_MIN_LEN2) || rayLen2 > FOG_RAY_MAX_LEN2)
 	{
 		FragColor = vec4(scene, 0.0);
 		return;
 	}
 	vec3 rd = rayDelta * inversesqrt(rayLen2);
+	if (!IsFiniteVec3(rd))
+	{
+		FragColor = vec4(scene, 0.0);
+		return;
+	}
 	vec3 viewDir = -rd;
 	float tScene = sqrt(rayLen2);
 
 	float tEnter;
 	float tExit;
-	if (int(volume.misc.y + 0.5) == FOGVOL_SHAPE_SPHERE)
+	if (volumeShape == FOGVOL_SHAPE_SPHERE)
 	{
 		if (!RaySphere(ro, rd, volume.sphere.xyz, volume.sphere.w, tEnter, tExit))
 		{
@@ -482,6 +573,11 @@ void main()
 	float lengthInVolume = tExit - tEnter;
 	int stepCount = max(FogSteps, 1);
 	float stepLen = lengthInVolume / float(stepCount);
+	if (!IsFiniteFloat(stepLen) || stepLen <= 0.0)
+	{
+		FragColor = vec4(scene, 0.0);
+		return;
+	}
 
 	if (FogJitterEnabled != 0 && !isCameraFollowGlobalFog)
 	{
@@ -500,6 +596,8 @@ void main()
 	float ambientWeight = clamp(FogClusterParams.x, 0.0, 1.0);
 	float ambientSkyVis = clamp(volume.params2.w, 0.0, 1.0);
 	float ambientSkyMod = 1.0;
+	bool noFogLights = (FogLightSourceScales.x <= 1e-4 && FogLightSourceScales.y <= 1e-4 && FogLightSourceScales.z <= 1e-4);
+	float ambientClamp = 0.15;
 	if (AmbientSkyEnabled() > 0.5)
 	{
 		float skyRoom = 1.0 - clamp(max(max(volume.color_density.r, volume.color_density.g), volume.color_density.b) * 0.6, 0.0, 1.0);
@@ -511,7 +609,18 @@ void main()
 	/* Global camera-follow fog should read as depth volume, not as
 	 * light-dependent dark-area lift. */
 	if (isCameraFollowGlobalFog)
+	{
 		extinctionRelief = 0.0;
+		/* Keep global medium extinction-dominant; large ambient values flatten
+		 * depth cues into a fullscreen veil, especially when config overrides
+		 * push r_fogvol_light_ambient far above default. */
+		ambientClamp = noFogLights ? 0.0 : 0.04;
+		/* When fog lighting is disabled (r_fogvol_light 0), suppress ambient
+		 * in-scatter for global fog so distance extinction remains visible
+		 * instead of collapsing into a flat fullscreen veil. */
+		if (noFogLights)
+			ambientWeight = 0.0;
+	}
 
 	for (int i = 0; i < FogSteps; ++i)
 	{
@@ -526,7 +635,7 @@ void main()
 		// Use distance-only noise LOD so dense fog keeps detail.
 		int noiseLod = (t > FogNoiseLodSwitchDist) ? 1 : 0;
 		float sigma = EvaluateFogSigma(p, volume, flow, noiseLod, noiseAmountScale);
-		if (sigma <= 1e-6)
+		if (!IsFiniteFloat(sigma) || sigma <= 1e-6)
 			continue;
 
 		vec3 froxelScatter = SampleFroxelLight(p) * max(FogLightSourceScales.x, 0.0);
@@ -545,7 +654,7 @@ void main()
 		vec3 scattering = vec3(0.0);
 		// Keep only a small unlit baseline so lighting and shadows dominate.
 		vec3 ambientTint = mix(vec3(1.0), AmbientSkyTint(), clamp(ambientSkyMod, 0.0, 1.0));
-		scattering += volume.color_density.rgb * ambientTint * min(ambientWeight, 0.15);
+		scattering += volume.color_density.rgb * ambientTint * min(ambientWeight, ambientClamp);
 		scattering += froxelScatter;
 		scattering += sunScatter;
 		scattering += emissiveScatter;
@@ -556,10 +665,14 @@ void main()
 		float opticalDepth = min(sigmaLit * stepLen, max(FogDensityParams.y, 0.001));
 		float att = exp(-opticalDepth);
 		float mediumWeight = 1.0 - att;
+		if (!IsFiniteFloat(opticalDepth) || !IsFiniteFloat(att) || !IsFiniteFloat(mediumWeight))
+			continue;
 
 		accum += transmittance * scattering * mediumWeight;
 		transmittance *= att;
 		tau += opticalDepth;
+		if (!IsFiniteVec3(accum) || !IsFiniteFloat(transmittance) || !IsFiniteFloat(tau))
+			break;
 		if (transmittance < 0.01)
 			break;
 	}
@@ -633,6 +746,14 @@ void main()
 	if (isCameraFollowGlobalFog)
 		blendMode = 0;
 
+	if (!IsFiniteVec3(accum) || !IsFiniteFloat(transmittance))
+	{
+		FragColor = vec4(scene, 0.0);
+		return;
+	}
+	transmittance = clamp(transmittance, 0.0, 1.0);
+	accum = max(accum, vec3(0.0));
+
 	vec3 outColor;
 	if (blendMode == 1)
 		outColor = scene + accum;
@@ -640,6 +761,8 @@ void main()
 		outColor = scene * transmittance + accum;
 	else
 		outColor = mix(scene, scene + accum, 1.0 - transmittance);
+	if (!IsFiniteVec3(outColor))
+		outColor = scene;
 
 	FragColor = vec4(outColor, 1.0 - transmittance);
 }
