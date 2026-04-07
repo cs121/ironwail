@@ -10,6 +10,7 @@ cvar_t bot_aim_debug = {"bot_aim_debug", "0", CVAR_NONE};
 cvar_t bot_skill = {"bot_skill", "0.55", CVAR_ARCHIVE};
 cvar_t bot_use_nav2 = {"bot_use_nav2", "1", CVAR_ARCHIVE};
 cvar_t bot_call_clientconnect = {"bot_call_clientconnect", "1", CVAR_ARCHIVE};
+cvar_t bot_full_think_ms = {"bot_full_think_ms", "75", CVAR_ARCHIVE};
 cvar_t bot_count = {"bot_count", "0", CVAR_NONE};
 
 static bot_state_t g_bot_states[MAX_SCOREBOARD];
@@ -418,6 +419,11 @@ void Bot_RunFrameForClient (client_t *client)
 	vec3_t v_angle;
 	qboolean attack;
 	int impulse;
+	double now;
+	double think_interval;
+	double stagger_offset;
+	qboolean force_full_think;
+	qboolean full_think;
 
 	if (!client || !client->active || !client->isbot)
 		return;
@@ -436,6 +442,11 @@ void Bot_RunFrameForClient (client_t *client)
 		state->forced_team = (client->colors & 15) + 1;
 		BotAI_ResetState (state);
 	}
+	now = qcvm->time;
+	think_interval = CLAMP (0.05, bot_full_think_ms.value * 0.001, 0.25);
+	stagger_offset = think_interval * (((state->clientnum % 8) + 8) % 8) / 8.0;
+	if (state->next_full_think_time <= 0.0)
+		state->next_full_think_time = now + stagger_offset;
 
 	if (!client->spawned)
 	{
@@ -445,9 +456,18 @@ void Bot_RunFrameForClient (client_t *client)
 			return;
 		}
 		BotAI_ResetState (state);
+		state->next_full_think_time = now + stagger_offset;
 	}
 
-	BotAI_BuildCommand (state, client, &cmd, v_angle, &attack, &impulse);
+	force_full_think = BotAI_ShouldForceFullThink (state, client);
+	full_think = force_full_think || (now >= state->next_full_think_time);
+	if (full_think)
+	{
+		state->last_full_think_time = now;
+		state->next_full_think_time = now + think_interval;
+	}
+
+	BotAI_BuildCommand (state, client, &cmd, v_angle, &attack, &impulse, full_think);
 	client->cmd = cmd;
 	VectorCopy (v_angle, client->edict->v.v_angle);
 	client->edict->v.fixangle = 1.0f;
@@ -540,6 +560,7 @@ void Bot_Init (void)
 	Cvar_RegisterVariable (&bot_skill);
 	Cvar_RegisterVariable (&bot_use_nav2);
 	Cvar_RegisterVariable (&bot_call_clientconnect);
+	Cvar_RegisterVariable (&bot_full_think_ms);
 	Cvar_RegisterVariable (&bot_count);
 
 	Cmd_AddCommand ("bot_add", Bot_Add_f);

@@ -6,7 +6,8 @@
 
 void BotAI_OnMapSpawn (void);
 void BotAI_ResetState (bot_state_t *bot);
-void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, vec3_t out_vangle, qboolean *out_attack, int *out_impulse);
+qboolean BotAI_ShouldForceFullThink (bot_state_t *bot, client_t *client);
+void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, vec3_t out_vangle, qboolean *out_attack, int *out_impulse, qboolean full_think);
 const char *BotAI_StateName (bot_ai_state_t state);
 
 #endif /* BOT_AI_H */

@@ -1166,6 +1166,67 @@ void BotAI_ResetState (bot_state_t *bot)
 	bot->follow_target = NULL;
 	bot->follow_unreachable_since = 0.0;
 	bot->next_follow_teleport_time = 0.0;
+	bot->next_full_think_time = 0.0;
+	bot->last_full_think_time = 0.0;
+	bot->last_decision_state = BOT_STATE_ROAM;
+	bot->last_decision_enemy = NULL;
+	VectorCopy (vec3_origin, bot->last_decision_goal_pos);
+	bot->last_decision_has_goal = false;
+	bot->last_decision_has_path = false;
+	memset (&bot->last_decision_path, 0, sizeof (bot->last_decision_path));
+	bot->last_decision_path_index = 0;
+}
+
+static void BotAI_CaptureDecisionSnapshot (bot_state_t *bot)
+{
+	if (!bot)
+		return;
+	bot->last_decision_state = bot->state;
+	bot->last_decision_enemy = bot->enemy;
+	VectorCopy (bot->goal_pos, bot->last_decision_goal_pos);
+	bot->last_decision_has_goal = bot->has_goal;
+	bot->last_decision_has_path = bot->has_path;
+	bot->last_decision_path = bot->path;
+	bot->last_decision_path_index = bot->path_index;
+}
+
+static void BotAI_ApplyDecisionSnapshot (bot_state_t *bot)
+{
+	if (!bot)
+		return;
+	bot->state = bot->last_decision_state;
+	bot->enemy = bot->last_decision_enemy;
+	VectorCopy (bot->last_decision_goal_pos, bot->goal_pos);
+	bot->has_goal = bot->last_decision_has_goal;
+	bot->has_path = bot->last_decision_has_path;
+	bot->path = bot->last_decision_path;
+	bot->path_index = bot->last_decision_path_index;
+}
+
+qboolean BotAI_ShouldForceFullThink (bot_state_t *bot, client_t *client)
+{
+	edict_t *self;
+	qboolean enemy_visible = false;
+	edict_t *visible_enemy;
+
+	if (!bot || !client || !client->edict || !client->spawned)
+		return false;
+	self = client->edict;
+	if (!BotAI_IsAlivePlayer (self))
+		return true;
+
+	if (BotAI_UpdateDamageAlert (self->v.health, &bot->last_health))
+		return true;
+	if (qcvm->time < bot->stuck_until || bot->obstacle_avoid_streak >= 8 || bot->no_move_target_streak >= 2)
+		return true;
+
+	visible_enemy = BotAI_FindBestEnemy (bot, self, &enemy_visible);
+	if (visible_enemy && visible_enemy != bot->enemy)
+		return true;
+	if (enemy_visible && !bot->enemy)
+		return true;
+
+	return false;
 }
 
 static void BotAI_SelectRoamGoal (bot_state_t *bot, edict_t *self)
@@ -1794,7 +1855,7 @@ static void BotAI_TeleportNearLeader (bot_state_t *bot, edict_t *self, edict_t *
 	}
 }
 
-void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, vec3_t out_vangle, qboolean *out_attack, int *out_impulse)
+void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, vec3_t out_vangle, qboolean *out_attack, int *out_impulse, qboolean full_think)
 {
 	edict_t *self;
 	edict_t *visible_enemy;
@@ -1890,90 +1951,92 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		bot->last_progress_time = qcvm->time;
 	}
 
-	visible_enemy = BotAI_FindBestEnemy (bot, self, &enemy_visible);
-	if (visible_enemy)
+	if (full_think)
 	{
-		bot->enemy = visible_enemy;
-		VectorCopy (visible_enemy->v.origin, bot->enemy_last_pos);
-		bot->enemy_last_seen_time = qcvm->time;
-	}
-	else if (bot->enemy && qcvm->time - bot->enemy_last_seen_time > BOT_ENEMY_FORGET_TIME)
-	{
-		bot->enemy = NULL;
-	}
-
-	companion_alerted = companion_mode && leader && BotAI_UpdateCompanionAlert (bot, self, leader);
-	if (companion_alerted && !bot->enemy)
-	{
-		edict_t *alert_enemy = BotAI_FindThreatNearPoint (bot, self, leader, bot->alert_pos, &alert_enemy_visible);
-		if (alert_enemy)
+		visible_enemy = BotAI_FindBestEnemy (bot, self, &enemy_visible);
+		if (visible_enemy)
 		{
-			bot->enemy = alert_enemy;
-			VectorCopy (alert_enemy->v.origin, bot->enemy_last_pos);
+			bot->enemy = visible_enemy;
+			VectorCopy (visible_enemy->v.origin, bot->enemy_last_pos);
 			bot->enemy_last_seen_time = qcvm->time;
-			if (alert_enemy_visible)
-				enemy_visible = true;
 		}
-	}
+		else if (bot->enemy && qcvm->time - bot->enemy_last_seen_time > BOT_ENEMY_FORGET_TIME)
+		{
+			bot->enemy = NULL;
+		}
 
-	if (qcvm->time >= bot->next_item_scan_time)
-	{
-		qboolean urgent_item_override = (self->v.health < 40.f || no_combat_ammo);
-		bot->next_item_scan_time = qcvm->time + 0.4;
-		best_item = NULL;
-		if (!companion_mode || urgent_item_override)
-			best_item = BotAI_FindBestItem (bot, self, enemy_visible, urgent_item_override);
-		if (best_item)
+		companion_alerted = companion_mode && leader && BotAI_UpdateCompanionAlert (bot, self, leader);
+		if (companion_alerted && !bot->enemy)
 		{
-			bot->goal_item = best_item;
-			BotAI_SetGoalFromItem (bot, best_item);
-			bot->has_goal = true;
-			bot->goal_timeout = qcvm->time + ((bot->state == BOT_STATE_RETREAT) ? 3.5 : 8.0);
-		}
-		else if (companion_mode && bot->goal_item)
-		{
-			bot->goal_item = NULL;
-			bot->has_goal = false;
-			bot->has_path = false;
-		}
-	}
-
-	if (bot->goal_item)
-	{
-		if (bot->goal_item->free || (int) bot->goal_item->v.solid == SOLID_NOT || qcvm->time > bot->goal_timeout || !BotAI_ItemPotentiallyReachable (bot, self, bot->goal_item))
-		{
-			if (!bot->goal_item->free)
+			edict_t *alert_enemy = BotAI_FindThreatNearPoint (bot, self, leader, bot->alert_pos, &alert_enemy_visible);
+			if (alert_enemy)
 			{
-				bot->failed_goal_item = bot->goal_item;
-				bot->failed_goal_item_until = qcvm->time + 5.0;
+				bot->enemy = alert_enemy;
+				VectorCopy (alert_enemy->v.origin, bot->enemy_last_pos);
+				bot->enemy_last_seen_time = qcvm->time;
+				if (alert_enemy_visible)
+					enemy_visible = true;
 			}
-			bot->goal_item = NULL;
-			bot->has_goal = false;
-			bot->has_path = false;
 		}
-		else
-		{
-			BotAI_SetGoalFromItem (bot, bot->goal_item);
-		}
-	}
 
-	should_retreat = (self->v.health < 40.f || no_combat_ammo);
-	can_exit_retreat = (self->v.health > 55.f && !no_combat_ammo);
-
-	if (qcvm->time < bot->stuck_until)
-		bot->state = BOT_STATE_STUCK_RECOVERY;
-	else if (enemy_visible && bot->enemy)
-	{
-		if (should_retreat || qcvm->time < bot->retreat_hold_until)
+		if (qcvm->time >= bot->next_item_scan_time)
 		{
-			bot->state = BOT_STATE_RETREAT;
-			bot->retreat_hold_until = q_max (bot->retreat_hold_until, qcvm->time + 1.2);
+			qboolean urgent_item_override = (self->v.health < 40.f || no_combat_ammo);
+			bot->next_item_scan_time = qcvm->time + 0.4;
+			best_item = NULL;
+			if (!companion_mode || urgent_item_override)
+				best_item = BotAI_FindBestItem (bot, self, enemy_visible, urgent_item_override);
+			if (best_item)
+			{
+				bot->goal_item = best_item;
+				BotAI_SetGoalFromItem (bot, best_item);
+				bot->has_goal = true;
+				bot->goal_timeout = qcvm->time + ((bot->state == BOT_STATE_RETREAT) ? 3.5 : 8.0);
+			}
+			else if (companion_mode && bot->goal_item)
+			{
+				bot->goal_item = NULL;
+				bot->has_goal = false;
+				bot->has_path = false;
+			}
 		}
-		else
-			bot->state = BOT_STATE_ATTACK;
-	}
-	else if (bot->enemy && (qcvm->time - bot->enemy_last_seen_time) <= BOT_ENEMY_FORGET_TIME)
-	{
+
+		if (bot->goal_item)
+		{
+			if (bot->goal_item->free || (int) bot->goal_item->v.solid == SOLID_NOT || qcvm->time > bot->goal_timeout || !BotAI_ItemPotentiallyReachable (bot, self, bot->goal_item))
+			{
+				if (!bot->goal_item->free)
+				{
+					bot->failed_goal_item = bot->goal_item;
+					bot->failed_goal_item_until = qcvm->time + 5.0;
+				}
+				bot->goal_item = NULL;
+				bot->has_goal = false;
+				bot->has_path = false;
+			}
+			else
+			{
+				BotAI_SetGoalFromItem (bot, bot->goal_item);
+			}
+		}
+
+		should_retreat = (self->v.health < 40.f || no_combat_ammo);
+		can_exit_retreat = (self->v.health > 55.f && !no_combat_ammo);
+
+		if (qcvm->time < bot->stuck_until)
+			bot->state = BOT_STATE_STUCK_RECOVERY;
+		else if (enemy_visible && bot->enemy)
+		{
+			if (should_retreat || qcvm->time < bot->retreat_hold_until)
+			{
+				bot->state = BOT_STATE_RETREAT;
+				bot->retreat_hold_until = q_max (bot->retreat_hold_until, qcvm->time + 1.2);
+			}
+			else
+				bot->state = BOT_STATE_ATTACK;
+		}
+		else if (bot->enemy && (qcvm->time - bot->enemy_last_seen_time) <= BOT_ENEMY_FORGET_TIME)
+		{
 		vec3_t chase_goal;
 
 		BotAI_SnapGoalToNavNode (bot, bot->enemy_last_pos, chase_goal);
@@ -1999,13 +2062,19 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 			if (qcvm->time - bot->enemy_last_seen_time > 0.6)
 				bot->enemy = NULL;
 		}
+		}
+		else if (bot->has_goal)
+			bot->state = BOT_STATE_SEEK_ITEM;
+		else
+			bot->state = BOT_STATE_ROAM;
 	}
-	else if (bot->has_goal)
-		bot->state = BOT_STATE_SEEK_ITEM;
 	else
-		bot->state = BOT_STATE_ROAM;
+	{
+		BotAI_ApplyDecisionSnapshot (bot);
+		enemy_visible = (bot->enemy != NULL);
+	}
 
-	if (companion_mode && leader && !bot->enemy)
+	if (full_think && companion_mode && leader && !bot->enemy)
 	{
 		if (qcvm->time < bot->alert_until)
 		{
@@ -2060,7 +2129,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		}
 	}
 
-	if (bot->state == BOT_STATE_ROAM)
+	if (full_think && bot->state == BOT_STATE_ROAM)
 	{
 		vec3_t delta;
 		if (bot->roam_point < 0)
@@ -2071,7 +2140,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		bot->has_goal = true;
 	}
 
-	if (bot->state == BOT_STATE_RETREAT && bot->goal_item)
+	if (full_think && bot->state == BOT_STATE_RETREAT && bot->goal_item)
 	{
 		if (qcvm->time > bot->goal_timeout || !BotAI_ItemPotentiallyReachable (bot, self, bot->goal_item))
 		{
@@ -2080,13 +2149,16 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 			bot->has_path = false;
 		}
 	}
-	else if (bot->state == BOT_STATE_RETREAT && bot->enemy)
+	else if (full_think && bot->state == BOT_STATE_RETREAT && bot->enemy)
 	{
 		BotAI_SelectRetreatGoal (bot, self, bot->enemy);
 	}
 
-	if (bot->has_goal)
+	if (full_think && bot->has_goal)
 		BotAI_UpdatePath (bot, self);
+
+	if (full_think)
+		BotAI_CaptureDecisionSnapshot (bot);
 
 	if (bot->enemy)
 	{
