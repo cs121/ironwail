@@ -44,6 +44,7 @@ typedef struct rl_source_summary_s
 {
 	unsigned int source_id;
 	int offered_count;
+	int rejected_priority;
 	int accepted[RL_CONSUMER_COUNT];
 	float energy[RL_CONSUMER_COUNT];
 	int rejected[RL_CONSUMER_COUNT][RL_REJECT_COUNT];
@@ -51,8 +52,6 @@ typedef struct rl_source_summary_s
 
 static rl_source_summary_t rl_source_summaries[RL_FRAME_LIGHTS_MAX];
 static int rl_source_summary_count = 0;
-
-#define RL_EMISSIVE_BUDGET_DEFAULT 24
 
 static void R_PPdlights_DebugModeCompat_f (void)
 {
@@ -120,7 +119,7 @@ static qboolean R_PPdlights_IsFrustumCulled (const vec3_t origin, float radius)
 
 static void R_PPdlights_Stats_f (void)
 {
-	Con_Printf ("r_ppdlights: src(dlight=%d emissive=%d) accepted(total=%d dlight=%d emissive=%d) culled(inactive=%d not_live=%d persistent_off=%d zero_radius=%d frustum=%d budget=%d emissive_budget=%d)\n",
+	Con_Printf ("r_ppdlights: src(dlight=%d emissive=%d) accepted(total=%d dlight=%d emissive=%d) culled(inactive=%d not_live=%d persistent_off=%d zero_radius=%d frustum=%d budget=%d emissive_budget=%d priority=%d)\n",
 		rl_frame_stats.source_dlights,
 		rl_frame_stats.source_emissive,
 		rl_frame_stats.accepted,
@@ -132,7 +131,8 @@ static void R_PPdlights_Stats_f (void)
 		rl_frame_stats.rejected_zero_radius,
 		rl_frame_stats.rejected_frustum,
 		rl_frame_stats.rejected_budget,
-		rl_frame_stats.rejected_emissive_budget);
+		rl_frame_stats.rejected_emissive_budget,
+		rl_frame_stats.rejected_priority);
 }
 
 static const char *R_PPdlights_ConsumerName (rl_light_consumer_t consumer)
@@ -196,13 +196,14 @@ static void R_PPdlights_Participation_f (void)
 			R_PPdlights_RejectReasonName (RL_REJECT_HW_BUDGET), s->rejected[RL_REJECT_HW_BUDGET]);
 	}
 
-	Con_Printf ("  source participation (source_id offered world model fog | reject reasons):\n");
+	Con_Printf ("  source participation (source_id offered prio_reject world model fog | reject reasons):\n");
 	for (i = 0; i < rl_source_summary_count; ++i)
 	{
 		const rl_source_summary_t *e = &rl_source_summaries[i];
-		Con_Printf ("    0x%08x offer=%d world=%d(%.3f) model=%d(%.3f) fog=%d(%.3f) reject[w:%d/%d/%d/%d m:%d/%d/%d/%d f:%d/%d/%d/%d]\n",
+		Con_Printf ("    0x%08x offer=%d prio=%d world=%d(%.3f) model=%d(%.3f) fog=%d(%.3f) reject[w:%d/%d/%d/%d m:%d/%d/%d/%d f:%d/%d/%d/%d]\n",
 			e->source_id,
 			e->offered_count,
+			e->rejected_priority,
 			e->accepted[RL_CONSUMER_WORLD], e->energy[RL_CONSUMER_WORLD],
 			e->accepted[RL_CONSUMER_MODEL], e->energy[RL_CONSUMER_MODEL],
 			e->accepted[RL_CONSUMER_FOG], e->energy[RL_CONSUMER_FOG],
@@ -233,10 +234,81 @@ static unsigned int R_PPdlights_EmissiveSourceId (const entity_t *ent, unsigned 
 	return (0xEEu << 24) | ((tag & 0xffu) << 16) | (ent_id & 0xffffu);
 }
 
-static qboolean R_PPdlights_AddFrameLight (const vec3_t origin, float radius, const vec3_t color, float intensity,
+typedef struct rl_frame_light_candidate_s
+{
+	vec3_t origin;
+	float radius;
+	vec3_t color;
+	float intensity;
+	unsigned int type;
+	unsigned int flags;
+	unsigned int source_id;
+	dlight_t *source;
+	qboolean from_emissive;
+	float luminance;
+	float camera_distance;
+	float score;
+} rl_frame_light_candidate_t;
+
+static float R_PPdlights_CandidateLuminance (const vec3_t color, float intensity)
+{
+	return intensity * (0.2126f * color[0] + 0.7152f * color[1] + 0.0722f * color[2]);
+}
+
+static qboolean R_PPdlights_IsCandidateBetter (const rl_frame_light_candidate_t *a, const rl_frame_light_candidate_t *b)
+{
+	if (a->score > b->score)
+		return true;
+	if (a->score < b->score)
+		return false;
+	return a->source_id < b->source_id;
+}
+
+static void R_PPdlights_InsertTopCandidate (rl_frame_light_candidate_t *best, int *best_count,
+	const rl_frame_light_candidate_t *candidate)
+{
+	int insert_at;
+
+	if (*best_count == RL_FRAME_LIGHTS_MAX
+		&& !R_PPdlights_IsCandidateBetter (candidate, &best[RL_FRAME_LIGHTS_MAX - 1]))
+	{
+		rl_source_summary_t *sum = R_PPdlights_GetSourceSummary (candidate->source_id, true);
+		rl_frame_stats.rejected_priority++;
+		if (sum)
+			sum->rejected_priority++;
+		return;
+	}
+
+	insert_at = *best_count;
+	while (insert_at > 0 && R_PPdlights_IsCandidateBetter (candidate, &best[insert_at - 1]))
+		insert_at--;
+
+	if (*best_count == RL_FRAME_LIGHTS_MAX)
+	{
+		rl_source_summary_t *dropped = R_PPdlights_GetSourceSummary (best[RL_FRAME_LIGHTS_MAX - 1].source_id, true);
+		rl_frame_stats.rejected_priority++;
+		if (dropped)
+			dropped->rejected_priority++;
+	}
+	else
+	{
+		(*best_count)++;
+	}
+
+	if (*best_count - 1 > insert_at)
+		memmove (&best[insert_at + 1], &best[insert_at], (size_t)(*best_count - insert_at - 1) * sizeof (best[0]));
+
+	best[insert_at] = *candidate;
+}
+
+static qboolean R_PPdlights_AddFrameLightCandidate (rl_frame_light_candidate_t *out_candidate,
+	const vec3_t origin, float radius, const vec3_t color, float intensity,
 	unsigned int type, unsigned int flags, unsigned int source_id, dlight_t *source, qboolean from_emissive)
 {
-	rl_light_t *dst;
+	vec3_t delta;
+	float distance;
+	float dist_factor;
+	rl_source_summary_t *sum;
 
 	if (radius <= 0.f || intensity <= 0.f)
 	{
@@ -257,43 +329,32 @@ static qboolean R_PPdlights_AddFrameLight (const vec3_t origin, float radius, co
 		return false;
 	}
 
-	if (rl_frame_light_count >= RL_FRAME_LIGHTS_MAX)
-	{
-		rl_frame_stats.rejected_budget++;
-		return false;
-	}
+	VectorCopy (origin, out_candidate->origin);
+	out_candidate->radius = radius;
+	VectorCopy (color, out_candidate->color);
+	out_candidate->intensity = intensity;
+	out_candidate->type = type;
+	out_candidate->flags = flags;
+	out_candidate->source_id = source_id;
+	out_candidate->source = source;
+	out_candidate->from_emissive = from_emissive;
+	out_candidate->luminance = R_PPdlights_CandidateLuminance (color, intensity);
+	VectorSubtract (origin, r_refdef.vieworg, delta);
+	distance = VectorLength (delta);
+	out_candidate->camera_distance = distance;
+	dist_factor = 1.f + distance;
+	out_candidate->score = (radius * out_candidate->luminance) / dist_factor;
 
-	dst = &rl_frame_lights[rl_frame_light_count++];
-	VectorCopy (origin, dst->origin);
-	dst->radius = radius;
-	VectorCopy (color, dst->color);
-	dst->intensity = intensity;
-	dst->type = type;
-	dst->flags = flags;
-	dst->source_id = source_id;
-	/* Preserve original dlight subtype for fog/froxel parity (e.g. lava/torch weighting). */
-	dst->reserved = (type == RL_LIGHT_POINT && source != NULL)
-		? (unsigned int)source->type
-		: 0u;
-	rl_frame_light_sources[rl_frame_light_count - 1] = source;
-	{
-		rl_source_summary_t *sum = R_PPdlights_GetSourceSummary (source_id, true);
-		if (sum)
-			sum->offered_count++;
-	}
-	rl_frame_stats.accepted++;
-	if (from_emissive)
-		rl_frame_stats.accepted_emissive++;
-	else
-		rl_frame_stats.accepted_dlights++;
+	sum = R_PPdlights_GetSourceSummary (source_id, true);
+	if (sum)
+		sum->offered_count++;
 	return true;
 }
 
-static void R_PPdlights_CollectEmissiveFrame (void)
+static void R_PPdlights_CollectEmissiveFrame (rl_frame_light_candidate_t *best, int *best_count)
 {
 	int i;
-	int emissive_count = 0;
-	const int emissive_budget = CLAMP (0, RL_EMISSIVE_BUDGET_DEFAULT, RL_FRAME_LIGHTS_MAX);
+	rl_frame_light_candidate_t candidate;
 
 	if (r_ppdlights_emissive.value <= 0.f || cl_numvisedicts <= 0)
 		return;
@@ -377,30 +438,31 @@ static void R_PPdlights_CollectEmissiveFrame (void)
 			continue;
 
 		rl_frame_stats.source_emissive++;
-		if (emissive_count >= emissive_budget)
-		{
-			rl_frame_stats.rejected_emissive_budget++;
-			continue;
-		}
-
-		if (R_PPdlights_AddFrameLight (ent->origin, radius, color, intensity,
+		if (R_PPdlights_AddFrameLightCandidate (&candidate, ent->origin, radius, color, intensity,
 			RL_LIGHT_EMISSIVE_PROXY,
 			RL_LIGHT_SURFACE_CONTRIB | RL_LIGHT_VOLUMETRIC_CONTRIB,
 			R_PPdlights_EmissiveSourceId (ent, source_tag),
 			NULL,
 			true))
 		{
-			emissive_count++;
+			R_PPdlights_InsertTopCandidate (best, best_count, &candidate);
 		}
 	}
 
 	if (r_ppdlights_emissive_debug.value >= 1.f && (r_framecount % 60) == 0)
 	{
-		Con_DPrintf ("r_ppdlights_emissive: src=%d accepted=%d budget=%d reject_budget=%d\n",
+		int accepted_emissive = 0;
+		for (i = 0; i < *best_count; ++i)
+		{
+			if (best[i].type == RL_LIGHT_EMISSIVE_PROXY)
+				accepted_emissive++;
+		}
+		Con_DPrintf ("r_ppdlights_emissive: src=%d accepted=%d budget=%d reject_budget=%d reject_priority=%d\n",
 			rl_frame_stats.source_emissive,
-			rl_frame_stats.accepted_emissive,
-			emissive_budget,
-			rl_frame_stats.rejected_emissive_budget);
+			accepted_emissive,
+			RL_FRAME_LIGHTS_MAX,
+			rl_frame_stats.rejected_emissive_budget,
+			rl_frame_stats.rejected_priority);
 	}
 }
 
@@ -434,6 +496,8 @@ void R_PPdlights_RegisterCvars (void)
 void R_PPdlights_CollectFrame (void)
 {
 	const dlight_t *const *active;
+	rl_frame_light_candidate_t *best;
+	int best_count = 0;
 	int active_count = 0;
 	int i;
 	qboolean collect_enabled;
@@ -460,6 +524,7 @@ void R_PPdlights_CollectFrame (void)
 	 * consume filtered views of this same array in their own pass budgets.
 	 */
 	active = DLightPool_GetActiveList (&active_count);
+	best = (rl_frame_light_candidate_t *)Hunk_TempAlloc ((size_t)RL_FRAME_LIGHTS_MAX * sizeof (*best));
 	if (active && active_count > 0)
 	{
 		for (i = 0; i < active_count; ++i)
@@ -467,6 +532,7 @@ void R_PPdlights_CollectFrame (void)
 			const dlight_t *dl = active[i];
 			float radius = 0.f;
 			vec3_t color;
+			rl_frame_light_candidate_t candidate;
 
 			rl_frame_stats.source_dlights++;
 
@@ -490,16 +556,43 @@ void R_PPdlights_CollectFrame (void)
 
 			R_EvaluateDLightForRender (dl, &radius, color);
 
-			R_PPdlights_AddFrameLight (dl->origin, radius, color, 1.f,
+			if (R_PPdlights_AddFrameLightCandidate (&candidate, dl->origin, radius, color, 1.f,
 				RL_LIGHT_POINT,
 				RL_LIGHT_SURFACE_CONTRIB | RL_LIGHT_VOLUMETRIC_CONTRIB,
 				(unsigned int)dl->key,
 				(dlight_t *)dl,
-				false);
+				false))
+			{
+				R_PPdlights_InsertTopCandidate (best, &best_count, &candidate);
+			}
 		}
 	}
 
-	R_PPdlights_CollectEmissiveFrame ();
+	R_PPdlights_CollectEmissiveFrame (best, &best_count);
+
+	rl_frame_light_count = best_count;
+	rl_frame_stats.accepted = rl_frame_light_count;
+	rl_frame_stats.accepted_dlights = 0;
+	rl_frame_stats.accepted_emissive = 0;
+	for (i = 0; i < rl_frame_light_count; ++i)
+	{
+		rl_light_t *dst = &rl_frame_lights[i];
+		VectorCopy (best[i].origin, dst->origin);
+		dst->radius = best[i].radius;
+		VectorCopy (best[i].color, dst->color);
+		dst->intensity = best[i].intensity;
+		dst->type = best[i].type;
+		dst->flags = best[i].flags;
+		dst->source_id = best[i].source_id;
+		dst->reserved = (dst->type == RL_LIGHT_POINT && best[i].source != NULL)
+			? (unsigned int)best[i].source->type
+			: 0u;
+		rl_frame_light_sources[i] = best[i].source;
+		if (dst->type == RL_LIGHT_EMISSIVE_PROXY)
+			rl_frame_stats.accepted_emissive++;
+		else
+			rl_frame_stats.accepted_dlights++;
+	}
 
 	if (r_ppdlights_debug.value >= 2.f && (r_framecount % 60) == 0)
 	{

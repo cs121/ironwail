@@ -54,6 +54,7 @@ typedef struct rl_light_collect_stats_s
 	int rejected_frustum;
 	int rejected_budget;
 	int rejected_emissive_budget;
+	int rejected_priority;
 } rl_light_collect_stats_t;
 
 typedef enum rl_light_consumer_e
