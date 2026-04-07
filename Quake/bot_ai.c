@@ -7,6 +7,8 @@
 #define BOT_MAX_ROAM_POINTS 512
 #define BOT_GOAL_REACH_DIST 56.f
 #define BOT_ENEMY_FORGET_TIME 2.5
+#define BOT_NAV_CACHE_MAX_AGE 0.15
+#define BOT_NAV_CACHE_REUSE_DIST 48.f
 
 typedef enum bot_item_type_e
 {
@@ -92,6 +94,61 @@ static qboolean BotAI_IsFailedGoalNode (const bot_state_t *bot, int node)
 	return bot->failed_goal_node == node && qcvm->time < bot->failed_goal_node_until;
 }
 
+static void BotAI_ResetNearestCacheEntry (bot_nav_nearest_cache_t *cache)
+{
+	if (!cache)
+		return;
+	cache->node_index = -1;
+	cache->nav_node_count = -1;
+	cache->timestamp = 0.0;
+	VectorCopy (vec3_origin, cache->sampled_origin);
+}
+
+static int BotAI_FindNearestNodeCached (bot_nav_nearest_cache_t *cache, const vec3_t pos)
+{
+	int nav_node_count;
+	double age = 0.0;
+
+	if (!cache)
+		return BotNav_FindNearestNode (pos);
+
+	nav_node_count = BotNav_NodeCount ();
+	if (cache->nav_node_count != nav_node_count)
+		cache->node_index = -1;
+
+	if (cache->node_index >= 0)
+	{
+		vec3_t delta;
+		float dist;
+
+		VectorSubtract (pos, cache->sampled_origin, delta);
+		dist = VectorLength (delta);
+		age = qcvm->time - cache->timestamp;
+		if (dist <= BOT_NAV_CACHE_REUSE_DIST && age >= 0.0 && age <= BOT_NAV_CACHE_MAX_AGE)
+			return cache->node_index;
+	}
+
+	cache->node_index = BotNav_FindNearestNode (pos);
+	cache->nav_node_count = nav_node_count;
+	cache->timestamp = qcvm->time;
+	VectorCopy (pos, cache->sampled_origin);
+	return cache->node_index;
+}
+
+static int BotAI_FindNearestSelfNode (bot_state_t *bot, edict_t *self)
+{
+	if (!bot || !self)
+		return -1;
+	return BotAI_FindNearestNodeCached (&bot->self_nearest_cache, self->v.origin);
+}
+
+static int BotAI_FindNearestGoalNode (bot_state_t *bot, const vec3_t goal_pos)
+{
+	if (!bot)
+		return BotNav_FindNearestNode (goal_pos);
+	return BotAI_FindNearestNodeCached (&bot->goal_nearest_cache, goal_pos);
+}
+
 static qboolean BotAI_CanPathToPos (bot_state_t *bot, edict_t *self, const vec3_t goal_pos, qboolean reject_failed_first_edge)
 {
 	int start;
@@ -101,8 +158,8 @@ static qboolean BotAI_CanPathToPos (bot_state_t *bot, edict_t *self, const vec3_
 	if (!bot || !self || !BotAI_ShouldUseNav2 ())
 		return true;
 
-	start = BotNav_FindNearestNode (self->v.origin);
-	goal = BotNav_FindNearestNode (goal_pos);
+	start = BotAI_FindNearestSelfNode (bot, self);
+	goal = BotAI_FindNearestGoalNode (bot, goal_pos);
 	if (start < 0 || goal < 0)
 		return false;
 	if (!BotNav_FindPath (start, goal, &path))
@@ -446,7 +503,7 @@ static bot_ammo_type_t BotAI_AmmoForClassname (const char *classname)
 	return BOT_AMMO_NONE;
 }
 
-static qboolean BotAI_ItemPotentiallyReachable (edict_t *self, edict_t *item)
+static qboolean BotAI_ItemPotentiallyReachable (bot_state_t *bot, edict_t *self, edict_t *item)
 {
 	vec3_t start;
 	vec3_t end;
@@ -457,8 +514,8 @@ static qboolean BotAI_ItemPotentiallyReachable (edict_t *self, edict_t *item)
 
 	if (BotAI_ShouldUseNav2 ())
 	{
-		int from = BotNav_FindNearestNode (self->v.origin);
-		int to = BotNav_FindNearestNode (item->v.origin);
+		int from = BotAI_FindNearestSelfNode (bot, self);
+		int to = BotAI_FindNearestGoalNode (bot, item->v.origin);
 		bot_path_t path;
 		vec3_t to_pos;
 		trace_t item_link_tr;
@@ -576,7 +633,7 @@ static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, co
 	score -= dist * 0.05f;
 	if (enemy_visible && item_type != BOT_ITEM_HEALTH && item_type != BOT_ITEM_POWERUP)
 		score *= 0.65f;
-	if (!BotAI_ItemPotentiallyReachable (self, item))
+	if (!BotAI_ItemPotentiallyReachable (bot, self, item))
 		score *= 0.2f;
 	if (bot->state == BOT_STATE_RETREAT && item_type == BOT_ITEM_HEALTH)
 		score += 80.f;
@@ -610,7 +667,7 @@ static edict_t *BotAI_FindBestItem (bot_state_t *bot, edict_t *self, qboolean en
 			continue;
 		if (BotAI_ShouldUseNav2 ())
 		{
-			int item_node = BotNav_FindNearestNode (item->v.origin);
+			int item_node = BotAI_FindNearestGoalNode (bot, item->v.origin);
 			if (BotAI_IsFailedGoalNode (bot, item_node))
 				continue;
 		}
@@ -627,7 +684,7 @@ static edict_t *BotAI_FindBestItem (bot_state_t *bot, edict_t *self, qboolean en
 			continue;
 
 		score = BotAI_ItemScore (bot, self, item, classname, enemy_visible, dist);
-		if (!BotAI_ItemPotentiallyReachable (self, item))
+		if (!BotAI_ItemPotentiallyReachable (bot, self, item))
 			continue;
 		if (score > best_score)
 		{
@@ -856,6 +913,8 @@ void BotAI_ResetState (bot_state_t *bot)
 	bot->has_path = false;
 	bot->path_index = 0;
 	bot->next_repath_time = 0.0;
+	BotAI_ResetNearestCacheEntry (&bot->self_nearest_cache);
+	BotAI_ResetNearestCacheEntry (&bot->goal_nearest_cache);
 	VectorCopy (vec3_origin, bot->last_origin);
 	bot->last_progress_time = now;
 	bot->stuck_until = 0.0;
@@ -899,7 +958,7 @@ static void BotAI_SelectRoamGoal (bot_state_t *bot, edict_t *self)
 	nav_node_count = BotAI_ShouldUseNav2 () ? BotNav_NodeCount () : 0;
 	if (self && nav_node_count > 0)
 	{
-		int start = BotNav_FindNearestNode (self->v.origin);
+		int start = BotAI_FindNearestSelfNode (bot, self);
 		int tries;
 
 		if (start >= 0)
@@ -970,7 +1029,7 @@ static void BotAI_SelectRetreatGoal (bot_state_t *bot, edict_t *self, edict_t *e
 		return;
 
 	nav_node_count = BotAI_ShouldUseNav2 () ? BotNav_NodeCount () : 0;
-	start = nav_node_count > 0 ? BotNav_FindNearestNode (self->v.origin) : -1;
+	start = nav_node_count > 0 ? BotAI_FindNearestSelfNode (bot, self) : -1;
 	if (start >= 0)
 	{
 		for (tries = 0; tries < 40; ++tries)
@@ -1060,8 +1119,8 @@ static void BotAI_UpdatePath (bot_state_t *bot, edict_t *self)
 	bot->next_repath_time = qcvm->time + 0.8;
 	bot->dbg_repaths++;
 
-	start = BotNav_FindNearestNode (self->v.origin);
-	goal = BotNav_FindNearestNode (bot->goal_pos);
+	start = BotAI_FindNearestSelfNode (bot, self);
+	goal = BotAI_FindNearestGoalNode (bot, bot->goal_pos);
 	if (goal >= 0 && BotNav_GetNodePosition (goal, goal_node_pos))
 	{
 		vec3_t d;
@@ -1291,7 +1350,7 @@ static void BotAI_SetGoalFromItem (bot_state_t *bot, edict_t *item)
 
 	if (BotAI_ShouldUseNav2 ())
 	{
-		int item_node = BotNav_FindNearestNode (item->v.origin);
+		int item_node = BotAI_FindNearestGoalNode (bot, item->v.origin);
 		vec3_t node_pos;
 
 		if (item_node >= 0 && BotNav_GetNodePosition (item_node, node_pos))
@@ -1313,7 +1372,7 @@ static void BotAI_SnapGoalToNavNode (bot_state_t *bot, const vec3_t wanted, vec3
 	if (!bot || !BotAI_ShouldUseNav2 ())
 		return;
 
-	node = BotNav_FindNearestNode (wanted);
+	node = BotAI_FindNearestGoalNode (bot, wanted);
 	if (node < 0 || BotAI_IsFailedGoalNode (bot, node))
 		return;
 	if (BotNav_GetNodePosition (node, node_pos))
@@ -1570,7 +1629,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 	if (bot->goal_item)
 	{
-		if (bot->goal_item->free || (int) bot->goal_item->v.solid == SOLID_NOT || qcvm->time > bot->goal_timeout || !BotAI_ItemPotentiallyReachable (self, bot->goal_item))
+		if (bot->goal_item->free || (int) bot->goal_item->v.solid == SOLID_NOT || qcvm->time > bot->goal_timeout || !BotAI_ItemPotentiallyReachable (bot, self, bot->goal_item))
 		{
 			if (!bot->goal_item->free)
 			{
@@ -1703,7 +1762,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 	if (bot->state == BOT_STATE_RETREAT && bot->goal_item)
 	{
-		if (qcvm->time > bot->goal_timeout || !BotAI_ItemPotentiallyReachable (self, bot->goal_item))
+		if (qcvm->time > bot->goal_timeout || !BotAI_ItemPotentiallyReachable (bot, self, bot->goal_item))
 		{
 			bot->goal_item = NULL;
 			bot->has_goal = false;

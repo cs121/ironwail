@@ -16,6 +16,14 @@ typedef enum bot_ai_state_e
 	BOT_STATE_STUCK_RECOVERY
 } bot_ai_state_t;
 
+typedef struct bot_nav_nearest_cache_s
+{
+	int		node_index;
+	int		nav_node_count;
+	double		timestamp;
+	vec3_t		sampled_origin;
+} bot_nav_nearest_cache_t;
+
 typedef struct bot_state_s
 {
 	qboolean	inuse;
@@ -41,6 +49,8 @@ typedef struct bot_state_s
 	qboolean	has_path;
 	int		path_index;
 	double		next_repath_time;
+	bot_nav_nearest_cache_t	self_nearest_cache;
+	bot_nav_nearest_cache_t	goal_nearest_cache;
 
 	vec3_t		last_origin;
 	double		last_progress_time;
