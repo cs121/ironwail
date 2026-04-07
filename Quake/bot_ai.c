@@ -9,6 +9,7 @@
 #define BOT_ENEMY_FORGET_TIME 2.5
 #define BOT_NAV_CACHE_MAX_AGE 0.15
 #define BOT_NAV_CACHE_REUSE_DIST 48.f
+#define BOT_ITEM_SCAN_SHARDS 4
 
 typedef enum bot_item_type_e
 {
@@ -29,8 +30,20 @@ typedef enum bot_ammo_type_e
 	BOT_AMMO_CELLS
 } bot_ammo_type_t;
 
+typedef struct bot_item_candidate_s
+{
+	int edict_index;
+	bot_item_type_t type;
+} bot_item_candidate_t;
+
 static vec3_t g_roam_points[BOT_MAX_ROAM_POINTS];
 static int g_roam_count;
+static bot_item_candidate_t g_item_candidates[MAX_EDICTS];
+static int g_item_candidate_count;
+static int g_item_candidate_last_num_edicts;
+
+static void BotAI_RebuildItemCandidates (void);
+static void BotAI_MaintainItemCandidates (void);
 
 static qboolean BotAI_ShouldUseNav2 (void)
 {
@@ -411,6 +424,7 @@ void BotAI_OnMapSpawn (void)
 	int i;
 
 	g_roam_count = 0;
+	BotAI_RebuildItemCandidates ();
 
 	for (i = 1; i < qcvm->num_edicts; ++i)
 	{
@@ -447,7 +461,7 @@ void BotAI_OnMapSpawn (void)
 	}
 
 	if (bot_think_debug.value)
-		Con_Printf ("BotAI: collected %d roam points\n", g_roam_count);
+		Con_Printf ("BotAI: collected %d roam points, %d item candidates\n", g_roam_count, g_item_candidate_count);
 }
 
 static bot_item_type_t BotAI_ClassifyItem (const char *classname)
@@ -465,6 +479,75 @@ static bot_item_type_t BotAI_ClassifyItem (const char *classname)
 	if (q_strcasestr (classname, "artifact") || q_strcasestr (classname, "powerup"))
 		return BOT_ITEM_POWERUP;
 	return BOT_ITEM_NONE;
+}
+
+static void BotAI_RebuildItemCandidates (void)
+{
+	int i;
+
+	g_item_candidate_count = 0;
+	g_item_candidate_last_num_edicts = qcvm ? qcvm->num_edicts : 0;
+	if (!qcvm)
+		return;
+
+	for (i = svs.maxclients + 1; i < qcvm->num_edicts; ++i)
+	{
+		edict_t *ent = EDICT_NUM (i);
+		const char *classname;
+		bot_item_type_t type;
+
+		if (!ent || ent->free)
+			continue;
+
+		classname = BotAI_TryGetString ((int) ent->v.classname);
+		type = BotAI_ClassifyItem (classname);
+		if (type == BOT_ITEM_NONE)
+			continue;
+		if (g_item_candidate_count >= (int) countof (g_item_candidates))
+			break;
+
+		g_item_candidates[g_item_candidate_count].edict_index = i;
+		g_item_candidates[g_item_candidate_count].type = type;
+		g_item_candidate_count++;
+	}
+}
+
+static void BotAI_MaintainItemCandidates (void)
+{
+	int i;
+
+	if (!qcvm)
+		return;
+	if (g_item_candidate_last_num_edicts > qcvm->num_edicts)
+	{
+		BotAI_RebuildItemCandidates ();
+		return;
+	}
+	if (g_item_candidate_last_num_edicts == qcvm->num_edicts)
+		return;
+
+	for (i = q_max (g_item_candidate_last_num_edicts, svs.maxclients + 1); i < qcvm->num_edicts; ++i)
+	{
+		edict_t *ent = EDICT_NUM (i);
+		const char *classname;
+		bot_item_type_t type;
+
+		if (!ent || ent->free)
+			continue;
+
+		classname = BotAI_TryGetString ((int) ent->v.classname);
+		type = BotAI_ClassifyItem (classname);
+		if (type == BOT_ITEM_NONE)
+			continue;
+		if (g_item_candidate_count >= (int) countof (g_item_candidates))
+			break;
+
+		g_item_candidates[g_item_candidate_count].edict_index = i;
+		g_item_candidates[g_item_candidate_count].type = type;
+		g_item_candidate_count++;
+	}
+
+	g_item_candidate_last_num_edicts = qcvm->num_edicts;
 }
 
 static int BotAI_WeaponForClassname (const char *classname)
@@ -645,21 +728,28 @@ static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, co
 	return score;
 }
 
-static edict_t *BotAI_FindBestItem (bot_state_t *bot, edict_t *self, qboolean enemy_visible)
+static edict_t *BotAI_FindBestItem (bot_state_t *bot, edict_t *self, qboolean enemy_visible, qboolean urgent_override)
 {
 	int i;
 	float best_score = 0.f;
 	edict_t *best = NULL;
+	const int frame_shard = ((int) host_framecount) % BOT_ITEM_SCAN_SHARDS;
+	const int bot_shard = bot ? (bot->clientnum % BOT_ITEM_SCAN_SHARDS) : 0;
 
-	for (i = svs.maxclients + 1; i < qcvm->num_edicts; ++i)
+	BotAI_MaintainItemCandidates ();
+
+	for (i = 0; i < g_item_candidate_count; ++i)
 	{
-		edict_t *item = EDICT_NUM (i);
+		const bot_item_candidate_t *candidate = &g_item_candidates[i];
+		edict_t *item = EDICT_NUM (candidate->edict_index);
 		const char *classname;
 		vec3_t delta;
 		float dist;
 		float score;
 		qboolean item_reachable;
 
+		if (!urgent_override && !enemy_visible && bot_shard != frame_shard)
+			continue;
 		if (!item || item->free)
 			continue;
 		if ((int) item->v.solid == SOLID_NOT)
@@ -676,7 +766,7 @@ static edict_t *BotAI_FindBestItem (bot_state_t *bot, edict_t *self, qboolean en
 		classname = BotAI_TryGetString ((int) item->v.classname);
 		if (!classname)
 			continue;
-		if (BotAI_ClassifyItem (classname) == BOT_ITEM_NONE)
+		if (candidate->type == BOT_ITEM_NONE)
 			continue;
 
 		VectorSubtract (item->v.origin, self->v.origin, delta);
@@ -1610,24 +1700,25 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 	if (qcvm->time >= bot->next_item_scan_time)
 	{
+		qboolean urgent_item_override = (self->v.health < 40.f || no_combat_ammo);
 		bot->next_item_scan_time = qcvm->time + 0.4;
 		best_item = NULL;
-		if (!companion_mode || self->v.health < 40.f || no_combat_ammo)
-			best_item = BotAI_FindBestItem (bot, self, enemy_visible);
+		if (!companion_mode || urgent_item_override)
+			best_item = BotAI_FindBestItem (bot, self, enemy_visible, urgent_item_override);
 		if (best_item)
-			{
-				bot->goal_item = best_item;
-				BotAI_SetGoalFromItem (bot, best_item);
-				bot->has_goal = true;
-				bot->goal_timeout = qcvm->time + ((bot->state == BOT_STATE_RETREAT) ? 3.5 : 8.0);
-			}
+		{
+			bot->goal_item = best_item;
+			BotAI_SetGoalFromItem (bot, best_item);
+			bot->has_goal = true;
+			bot->goal_timeout = qcvm->time + ((bot->state == BOT_STATE_RETREAT) ? 3.5 : 8.0);
+		}
 		else if (companion_mode && bot->goal_item)
 		{
 			bot->goal_item = NULL;
 			bot->has_goal = false;
 			bot->has_path = false;
 		}
-		}
+	}
 
 	if (bot->goal_item)
 	{
