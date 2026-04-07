@@ -117,6 +117,150 @@ static GLuint r_godrays_coupling_shafts_tex = 0;
 static int r_godrays_coupling_shafts_w = 0;
 static int r_godrays_coupling_shafts_h = 0;
 
+typedef struct light_tile_entry_s
+{
+	unsigned int	offset;
+	unsigned int	count;
+} light_tile_entry_t;
+
+#define LIGHT_TILE_COUNT (LIGHT_TILES_X * LIGHT_TILES_Y * LIGHT_TILES_Z)
+#define LIGHT_TILE_INDEX_CAPACITY (LIGHT_TILE_COUNT * 8)
+
+static light_tile_entry_t r_light_tiles[LIGHT_TILE_COUNT];
+static unsigned int r_light_tile_indices[LIGHT_TILE_INDEX_CAPACITY];
+static int r_light_tile_index_count = 0;
+static int r_light_tile_used_count = 0;
+static float r_light_tile_avg_lights = 0.f;
+static qboolean r_light_tile_ready = false;
+
+static int R_LightTileIndex (int tx, int ty, int tz)
+{
+	return tz * (LIGHT_TILES_X * LIGHT_TILES_Y) + ty * LIGHT_TILES_X + tx;
+}
+
+static int R_LightTileCoordFromDepth (float depth)
+{
+	const float z = q_max (depth, 1e-6f);
+	const float tzf = CLAMP (0.f, log2f (z) * r_framedata.zparams[0] + r_framedata.zparams[1], (float)(LIGHT_TILES_Z - 1));
+	return (int)tzf;
+}
+
+static qboolean R_BuildLightTileLists (void)
+{
+	typedef struct light_tile_light_range_s
+	{
+		unsigned char tx0, tx1, ty0, ty1, tz0, tz1;
+		qboolean valid;
+	} light_tile_light_range_t;
+	light_tile_light_range_t light_ranges[DLIGHT_GPU_MAX];
+	unsigned int tile_counts[LIGHT_TILE_COUNT];
+	unsigned int tile_offsets[LIGHT_TILE_COUNT];
+	unsigned int running = 0;
+	int i, tx, ty, tz;
+
+	memset (r_light_tiles, 0, sizeof (r_light_tiles));
+	memset (r_light_tile_indices, 0, sizeof (r_light_tile_indices));
+	memset (light_ranges, 0, sizeof (light_ranges));
+	memset (tile_counts, 0, sizeof (tile_counts));
+	memset (tile_offsets, 0, sizeof (tile_offsets));
+	r_light_tile_index_count = 0;
+	r_light_tile_used_count = 0;
+	r_light_tile_avg_lights = 0.f;
+	r_light_tile_ready = false;
+
+	if (r_ppdlights_world_tiles.value <= 0.f || r_framedata.numlights == 0)
+		return false;
+
+	for (i = 0; i < (int)r_framedata.numlights; ++i)
+	{
+		const gpulight_t *l = &r_lightbuffer.lights[i];
+		const float radius = q_max (l->radius, 1.f);
+		const float clip_x = r_matviewproj[0] * l->pos[0] + r_matviewproj[4] * l->pos[1] + r_matviewproj[8] * l->pos[2] + r_matviewproj[12];
+		const float clip_y = r_matviewproj[1] * l->pos[0] + r_matviewproj[5] * l->pos[1] + r_matviewproj[9] * l->pos[2] + r_matviewproj[13];
+		const float clip_w = r_matviewproj[3] * l->pos[0] + r_matviewproj[7] * l->pos[1] + r_matviewproj[11] * l->pos[2] + r_matviewproj[15];
+		const float view_z = r_matview[2] * l->pos[0] + r_matview[6] * l->pos[1] + r_matview[10] * l->pos[2] + r_matview[14];
+		const float view_depth = -view_z;
+		const float depth_near = q_max (view_depth - radius, 1e-4f);
+		const float depth_far = view_depth + radius;
+		const float ndc_x = clip_x / q_max (fabsf (clip_w), 1e-6f);
+		const float ndc_y = clip_y / q_max (fabsf (clip_w), 1e-6f);
+		const float extent_x = fabsf (r_matproj[0]) * radius / depth_near;
+		const float extent_y = fabsf (r_matproj[5]) * radius / depth_near;
+		const float min_x = ndc_x - extent_x;
+		const float max_x = ndc_x + extent_x;
+		const float min_y = ndc_y - extent_y;
+		const float max_y = ndc_y + extent_y;
+		const float tile_fx0 = CLAMP (0.f, (min_x * 0.5f + 0.5f) * LIGHT_TILES_X, (float)(LIGHT_TILES_X - 1));
+		const float tile_fx1 = CLAMP (0.f, (max_x * 0.5f + 0.5f) * LIGHT_TILES_X, (float)(LIGHT_TILES_X - 1));
+		const float tile_fy0 = CLAMP (0.f, (min_y * 0.5f + 0.5f) * LIGHT_TILES_Y, (float)(LIGHT_TILES_Y - 1));
+		const float tile_fy1 = CLAMP (0.f, (max_y * 0.5f + 0.5f) * LIGHT_TILES_Y, (float)(LIGHT_TILES_Y - 1));
+		light_tile_light_range_t *range = &light_ranges[i];
+
+		if (clip_w <= 1e-5f || depth_far <= 1e-5f)
+			continue;
+
+		range->tx0 = (unsigned char)tile_fx0;
+		range->tx1 = (unsigned char)tile_fx1;
+		range->ty0 = (unsigned char)tile_fy0;
+		range->ty1 = (unsigned char)tile_fy1;
+		range->tz0 = (unsigned char)R_LightTileCoordFromDepth (depth_near);
+		range->tz1 = (unsigned char)R_LightTileCoordFromDepth (q_max (depth_far, depth_near));
+		range->valid = true;
+
+		for (tz = range->tz0; tz <= range->tz1; ++tz)
+			for (ty = range->ty0; ty <= range->ty1; ++ty)
+				for (tx = range->tx0; tx <= range->tx1; ++tx)
+					tile_counts[R_LightTileIndex (tx, ty, tz)]++;
+	}
+
+	for (i = 0; i < LIGHT_TILE_COUNT; ++i)
+	{
+		r_light_tiles[i].offset = running;
+		r_light_tiles[i].count = tile_counts[i];
+		tile_offsets[i] = running;
+		running += tile_counts[i];
+	}
+
+	if (running == 0 || running > LIGHT_TILE_INDEX_CAPACITY)
+	{
+		if (running > LIGHT_TILE_INDEX_CAPACITY && r_ppdlights_debug.value >= 1.f && (r_framecount % 60) == 0)
+			Con_DWarning ("r_ppdlights_world_tiles: overflow (%u > %u), fallback to global loop\n", running, LIGHT_TILE_INDEX_CAPACITY);
+		return false;
+	}
+
+	for (i = 0; i < (int)r_framedata.numlights; ++i)
+	{
+		const light_tile_light_range_t *range = &light_ranges[i];
+		if (!range->valid)
+			continue;
+		for (tz = range->tz0; tz <= range->tz1; ++tz)
+			for (ty = range->ty0; ty <= range->ty1; ++ty)
+				for (tx = range->tx0; tx <= range->tx1; ++tx)
+				{
+					const int tile = R_LightTileIndex (tx, ty, tz);
+					const unsigned int write_index = tile_offsets[tile]++;
+					r_light_tile_indices[write_index] = (unsigned int)i;
+				}
+	}
+
+	r_light_tile_index_count = (int)running;
+	for (i = 0; i < LIGHT_TILE_COUNT; ++i)
+	{
+		if (r_light_tiles[i].count > 0)
+			r_light_tile_used_count++;
+	}
+	r_light_tile_avg_lights = (float)r_light_tile_index_count / (float)LIGHT_TILE_COUNT;
+	r_light_tile_ready = true;
+
+	if (r_ppdlights_world_tiles_debug.value > 0.f && (r_framecount % 60) == 0)
+	{
+		Con_DPrintf ("r_ppdlights_world_tiles: lights=%u refs=%d tiles=%d/%d avg=%.2f\n",
+			r_framedata.numlights, r_light_tile_index_count, r_light_tile_used_count, LIGHT_TILE_COUNT, r_light_tile_avg_lights);
+	}
+
+	return true;
+}
+
 qboolean R_Godrays_GetFogCouplingSource (GLuint *out_shafts_tex, int *out_width, int *out_height)
 {
 	if (out_shafts_tex)
@@ -4183,10 +4327,22 @@ void R_UploadFrameData (void)
 	GLuint	buf;
 	GLbyte* ofs;
 	size_t	size;
+	qboolean tile_ready;
+
+	tile_ready = R_BuildLightTileLists ();
+	r_framedata.dlight_params[2] = tile_ready ? 1.f : 0.f;
 
 	size = sizeof (r_lightbuffer.lightstyles) + sizeof (r_lightbuffer.lights[0]) * q_max (r_framedata.numlights, 1); // avoid zero-length array
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, &r_lightbuffer, size, &buf, &ofs);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, buf, (GLintptr)ofs, size);
+
+	size = sizeof (r_light_tiles);
+	GL_Upload (GL_SHADER_STORAGE_BUFFER, &r_light_tiles, size, &buf, &ofs);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 9, buf, (GLintptr)ofs, size);
+
+	size = sizeof (r_light_tile_indices[0]) * q_max (r_light_tile_index_count, 1);
+	GL_Upload (GL_SHADER_STORAGE_BUFFER, &r_light_tile_indices, size, &buf, &ofs);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 10, buf, (GLintptr)ofs, size);
 
 	GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));

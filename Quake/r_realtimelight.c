@@ -14,6 +14,8 @@ cvar_t r_ppdlights_world_scale = { "r_ppdlights_world_scale", "1", CVAR_ARCHIVE 
 /* World-light shaping controls, applied in shader before additive blend. */
 cvar_t r_ppdlights_world_luma_clamp = { "r_ppdlights_world_luma_clamp", "1.0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_world_soft_knee = { "r_ppdlights_world_soft_knee", "1.0", CVAR_ARCHIVE };
+cvar_t r_ppdlights_world_tiles = { "r_ppdlights_world_tiles", "1", CVAR_ARCHIVE };
+cvar_t r_ppdlights_world_tiles_debug = { "r_ppdlights_world_tiles_debug", "0", CVAR_NONE };
 /* Experimental fixed-function blend op override for world dlight pass. */
 cvar_t r_experimental_ppdlights_world_blendop = { "r_experimental_ppdlights_world_blendop", "0", CVAR_ARCHIVE };
 /* Forward alias/model consumer toggle (shared frame-light list -> alias lighting). */
@@ -474,6 +476,8 @@ void R_PPdlights_RegisterCvars (void)
 	Cvar_RegisterVariable (&r_ppdlights_world_scale);
 	Cvar_RegisterVariable (&r_ppdlights_world_luma_clamp);
 	Cvar_RegisterVariable (&r_ppdlights_world_soft_knee);
+	Cvar_RegisterVariable (&r_ppdlights_world_tiles);
+	Cvar_RegisterVariable (&r_ppdlights_world_tiles_debug);
 	Cvar_RegisterVariable (&r_experimental_ppdlights_world_blendop);
 	Cvar_RegisterVariable (&r_ppdlights_models);
 	Cvar_RegisterVariable (&r_ppdlights_fog);

@@ -87,12 +87,7 @@ void R_DrawDLightPass (void)
 
 	r_framedata.dlight_params[2] = 1.f;
 	r_framedata.dlight_params[3] = pp_debug_mode;
-	{
-		GLuint buf;
-		GLbyte *ofs;
-		GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
-		GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
-	}
+	R_UploadFrameData ();
 
 	{
 		const float world_scale = CLAMP (0.f, r_ppdlights_world_scale.value, 4.f);
@@ -106,12 +101,7 @@ void R_DrawDLightPass (void)
 
 	r_framedata.dlight_params[2] = 0.f;
 	r_framedata.dlight_params[3] = 0.f;
-	{
-		GLuint buf;
-		GLbyte *ofs;
-		GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
-		GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
-	}
+	R_UploadFrameData ();
 
 	GL_EndGroup ();
 

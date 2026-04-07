@@ -76,6 +76,16 @@ layout(std430, binding=0) restrict readonly buffer LightBuffer
 	Light   Lights[];
 };
 
+layout(std430, binding=9) restrict readonly buffer LightTileBuffer
+{
+	uvec2 LightTileRanges[];
+};
+
+layout(std430, binding=10) restrict readonly buffer LightTileIndexBuffer
+{
+	uint LightTileIndices[];
+};
+
 layout(location=0) flat in uint in_flags;
 layout(location=1) flat in float in_alpha;
 layout(location=2) in vec3 in_pos;
@@ -210,6 +220,9 @@ void main()
 	vec3 rim_dlight_accum = vec3(0.0);
 	float debug_attenuation = 0.0;
 	float debug_affected_count = 0.0;
+	uvec3 tile_coord = ComputeLightTileCoord(in_coord, in_depth);
+	uint tile_index = tile_coord.z * uint(LIGHT_TILES_X * LIGHT_TILES_Y) + tile_coord.y * uint(LIGHT_TILES_X) + tile_coord.x;
+	bool use_tile_lists = (DLightParams.z > 0.5);
 	if (NumLights > 0u)
 	{
 		const float core_boost = 0.0;
@@ -217,9 +230,20 @@ void main()
 		const float knee = 0.0;
 		const float ndotl_mix = 1.0;
 		const float saturation_chop = 0.0;
-
-		for (uint light_index = 0u; light_index < NumLights; light_index++)
+		uint light_begin = 0u;
+		uint light_end = NumLights;
+		if (use_tile_lists)
 		{
+			uvec2 tile_range = LightTileRanges[tile_index];
+			light_begin = tile_range.x;
+			light_end = tile_range.x + tile_range.y;
+		}
+
+		for (uint light_iter = light_begin; light_iter < light_end; light_iter++)
+		{
+			uint light_index = use_tile_lists ? LightTileIndices[light_iter] : light_iter;
+			if (light_index >= NumLights)
+				continue;
 			Light l = Lights[light_index];
 
 			float rad = l.radius;
@@ -296,7 +320,8 @@ void main()
 	{
 		if (pp_debug_mode == 1)
 		{
-			float count_norm = debug_affected_count / max(float(NumLights), 1.0);
+			float debug_denom = use_tile_lists ? max(float(LightTileRanges[tile_index].y), 1.0) : max(float(NumLights), 1.0);
+			float count_norm = debug_affected_count / debug_denom;
 			color = vec3(clamp(count_norm, 0.0, 1.0));
 		}
 		else if (pp_debug_mode == 2)
