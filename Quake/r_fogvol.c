@@ -443,6 +443,103 @@ static int FogVol_ComparePriority (const void *a, const void *b)
 	return (vb->priority - va->priority);
 }
 
+static float FogVol_DebugRand01 (void)
+{
+	return (float)(rand () & 0x7fff) * (1.f / 32767.f);
+}
+
+static float FogVol_DebugRandRange (float min_value, float max_value)
+{
+	return min_value + (max_value - min_value) * FogVol_DebugRand01 ();
+}
+
+static void FogVol_DebugGetMapBounds (vec3_t mins, vec3_t maxs)
+{
+	VectorSet (mins, -1024.f, -1024.f, -256.f);
+	VectorSet (maxs, 1024.f, 1024.f, 512.f);
+
+	if (!cl.worldmodel)
+		return;
+
+	VectorCopy (cl.worldmodel->mins, mins);
+	VectorCopy (cl.worldmodel->maxs, maxs);
+	for (int a = 0; a < 3; ++a)
+	{
+		if (maxs[a] - mins[a] < 128.f)
+		{
+			mins[a] -= 64.f;
+			maxs[a] += 64.f;
+		}
+	}
+}
+
+static void FogVol_DebugBuildRandomVolume (fog_volume_t *v, const vec3_t map_mins, const vec3_t map_maxs)
+{
+	vec3_t center;
+	vec3_t extents;
+
+	memset (v, 0, sizeof (*v));
+	for (int a = 0; a < 3; ++a)
+	{
+		center[a] = FogVol_DebugRandRange (map_mins[a], map_maxs[a]);
+		extents[a] = FogVol_DebugRandRange (48.f, 320.f);
+		v->mins[a] = center[a] - extents[a];
+		v->maxs[a] = center[a] + extents[a];
+		v->velocity[a] = FogVol_DebugRandRange (-32.f, 32.f);
+		v->windDir[a] = FogVol_DebugRandRange (-1.f, 1.f);
+		v->color[a] = FogVol_DebugRandRange (0.2f, 1.f);
+	}
+
+	v->shape = FOGVOL_SHAPE_BOX;
+	v->sphereRadius = q_max (extents[0], q_max (extents[1], extents[2]));
+	VectorCopy (center, v->sphereCenter);
+	v->density = FogVol_DebugRandRange (0.008f, 0.095f);
+	v->falloff = FogVol_DebugRandRange (24.f, 192.f);
+	v->mode = 1;
+	v->blendMode = (FogVol_DebugRand01 () > 0.5f) ? 1 : 0;
+	v->emissiveStrength = FogVol_DebugRandRange (0.f, 1.75f);
+	v->noiseScale = FogVol_DebugRandRange (0.01f, 0.16f);
+	v->noiseAmount = FogVol_DebugRandRange (0.1f, 1.0f);
+	v->noiseBias = FogVol_DebugRandRange (-0.5f, 0.5f);
+	v->turbulence = FogVol_DebugRandRange (0.f, 3.f);
+	v->windSpeed = FogVol_DebugRandRange (0.f, 48.f);
+	v->maxDistance = FogVol_DebugRandRange (512.f, 8192.f);
+	v->priority = 16 + (int)Q_rint (FogVol_DebugRandRange (0.f, 32.f));
+	v->enabled = 1;
+	v->height = FogVol_DebugRandRange (map_mins[2], map_maxs[2]);
+	v->heightScale = FogVol_DebugRandRange (0.f, 0.02f);
+	v->edgeSoftness = FogVol_DebugRandRange (0.05f, 0.8f);
+}
+
+static void FogVol_DebugBuildOriginVolume (fog_volume_t *v)
+{
+	memset (v, 0, sizeof (*v));
+	VectorSet (v->mins, -96.f, -96.f, -64.f);
+	VectorSet (v->maxs, 96.f, 96.f, 160.f);
+	VectorSet (v->sphereCenter, 0.f, 0.f, 0.f);
+	VectorSet (v->color, 0.35f, 0.75f, 1.f);
+	VectorSet (v->velocity, 0.f, 0.f, 0.f);
+	VectorSet (v->windDir, 0.f, 0.f, 1.f);
+	v->shape = FOGVOL_SHAPE_BOX;
+	v->sphereRadius = 128.f;
+	v->density = 0.055f;
+	v->falloff = 72.f;
+	v->mode = 1;
+	v->blendMode = 0;
+	v->emissiveStrength = 0.25f;
+	v->noiseScale = 0.06f;
+	v->noiseAmount = 0.35f;
+	v->noiseBias = 0.f;
+	v->turbulence = 0.5f;
+	v->windSpeed = 0.f;
+	v->maxDistance = 4096.f;
+	v->priority = 512;
+	v->enabled = 1;
+	v->height = 0.f;
+	v->heightScale = 0.005f;
+	v->edgeSoftness = 0.2f;
+}
+
 static qboolean FogVol_BuildGlobalVolume (fog_volume_t *out)
 {
 	const float world_density_scale = 1.f / 64.f;
@@ -546,6 +643,7 @@ void R_FogVol_Clear (void)
 void R_FogVol_BuildList (void)
 {
 	const float local_density_scale = q_max (0.f, r_fogvol_density_scale.value);
+	const qboolean debug_spawn_mode = (r_fogvol.value >= 3.f);
 
 	r_fogvolume_count = 0;
 	r_fogvol_global_active = FogVol_BuildGlobalVolume (&r_fogvol_global_volume);
@@ -563,6 +661,34 @@ void R_FogVol_BuildList (void)
 		if (v.density <= 1e-6f)
 			continue;
 		r_fogvolumes[r_fogvolume_count++] = v;
+	}
+
+	if (debug_spawn_mode)
+	{
+		vec3_t map_mins;
+		vec3_t map_maxs;
+
+		FogVol_DebugGetMapBounds (map_mins, map_maxs);
+		for (int i = 0; i < 20 && r_fogvolume_count < MAX_FOGVOLUMES; ++i)
+		{
+			fog_volume_t v;
+
+			FogVol_DebugBuildRandomVolume (&v, map_mins, map_maxs);
+			FogVol_ClampVolume (&v);
+			if (v.density <= 1e-6f)
+				continue;
+			r_fogvolumes[r_fogvolume_count++] = v;
+		}
+
+		if (r_fogvolume_count < MAX_FOGVOLUMES)
+		{
+			fog_volume_t v;
+
+			FogVol_DebugBuildOriginVolume (&v);
+			FogVol_ClampVolume (&v);
+			if (v.density > 1e-6f)
+				r_fogvolumes[r_fogvolume_count++] = v;
+		}
 	}
 
 	if (r_fogvolume_count > 1)
@@ -1465,14 +1591,17 @@ void R_FogVol_Render (void)
 
 void R_FogVol_DrawDebug2D (void)
 {
+	vec3_t wire_color;
+
 	if (r_fogvol_debug.value <= 0.f)
 		return;
+	VectorSet (wire_color, 1.f, 1.f, 1.f);
 	for (int i = 0; i < r_fogvolume_count; ++i)
 	{
 		const fog_volume_t *v = &r_fogvolumes[i];
 		if (!v->enabled)
 			continue;
-		R_DebugDrawWireBox (v->mins, v->maxs, v->color, true);
+		R_DebugDrawWireBox (v->mins, v->maxs, wire_color, true);
 	}
 	R_DebugFlushGeometry ();
 }
