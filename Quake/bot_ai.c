@@ -547,7 +547,7 @@ static qboolean BotAI_ItemPotentiallyReachable (bot_state_t *bot, edict_t *self,
 	return tr.fraction >= 1.f;
 }
 
-static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, const char *classname, qboolean enemy_visible, float dist)
+static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, const char *classname, qboolean enemy_visible, float dist, qboolean item_reachable)
 {
 	bot_item_type_t item_type;
 	float score = -1.f;
@@ -633,7 +633,7 @@ static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, co
 	score -= dist * 0.05f;
 	if (enemy_visible && item_type != BOT_ITEM_HEALTH && item_type != BOT_ITEM_POWERUP)
 		score *= 0.65f;
-	if (!BotAI_ItemPotentiallyReachable (bot, self, item))
+	if (!item_reachable)
 		score *= 0.2f;
 	if (bot->state == BOT_STATE_RETREAT && item_type == BOT_ITEM_HEALTH)
 		score += 80.f;
@@ -658,6 +658,7 @@ static edict_t *BotAI_FindBestItem (bot_state_t *bot, edict_t *self, qboolean en
 		vec3_t delta;
 		float dist;
 		float score;
+		qboolean item_reachable;
 
 		if (!item || item->free)
 			continue;
@@ -683,9 +684,10 @@ static edict_t *BotAI_FindBestItem (bot_state_t *bot, edict_t *self, qboolean en
 		if (dist > 2200.f)
 			continue;
 
-		score = BotAI_ItemScore (bot, self, item, classname, enemy_visible, dist);
-		if (!BotAI_ItemPotentiallyReachable (bot, self, item))
+		item_reachable = BotAI_ItemPotentiallyReachable (bot, self, item);
+		if (!item_reachable)
 			continue;
+		score = BotAI_ItemScore (bot, self, item, classname, enemy_visible, dist, item_reachable);
 		if (score > best_score)
 		{
 			best_score = score;
