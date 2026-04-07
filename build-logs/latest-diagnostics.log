@@ -10,12 +10,12 @@ Build + Deploy Ironwail (Release x64)
 [INFO] Sammle Diagnosedaten...
 ==== Environment ====
 DATE=07.04.2026
-TIME= 0:27:11,60
+TIME= 2:07:05,86
 CD=C:\Quake\source\ironwail
 PROCESSOR_ARCHITECTURE=AMD64
 VisualStudioVersion=
 VSINSTALLDIR=
-PATH=C:\Program Files\ImageMagick-7.1.2-Q16-HDRI;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\Microsoft VS Code\bin;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\ACE Studio;C:\Program Files\Git\cmd;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Program Files\Calibre2\;C:\Program Files\Meld\;C:\Program Files\KTX-Software\bin;C:\Program Files\nodejs\;C:\Program Files\GitHub CLI\;C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR;C:\Program Files\dotnet\;C:\Users\schmi\.local\bin;$($env:PATH);C:\Tools\potrace;C:\Users\schmi\.dotnet\tools;C:\Users\schmi\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\schmi\AppData\Local\Python\bin;C:\Users\schmi\AppData\Local\Python\pythoncore-3.14-64\Scripts;C:\Users\schmi\AppData\Roaming\npm;C:\Users\schmi\AppData\Local\Programs\Antigravity\bin
+PATH=C:\Users\schmi\.codex\tmp\arg0\codex-arg0YIFFua;C:\Program Files\ImageMagick-7.1.2-Q16-HDRI;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\Microsoft VS Code\bin;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\ACE Studio;C:\Program Files\Git\cmd;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Program Files\Calibre2\;C:\Program Files\Meld\;C:\Program Files\KTX-Software\bin;C:\Program Files\nodejs\;C:\Program Files\GitHub CLI\;C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR;C:\Users\schmi\.local\bin;$($env:PATH);C:\Tools\potrace;C:\Users\schmi\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\schmi\AppData\Local\Python\bin;C:\Users\schmi\AppData\Local\Python\pythoncore-3.14-64\Scripts;C:\Users\schmi\AppData\Roaming\npm;C:\Users\schmi\AppData\Local\Programs\Antigravity\bin;C:\Users\schmi\AppData\Local\OpenAI\Codex\bin;C:\Program Files\WindowsApps\OpenAI.Codex_26.325.3894.0_x64__2p2nqsd0c76g0\app\resources
 
 ==== Toolset hints from Windows\VisualStudio\ironwail.vcxproj ====
 25:    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>

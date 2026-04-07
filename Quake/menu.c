@@ -210,8 +210,15 @@ void M_Options_Init (enum m_state_e state);
 
 static void M_StopDemoForMultiplayerMenu (void)
 {
+	// Prevent the attract-loop from restarting demos while navigating MP menus.
+	cls.demonum = -1;
+	cls.demoloop = false;
+
 	if (cls.demoplayback)
-		Cbuf_InsertText ("stopdemo\n");
+	{
+		CL_StopPlayback ();
+		CL_Disconnect ();
+	}
 }
 
 #define PREVIEW_FADEIN_TIME				0.125
@@ -7639,7 +7646,7 @@ qboolean M_ForcedUnderwater (void)
 void M_ConfigureNetSubsystem(void)
 {
 // enable/disable net systems to match desired config
-	Cbuf_AddText ("stopdemo\n");
+	M_StopDemoForMultiplayerMenu ();
 
 	if (IPXConfig || TCPIPConfig)
 		net_hostport = lanConfig_port;

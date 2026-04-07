@@ -16,6 +16,11 @@ static bot_state_t g_bot_states[MAX_SCOREBOARD];
 static qboolean g_bot_initialized;
 static qboolean g_bot_nav_enabled_cache;
 
+static int Bot_MaxTrackedClients (void)
+{
+	return q_min (svs.maxclients, (int) countof (g_bot_states));
+}
+
 static int Bot_ClientIndex (const client_t *client)
 {
 	if (!client)
@@ -268,6 +273,12 @@ static qboolean Bot_AddClient (int requested_team)
 	team = Bot_PickTeam (requested_team);
 	Bot_GenerateUniqueName (botname, sizeof (botname));
 
+	if ((unsigned int) clientnum >= (unsigned int) countof (g_bot_states))
+	{
+		Con_Printf ("bot_add failed: slot %d exceeds bot state capacity (%d)\n", clientnum + 1, (int) countof (g_bot_states));
+		return false;
+	}
+
 	client = &svs.clients[clientnum];
 	memset (client, 0, sizeof (*client));
 	client->active = true;
@@ -452,8 +463,15 @@ void Bot_RunFrameForClient (client_t *client)
 void Bot_OnServerSpawnedMap (void)
 {
 	int i;
+	int limit;
 
 	if (!g_bot_initialized)
+		return;
+	if (!sv.active || sv.state != ss_active)
+		return;
+	if (!sv.qcvm.progs || !sv.qcvm.edicts)
+		return;
+	if (!sv.name[0])
 		return;
 
 	if (bot_use_nav2.value)
@@ -464,13 +482,18 @@ void Bot_OnServerSpawnedMap (void)
 
 	BotAI_OnMapSpawn ();
 
-	for (i = 0; i < svs.maxclients; ++i)
+	limit = Bot_MaxTrackedClients ();
+	for (i = 0; i < limit; ++i)
 	{
 		client_t *client = &svs.clients[i];
-		bot_state_t *state = &g_bot_states[i];
+		bot_state_t *state;
 
 		if (!client->active || !client->isbot)
 			continue;
+		if (!client->edict)
+			continue;
+
+		state = &g_bot_states[i];
 
 		state->inuse = true;
 		state->clientnum = i;
