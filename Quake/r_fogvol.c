@@ -920,6 +920,10 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	float shadow_contrast = CLAMP (0.5f, r_fogvol_shadow_contrast.value, 4.f);
 	float extinction_relief = CLAMP (0.f, r_fogvol_light_extinction_relief.value, 0.95f);
 	float emissive_floor = 0.f;
+	qboolean light_enabled = false;
+	qboolean light_has_froxel = false;
+	qboolean light_has_sun = false;
+	qboolean light_has_emissive = false;
 	float debug_dlight_scale = 1.f;
 	float debug_sun_scale = 0.f;
 	float debug_emissive_scale = 0.f;
@@ -982,6 +986,14 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 		light_scale_dlight = q_max (light_scale_dlight, 3.0f);
 		light_contrast = q_max (light_contrast, 1.0f);
 	}
+	lighting_mode = CLAMP (0, mode, 2);
+	light_has_froxel = (mode > 0 && (froxel_ready || force_froxel_debug) && light_scale_dlight > 0.f);
+	light_has_sun = (mode > 0 && shadow_enabled && light_scale_sun > 0.f);
+	light_has_emissive = (mode > 1 && r_fogvol_emissive.value > 0.f && light_scale_emissive > 0.f);
+	if (lighting_mode == 1)
+		light_enabled = (light_has_froxel || light_has_sun);
+	else if (lighting_mode >= 2)
+		light_enabled = (light_has_froxel || light_has_sun || light_has_emissive);
 
 	GL_Uniform1iFunc (FOGVOL_U_STEPS, q_max (8, steps));
 	GL_Uniform1iFunc (FOGVOL_U_NOISE_ENABLED, r_fogvol_noise.value > 0.f ? 1 : 0);
@@ -1002,7 +1014,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	GL_Uniform4fFunc (FOGVOL_U_DENSITY_PARAMS, fog_density, sigma_max, noise_scale, noise_bias);
 	GL_Uniform1iFunc (FOGVOL_U_EMISSIVE_ENABLED, r_fogvol_emissive.value > 0.f ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_BLEND_MODE_DEFAULT, CLAMP (0, (int)Q_rint (r_fogvol_blendmode.value), 1));
-	GL_Uniform1iFunc (FOGVOL_U_LIGHT_ENABLED, 0);
+	GL_Uniform1iFunc (FOGVOL_U_LIGHT_ENABLED, light_enabled ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_SHADOW_ENABLED, shadow_enabled ? 1 : 0);
 	GL_Uniform1iFunc (FOGVOL_U_SHADOW_SAMPLES, shadow_enabled ? 1 : 0);
 	GL_Uniform1fFunc (FOGVOL_U_SHADOW_STRENGTH, CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f));
