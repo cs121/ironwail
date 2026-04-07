@@ -525,9 +525,12 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 	FindChunk("cue ");
 	if (data_p)
 	{
+		qboolean has_valid_loop = false;
+		int cue_loopstart = -1;
+
 		data_p += 32;
-		info.loopstart = GetLittleLong();
-	//	Con_Printf("loopstart=%d\n", sfx->loopstart);
+		cue_loopstart = GetLittleLong();
+	//	Con_Printf("loopstart=%d\n", cue_loopstart);
 
 	// if the next chunk is a LIST chunk, look for a cue length marker
 		FindNextChunk ("LIST");
@@ -537,10 +540,18 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 			{	// this is not a proper parse, but it works with cooledit...
 				data_p += 24;
 				i = GetLittleLong();	// samples in loop
-				info.samples = info.loopstart + i;
+				if (cue_loopstart >= 0 && i > 0)
+				{
+					info.loopstart = cue_loopstart;
+					info.samples = info.loopstart + i;
+					has_valid_loop = true;
+				}
 		//		Con_Printf("looped length: %i\n", i);
 			}
 		}
+
+		if (!has_valid_loop)
+			info.loopstart = -1;
 	}
 	else
 		info.loopstart = -1;
