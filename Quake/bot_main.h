@@ -108,6 +108,16 @@ typedef struct bot_state_s
 	edict_t		*follow_target;
 	double		follow_unreachable_since;
 	double		next_follow_teleport_time;
+
+	double		next_full_think_time;
+	double		last_full_think_time;
+	bot_ai_state_t	last_decision_state;
+	edict_t		*last_decision_enemy;
+	vec3_t		last_decision_goal_pos;
+	qboolean	last_decision_has_goal;
+	qboolean	last_decision_has_path;
+	bot_path_t	last_decision_path;
+	int		last_decision_path_index;
 	 } bot_state_t;
 
 extern cvar_t bot_debug;
