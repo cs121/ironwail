@@ -10,6 +10,8 @@
 #define BOT_NAV_CACHE_MAX_AGE 0.15
 #define BOT_NAV_CACHE_REUSE_DIST 48.f
 #define BOT_ITEM_SCAN_SHARDS 4
+#define BOT_TARGET_EVAL_CACHE_TTL 0.1
+#define BOT_TARGET_EVAL_INVALIDATE_DIST 64.f
 
 typedef enum bot_item_type_e
 {
@@ -357,6 +359,129 @@ static qboolean BotAI_CanSee (edict_t *self, edict_t *other)
 	VectorAdd (other->v.origin, other->v.view_ofs, end);
 	tr = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, self);
 	return tr.fraction >= 1.f;
+}
+
+static void BotAI_ClearTargetEvalCache (bot_state_t *bot)
+{
+	int i;
+
+	if (!bot)
+		return;
+
+	for (i = 0; i < BOT_TARGET_EVAL_CACHE_SIZE; ++i)
+	{
+		bot->target_eval_cache[i].target_entnum = -1;
+		bot->target_eval_cache[i].timestamp = 0.0;
+		bot->target_eval_cache[i].has_visibility = false;
+		bot->target_eval_cache[i].visibility = false;
+		bot->target_eval_cache[i].has_pathable = false;
+		bot->target_eval_cache[i].pathable = false;
+	}
+	bot->target_eval_origin_valid = false;
+	VectorCopy (vec3_origin, bot->target_eval_origin);
+}
+
+static bot_target_eval_cache_entry_t *BotAI_FindTargetEvalCacheEntry (bot_state_t *bot, int target_entnum)
+{
+	int i;
+	bot_target_eval_cache_entry_t *oldest = NULL;
+	double oldest_time = 0.0;
+
+	if (!bot || target_entnum < 0)
+		return NULL;
+
+	for (i = 0; i < BOT_TARGET_EVAL_CACHE_SIZE; ++i)
+	{
+		bot_target_eval_cache_entry_t *entry = &bot->target_eval_cache[i];
+		if (entry->target_entnum == target_entnum)
+			return entry;
+		if (entry->target_entnum < 0)
+			return entry;
+		if (!oldest || entry->timestamp < oldest_time)
+		{
+			oldest = entry;
+			oldest_time = entry->timestamp;
+		}
+	}
+
+	return oldest;
+}
+
+static void BotAI_PrepareTargetEvalCache (bot_state_t *bot, edict_t *self)
+{
+	vec3_t delta;
+
+	if (!bot || !self)
+		return;
+
+	if (!bot->target_eval_origin_valid)
+	{
+		VectorCopy (self->v.origin, bot->target_eval_origin);
+		bot->target_eval_origin_valid = true;
+		return;
+	}
+
+	VectorSubtract (self->v.origin, bot->target_eval_origin, delta);
+	if (DotProduct (delta, delta) > BOT_TARGET_EVAL_INVALIDATE_DIST * BOT_TARGET_EVAL_INVALIDATE_DIST)
+	{
+		BotAI_ClearTargetEvalCache (bot);
+		VectorCopy (self->v.origin, bot->target_eval_origin);
+		bot->target_eval_origin_valid = true;
+	}
+}
+
+static qboolean BotAI_CanSeeCached (bot_state_t *bot, edict_t *self, edict_t *viewer, edict_t *target)
+{
+	bot_target_eval_cache_entry_t *entry;
+	int target_entnum;
+	qboolean visible;
+
+	if (!viewer || !target)
+		return false;
+	if (!bot || viewer != self)
+		return BotAI_CanSee (viewer, target);
+
+	BotAI_PrepareTargetEvalCache (bot, self);
+	target_entnum = NUM_FOR_EDICT (target);
+	entry = BotAI_FindTargetEvalCacheEntry (bot, target_entnum);
+	if (entry && entry->target_entnum == target_entnum && entry->has_visibility && (qcvm->time - entry->timestamp) <= BOT_TARGET_EVAL_CACHE_TTL)
+		return entry->visibility;
+
+	visible = BotAI_CanSee (viewer, target);
+	if (entry)
+	{
+		entry->target_entnum = target_entnum;
+		entry->timestamp = qcvm->time;
+		entry->has_visibility = true;
+		entry->visibility = visible;
+	}
+	return visible;
+}
+
+static qboolean BotAI_CanPathToTargetCached (bot_state_t *bot, edict_t *self, edict_t *target)
+{
+	bot_target_eval_cache_entry_t *entry;
+	int target_entnum;
+	qboolean pathable;
+
+	if (!bot || !self || !target)
+		return false;
+
+	BotAI_PrepareTargetEvalCache (bot, self);
+	target_entnum = NUM_FOR_EDICT (target);
+	entry = BotAI_FindTargetEvalCacheEntry (bot, target_entnum);
+	if (entry && entry->target_entnum == target_entnum && entry->has_pathable && (qcvm->time - entry->timestamp) <= BOT_TARGET_EVAL_CACHE_TTL)
+		return entry->pathable;
+
+	pathable = BotAI_CanPathToPos (bot, self, target->v.origin, true);
+	if (entry)
+	{
+		entry->target_entnum = target_entnum;
+		entry->timestamp = qcvm->time;
+		entry->has_pathable = true;
+		entry->pathable = pathable;
+	}
+	return pathable;
 }
 
 static qboolean BotAI_IsMonsterEnemyCandidate (edict_t *ent)
@@ -823,10 +948,10 @@ static edict_t *BotAI_FindBestEnemy (bot_state_t *bot, edict_t *self, qboolean *
 		dist = VectorLength (delta);
 		if (dist > 2500.f)
 			continue;
-		visible = BotAI_CanSee (self, candidate);
+		visible = BotAI_CanSeeCached (bot, self, self, candidate);
 		if (!visible && dist > 900.f)
 			continue;
-		if (!visible && BotAI_ShouldUseNav2 () && !BotAI_CanPathToPos (bot, self, candidate->v.origin, true))
+		if (!visible && BotAI_ShouldUseNav2 () && !BotAI_CanPathToTargetCached (bot, self, candidate))
 			continue;
 
 		score = 2600.f - dist;
@@ -860,10 +985,10 @@ static edict_t *BotAI_FindBestEnemy (bot_state_t *bot, edict_t *self, qboolean *
 			dist = VectorLength (delta);
 			if (dist > 2500.f)
 				continue;
-			visible = BotAI_CanSee (self, candidate);
+			visible = BotAI_CanSeeCached (bot, self, self, candidate);
 			if (!visible && dist > 900.f)
 				continue;
-			if (!visible && BotAI_ShouldUseNav2 () && !BotAI_CanPathToPos (bot, self, candidate->v.origin, true))
+			if (!visible && BotAI_ShouldUseNav2 () && !BotAI_CanPathToTargetCached (bot, self, candidate))
 				continue;
 
 			score = 2300.f - dist;
@@ -915,9 +1040,9 @@ static edict_t *BotAI_FindThreatNearPoint (bot_state_t *bot, edict_t *self, edic
 
 		VectorSubtract (candidate->v.origin, self->v.origin, to_self);
 		self_dist = VectorLength (to_self);
-		visible = BotAI_CanSee (self, candidate);
-		leader_visible = leader ? BotAI_CanSee (leader, candidate) : false;
-		if (!visible && !leader_visible && BotAI_ShouldUseNav2 () && !BotAI_CanPathToPos (bot, self, candidate->v.origin, true))
+		visible = BotAI_CanSeeCached (bot, self, self, candidate);
+		leader_visible = leader ? BotAI_CanSeeCached (bot, self, leader, candidate) : false;
+		if (!visible && !leader_visible && BotAI_ShouldUseNav2 () && !BotAI_CanPathToTargetCached (bot, self, candidate))
 			continue;
 
 		score = 1500.f - focus_dist - self_dist * 0.2f;
@@ -1007,6 +1132,7 @@ void BotAI_ResetState (bot_state_t *bot)
 	bot->next_repath_time = 0.0;
 	BotAI_ResetNearestCacheEntry (&bot->self_nearest_cache);
 	BotAI_ResetNearestCacheEntry (&bot->goal_nearest_cache);
+	BotAI_ClearTargetEvalCache (bot);
 	VectorCopy (vec3_origin, bot->last_origin);
 	bot->last_progress_time = now;
 	bot->stuck_until = 0.0;

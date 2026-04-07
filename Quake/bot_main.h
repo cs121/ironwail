@@ -24,6 +24,18 @@ typedef struct bot_nav_nearest_cache_s
 	vec3_t		sampled_origin;
 } bot_nav_nearest_cache_t;
 
+#define BOT_TARGET_EVAL_CACHE_SIZE 8
+
+typedef struct bot_target_eval_cache_entry_s
+{
+	int		target_entnum;
+	double		timestamp;
+	qboolean	has_visibility;
+	qboolean	visibility;
+	qboolean	has_pathable;
+	qboolean	pathable;
+} bot_target_eval_cache_entry_t;
+
 typedef struct bot_state_s
 {
 	qboolean	inuse;
@@ -51,6 +63,9 @@ typedef struct bot_state_s
 	double		next_repath_time;
 	bot_nav_nearest_cache_t	self_nearest_cache;
 	bot_nav_nearest_cache_t	goal_nearest_cache;
+	bot_target_eval_cache_entry_t	target_eval_cache[BOT_TARGET_EVAL_CACHE_SIZE];
+	vec3_t		target_eval_origin;
+	qboolean	target_eval_origin_valid;
 
 	vec3_t		last_origin;
 	double		last_progress_time;
