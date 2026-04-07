@@ -99,6 +99,7 @@ extern cvar_t r_ppdlights_debug;
 extern cvar_t r_ppdlights_debug_mode;
 extern cvar_t r_ppdlights_emissive;
 extern cvar_t r_ppdlights_emissive_debug;
+extern cvar_t r_ppdlights_emissive_budget;
 
 void R_PPdlights_RegisterCvars (void);
 void R_PPdlights_CollectFrame (void);

@@ -33,6 +33,7 @@ cvar_t r_ppdlights_debug = { "r_ppdlights_debug", "0", CVAR_NONE };
 cvar_t r_ppdlights_debug_mode = { "r_ppdlights_dbgmode", "0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_emissive = { "r_ppdlights_emissive", "0", CVAR_ARCHIVE };
 cvar_t r_ppdlights_emissive_debug = { "r_ppdlights_emissive_debug", "0", CVAR_NONE };
+cvar_t r_ppdlights_emissive_budget = { "r_ppdlights_emissive_budget", "24", CVAR_ARCHIVE };
 
 static rl_light_t rl_frame_lights[RL_FRAME_LIGHTS_MAX];
 static dlight_t *rl_frame_light_sources[RL_FRAME_LIGHTS_MAX];
@@ -120,7 +121,10 @@ static qboolean R_PPdlights_IsFrustumCulled (const vec3_t origin, float radius)
 
 static void R_PPdlights_Stats_f (void)
 {
-	Con_Printf ("r_ppdlights: src(dlight=%d emissive=%d) accepted(total=%d dlight=%d emissive=%d) culled(inactive=%d not_live=%d persistent_off=%d zero_radius=%d frustum=%d budget=%d emissive_budget=%d priority=%d)\n",
+	const int emissive_budget_cfg = (int)r_ppdlights_emissive_budget.value;
+	const int emissive_budget = CLAMP (0, emissive_budget_cfg, RL_FRAME_LIGHTS_MAX);
+
+	Con_Printf ("r_ppdlights: src(dlight=%d emissive=%d) accepted(total=%d dlight=%d emissive=%d) culled(inactive=%d not_live=%d persistent_off=%d zero_radius=%d frustum=%d budget=%d emissive_budget=%d/%d priority=%d)\n",
 		rl_frame_stats.source_dlights,
 		rl_frame_stats.source_emissive,
 		rl_frame_stats.accepted,
@@ -132,6 +136,8 @@ static void R_PPdlights_Stats_f (void)
 		rl_frame_stats.rejected_zero_radius,
 		rl_frame_stats.rejected_frustum,
 		rl_frame_stats.rejected_budget,
+		emissive_budget,
+		emissive_budget_cfg,
 		rl_frame_stats.rejected_emissive_budget,
 		rl_frame_stats.rejected_priority);
 }
@@ -354,6 +360,8 @@ static qboolean R_PPdlights_AddFrameLightCandidate (rl_frame_light_candidate_t *
 
 static void R_PPdlights_CollectEmissiveFrame (rl_frame_light_candidate_t *best, int *best_count)
 {
+	const int emissive_budget_cfg = (int)r_ppdlights_emissive_budget.value;
+	const int emissive_budget = CLAMP (0, emissive_budget_cfg, RL_FRAME_LIGHTS_MAX);
 	int i;
 	rl_frame_light_candidate_t candidate;
 
@@ -367,6 +375,7 @@ static void R_PPdlights_CollectEmissiveFrame (rl_frame_light_candidate_t *best, 
 		float radius = 0.f;
 		float intensity = 0.f;
 		unsigned int source_tag = 0u;
+		int j;
 
 		if (!ent || !ent->model || ent->alpha == ENTALPHA_ZERO)
 			continue;
@@ -446,6 +455,38 @@ static void R_PPdlights_CollectEmissiveFrame (rl_frame_light_candidate_t *best, 
 			NULL,
 			true))
 		{
+			int emissive_count = 0;
+			int worst_emissive = -1;
+
+			if (emissive_budget == 0)
+			{
+				rl_frame_stats.rejected_emissive_budget++;
+				continue;
+			}
+
+			for (j = 0; j < *best_count; ++j)
+			{
+				if (best[j].type != RL_LIGHT_EMISSIVE_PROXY)
+					continue;
+				emissive_count++;
+				worst_emissive = j;
+			}
+
+			if (emissive_count >= emissive_budget)
+			{
+				if (worst_emissive < 0
+					|| !R_PPdlights_IsCandidateBetter (&candidate, &best[worst_emissive]))
+				{
+					rl_frame_stats.rejected_emissive_budget++;
+					continue;
+				}
+
+				if (*best_count - 1 > worst_emissive)
+					memmove (&best[worst_emissive], &best[worst_emissive + 1], (size_t)(*best_count - worst_emissive - 1) * sizeof (best[0]));
+				(*best_count)--;
+				rl_frame_stats.rejected_emissive_budget++;
+			}
+
 			R_PPdlights_InsertTopCandidate (best, best_count, &candidate);
 		}
 	}
@@ -458,10 +499,11 @@ static void R_PPdlights_CollectEmissiveFrame (rl_frame_light_candidate_t *best, 
 			if (best[i].type == RL_LIGHT_EMISSIVE_PROXY)
 				accepted_emissive++;
 		}
-		Con_DPrintf ("r_ppdlights_emissive: src=%d accepted=%d budget=%d reject_budget=%d reject_priority=%d\n",
+		Con_DPrintf ("r_ppdlights_emissive: src=%d accepted=%d budget=%d/%d reject_budget=%d reject_priority=%d\n",
 			rl_frame_stats.source_emissive,
 			accepted_emissive,
-			RL_FRAME_LIGHTS_MAX,
+			emissive_budget,
+			emissive_budget_cfg,
 			rl_frame_stats.rejected_emissive_budget,
 			rl_frame_stats.rejected_priority);
 	}
@@ -486,6 +528,7 @@ void R_PPdlights_RegisterCvars (void)
 	Cvar_RegisterVariable (&r_ppdlights_debug_mode);
 	Cvar_RegisterVariable (&r_ppdlights_emissive);
 	Cvar_RegisterVariable (&r_ppdlights_emissive_debug);
+	Cvar_RegisterVariable (&r_ppdlights_emissive_budget);
 	Cmd_AddCommand ("r_ppdlights_stats", R_PPdlights_Stats_f);
 	Cmd_AddCommand ("r_ppdlights_debug_mode", R_PPdlights_DebugModeCompat_f);
 	Cmd_AddCommand ("r_ppdlights_world_blendop", R_PPdlights_WorldBlendOpCompat_f);
