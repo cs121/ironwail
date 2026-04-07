@@ -1452,7 +1452,35 @@ static void BotAI_ComputeDirectionalMove (const vec3_t view_angles, const vec3_t
 	cmd->sidemove = DotProduct (move_dir, right) * speed;
 }
 
-static qboolean BotAI_TestMoveBlocked (edict_t *self, const vec3_t move_dir, float dist, trace_t *out_tr)
+typedef enum bot_ai_trace_priority_e
+{
+	BOT_AI_TRACE_PRIORITY_REQUIRED = 0,
+	BOT_AI_TRACE_PRIORITY_LOW
+} bot_ai_trace_priority_t;
+
+typedef struct bot_ai_move_trace_cache_s
+{
+	qboolean valid;
+	vec3_t start;
+	vec3_t dir;
+	float dist;
+	trace_t tr;
+	qboolean blocked;
+} bot_ai_move_trace_cache_t;
+
+#define BOT_AI_MOVE_TRACE_CACHE_MAX 16
+#define BOT_AI_TRACE_BUDGET_PER_TICK 10
+
+typedef struct bot_ai_trace_context_s
+{
+	int traces_used;
+	int trace_budget;
+	qboolean budget_capped;
+	int next_cache_slot;
+	bot_ai_move_trace_cache_t cache[BOT_AI_MOVE_TRACE_CACHE_MAX];
+} bot_ai_trace_context_t;
+
+static qboolean BotAI_TestMoveBlockedRaw (edict_t *self, const vec3_t move_dir, float dist, trace_t *out_tr)
 {
 	vec3_t end;
 	trace_t tr;
@@ -1468,7 +1496,69 @@ static qboolean BotAI_TestMoveBlocked (edict_t *self, const vec3_t move_dir, flo
 	return tr.startsolid || tr.fraction < 0.2f;
 }
 
-static qboolean BotAI_ShouldJumpForward (bot_state_t *bot, edict_t *self, const vec3_t move_dir)
+static void BotAI_InitTraceContext (bot_ai_trace_context_t *ctx)
+{
+	if (!ctx)
+		return;
+	memset (ctx, 0, sizeof (*ctx));
+	ctx->trace_budget = BOT_AI_TRACE_BUDGET_PER_TICK;
+}
+
+static qboolean BotAI_TestMoveBlockedCached (bot_ai_trace_context_t *ctx, edict_t *self, const vec3_t move_dir, float dist, trace_t *out_tr, bot_ai_trace_priority_t priority)
+{
+	int i;
+	trace_t tr;
+	qboolean blocked;
+
+	if (!ctx)
+		return BotAI_TestMoveBlockedRaw (self, move_dir, dist, out_tr);
+
+	for (i = 0; i < (int) countof (ctx->cache); ++i)
+	{
+		bot_ai_move_trace_cache_t *entry = &ctx->cache[i];
+		if (!entry->valid)
+			continue;
+		if (entry->dist != dist)
+			continue;
+		if (VectorCompare (entry->start, self->v.origin) != 1)
+			continue;
+		if (VectorCompare (entry->dir, move_dir) != 1)
+			continue;
+
+		if (out_tr)
+			*out_tr = entry->tr;
+		return entry->blocked;
+	}
+
+	if (ctx->traces_used >= ctx->trace_budget && priority == BOT_AI_TRACE_PRIORITY_LOW)
+	{
+		ctx->budget_capped = true;
+		if (out_tr)
+			memset (out_tr, 0, sizeof (*out_tr));
+		return true;
+	}
+
+	blocked = BotAI_TestMoveBlockedRaw (self, move_dir, dist, &tr);
+	ctx->traces_used++;
+
+	{
+		int slot = ctx->next_cache_slot % (int) countof (ctx->cache);
+		bot_ai_move_trace_cache_t *entry = &ctx->cache[slot];
+		ctx->next_cache_slot++;
+		entry->valid = true;
+		entry->dist = dist;
+		VectorCopy (self->v.origin, entry->start);
+		VectorCopy (move_dir, entry->dir);
+		entry->tr = tr;
+		entry->blocked = blocked;
+	}
+
+	if (out_tr)
+		*out_tr = tr;
+	return blocked;
+}
+
+static qboolean BotAI_ShouldJumpForward (bot_state_t *bot, bot_ai_trace_context_t *trace_ctx, edict_t *self, const vec3_t move_dir)
 {
 	trace_t tr_wall;
 	trace_t tr_jump;
@@ -1483,7 +1573,7 @@ static qboolean BotAI_ShouldJumpForward (bot_state_t *bot, edict_t *self, const 
 		return false;
 	if (qcvm->time < bot->next_jump_time)
 		return false;
-	if (!BotAI_TestMoveBlocked (self, move_dir, 30.f, &tr_wall))
+	if (!BotAI_TestMoveBlockedCached (trace_ctx, self, move_dir, 30.f, &tr_wall, BOT_AI_TRACE_PRIORITY_LOW))
 		return false;
 	if (tr_wall.startsolid)
 		return false;
@@ -1597,7 +1687,7 @@ static void BotAI_SnapGoalToNavNode (bot_state_t *bot, const vec3_t wanted, vec3
 		VectorCopy (node_pos, out_goal);
 }
 
-static qboolean BotAI_AdjustForImmediateObstacle (bot_state_t *bot, edict_t *self, vec3_t move_dir)
+static qboolean BotAI_AdjustForImmediateObstacle (bot_state_t *bot, bot_ai_trace_context_t *trace_ctx, edict_t *self, vec3_t move_dir)
 {
 	trace_t tr;
 	float probe_dist = 56.f;
@@ -1606,7 +1696,7 @@ static qboolean BotAI_AdjustForImmediateObstacle (bot_state_t *bot, edict_t *sel
 	if (!bot || !self)
 		return false;
 
-	if (!BotAI_TestMoveBlocked (self, move_dir, probe_dist, &tr))
+	if (!BotAI_TestMoveBlockedCached (trace_ctx, self, move_dir, probe_dist, &tr, BOT_AI_TRACE_PRIORITY_REQUIRED))
 		return false;
 
 	if (!tr.startsolid && tr.fraction < 1.f && fabsf (tr.plane.normal[2]) < 0.7f)
@@ -1618,7 +1708,7 @@ static qboolean BotAI_AdjustForImmediateObstacle (bot_state_t *bot, edict_t *sel
 		if (VectorNormalize (slide) > 0.2f)
 		{
 			VectorCopy (slide, move_dir);
-			if (!BotAI_TestMoveBlocked (self, move_dir, probe_dist, NULL))
+			if (!BotAI_TestMoveBlockedCached (trace_ctx, self, move_dir, probe_dist, NULL, BOT_AI_TRACE_PRIORITY_LOW))
 				adjusted = true;
 		}
 	}
@@ -1632,7 +1722,7 @@ static qboolean BotAI_AdjustForImmediateObstacle (bot_state_t *bot, edict_t *sel
 		if (VectorNormalize (side) > 0.f)
 		{
 			VectorCopy (side, move_dir);
-			if (!BotAI_TestMoveBlocked (self, move_dir, probe_dist, NULL))
+			if (!BotAI_TestMoveBlockedCached (trace_ctx, self, move_dir, probe_dist, NULL, BOT_AI_TRACE_PRIORITY_LOW))
 				adjusted = true;
 			else
 			{
@@ -1643,7 +1733,7 @@ static qboolean BotAI_AdjustForImmediateObstacle (bot_state_t *bot, edict_t *sel
 				if (VectorNormalize (side) > 0.f)
 				{
 					VectorCopy (side, move_dir);
-					if (!BotAI_TestMoveBlocked (self, move_dir, probe_dist, NULL))
+					if (!BotAI_TestMoveBlockedCached (trace_ctx, self, move_dir, probe_dist, NULL, BOT_AI_TRACE_PRIORITY_LOW))
 						adjusted = true;
 				}
 			}
@@ -1659,7 +1749,7 @@ static qboolean BotAI_AdjustForImmediateObstacle (bot_state_t *bot, edict_t *sel
 		if (VectorNormalize (back) > 0.f)
 		{
 			VectorCopy (back, move_dir);
-			adjusted = !BotAI_TestMoveBlocked (self, move_dir, probe_dist, NULL);
+			adjusted = !BotAI_TestMoveBlockedCached (trace_ctx, self, move_dir, probe_dist, NULL, BOT_AI_TRACE_PRIORITY_LOW);
 		}
 	}
 
@@ -1730,6 +1820,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 	qboolean companion_alerted = false;
 	qboolean alert_enemy_visible = false;
 	qboolean hold_position = false;
+	bot_ai_trace_context_t trace_ctx;
 
 	memset (outcmd, 0, sizeof (*outcmd));
 	*out_attack = false;
@@ -1742,6 +1833,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 	}
 
 	self = client->edict;
+	BotAI_InitTraceContext (&trace_ctx);
 	VectorCopy (self->v.v_angle, out_vangle);
 
 	if (!client->spawned)
@@ -2136,7 +2228,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 			VectorCopy (nav_move_dir, move_dir);
 			move_speed = 300.f;
-			if (dist < 700.f && !BotAI_TestMoveBlocked (self, enemy_dir, 72.f, NULL))
+			if (dist < 700.f && !BotAI_TestMoveBlockedCached (&trace_ctx, self, enemy_dir, 72.f, NULL, BOT_AI_TRACE_PRIORITY_REQUIRED))
 			{
 				if (dist < 170.f)
 					VectorMA (strafe, -0.8f, enemy_dir, move_dir);
@@ -2145,7 +2237,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 				else
 					VectorCopy (strafe, move_dir);
 				VectorNormalize (move_dir);
-				if (BotAI_TestMoveBlocked (self, move_dir, 72.f, NULL))
+				if (BotAI_TestMoveBlockedCached (&trace_ctx, self, move_dir, 72.f, NULL, BOT_AI_TRACE_PRIORITY_LOW))
 					VectorCopy (nav_move_dir, move_dir);
 			}
 
@@ -2172,7 +2264,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 					move_speed = 320.f;
 					VectorMA (strafe, 1.0f, enemy_dir, move_dir);
 					VectorNormalize (move_dir);
-					if (BotAI_TestMoveBlocked (self, move_dir, 72.f, NULL))
+					if (BotAI_TestMoveBlockedCached (&trace_ctx, self, move_dir, 72.f, NULL, BOT_AI_TRACE_PRIORITY_LOW))
 						VectorCopy (nav_move_dir, move_dir);
 				}
 				else if (qcvm->time - bot->last_fire_block_time > 0.6)
@@ -2233,7 +2325,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 	if (bot->state != BOT_STATE_STUCK_RECOVERY && !hold_position)
 	{
-		qboolean avoided_wall = BotAI_AdjustForImmediateObstacle (bot, self, move_dir);
+		qboolean avoided_wall = BotAI_AdjustForImmediateObstacle (bot, &trace_ctx, self, move_dir);
 		if (avoided_wall)
 		{
 			bot->obstacle_avoid_streak++;
@@ -2270,7 +2362,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 		BotAI_ComputeDirectionalMove (out_vangle, move_dir, move_speed, outcmd);
 
-		if (BotAI_ShouldJumpForward (bot, self, move_dir))
+		if (BotAI_ShouldJumpForward (bot, &trace_ctx, self, move_dir))
 		{
 			outcmd->upmove = 320.f;
 			bot->next_jump_time = qcvm->time + 0.45;
