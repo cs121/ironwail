@@ -548,6 +548,7 @@ void R_PPdlights_CollectFrame (void)
 	int best_count = 0;
 	int active_count = 0;
 	int i;
+	int mark;
 	qboolean collect_enabled;
 
 	rl_frame_light_count = 0;
@@ -572,7 +573,8 @@ void R_PPdlights_CollectFrame (void)
 	 * consume filtered views of this same array in their own pass budgets.
 	 */
 	active = DLightPool_GetActiveList (&active_count);
-	best = (rl_frame_light_candidate_t *)Hunk_TempAlloc ((size_t)RL_FRAME_LIGHTS_MAX * sizeof (*best));
+	mark = Hunk_LowMark ();
+	best = (rl_frame_light_candidate_t *)Hunk_Alloc ((int)((size_t)RL_FRAME_LIGHTS_MAX * sizeof (*best)));
 	if (active && active_count > 0)
 	{
 		for (i = 0; i < active_count; ++i)
@@ -652,6 +654,8 @@ void R_PPdlights_CollectFrame (void)
 			rl_frame_stats.rejected_frustum,
 			rl_frame_stats.rejected_budget);
 	}
+
+	Hunk_FreeToLowMark (mark);
 }
 
 const rl_light_t *R_PPdlights_GetFrameLights (int *out_count)

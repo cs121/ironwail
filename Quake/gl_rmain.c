@@ -2028,7 +2028,11 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	int samples = (int)Q_rint (r_ssao_samples.value);
 	samples = CLAMP (4, samples, SSAO_MAX_SAMPLES);
 	float radius = R_SSAO_SanitizeValue (r_ssao_radius.value, 24.f, 0.01f, 8192.f);
-	float bias = R_SSAO_SanitizeValue (r_ssao_bias.value, 0.02f, 0.f, 1.f) * radius;
+	/* Bias is a view-space epsilon. Scaling it by radius makes the effective
+	 * threshold far too large at default radius and suppresses most AO except
+	 * at steep depth transitions. Keep bias in its own units so AO remains
+	 * visible on broad contact edges. */
+	float bias = R_SSAO_SanitizeValue (r_ssao_bias.value, 0.02f, 0.f, 1.f);
 	float power = R_SSAO_SanitizeValue (r_ssao_power.value, 1.f, 0.01f, 8.f);
 	float min_ao = CLAMP (0.f, r_ssao_min.value, 1.f);
 	qboolean use_halfres = (r_ssao_halfres.value > 0.f && r_ssao_force_fullres.value <= 0.f);

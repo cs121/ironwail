@@ -509,7 +509,10 @@ void main()
 		return;
 	}
 
-	float ao = 1.0 - occlusion / float(samples);
+	// Normalize by actually valid taps; dividing by full kernel size can
+	// under-occlude heavily when many taps are rejected (off-screen/sky/behind).
+	float denom = max(validSamples, 1.0);
+	float ao = 1.0 - occlusion / denom;
 	ao = clamp(ao, 0.0, 1.0);
 	ao = pow(ao, u_params0.z);
 	ao = max(ao, u_params0.w);

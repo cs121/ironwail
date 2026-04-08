@@ -671,7 +671,13 @@ void main()
                                 }
                                 else if (centerOpaque)
                                 {
-                                        color.rgb *= mix(1.0, aoDamped, ssaoIntensity);
+                                        // Keep SSAO intensity bounded for t>1.0.
+                                        // Previous mix(1, ao, t) extrapolated when t>1 and could
+                                        // over-darken lit areas; pow preserves stronger AO while
+                                        // keeping the multiplier in [0,1].
+                                        float aoStrength = max(ssaoIntensity, 0.0);
+                                        float aoFactor = pow(clamp(aoDamped, 0.0, 1.0), aoStrength);
+                                        color.rgb *= aoFactor;
                                 }
                         }
                 }
