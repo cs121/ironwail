@@ -28,7 +28,7 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	DLightDebugModels;
 	float	DLightDirectionalMix;
 	float	PPDLightModelEnable;
-	float	PPDLightModelDebug;
+	float	PPDLightModelDebug; // 0=cpu, 1=blend, 2=gpu-prefer
 	vec4	AmbientSkyParams; // x: enabled, y: scale, z: debug mode, w: unused
 	vec4	AmbientSkyTint;   // rgb: tint, w: cap
 	float	_Pad1[3];
@@ -367,6 +367,7 @@ float ComputeAliasDLightShadow(vec3 worldPos)
 	if (ShadowEnableDebug.x < 0.5 || ShadowEnableDebug.z < 0.5)
 		return 1.0;
 
+	int numLights = int(clamp(ShadowNumLights, 0.0, float(SHADOW_LIGHT_MAX)));
 	float accum = 0.0;
 	float weightSum = 0.0;
 	int slots = int(clamp(ShadowBiasCounts.x, 0.0, float(SHADOW_DLIGHT_MAX)));
@@ -375,7 +376,7 @@ float ComputeAliasDLightShadow(vec3 worldPos)
 		int idx = int(round((slot == 0) ? ShadowDLightIndices.x :
 				    (slot == 1) ? ShadowDLightIndices.y :
 				    (slot == 2) ? ShadowDLightIndices.z : ShadowDLightIndices.w));
-		if (idx < 0)
+		if (idx < 0 || idx >= numLights)
 			continue;
 		Light l = Lights[idx];
 		vec3 d = worldPos - l.origin;
@@ -397,8 +398,9 @@ float SampleFirstDLightDepth(vec3 worldPos)
 	if (ShadowBiasCounts.x < 0.5)
 		return 1.0;
 
+	int numLights = int(clamp(ShadowNumLights, 0.0, float(SHADOW_LIGHT_MAX)));
 	int idx = int(round(ShadowDLightIndices.x));
-	if (idx < 0)
+	if (idx < 0 || idx >= numLights)
 		return 1.0;
 
 	Light l = Lights[idx];
@@ -455,13 +457,21 @@ void main()
 	dlight_contrib = in_dlight_color;
 	if (AliasFrameBuffer.PPDLightModelEnable > 0.5 && ShadowNumLights > 0.5)
 	{
-		/* Keep CPU-accumulated dlight as a robust baseline and blend towards
-		 * per-light directional response only when requested by the model mix cvar. */
+		float model_dlight_mode = clamp(floor(AliasFrameBuffer.PPDLightModelDebug + 0.5), 0.0, 2.0);
 		vec3 gpu_dlight = ComputeAliasDLightContribution(world_pos, world_nor);
 		float gpu_energy = dot(gpu_dlight, vec3(0.2126, 0.7152, 0.0722));
-		float dir_mix = clamp(AliasFrameBuffer.DLightDirectionalMix, 0.0, 1.0);
-		if (gpu_energy > 1e-6)
-			dlight_contrib = mix(in_dlight_color, gpu_dlight, dir_mix);
+		if (model_dlight_mode >= 1.5)
+		{
+			/* GPU-prefer mode keeps CPU as fallback if the per-light list is empty/culled. */
+			if (gpu_energy > 1e-6)
+				dlight_contrib = gpu_dlight;
+		}
+		else if (model_dlight_mode >= 0.5)
+		{
+			float dir_mix = clamp(AliasFrameBuffer.DLightDirectionalMix, 0.0, 1.0);
+			if (gpu_energy > 1e-6)
+				dlight_contrib = mix(in_dlight_color, gpu_dlight, dir_mix);
+		}
 	}
 #if ALPHATEST
 	result.rgb += texel_albedo * dlight_contrib;

@@ -613,13 +613,11 @@ void R_SetupAliasLighting (entity_t     *e)
                 }
         }
 
-        // Use the full active dlight pool for model lighting so short-lived/small lights
-        // (muzzle flash, rockets, lava balls) are not dropped by render budgeting/culling.
         if (r_dlight_models_directional.value > 0.f)
-                R_AccumulateEntityDLights (e->origin, dlightcolor, dlightdir);
+                R_AccumulateEntityModelDLights (e->origin, dlightcolor, dlightdir);
         else
         {
-                R_AccumulateEntityDLights (e->origin, dlightcolor, NULL);
+                R_AccumulateEntityModelDLights (e->origin, dlightcolor, NULL);
                 VectorClear (dlightdir);
         }
         VectorAdd (lightcolor, dlightcolor, lightcolor);
@@ -799,6 +797,9 @@ memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_frame
 	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
 	memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
 	use_pp_models = R_PPdlights_ModelPathEnabled ();
+	{
+		const int model_dlight_mode = CLAMP (0, (int)Q_rint (r_dlight_models_mode.value), 2);
+
 // use fog density sign bit as overbright flag
 ibuf.global.fog[3] =
 gl_overbright_models.value ?
@@ -811,7 +812,8 @@ ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 ibuf.global.dlight_debug_models = 0.f;
 ibuf.global.dlight_directional_mix = CLAMP (0.f, r_dlight_models_directional.value, 1.f);
 ibuf.global.pp_dlight_model_enable = use_pp_models ? 1.f : 0.f;
-ibuf.global.pp_dlight_model_debug = 0.f;
+ibuf.global.pp_dlight_model_debug = (float)model_dlight_mode;
+	}
 ibuf.global.ambient_sky_params[0] = (r_skyvis.value > 0.f && R_SkyVis_Active ()) ? 1.f : 0.f;
 ibuf.global.ambient_sky_params[1] = R_SkyVis_GetResolvedScale ();
 ibuf.global.ambient_sky_params[2] = (r_skyvis_debug.value >= 2.f) ? 1.f : 0.f;

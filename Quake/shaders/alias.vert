@@ -28,7 +28,7 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	DLightDebugModels;
 	float	DLightDirectionalMix;
 	float	PPDLightModelEnable;
-	float	PPDLightModelDebug;
+	float	PPDLightModelDebug; // 0=cpu, 1=blend, 2=gpu-prefer
 	vec4	AmbientSkyParams; // x: enabled, y: scale, z: debug mode, w: unused
 	vec4	AmbientSkyTint;   // rgb: tint, w: cap
 	float	_Pad1[3];

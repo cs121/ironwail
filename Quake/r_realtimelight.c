@@ -703,6 +703,8 @@ static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, 
 {
 	int i;
 	int count = 0;
+	const qboolean require_dynamic_points =
+		(consumer == RL_CONSUMER_WORLD || consumer == RL_CONSUMER_MODEL);
 
 	if (!out_buffer || !out_sources || max_lights <= 0)
 		return 0;
@@ -713,6 +715,12 @@ static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, 
 		gpulight_t *dst;
 		float energy;
 		R_PPdlights_RecordConsumerConsidered (consumer, src->source_id);
+		if (require_dynamic_points && src->type != RL_LIGHT_POINT)
+		{
+			/* Keep world/model dlight consumers parity with legacy dynamic lights. */
+			R_PPdlights_RecordConsumerReject (consumer, src->source_id, RL_REJECT_NON_CONTRIB);
+			continue;
+		}
 		if ((src->flags & RL_LIGHT_SURFACE_CONTRIB) == 0u)
 		{
 			R_PPdlights_RecordConsumerReject (consumer, src->source_id, RL_REJECT_NON_CONTRIB);

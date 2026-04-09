@@ -252,6 +252,7 @@ void R_Shadow_ResetRuntime (shadow_runtime_t *state)
 	for (i = 0; i < SHADOW_DLIGHT_MAX; ++i)
 	{
 		state->dlight_indices[i] = -1;
+		state->dlight_sources[i] = NULL;
 		for (f = 0; f < SHADOW_DLIGHT_FACES; ++f)
 			memset (state->dlight_frustum[i][f], 0, sizeof (state->dlight_frustum[i][f]));
 	}
@@ -262,6 +263,9 @@ void R_Shadow_SelectDlights (shadow_runtime_t *state)
 	int i, slot;
 	int limit = CLAMP (0, (int)Q_rint (r_shadow_dlight_max.value), SHADOW_DLIGHT_MAX);
 	float best_score[SHADOW_DLIGHT_MAX];
+	const gpulight_t *lights = r_lightbuffer.lights;
+	dlight_t *const *sources = r_dlight_sources;
+	int light_count = (int)r_framedata.numlights;
 
 	if (!state)
 		return;
@@ -270,6 +274,7 @@ void R_Shadow_SelectDlights (shadow_runtime_t *state)
 	for (slot = 0; slot < SHADOW_DLIGHT_MAX; ++slot)
 	{
 		state->dlight_indices[slot] = -1;
+		state->dlight_sources[slot] = NULL;
 		VectorSet (state->dlight_pos_radius[slot], 0.f, 0.f, 0.f);
 		state->dlight_pos_radius[slot][3] = 1.f;
 		best_score[slot] = -FLT_MAX;
@@ -278,11 +283,15 @@ void R_Shadow_SelectDlights (shadow_runtime_t *state)
 	if (!R_Shadow_DlightEnabled () || limit <= 0)
 		return;
 
-	for (i = 0; i < (int)r_framedata.numlights; ++i)
+	for (i = 0; i < light_count; ++i)
 	{
-		const gpulight_t *l = &r_lightbuffer.lights[i];
+		const gpulight_t *l = &lights[i];
 		vec3_t to_light;
 		float dist, luminance, score;
+
+		/* Keep shadow-slot ownership on concrete dlight sources only. */
+		if (!sources[i])
+			continue;
 
 		VectorSubtract (l->pos, r_refdef.vieworg, to_light);
 		dist = VectorLength (to_light);
@@ -309,10 +318,11 @@ void R_Shadow_SelectDlights (shadow_runtime_t *state)
 	for (slot = 0; slot < limit; ++slot)
 	{
 		int idx = state->dlight_indices[slot];
-		if (idx < 0 || idx >= (int)r_framedata.numlights)
+		if (idx < 0 || idx >= light_count)
 			continue;
-		VectorCopy (r_lightbuffer.lights[idx].pos, state->dlight_pos_radius[slot]);
-		state->dlight_pos_radius[slot][3] = q_max (r_lightbuffer.lights[idx].radius, 16.f);
+		VectorCopy (lights[idx].pos, state->dlight_pos_radius[slot]);
+		state->dlight_pos_radius[slot][3] = q_max (lights[idx].radius, 16.f);
+		state->dlight_sources[slot] = sources[idx];
 		state->num_dlights++;
 	}
 }
@@ -646,11 +656,37 @@ void R_Shadow_ReconcileResources (void)
 		retry_after_frame = 0;
 }
 
+static int R_Shadow_FindCurrentIndexForSlot (const dlight_t *source)
+{
+	int i;
+	int light_count = (int)r_framedata.numlights;
+
+	if (!source)
+		return -1;
+
+	for (i = 0; i < light_count; ++i)
+	{
+		if (r_dlight_sources[i] == source)
+			return i;
+	}
+
+	return -1;
+}
+
 static void R_Shadow_GetSelectedIndices (int outidx[SHADOW_DLIGHT_MAX])
 {
 	int i;
+
 	for (i = 0; i < SHADOW_DLIGHT_MAX; ++i)
-		outidx[i] = (i < r_shadow_state.num_dlights) ? r_shadow_state.dlight_indices[i] : -1;
+	{
+		if (i >= r_shadow_state.num_dlights)
+		{
+			outidx[i] = -1;
+			continue;
+		}
+
+		outidx[i] = R_Shadow_FindCurrentIndexForSlot (r_shadow_state.dlight_sources[i]);
+	}
 }
 
 qboolean R_Shadow_GetSunOcclusionData (float out_viewproj[16], float *out_bias, float *out_pcf_uv)

@@ -391,6 +391,7 @@ float ComputeCombinedDLightShadow(vec3 worldPos)
 	if (ShadowEnableDebug.x < 0.5 || ShadowEnableDebug.z < 0.5)
 		return 1.0;
 
+	int numLights = int(NumLights);
 	float accum = 0.0;
 	float wsum = 0.0;
 	int slots = int(clamp(ShadowBiasCounts.x, 0.0, 4.0));
@@ -399,7 +400,7 @@ float ComputeCombinedDLightShadow(vec3 worldPos)
 		int idx = int(round((slot == 0) ? ShadowDLightIndices.x :
 				    (slot == 1) ? ShadowDLightIndices.y :
 				    (slot == 2) ? ShadowDLightIndices.z : ShadowDLightIndices.w));
-		if (idx < 0)
+		if (idx < 0 || idx >= numLights)
 			continue;
 		Light l = Lights[idx];
 		vec3 d = worldPos - l.origin;
@@ -422,8 +423,9 @@ float SampleFirstDLightDepth(vec3 worldPos)
 	if (ShadowBiasCounts.x < 0.5)
 		return 1.0;
 
+	int numLights = int(NumLights);
 	int idx = int(round(ShadowDLightIndices.x));
-	if (idx < 0)
+	if (idx < 0 || idx >= numLights)
 		return 1.0;
 
 	Light l = Lights[idx];

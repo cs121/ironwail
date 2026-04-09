@@ -981,9 +981,13 @@ void R_Froxel_InjectDlights (void)
 {
 	int active_count = 0;
 	const dlight_t *const *active = NULL;
+	const int dlight_source_mode = CLAMP (0, (int)Q_rint (r_fogvol_dlight_source.value), 2);
 	const qboolean pp_fog_enabled = (r_ppdlights.value > 0.f && r_ppdlights_fog.value > 0.f);
+	const qboolean pp_collect_enabled = (r_ppdlights.value > 0.f);
+	const qboolean allow_legacy_fallback = (r_fogvol_dlight_legacy_fallback.value > 0.f);
 	const qboolean allow_lava_emissive = (r_fogvol_lava_emissive.value >= 0.f);
 	const qboolean fog_light_enabled = (r_fogvol_light.value > 0.f);
+	qboolean use_pp_path = false;
 	float intensity_scale;
 
 	if (!r_froxel.valid)
@@ -995,10 +999,28 @@ void R_Froxel_InjectDlights (void)
 	 */
 	if (allow_lava_emissive)
 		R_Froxel_InjectLavaSurfaceLights ();
-	if (pp_fog_enabled)
+
+	/* Fog dlight source selection:
+	 * 0 = legacy-compatible behavior (pp only when r_ppdlights_fog=1)
+	 * 1 = prefer shared pp frame lights (default), fallback to legacy when pp contributes none
+	 * 2 = force legacy pool path */
+	if (dlight_source_mode == 1)
+		use_pp_path = pp_collect_enabled;
+	else if (dlight_source_mode == 2)
+		use_pp_path = false;
+	else
+		use_pp_path = pp_fog_enabled;
+
+	if (use_pp_path)
 	{
+		const int light_count_before_pp = r_froxel.light_count;
 		R_Froxel_InjectPPDLights ();
-		return;
+		if (!(dlight_source_mode == 1
+			&& allow_legacy_fallback
+			&& r_froxel.light_count == light_count_before_pp))
+		{
+			return;
+		}
 	}
 	if (!fog_light_enabled && !allow_lava_emissive)
 		return;

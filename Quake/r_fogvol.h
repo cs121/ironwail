@@ -83,6 +83,8 @@ extern cvar_t r_fogvol_global_priority;
 extern cvar_t r_fogvol_stats;
 extern cvar_t r_fogvol_light;
 extern cvar_t r_fogvol_dlightscale;
+extern cvar_t r_fogvol_dlight_source;
+extern cvar_t r_fogvol_dlight_legacy_fallback;
 extern cvar_t r_fogvol_froxel_sun;
 extern cvar_t r_fogvol_light_dlight_boost;
 extern cvar_t r_fogvol_light_sun_boost;

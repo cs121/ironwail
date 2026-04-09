@@ -16,6 +16,7 @@ typedef struct shadow_runtime_s
 	mplane_t	sun_frustum[SHADOW_SUN_CASCADE_MAX][4];
 	int			num_dlights;
 	int			dlight_indices[SHADOW_DLIGHT_MAX];
+	dlight_t	*dlight_sources[SHADOW_DLIGHT_MAX];
 	vec4_t		dlight_pos_radius[SHADOW_DLIGHT_MAX];
 	float		dlight_viewproj[SHADOW_DLIGHT_MAX][SHADOW_DLIGHT_FACES][16];
 	mplane_t	dlight_frustum[SHADOW_DLIGHT_MAX][SHADOW_DLIGHT_FACES][4];

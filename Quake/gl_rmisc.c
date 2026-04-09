@@ -66,10 +66,24 @@ extern cvar_t r_lightmap_mipmaps;
 extern cvar_t r_lightmap16f;
 extern cvar_t r_lightingdir;
 extern cvar_t r_dlight_entities;
+extern cvar_t r_legacy_dlight_world_translucent;
+extern cvar_t r_legacy_dlight_water;
+extern cvar_t r_legacy_dlight_decals;
+extern cvar_t r_legacy_dlight_particles;
+extern cvar_t r_legacy_dlight_fog;
+extern cvar_t r_pp_dlight_world_translucent;
+extern cvar_t r_pp_dlight_water;
+extern cvar_t r_pp_dlight_decals;
+extern cvar_t r_pp_dlight_particles;
 extern cvar_t r_quality;
 extern cvar_t r_model_light_multisample;
 extern cvar_t r_model_light_smooth;
 extern cvar_t r_dlight_models_directional;
+extern cvar_t r_dlight_models_mode;
+extern cvar_t r_world_dlight_source;
+extern cvar_t r_world_dlight_legacy_fallback;
+extern cvar_t r_model_dlight_source;
+extern cvar_t r_model_dlight_legacy_fallback;
 extern cvar_t r_model_lightgrid_assist;
 extern cvar_t r_model_lightgrid_assist_threshold;
 extern cvar_t r_bmodel_relight;
@@ -453,6 +467,18 @@ float GL_WaterAlphaForTextureType (textype_t type)
 		return map_wateralpha;
 }
 
+static void R_DeprecatedDLightReceiverAlias_f (cvar_t *var)
+{
+	if (!var)
+		return;
+
+	if (var->value != 0.f)
+	{
+		Con_Warning ("%s is deprecated and has no runtime effect; forcing 0\n", var->name);
+		Cvar_SetValueQuick (var, 0.f);
+	}
+}
+
 
 
 /*
@@ -495,6 +521,13 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_model_light_multisample);
         Cvar_RegisterVariable (&r_model_light_smooth);
         Cvar_RegisterVariable (&r_dlight_models_directional);
+        Cvar_RegisterVariable (&r_dlight_models_mode);
+        Cvar_RegisterVariable (&r_world_dlight_source);
+        Cvar_RegisterVariable (&r_world_dlight_legacy_fallback);
+        Cvar_RegisterVariable (&r_model_dlight_source);
+        Cvar_RegisterVariable (&r_model_dlight_legacy_fallback);
+        Cvar_RegisterVariable (&r_receiver_dlight_source);
+        Cvar_RegisterVariable (&r_receiver_dlight_legacy_fallback);
         Cvar_RegisterVariable (&r_model_lightgrid_assist);
         Cvar_RegisterVariable (&r_model_lightgrid_assist_threshold);
         Cvar_RegisterVariable (&r_bmodel_relight);
@@ -503,7 +536,7 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_wateralpha);
         Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
         Cvar_RegisterVariable (&r_litwater);
-        Cvar_RegisterVariable (&r_dynamic);
+	Cvar_RegisterVariable (&r_dynamic);
         Cvar_RegisterVariable (&r_dlight_entities);
 	Cvar_RegisterVariable (&r_dlight_receive_overlay);
 	Cvar_RegisterVariable (&r_legacy_dlight_world_translucent);
@@ -515,6 +548,15 @@ Cvar_RegisterVariable (&r_drawviewmodel);
 	Cvar_RegisterVariable (&r_pp_dlight_water);
 	Cvar_RegisterVariable (&r_pp_dlight_decals);
 	Cvar_RegisterVariable (&r_pp_dlight_particles);
+	Cvar_SetCallback (&r_legacy_dlight_world_translucent, R_DeprecatedDLightReceiverAlias_f);
+	Cvar_SetCallback (&r_legacy_dlight_water, R_DeprecatedDLightReceiverAlias_f);
+	Cvar_SetCallback (&r_legacy_dlight_decals, R_DeprecatedDLightReceiverAlias_f);
+	Cvar_SetCallback (&r_legacy_dlight_particles, R_DeprecatedDLightReceiverAlias_f);
+	Cvar_SetCallback (&r_legacy_dlight_fog, R_DeprecatedDLightReceiverAlias_f);
+	Cvar_SetCallback (&r_pp_dlight_world_translucent, R_DeprecatedDLightReceiverAlias_f);
+	Cvar_SetCallback (&r_pp_dlight_water, R_DeprecatedDLightReceiverAlias_f);
+	Cvar_SetCallback (&r_pp_dlight_decals, R_DeprecatedDLightReceiverAlias_f);
+	Cvar_SetCallback (&r_pp_dlight_particles, R_DeprecatedDLightReceiverAlias_f);
 	Cvar_RegisterVariable (&r_quality);
 	Cvar_RegisterVariable (&r_shadow);
 	Cvar_RegisterVariable (&r_shadow_sun);

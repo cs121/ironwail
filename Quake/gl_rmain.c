@@ -358,45 +358,15 @@ static void R_DebugDRSNativeEffects (qboolean bloom_enabled, qboolean ssao_enabl
 		motion_enabled ? 1 : 0);
 }
 
-static void R_DLightContract_EnforceGuards (void)
-{
-	struct dlight_guard_s
-	{
-		cvar_t *var;
-		const char *category;
-		const char *path;
-	} guards[] = {
-		{ &r_legacy_dlight_world_translucent, "world translucent", "legacy" },
-		{ &r_legacy_dlight_water, "water", "legacy" },
-		{ &r_legacy_dlight_decals, "decals", "legacy" },
-		{ &r_legacy_dlight_particles, "particles", "legacy" },
-		{ &r_legacy_dlight_fog, "fog", "legacy" },
-		{ &r_pp_dlight_world_translucent, "world translucent", "pp" },
-		{ &r_pp_dlight_water, "water", "pp" },
-		{ &r_pp_dlight_decals, "decals", "pp" },
-		{ &r_pp_dlight_particles, "particles", "pp" }
-	};
-	int i;
-
-	for (i = 0; i < (int)countof (guards); ++i)
-	{
-		if (guards[i].var->value > 0.f)
-		{
-			if ((r_framecount % 60) == 0)
-				Con_Warning ("dlight contract: %s receiver path for %s is intentionally excluded; forcing %s 0\n",
-					guards[i].path, guards[i].category, guards[i].var->name);
-			Cvar_SetValueQuick (guards[i].var, 0.f);
-		}
-	}
-}
-
 extern cvar_t r_dlight_entities;
 
 static void R_DLightContract_DebugOverlay (void)
 {
-	const qboolean legacy_world_opaque = (r_dynamic.value > 0.f && r_drawworld_cheatsafe);
+	const qboolean world_pp_source = R_WorldDLightUsingPPPath ();
+	const qboolean legacy_world_opaque = (r_dynamic.value > 0.f && r_drawworld_cheatsafe && !world_pp_source);
 	const qboolean legacy_alias = (r_dynamic.value > 0.f && r_dlight_entities.value > 0.f && r_drawentities.value > 0.f);
-	const qboolean pp_world_opaque = R_PPdlights_WorldPathEnabled () && CLAMP (0.f, r_ppdlights_world_scale.value, 4.f) > 0.f;
+	const qboolean pp_world_opaque = (r_dynamic.value > 0.f && r_drawworld_cheatsafe && world_pp_source
+		&& CLAMP (0.f, r_ppdlights_world_scale.value, 4.f) > 0.f);
 	const qboolean pp_alias = R_PPdlights_ModelPathEnabled () && r_drawentities.value > 0.f;
 	const qboolean pp_fog = (r_ppdlights.value > 0.f && r_ppdlights_fog.value > 0.f);
 
@@ -507,7 +477,7 @@ cvar_t  r_framegraph_autobind = { "r_framegraph_autobind", "0", CVAR_NONE };
 cvar_t  r_framegraph_debug = { "r_framegraph_debug", "0", CVAR_NONE };
 cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
 cvar_t	r_dlight_receive_overlay = { "r_dlight_receive_overlay", "0", CVAR_NONE };
-/* Guard cvars for categories intentionally excluded from dynamic-light receiver paths. */
+/* Deprecated compatibility aliases: parsed from existing cfgs, no runtime effect. */
 cvar_t	r_legacy_dlight_world_translucent = { "r_legacy_dlight_world_translucent", "0", CVAR_ARCHIVE };
 cvar_t	r_legacy_dlight_water = { "r_legacy_dlight_water", "0", CVAR_ARCHIVE };
 cvar_t	r_legacy_dlight_decals = { "r_legacy_dlight_decals", "0", CVAR_ARCHIVE };
@@ -4334,6 +4304,12 @@ void R_UploadFrameData (void)
 	qboolean tile_ready;
 
 	tile_ready = R_BuildLightTileLists ();
+	if (tile_ready && R_WorldDLightUsingPPPath ())
+	{
+		/* Safety bridge: shared world-light source can diverge from tile classification.
+		 * Keep correctness first by forcing global per-light loop for this mode. */
+		tile_ready = false;
+	}
 	r_framedata.dlight_params[2] = tile_ready ? 1.f : 0.f;
 
 	size = sizeof (r_lightbuffer.lightstyles) + sizeof (r_lightbuffer.lights[0]) * q_max (r_framedata.numlights, 1); // avoid zero-length array
@@ -5648,7 +5624,6 @@ void R_RenderScene (const RenderGraphResourceHandle *resources)
 	(void)resources;
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_Clear ();
-	R_DLightContract_EnforceGuards ();
 	
 	// Upload frame data after fog has been set up to ensure fog parameters
 	// are available to all draw calls, even when light clustering is skipped.

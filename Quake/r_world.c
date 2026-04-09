@@ -1754,8 +1754,8 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 	 *   category              legacy dlight pass      pp dlight pass
 	 *   -------------------------------------------------------------
 	 *   world opaque          yes                     yes
-	 *   world translucent     no (guarded off)        no (guarded off)
-	 *   water                 no (guarded off)        no (guarded off)
+	 *   world translucent     no (unsupported)        no (unsupported)
+	 *   water                 no (unsupported)        no (unsupported)
 	 *   decals                no (pass-order excl.)   no (pass-order excl.)
 	 *   particles             no (pass-order excl.)   no (pass-order excl.)
 	 * Notes:
