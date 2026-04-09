@@ -32,7 +32,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
-extern cvar_t r_dlight_entities;
 extern cvar_t r_lightgrid;
 extern cvar_t r_lightgrid_force;
 extern cvar_t r_rgblighting_enable;
@@ -42,12 +41,6 @@ cvar_t r_minlight_models = { "r_minlight_models", "0.02", CVAR_ARCHIVE };
 cvar_t r_model_lightgrid = { "r_model_lightgrid", "1", CVAR_ARCHIVE };
 cvar_t r_model_light_multisample = { "r_model_light_multisample", "0", CVAR_ARCHIVE };
 cvar_t r_model_light_smooth = { "r_model_light_smooth", "0", CVAR_ARCHIVE };
-cvar_t r_dlight_models_directional = { "r_dlight_models_directional", "0", CVAR_ARCHIVE };
-cvar_t r_dlight_models_mode = { "r_dlight_models_mode", "1", CVAR_ARCHIVE };
-cvar_t r_model_dlight_source = { "r_model_dlight_source", "1", CVAR_ARCHIVE };
-cvar_t r_model_dlight_legacy_fallback = { "r_model_dlight_legacy_fallback", "1", CVAR_ARCHIVE };
-cvar_t r_receiver_dlight_source = { "r_receiver_dlight_source", "1", CVAR_ARCHIVE };
-cvar_t r_receiver_dlight_legacy_fallback = { "r_receiver_dlight_legacy_fallback", "1", CVAR_ARCHIVE };
 cvar_t r_model_lightgrid_assist = { "r_model_lightgrid_assist", "0", CVAR_ARCHIVE };
 cvar_t r_model_lightgrid_assist_threshold = { "r_model_lightgrid_assist_threshold", "0.03", CVAR_ARCHIVE };
 cvar_t r_bmodel_relight = { "r_bmodel_relight", "0", CVAR_ARCHIVE };
@@ -211,80 +204,6 @@ static void R_ModelLightStats_AddCall (int sample_count, qboolean used_multisamp
 		r_model_light_frame_stats.total_ms += elapsed_ms;
 }
 
-static void R_AccumulateEntityDLightsArray (const dlight_t *const *lights, int count, const vec3_t pos, vec3_t lightcolor, vec3_t out_dir)
-{
-	vec3_t dir_accum = {0.f, 0.f, 0.f};
-	float dir_weight_sum = 0.f;
-
-	for (int i = 0; i < count; i++)
-	{
-		const dlight_t *l = lights[i];
-		vec3_t dist;
-		float add;
-		float dist_len;
-		vec3_t contrib;
-		float radius;
-		vec3_t eval_color;
-
-		if (l->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
-			continue;
-
-		if (!CL_DlightIsActive (l))
-			continue;
-
-		R_EvaluateDLightForRender (l, &radius, eval_color);
-		if (radius <= 0.f)
-			continue;
-
-		VectorSubtract (pos, l->origin, dist);
-		dist_len = VectorLength (dist);
-		add = radius - dist_len;
-
-		if (add <= l->minlight)
-			continue;
-
-		add -= l->minlight;
-		VectorScale (eval_color, add, contrib);
-		VectorAdd (lightcolor, contrib, lightcolor);
-
-		if (out_dir && dist_len > 1e-4f)
-		{
-			vec3_t ldir;
-			const float weight = q_max (R_ModelLightLuma (contrib), 0.f);
-			VectorScale (dist, -1.f / dist_len, ldir);
-			VectorMA (dir_accum, weight, ldir, dir_accum);
-			dir_weight_sum += weight;
-		}
-	}
-
-	if (out_dir)
-	{
-		if (dir_weight_sum > 1e-6f && VectorNormalize (dir_accum) > 1e-6f)
-			VectorCopy (dir_accum, out_dir);
-		else
-			VectorClear (out_dir);
-	}
-}
-
-void R_AccumulateEntityDLights (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
-{
-	int count = 0;
-	const dlight_t *const *active;
-
-	VectorClear (out_color);
-	if (out_dir)
-		VectorClear (out_dir);
-
-	if (!r_dynamic.value)
-		return;
-
-	active = DLightPool_GetActiveList (&count);
-	if (!active || count <= 0)
-		return;
-
-	R_AccumulateEntityDLightsArray (active, count, pos, out_color, out_dir);
-}
-
 static int R_AccumulateEntityPPFrameLights (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
 {
 	int light_count = 0;
@@ -293,7 +212,7 @@ static int R_AccumulateEntityPPFrameLights (const vec3_t pos, vec3_t out_color, 
 	vec3_t dir_accum = {0.f, 0.f, 0.f};
 	float dir_weight_sum = 0.f;
 
-	if (!r_dynamic.value || r_ppdlights.value <= 0.f)
+	if (!r_dynamic.value)
 	{
 		if (out_dir)
 			VectorClear (out_dir);
@@ -318,7 +237,7 @@ static int R_AccumulateEntityPPFrameLights (const vec3_t pos, vec3_t out_color, 
 
 		if ((src->flags & RL_LIGHT_SURFACE_CONTRIB) == 0u)
 			continue;
-		/* Keep CPU model path parity with legacy dynamic lights only. */
+		/* CPU model sampling accepts runtime point dlights only. */
 		if (src->type != RL_LIGHT_POINT)
 			continue;
 		if (src->radius <= 0.f || src->intensity <= 0.f)
@@ -357,10 +276,6 @@ static int R_AccumulateEntityPPFrameLights (const vec3_t pos, vec3_t out_color, 
 
 void R_AccumulateEntityModelDLights (const vec3_t pos, vec3_t out_color, vec3_t out_dir)
 {
-	const int mode = CLAMP (0, (int)Q_rint (r_model_dlight_source.value), 2);
-	const qboolean allow_legacy_fallback = (r_model_dlight_legacy_fallback.value > 0.f);
-	int pp_contrib = 0;
-
 	VectorClear (out_color);
 	if (out_dir)
 		VectorClear (out_dir);
@@ -368,15 +283,8 @@ void R_AccumulateEntityModelDLights (const vec3_t pos, vec3_t out_color, vec3_t 
 	if (!r_dynamic.value)
 		return;
 
-	if (mode == 0)
-	{
-		R_AccumulateEntityDLights (pos, out_color, out_dir);
-		return;
-	}
-
-	pp_contrib = R_AccumulateEntityPPFrameLights (pos, out_color, out_dir);
-	if (mode == 1 && pp_contrib <= 0 && allow_legacy_fallback)
-		R_AccumulateEntityDLights (pos, out_color, out_dir);
+	/* Single-path behavior: model lighting uses the shared per-pixel frame lights. */
+	(void)R_AccumulateEntityPPFrameLights (pos, out_color, out_dir);
 }
 
 
@@ -440,9 +348,6 @@ void R_ParseDlightEntities (void)
 	DLightPool_ClearPersistent ();
 
 	if (!cl.worldmodel || !cl.worldmodel->entities)
-		return;
-
-	if (r_dlight_entities.value <= 0.f)
 		return;
 
 	data = cl.worldmodel->entities;
@@ -790,8 +695,6 @@ static int R_AddDynamicLights_Lightgrid_Internal (const vec3_t pos, vec3_t out_l
 
 		if (!l || !CL_DlightIsActive (l))
 			continue;
-		if (l->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
-			continue;
 
 		R_EvaluateDLightForRender (l, &radius, eval_color);
 		if (radius <= 0.f)
@@ -823,7 +726,7 @@ static int R_AddDynamicLights_PPFrame (const vec3_t pos, vec3_t out_lightcolor)
 	int contributed = 0;
 	const rl_light_t *lights;
 
-	if (!r_dynamic.value || r_ppdlights.value <= 0.f)
+	if (!r_dynamic.value)
 		return 0;
 
 	lights = R_PPdlights_GetFrameLights (&light_count);
@@ -857,42 +760,15 @@ static int R_AddDynamicLights_PPFrame (const vec3_t pos, vec3_t out_lightcolor)
 	return contributed;
 }
 
-static void R_AddDynamicLights_ReceiverLegacy (const vec3_t pos, qboolean lightgrid_has_sample, vec3_t out_lightcolor)
-{
-	if (lightgrid_has_sample)
-		(void)R_AddDynamicLights_Lightgrid_Internal (pos, out_lightcolor);
-	else
-		R_AccumulateEntityDLights (pos, out_lightcolor, NULL);
-}
-
 static void R_AddDynamicLights_Receiver (const vec3_t pos, qboolean lightgrid_has_sample, vec3_t out_lightcolor)
 {
-	const int mode = CLAMP (0, (int)Q_rint (r_receiver_dlight_source.value), 2);
-	const qboolean pp_enabled = (r_dynamic.value > 0.f && r_ppdlights.value > 0.f);
-	const qboolean allow_legacy_fallback = (r_receiver_dlight_legacy_fallback.value > 0.f);
-	int pp_contrib = 0;
+	(void)lightgrid_has_sample;
 
 	if (!r_dynamic.value)
 		return;
 
-	if (mode == 2)
-	{
-		R_AddDynamicLights_ReceiverLegacy (pos, lightgrid_has_sample, out_lightcolor);
-		return;
-	}
-
-	if (pp_enabled)
-		pp_contrib = R_AddDynamicLights_PPFrame (pos, out_lightcolor);
-
-	if (mode == 0)
-	{
-		if (!pp_enabled)
-			R_AddDynamicLights_ReceiverLegacy (pos, lightgrid_has_sample, out_lightcolor);
-		return;
-	}
-
-	if (mode == 1 && pp_contrib <= 0 && allow_legacy_fallback)
-		R_AddDynamicLights_ReceiverLegacy (pos, lightgrid_has_sample, out_lightcolor);
+	/* Single-path behavior: receiver dynamic contribution always comes from PP frame lights. */
+	(void)R_AddDynamicLights_PPFrame (pos, out_lightcolor);
 }
 
 void R_SampleReceiverLighting (const vec3_t pos, vec3_t out_color)

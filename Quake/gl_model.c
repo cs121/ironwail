@@ -37,7 +37,6 @@ static qmodel_t*	loadmodel;
 static char	loadname[32];	// for hunk tags
 
 extern vec3_t lightcolor;
-extern cvar_t r_dlight_entities;
 
 static void Mod_LoadSpriteModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer);

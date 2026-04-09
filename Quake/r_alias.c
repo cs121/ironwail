@@ -613,13 +613,7 @@ void R_SetupAliasLighting (entity_t     *e)
                 }
         }
 
-        if (r_dlight_models_directional.value > 0.f)
-                R_AccumulateEntityModelDLights (e->origin, dlightcolor, dlightdir);
-        else
-        {
-                R_AccumulateEntityModelDLights (e->origin, dlightcolor, NULL);
-                VectorClear (dlightdir);
-        }
+        R_AccumulateEntityModelDLights (e->origin, dlightcolor, dlightdir);
         VectorAdd (lightcolor, dlightcolor, lightcolor);
 
         R_ApplyLightgridLighting (e, ambientcolor);
@@ -792,14 +786,12 @@ void R_FlushAliasInstances (qboolean showtris)
 	}
 	GL_SetState (state);
 
-memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
+	memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
 memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
 	memcpy (ibuf.global.eyepos, r_refdef.vieworg, sizeof (r_refdef.vieworg));
 	memcpy (ibuf.global.fog, r_framedata.fogdata, 3 * sizeof (float));
-	use_pp_models = R_PPdlights_ModelPathEnabled ();
+	use_pp_models = (r_dynamic.value > 0.f);
 	{
-		const int model_dlight_mode = CLAMP (0, (int)Q_rint (r_dlight_models_mode.value), 2);
-
 // use fog density sign bit as overbright flag
 ibuf.global.fog[3] =
 gl_overbright_models.value ?
@@ -810,9 +802,9 @@ ibuf.global.overbright = gl_overbright_models.value > 0.f ? r_framedata.dither[2
 ibuf.global.dither = r_framedata.dither[0];
 ibuf.global.half_lambert = CLAMP (0.f, r_model_halflambert.value, 1.f);
 ibuf.global.dlight_debug_models = 0.f;
-ibuf.global.dlight_directional_mix = CLAMP (0.f, r_dlight_models_directional.value, 1.f);
+ibuf.global.dlight_directional_mix = 1.f;
 ibuf.global.pp_dlight_model_enable = use_pp_models ? 1.f : 0.f;
-ibuf.global.pp_dlight_model_debug = (float)model_dlight_mode;
+ibuf.global.pp_dlight_model_debug = 0.f;
 	}
 ibuf.global.ambient_sky_params[0] = (r_skyvis.value > 0.f && R_SkyVis_Active ()) ? 1.f : 0.f;
 ibuf.global.ambient_sky_params[1] = R_SkyVis_GetResolvedScale ();
@@ -1275,7 +1267,7 @@ R_DrawAliasModels
 void R_DrawAliasModels (entity_t **ents, int count)
 {
 	int i;
-	qboolean use_shared_model_lights = R_PPdlights_ModelPathEnabled ();
+	qboolean use_shared_model_lights = (r_dynamic.value > 0.f);
 	unsigned int saved_numlights = r_framedata.numlights;
 	gpulightbuffer_t saved_lightbuffer = {0};
 	dlight_t *saved_sources[DLIGHT_GPU_MAX] = {0};
@@ -1286,26 +1278,12 @@ void R_DrawAliasModels (entity_t **ents, int count)
 	if (use_shared_model_lights)
 	{
 		int pp_count;
-		rl_consumer_stats_t consumer_stats;
 		memcpy (&saved_lightbuffer, &r_lightbuffer, sizeof (saved_lightbuffer));
 		memcpy (saved_sources, r_dlight_sources, sizeof (saved_sources));
 
 		pp_count = R_PPdlights_BuildModelGpuLights (&r_lightbuffer, r_dlight_sources, DLIGHT_GPU_MAX);
 		r_framedata.numlights = (unsigned int)pp_count;
 		R_UploadFrameData ();
-
-		if (r_ppdlights_debug.value >= 1.f && (r_framecount % 60) == 0)
-			Con_DPrintf ("r_ppdlights_models: active (lights=%d)\n", pp_count);
-		if (r_ppdlights_debug.value >= 2.f && (r_framecount % 60) == 0
-			&& R_PPdlights_GetConsumerStats (RL_CONSUMER_MODEL, &consumer_stats))
-		{
-			Con_DPrintf ("r_ppdlights_models: considered=%d accepted=%d energy=%.3f reject(non_contrib=%d local_budget=%d)\n",
-				consumer_stats.considered,
-				consumer_stats.accepted,
-				consumer_stats.accepted_energy,
-				consumer_stats.rejected[RL_REJECT_NON_CONTRIB],
-				consumer_stats.rejected[RL_REJECT_LOCAL_BUDGET]);
-		}
 	}
 
 	for (i = 0; i < count; i++)
@@ -1338,7 +1316,7 @@ R_DrawAliasModels_ShowTris
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count)
 {
 	int i;
-	qboolean use_shared_model_lights = R_PPdlights_ModelPathEnabled ();
+	qboolean use_shared_model_lights = (r_dynamic.value > 0.f);
 	unsigned int saved_numlights = r_framedata.numlights;
 	gpulightbuffer_t saved_lightbuffer = {0};
 	dlight_t *saved_sources[DLIGHT_GPU_MAX] = {0};

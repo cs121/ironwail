@@ -82,34 +82,10 @@ typedef struct rl_consumer_stats_s
 	float accepted_energy;
 } rl_consumer_stats_t;
 
-extern cvar_t r_ppdlights;
-extern cvar_t r_ppdlights_world;
-extern cvar_t r_ppdlights_world_scale;
-extern cvar_t r_ppdlights_world_luma_clamp;
-extern cvar_t r_ppdlights_world_soft_knee;
-extern cvar_t r_ppdlights_world_tiles;
-extern cvar_t r_ppdlights_world_tiles_debug;
-extern cvar_t r_experimental_ppdlights_world_blendop;
-extern cvar_t r_ppdlights_models;
-extern cvar_t r_ppdlights_fog;
-extern cvar_t r_ppdlights_fog_debug;
-extern cvar_t r_ppdlights_fog_budget;
-extern cvar_t r_ppdlights_gi;
-extern cvar_t r_ppdlights_gi_debug;
-extern cvar_t r_ppdlights_gi_budget;
-extern cvar_t r_ppdlights_debug;
-extern cvar_t r_ppdlights_debug_mode;
-extern cvar_t r_ppdlights_emissive;
-extern cvar_t r_ppdlights_emissive_debug;
-extern cvar_t r_ppdlights_emissive_budget;
-
-void R_PPdlights_RegisterCvars (void);
 void R_PPdlights_CollectFrame (void);
 const rl_light_t *R_PPdlights_GetFrameLights (int *out_count);
 void R_PPdlights_GetFrameStats (rl_light_collect_stats_t *out_stats);
-qboolean R_PPdlights_WorldPathEnabled (void);
 int R_PPdlights_BuildWorldGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights);
-qboolean R_PPdlights_ModelPathEnabled (void);
 int R_PPdlights_BuildModelGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights);
 void R_PPdlights_RecordConsumerConsidered (rl_light_consumer_t consumer, unsigned int source_id);
 void R_PPdlights_RecordConsumerAccept (rl_light_consumer_t consumer, unsigned int source_id, float energy);

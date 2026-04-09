@@ -62,11 +62,7 @@ cvar_t r_fogvol_blendmode = { "r_fogvol_blendmode", "0", CVAR_ARCHIVE };
 cvar_t r_fogvol_emissive = { "r_fogvol_emissive", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_lava_emissive = { "r_fogvol_lava_emissive", "2.0", CVAR_ARCHIVE };
 cvar_t r_fogvol_light = { "r_fogvol_light", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_dlightscale = { "r_fogvol_dlightscale", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_dlight_source = { "r_fogvol_dlight_source", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_dlight_legacy_fallback = { "r_fogvol_dlight_legacy_fallback", "1", CVAR_ARCHIVE };
 cvar_t r_fogvol_froxel_sun = { "r_fogvol_froxel_sun", "1", CVAR_ARCHIVE };
-cvar_t r_fogvol_light_dlight_boost = { "r_fogvol_light_dlight_boost", "1.8", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_sun_boost = { "r_fogvol_light_sun_boost", "1.35", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_emissive_boost = { "r_fogvol_light_emissive_boost", "1.25", CVAR_ARCHIVE };
 cvar_t r_fogvol_light_ambient = { "r_fogvol_light_ambient", "0.055", CVAR_ARCHIVE };
@@ -114,11 +110,7 @@ static const fogvol_cvar_reg_t fogvol_cvar_table[] = {
 	{&r_fogvol_emissive},
 	{&r_fogvol_lava_emissive},
 	{&r_fogvol_light},
-	{&r_fogvol_dlightscale},
-	{&r_fogvol_dlight_source},
-	{&r_fogvol_dlight_legacy_fallback},
 	{&r_fogvol_froxel_sun},
-	{&r_fogvol_light_dlight_boost},
 	{&r_fogvol_light_sun_boost},
 	{&r_fogvol_light_emissive_boost},
 	{&r_fogvol_light_ambient},
@@ -1040,7 +1032,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	int sun_shadow_cascades = 0;
 	float sun_shadow_bias = 0.f;
 	float sun_shadow_pcf = 0.f;
-	float light_scale_dlight = q_max (0.f, r_fogvol_dlightscale.value) * q_max (0.f, r_fogvol_light_dlight_boost.value);
+	float light_scale_dlight = 1.8f;
 	/* Sun scatter scale stays tied to both sun controls. */
 	float light_scale_sun = q_max (0.f, r_fogvol_froxel_sun.value) * q_max (0.f, r_fogvol_light_sun_boost.value);
 	float light_scale_emissive = q_max (0.f, r_fogvol_light_emissive_boost.value);
@@ -1077,7 +1069,7 @@ static void R_FogVol_SetShaderUniforms (int steps, int mode, qboolean use_halfre
 	{
 		if (froxel_debug_random_mode <= 0)
 		{
-			/* Honor explicit dlight controls: do not force a dlight fallback here. */
+			/* Honor explicit dlight controls: do not force dlight contribution here. */
 			light_scale_dlight = 0.f;
 			light_scale_sun = 0.f;
 			if (r_fogvol_emissive.value <= 0.f)

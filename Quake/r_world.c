@@ -1751,16 +1751,16 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         qboolean oit;
 
 	/* Dynamic-light receiver contract for brush/world-side categories:
-	 *   category              legacy dlight pass      pp dlight pass
-	 *   -------------------------------------------------------------
-	 *   world opaque          yes                     yes
-	 *   world translucent     no (unsupported)        no (unsupported)
-	 *   water                 no (unsupported)        no (unsupported)
-	 *   decals                no (pass-order excl.)   no (pass-order excl.)
-	 *   particles             no (pass-order excl.)   no (pass-order excl.)
+	 *   category              dynamic dlight pass
+	 *   ----------------------------------------
+	 *   world opaque          yes
+	 *   world translucent     no (unsupported)
+	 *   water                 no (unsupported)
+	 *   decals                no (pass-order excl.)
+	 *   particles             no (pass-order excl.)
 	 * Notes:
 	 * - Alias opaque/translucent are handled in alias paths, not brush paths.
-	 * - Fog receives pp dlights via froxel injection, never via this pass. */
+	 * - Fog receives dlights via froxel injection, never via this pass. */
 
         if (!count)
                 return;
@@ -1852,8 +1852,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         state = GLS_CULL_BACK | GLS_ATTRIBS(6);
         if (pass == BP_DLIGHT_SOLID || pass == BP_DLIGHT_ALPHA)
         {
-                int blendop = CLAMP (0, (int)Q_rint (r_experimental_ppdlights_world_blendop.value), 1);
-                state |= ((blendop == 1) ? GLS_BLEND_SCREEN : GLS_BLEND_ADD) | GLS_NO_ZWRITE;
+                state |= GLS_BLEND_ADD | GLS_NO_ZWRITE;
         }
         else if (pass == BP_SHADOW_SUN || pass == BP_SHADOW_DLIGHT)
         {

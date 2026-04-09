@@ -4,8 +4,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-extern cvar_t r_dlight_entities;
-
 typedef struct dlight_pool_s
 {
 	dlight_t *items;
@@ -502,9 +500,6 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 			if (pass == 0 && dl->kind != DL_TRANSIENT)
 				continue;
 			if (pass == 1 && dl->kind == DL_TRANSIENT)
-				continue;
-
-			if (dl->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
 				continue;
 
 			if (!CL_DlightTransientIsLiveAtTime (dl, time, &expired))

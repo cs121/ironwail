@@ -168,7 +168,7 @@ static qboolean R_BuildLightTileLists (void)
 	r_light_tile_avg_lights = 0.f;
 	r_light_tile_ready = false;
 
-	if (r_ppdlights_world_tiles.value <= 0.f || r_framedata.numlights == 0)
+	if (r_framedata.numlights == 0)
 		return false;
 
 	for (i = 0; i < (int)r_framedata.numlights; ++i)
@@ -223,8 +223,8 @@ static qboolean R_BuildLightTileLists (void)
 
 	if (running == 0 || running > LIGHT_TILE_INDEX_CAPACITY)
 	{
-		if (running > LIGHT_TILE_INDEX_CAPACITY && r_ppdlights_debug.value >= 1.f && (r_framecount % 60) == 0)
-			Con_DWarning ("r_ppdlights_world_tiles: overflow (%u > %u), fallback to global loop\n", running, LIGHT_TILE_INDEX_CAPACITY);
+		if (running > LIGHT_TILE_INDEX_CAPACITY && (r_framecount % 60) == 0)
+			Con_DWarning ("dlight tiles: overflow (%u > %u), fallback to global loop\n", running, LIGHT_TILE_INDEX_CAPACITY);
 		return false;
 	}
 
@@ -251,12 +251,6 @@ static qboolean R_BuildLightTileLists (void)
 	}
 	r_light_tile_avg_lights = (float)r_light_tile_index_count / (float)LIGHT_TILE_COUNT;
 	r_light_tile_ready = true;
-
-	if (r_ppdlights_world_tiles_debug.value > 0.f && (r_framecount % 60) == 0)
-	{
-		Con_DPrintf ("r_ppdlights_world_tiles: lights=%u refs=%d tiles=%d/%d avg=%.2f\n",
-			r_framedata.numlights, r_light_tile_index_count, r_light_tile_used_count, LIGHT_TILE_COUNT, r_light_tile_avg_lights);
-	}
 
 	return true;
 }
@@ -358,33 +352,6 @@ static void R_DebugDRSNativeEffects (qboolean bloom_enabled, qboolean ssao_enabl
 		motion_enabled ? 1 : 0);
 }
 
-extern cvar_t r_dlight_entities;
-
-static void R_DLightContract_DebugOverlay (void)
-{
-	const qboolean world_pp_source = R_WorldDLightUsingPPPath ();
-	const qboolean legacy_world_opaque = (r_dynamic.value > 0.f && r_drawworld_cheatsafe && !world_pp_source);
-	const qboolean legacy_alias = (r_dynamic.value > 0.f && r_dlight_entities.value > 0.f && r_drawentities.value > 0.f);
-	const qboolean pp_world_opaque = (r_dynamic.value > 0.f && r_drawworld_cheatsafe && world_pp_source
-		&& CLAMP (0.f, r_ppdlights_world_scale.value, 4.f) > 0.f);
-	const qboolean pp_alias = R_PPdlights_ModelPathEnabled () && r_drawentities.value > 0.f;
-	const qboolean pp_fog = (r_ppdlights.value > 0.f && r_ppdlights_fog.value > 0.f);
-
-	if (r_dlight_receive_overlay.value <= 0.f || (r_framecount % 60) != 0)
-		return;
-
-	Con_Printf ("dlight recv legacy{wo:%d wt:0 wa:0 de:0 pa:0 ao:%d at:%d fg:0} "
-		"pp{wo:%d wt:0 wa:0 de:0 pa:0 ao:%d at:%d fg:%d}\n",
-		legacy_world_opaque ? 1 : 0,
-		legacy_alias ? 1 : 0,
-		legacy_alias ? 1 : 0,
-		pp_world_opaque ? 1 : 0,
-		pp_alias ? 1 : 0,
-		pp_alias ? 1 : 0,
-		pp_fog ? 1 : 0);
-}
-
-
 static qboolean R_IsUnderwaterContents (int contents)
 {
 	return contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA;
@@ -475,18 +442,6 @@ cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 cvar_t  r_gl_state_validate = { "r_gl_state_validate", "0", CVAR_NONE };
 cvar_t  r_framegraph_autobind = { "r_framegraph_autobind", "0", CVAR_NONE };
 cvar_t  r_framegraph_debug = { "r_framegraph_debug", "0", CVAR_NONE };
-cvar_t	r_dlight_entities = { "r_dlight_entities", "1", CVAR_ARCHIVE };
-cvar_t	r_dlight_receive_overlay = { "r_dlight_receive_overlay", "0", CVAR_NONE };
-/* Deprecated compatibility aliases: parsed from existing cfgs, no runtime effect. */
-cvar_t	r_legacy_dlight_world_translucent = { "r_legacy_dlight_world_translucent", "0", CVAR_ARCHIVE };
-cvar_t	r_legacy_dlight_water = { "r_legacy_dlight_water", "0", CVAR_ARCHIVE };
-cvar_t	r_legacy_dlight_decals = { "r_legacy_dlight_decals", "0", CVAR_ARCHIVE };
-cvar_t	r_legacy_dlight_particles = { "r_legacy_dlight_particles", "0", CVAR_ARCHIVE };
-cvar_t	r_legacy_dlight_fog = { "r_legacy_dlight_fog", "0", CVAR_ARCHIVE };
-cvar_t	r_pp_dlight_world_translucent = { "r_pp_dlight_world_translucent", "0", CVAR_ARCHIVE };
-cvar_t	r_pp_dlight_water = { "r_pp_dlight_water", "0", CVAR_ARCHIVE };
-cvar_t	r_pp_dlight_decals = { "r_pp_dlight_decals", "0", CVAR_ARCHIVE };
-cvar_t	r_pp_dlight_particles = { "r_pp_dlight_particles", "0", CVAR_ARCHIVE };
 cvar_t	r_quality = { "r_quality", "high", CVAR_ARCHIVE };
 cvar_t  r_shadow = { "r_shadow", "1", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
@@ -4304,10 +4259,9 @@ void R_UploadFrameData (void)
 	qboolean tile_ready;
 
 	tile_ready = R_BuildLightTileLists ();
-	if (tile_ready && R_WorldDLightUsingPPPath ())
+	if (tile_ready)
 	{
-		/* Safety bridge: shared world-light source can diverge from tile classification.
-		 * Keep correctness first by forcing global per-light loop for this mode. */
+		/* Keep correctness first by forcing the global per-light loop. */
 		tile_ready = false;
 	}
 	r_framedata.dlight_params[2] = tile_ready ? 1.f : 0.f;
@@ -6227,7 +6181,6 @@ void R_RenderView (void)
 			rs_aliaspolys,
 			rs_dynamiclightmaps);
 
-	R_DLightContract_DebugOverlay ();
 	//johnfitz
 }
 

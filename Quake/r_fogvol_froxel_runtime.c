@@ -2,13 +2,11 @@
 #include "draw.h"
 #include "r_fogvol.h"
 #include "r_fogvol_internal.h"
-#include "r_dlight_pool.h"
 #include "r_realtimelight.h"
 #include <math.h>
 #include <string.h>
 
 extern cvar_t gl_farclip;
-extern cvar_t r_dlight_entities;
 
 typedef struct froxel_gpu_light_s
 {
@@ -585,12 +583,13 @@ static void R_Froxel_InjectPPDGIHelper (const rl_light_t *lights, int light_coun
 
 	if (!lights || light_count <= 0)
 		return;
-	if (r_ppdlights_gi.value <= 0.f)
-		return;
 
 	/* Conservative helper: broad, low-energy secondary bounce proxies for fog ambience. */
-	gi_scale = CLAMP (0.f, r_ppdlights_gi.value, 2.f);
-	gi_budget = CLAMP (0, (int)Q_rint (r_ppdlights_gi_budget.value), MAX_FROXEL_GPU_LIGHTS);
+	gi_scale = 0.f;
+	gi_budget = 8;
+	if (gi_scale <= 0.f)
+		return;
+	gi_budget = CLAMP (0, gi_budget, MAX_FROXEL_GPU_LIGHTS);
 	for (i = 0; i < light_count; ++i)
 	{
 		const rl_light_t *src = &lights[i];
@@ -649,7 +648,8 @@ static void R_Froxel_InjectPPDGIHelper (const rl_light_t *lights, int light_coun
 static void R_Froxel_InjectPPDLights (void)
 {
 	const rl_light_t *lights;
-	const int fog_budget = CLAMP (0, (int)Q_rint (r_ppdlights_fog_budget.value), MAX_FROXEL_GPU_LIGHTS);
+	const int fog_budget = CLAMP (0, 32, MAX_FROXEL_GPU_LIGHTS);
+	const qboolean debug_log = false;
 	int light_count = 0;
 	int i;
 
@@ -716,10 +716,10 @@ static void R_Froxel_InjectPPDLights (void)
 	}
 	R_Froxel_InjectPPDGIHelper (lights, light_count);
 
-	if ((r_ppdlights_fog_debug.value > 0.f || r_ppdlights_gi_debug.value > 0.f) && (r_framecount % 60) == 0)
+	if (debug_log && (r_framecount % 60) == 0)
 	{
 		rl_consumer_stats_t consumer_stats;
-		Con_DPrintf ("r_ppdlights_fog: src=%d eligible=%d injected=%d reject(nonvol=%d distance=%d local_budget=%d hw_budget=%d) radiance=%.3f gi(candidates=%d injected=%d distance=%d budget=%d radiance=%.3f) caps(fog=%d gi=%d)\n",
+		Con_DPrintf ("dlight_fog: src=%d eligible=%d injected=%d reject(nonvol=%d distance=%d local_budget=%d hw_budget=%d) radiance=%.3f gi(candidates=%d injected=%d distance=%d budget=%d radiance=%.3f) caps(fog=%d gi=%d)\n",
 			r_froxel_ppd_stats.source_count,
 			r_froxel_ppd_stats.fog_eligible_count,
 			r_froxel_ppd_stats.injected_count,
@@ -734,10 +734,10 @@ static void R_Froxel_InjectPPDLights (void)
 			r_froxel_ppd_stats.gi_rejected_budget,
 			r_froxel_ppd_stats.gi_radiance,
 			fog_budget,
-			CLAMP (0, (int)Q_rint (r_ppdlights_gi_budget.value), MAX_FROXEL_GPU_LIGHTS));
+			8);
 		if (R_PPdlights_GetConsumerStats (RL_CONSUMER_FOG, &consumer_stats))
 		{
-			Con_DPrintf ("r_ppdlights_fog_consumer: considered=%d accepted=%d energy=%.3f reject(non_contrib=%d distance=%d local_budget=%d hw_budget=%d)\n",
+			Con_DPrintf ("dlight_fog_consumer: considered=%d accepted=%d energy=%.3f reject(non_contrib=%d distance=%d local_budget=%d hw_budget=%d)\n",
 				consumer_stats.considered,
 				consumer_stats.accepted,
 				consumer_stats.accepted_energy,
@@ -979,16 +979,8 @@ void R_Froxel_BeginFrame (float near_clip, float far_clip)
 
 void R_Froxel_InjectDlights (void)
 {
-	int active_count = 0;
-	const dlight_t *const *active = NULL;
-	const int dlight_source_mode = CLAMP (0, (int)Q_rint (r_fogvol_dlight_source.value), 2);
-	const qboolean pp_fog_enabled = (r_ppdlights.value > 0.f && r_ppdlights_fog.value > 0.f);
-	const qboolean pp_collect_enabled = (r_ppdlights.value > 0.f);
-	const qboolean allow_legacy_fallback = (r_fogvol_dlight_legacy_fallback.value > 0.f);
 	const qboolean allow_lava_emissive = (r_fogvol_lava_emissive.value >= 0.f);
 	const qboolean fog_light_enabled = (r_fogvol_light.value > 0.f);
-	qboolean use_pp_path = false;
-	float intensity_scale;
 
 	if (!r_froxel.valid)
 		return;
@@ -999,31 +991,6 @@ void R_Froxel_InjectDlights (void)
 	 */
 	if (allow_lava_emissive)
 		R_Froxel_InjectLavaSurfaceLights ();
-
-	/* Fog dlight source selection:
-	 * 0 = legacy-compatible behavior (pp only when r_ppdlights_fog=1)
-	 * 1 = prefer shared pp frame lights (default), fallback to legacy when pp contributes none
-	 * 2 = force legacy pool path */
-	if (dlight_source_mode == 1)
-		use_pp_path = pp_collect_enabled;
-	else if (dlight_source_mode == 2)
-		use_pp_path = false;
-	else
-		use_pp_path = pp_fog_enabled;
-
-	if (use_pp_path)
-	{
-		const int light_count_before_pp = r_froxel.light_count;
-		R_Froxel_InjectPPDLights ();
-		if (!(dlight_source_mode == 1
-			&& allow_legacy_fallback
-			&& r_froxel.light_count == light_count_before_pp))
-		{
-			return;
-		}
-	}
-	if (!fog_light_enabled && !allow_lava_emissive)
-		return;
 
 	/* Debug lights are additive and do not replace real dlights. */
 	if (fog_light_enabled && R_Froxel_DebugEnabled ())
@@ -1044,45 +1011,9 @@ void R_Froxel_InjectDlights (void)
 
 	if (!fog_light_enabled)
 		return;
-	/* r_fogvol_dlightscale is applied in fogvol.frag via FogLightSourceScales.x.
-	 * Do not bake it into froxel injection as well, otherwise dlights are scaled
-	 * twice (effectively squared). */
-	intensity_scale = 1.f;
-	if (q_max (0.f, r_fogvol_dlightscale.value) <= 0.f)
-		return;
 
-	active = DLightPool_GetActiveList (&active_count);
-	if (!active || active_count <= 0)
-		return;
-
-	for (int i = 0; i < active_count && r_froxel.light_count < MAX_FROXEL_GPU_LIGHTS; ++i)
-	{
-		const dlight_t *dl = active[i];
-		float eval_radius = 0.f;
-		float fog_radius = 0.f;
-		float fog_intensity = intensity_scale;
-		vec3_t eval_color;
-
-		if (!dl)
-			continue;
-		if (!CL_DlightIsActive (dl))
-			continue;
-		if (dl->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
-			continue;
-		if (!CL_DlightTransientIsLiveAtTime (dl, cl.time, NULL))
-			continue;
-
-		R_EvaluateDLightForRender (dl, &eval_radius, eval_color);
-		if (eval_radius <= 1.f)
-			continue;
-		if (eval_color[0] <= 0.f && eval_color[1] <= 0.f && eval_color[2] <= 0.f)
-			continue;
-		fog_radius = R_Froxel_DlightRadiusForFog (eval_radius, (uint32_t)dl->type);
-		if (R_Froxel_IsViewMuzzleDlight (dl))
-			R_Froxel_ApplyViewMuzzleFogClamp (dl->origin, &fog_radius, eval_color, &fog_intensity);
-
-		R_Froxel_AddLight (dl->origin, fog_radius, eval_color, fog_intensity, (uint32_t)dl->type);
-	}
+	/* Single-path behavior: volumetric dlight injection consumes the shared PP frame list. */
+	R_Froxel_InjectPPDLights ();
 }
 
 void R_Froxel_EndFrame (void)

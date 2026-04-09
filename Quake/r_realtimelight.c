@@ -4,38 +4,12 @@
 #include "r_dlight_pool.h"
 
 #define RL_FRAME_LIGHTS_MAX DLIGHT_GPU_MAX
-
-extern cvar_t r_dlight_entities;
-
-cvar_t r_ppdlights = { "r_ppdlights", "0", CVAR_ARCHIVE };
-/* Forward world consumer toggle (shared frame-light list -> world dlight pass). */
-cvar_t r_ppdlights_world = { "r_ppdlights_world", "1", CVAR_ARCHIVE };
-cvar_t r_ppdlights_world_scale = { "r_ppdlights_world_scale", "1", CVAR_ARCHIVE };
-/* World-light shaping controls, applied in shader before additive blend. */
-cvar_t r_ppdlights_world_luma_clamp = { "r_ppdlights_world_luma_clamp", "1.0", CVAR_ARCHIVE };
-cvar_t r_ppdlights_world_soft_knee = { "r_ppdlights_world_soft_knee", "1.0", CVAR_ARCHIVE };
-cvar_t r_ppdlights_world_tiles = { "r_ppdlights_world_tiles", "1", CVAR_ARCHIVE };
-cvar_t r_ppdlights_world_tiles_debug = { "r_ppdlights_world_tiles_debug", "0", CVAR_NONE };
-/* Experimental fixed-function blend op override for world dlight pass. */
-cvar_t r_experimental_ppdlights_world_blendop = { "r_experimental_ppdlights_world_blendop", "0", CVAR_ARCHIVE };
-/* Forward alias/model consumer toggle (shared frame-light list -> alias lighting). */
-cvar_t r_ppdlights_models = { "r_ppdlights_models", "1", CVAR_ARCHIVE };
-/* Froxel fog consumer toggle (shared frame-light list -> volumetric injection). */
-cvar_t r_ppdlights_fog = { "r_ppdlights_fog", "0", CVAR_ARCHIVE };
-cvar_t r_ppdlights_fog_debug = { "r_ppdlights_fog_debug", "0", CVAR_NONE };
-/* Per-frame fog consumer budget from the shared frame-light list. */
-cvar_t r_ppdlights_fog_budget = { "r_ppdlights_fog_budget", "32", CVAR_ARCHIVE };
-/* Optional GI helper that derives broad bounce from shared frame lights. */
-cvar_t r_ppdlights_gi = { "r_ppdlights_gi", "0", CVAR_ARCHIVE };
-cvar_t r_ppdlights_gi_debug = { "r_ppdlights_gi_debug", "0", CVAR_NONE };
-cvar_t r_ppdlights_gi_budget = { "r_ppdlights_gi_budget", "8", CVAR_ARCHIVE };
-cvar_t r_ppdlights_debug = { "r_ppdlights_debug", "0", CVAR_NONE };
-/* World dlight debug views: 0=off, 1=affected count, 2=attenuation, 3=raw light, 4=new/legacy split,
- * 5=pre-compression contribution, 6=post-compression contribution. */
-cvar_t r_ppdlights_debug_mode = { "r_ppdlights_dbgmode", "0", CVAR_ARCHIVE };
-cvar_t r_ppdlights_emissive = { "r_ppdlights_emissive", "0", CVAR_ARCHIVE };
-cvar_t r_ppdlights_emissive_debug = { "r_ppdlights_emissive_debug", "0", CVAR_NONE };
-cvar_t r_ppdlights_emissive_budget = { "r_ppdlights_emissive_budget", "24", CVAR_ARCHIVE };
+enum
+{
+	RL_EMISSIVE_BUDGET = 24
+};
+static const qboolean rl_emissive_enabled = false;
+static const qboolean rl_debug_enabled = false;
 
 static rl_light_t rl_frame_lights[RL_FRAME_LIGHTS_MAX];
 static dlight_t *rl_frame_light_sources[RL_FRAME_LIGHTS_MAX];
@@ -57,56 +31,6 @@ static rl_source_summary_t rl_source_summaries[RL_FRAME_LIGHTS_MAX];
 static int rl_source_summary_count = 0;
 static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights);
 
-static void R_PPdlights_DebugModeCompat_f (void)
-{
-	if (Cmd_Argc () <= 1)
-	{
-		Con_Printf ("\"r_ppdlights_debug_mode\" is deprecated; use \"r_ppdlights_dbgmode\" (current %.0f)\n",
-			r_ppdlights_debug_mode.value);
-		return;
-	}
-
-	Cvar_SetValueQuick (&r_ppdlights_debug_mode, Q_atof (Cmd_Argv (1)));
-}
-
-static void R_PPdlights_WorldBlendOpCompat_f (void)
-{
-	if (Cmd_Argc () <= 1)
-	{
-		Con_Printf ("\"r_ppdlights_world_blendop\" is deprecated; use \"r_experimental_ppdlights_world_blendop\" (current %.0f)\n",
-			r_experimental_ppdlights_world_blendop.value);
-		return;
-	}
-
-	Cvar_SetValueQuick (&r_experimental_ppdlights_world_blendop, Q_atof (Cmd_Argv (1)));
-}
-
-/* Backward compatibility for temporary milestone cvar names. */
-static void R_PPdlights_EmissiveShortAlias_f (void)
-{
-	if (Cmd_Argc () <= 1)
-	{
-		Con_Printf ("\"r_ppd_emissive\" is deprecated; use \"r_ppdlights_emissive\" (current %.0f)\n",
-			r_ppdlights_emissive.value);
-		return;
-	}
-
-	Cvar_SetValueQuick (&r_ppdlights_emissive, Q_atof (Cmd_Argv (1)));
-}
-
-/* Backward compatibility for temporary milestone cvar names. */
-static void R_PPdlights_EmissiveDebugShortAlias_f (void)
-{
-	if (Cmd_Argc () <= 1)
-	{
-		Con_Printf ("\"r_ppd_emisdbg\" is deprecated; use \"r_ppdlights_emissive_debug\" (current %.0f)\n",
-			r_ppdlights_emissive_debug.value);
-		return;
-	}
-
-	Cvar_SetValueQuick (&r_ppdlights_emissive_debug, Q_atof (Cmd_Argv (1)));
-}
-
 static qboolean R_PPdlights_IsFrustumCulled (const vec3_t origin, float radius)
 {
 	int i;
@@ -119,52 +43,6 @@ static qboolean R_PPdlights_IsFrustumCulled (const vec3_t origin, float radius)
 	}
 
 	return false;
-}
-
-static void R_PPdlights_Stats_f (void)
-{
-	const int emissive_budget_cfg = (int)r_ppdlights_emissive_budget.value;
-	const int emissive_budget = CLAMP (0, emissive_budget_cfg, RL_FRAME_LIGHTS_MAX);
-
-	Con_Printf ("r_ppdlights: src(dlight=%d emissive=%d) accepted(total=%d dlight=%d emissive=%d) culled(inactive=%d not_live=%d persistent_off=%d zero_radius=%d frustum=%d budget=%d emissive_budget=%d/%d priority=%d)\n",
-		rl_frame_stats.source_dlights,
-		rl_frame_stats.source_emissive,
-		rl_frame_stats.accepted,
-		rl_frame_stats.accepted_dlights,
-		rl_frame_stats.accepted_emissive,
-		rl_frame_stats.rejected_inactive,
-		rl_frame_stats.rejected_not_live,
-		rl_frame_stats.rejected_persistent_disabled,
-		rl_frame_stats.rejected_zero_radius,
-		rl_frame_stats.rejected_frustum,
-		rl_frame_stats.rejected_budget,
-		emissive_budget,
-		emissive_budget_cfg,
-		rl_frame_stats.rejected_emissive_budget,
-		rl_frame_stats.rejected_priority);
-}
-
-static const char *R_PPdlights_ConsumerName (rl_light_consumer_t consumer)
-{
-	switch (consumer)
-	{
-	case RL_CONSUMER_WORLD: return "world";
-	case RL_CONSUMER_MODEL: return "model";
-	case RL_CONSUMER_FOG: return "fog";
-	default: return "unknown";
-	}
-}
-
-static const char *R_PPdlights_RejectReasonName (rl_consumer_reject_reason_t reason)
-{
-	switch (reason)
-	{
-	case RL_REJECT_NON_CONTRIB: return "non_contrib";
-	case RL_REJECT_DISTANCE: return "distance";
-	case RL_REJECT_LOCAL_BUDGET: return "local_budget";
-	case RL_REJECT_HW_BUDGET: return "hw_budget";
-	default: return "unknown";
-	}
 }
 
 static rl_source_summary_t *R_PPdlights_GetSourceSummary (unsigned int source_id, qboolean create_if_missing)
@@ -184,51 +62,6 @@ static rl_source_summary_t *R_PPdlights_GetSourceSummary (unsigned int source_id
 	rl_source_summaries[rl_source_summary_count].source_id = source_id;
 	rl_source_summary_count++;
 	return &rl_source_summaries[rl_source_summary_count - 1];
-}
-
-static void R_PPdlights_Participation_f (void)
-{
-	int i, c;
-
-	Con_Printf ("r_ppdlights participation summary:\n");
-	for (c = 0; c < RL_CONSUMER_COUNT; ++c)
-	{
-		const rl_consumer_stats_t *s = &rl_consumer_stats[c];
-		Con_Printf ("  %s: considered=%d accepted=%d energy=%.3f reject(%s=%d %s=%d %s=%d %s=%d)\n",
-			R_PPdlights_ConsumerName ((rl_light_consumer_t)c),
-			s->considered,
-			s->accepted,
-			s->accepted_energy,
-			R_PPdlights_RejectReasonName (RL_REJECT_NON_CONTRIB), s->rejected[RL_REJECT_NON_CONTRIB],
-			R_PPdlights_RejectReasonName (RL_REJECT_DISTANCE), s->rejected[RL_REJECT_DISTANCE],
-			R_PPdlights_RejectReasonName (RL_REJECT_LOCAL_BUDGET), s->rejected[RL_REJECT_LOCAL_BUDGET],
-			R_PPdlights_RejectReasonName (RL_REJECT_HW_BUDGET), s->rejected[RL_REJECT_HW_BUDGET]);
-	}
-
-	Con_Printf ("  source participation (source_id offered prio_reject world model fog | reject reasons):\n");
-	for (i = 0; i < rl_source_summary_count; ++i)
-	{
-		const rl_source_summary_t *e = &rl_source_summaries[i];
-		Con_Printf ("    0x%08x offer=%d prio=%d world=%d(%.3f) model=%d(%.3f) fog=%d(%.3f) reject[w:%d/%d/%d/%d m:%d/%d/%d/%d f:%d/%d/%d/%d]\n",
-			e->source_id,
-			e->offered_count,
-			e->rejected_priority,
-			e->accepted[RL_CONSUMER_WORLD], e->energy[RL_CONSUMER_WORLD],
-			e->accepted[RL_CONSUMER_MODEL], e->energy[RL_CONSUMER_MODEL],
-			e->accepted[RL_CONSUMER_FOG], e->energy[RL_CONSUMER_FOG],
-			e->rejected[RL_CONSUMER_WORLD][RL_REJECT_NON_CONTRIB],
-			e->rejected[RL_CONSUMER_WORLD][RL_REJECT_DISTANCE],
-			e->rejected[RL_CONSUMER_WORLD][RL_REJECT_LOCAL_BUDGET],
-			e->rejected[RL_CONSUMER_WORLD][RL_REJECT_HW_BUDGET],
-			e->rejected[RL_CONSUMER_MODEL][RL_REJECT_NON_CONTRIB],
-			e->rejected[RL_CONSUMER_MODEL][RL_REJECT_DISTANCE],
-			e->rejected[RL_CONSUMER_MODEL][RL_REJECT_LOCAL_BUDGET],
-			e->rejected[RL_CONSUMER_MODEL][RL_REJECT_HW_BUDGET],
-			e->rejected[RL_CONSUMER_FOG][RL_REJECT_NON_CONTRIB],
-			e->rejected[RL_CONSUMER_FOG][RL_REJECT_DISTANCE],
-			e->rejected[RL_CONSUMER_FOG][RL_REJECT_LOCAL_BUDGET],
-			e->rejected[RL_CONSUMER_FOG][RL_REJECT_HW_BUDGET]);
-	}
 }
 
 static unsigned int R_PPdlights_EmissiveSourceId (const entity_t *ent, unsigned int tag)
@@ -325,14 +158,9 @@ static qboolean R_PPdlights_AddFrameLightCandidate (rl_frame_light_candidate_t *
 		return false;
 	}
 
-	/*
-	 * Keep froxel fog parity with legacy dlight injection:
-	 * when PP fog is enabled, do not frustum-cull volumetric contributors.
-	 */
+	/* Volumetric contributors should remain available for froxel fog injection. */
 	if (R_PPdlights_IsFrustumCulled (origin, radius)
-		&& !(r_ppdlights.value > 0.f
-			&& r_ppdlights_fog.value > 0.f
-			&& (flags & RL_LIGHT_VOLUMETRIC_CONTRIB) != 0u))
+		&& (flags & RL_LIGHT_VOLUMETRIC_CONTRIB) == 0u)
 	{
 		rl_frame_stats.rejected_frustum++;
 		return false;
@@ -362,12 +190,11 @@ static qboolean R_PPdlights_AddFrameLightCandidate (rl_frame_light_candidate_t *
 
 static void R_PPdlights_CollectEmissiveFrame (rl_frame_light_candidate_t *best, int *best_count)
 {
-	const int emissive_budget_cfg = (int)r_ppdlights_emissive_budget.value;
-	const int emissive_budget = CLAMP (0, emissive_budget_cfg, RL_FRAME_LIGHTS_MAX);
+	const int emissive_budget = RL_EMISSIVE_BUDGET;
 	int i;
 	rl_frame_light_candidate_t candidate;
 
-	if (r_ppdlights_emissive.value <= 0.f || cl_numvisedicts <= 0)
+	if (!rl_emissive_enabled || cl_numvisedicts <= 0)
 		return;
 
 	for (i = 0; i < cl_numvisedicts; ++i)
@@ -493,7 +320,7 @@ static void R_PPdlights_CollectEmissiveFrame (rl_frame_light_candidate_t *best, 
 		}
 	}
 
-	if (r_ppdlights_emissive_debug.value >= 1.f && (r_framecount % 60) == 0)
+	if (rl_debug_enabled && (r_framecount % 60) == 0)
 	{
 		int accepted_emissive = 0;
 		for (i = 0; i < *best_count; ++i)
@@ -501,44 +328,14 @@ static void R_PPdlights_CollectEmissiveFrame (rl_frame_light_candidate_t *best, 
 			if (best[i].type == RL_LIGHT_EMISSIVE_PROXY)
 				accepted_emissive++;
 		}
-		Con_DPrintf ("r_ppdlights_emissive: src=%d accepted=%d budget=%d/%d reject_budget=%d reject_priority=%d\n",
+		Con_DPrintf ("dlight_emissive: src=%d accepted=%d budget=%d/%d reject_budget=%d reject_priority=%d\n",
 			rl_frame_stats.source_emissive,
 			accepted_emissive,
 			emissive_budget,
-			emissive_budget_cfg,
+			RL_EMISSIVE_BUDGET,
 			rl_frame_stats.rejected_emissive_budget,
 			rl_frame_stats.rejected_priority);
 	}
-}
-
-void R_PPdlights_RegisterCvars (void)
-{
-	Cvar_RegisterVariable (&r_ppdlights);
-	Cvar_RegisterVariable (&r_ppdlights_world);
-	Cvar_RegisterVariable (&r_ppdlights_world_scale);
-	Cvar_RegisterVariable (&r_ppdlights_world_luma_clamp);
-	Cvar_RegisterVariable (&r_ppdlights_world_soft_knee);
-	Cvar_RegisterVariable (&r_ppdlights_world_tiles);
-	Cvar_RegisterVariable (&r_ppdlights_world_tiles_debug);
-	Cvar_RegisterVariable (&r_experimental_ppdlights_world_blendop);
-	Cvar_RegisterVariable (&r_ppdlights_models);
-	Cvar_RegisterVariable (&r_ppdlights_fog);
-	Cvar_RegisterVariable (&r_ppdlights_fog_debug);
-	Cvar_RegisterVariable (&r_ppdlights_fog_budget);
-	Cvar_RegisterVariable (&r_ppdlights_gi);
-	Cvar_RegisterVariable (&r_ppdlights_gi_debug);
-	Cvar_RegisterVariable (&r_ppdlights_gi_budget);
-	Cvar_RegisterVariable (&r_ppdlights_debug);
-	Cvar_RegisterVariable (&r_ppdlights_debug_mode);
-	Cvar_RegisterVariable (&r_ppdlights_emissive);
-	Cvar_RegisterVariable (&r_ppdlights_emissive_debug);
-	Cvar_RegisterVariable (&r_ppdlights_emissive_budget);
-	Cmd_AddCommand ("r_ppdlights_stats", R_PPdlights_Stats_f);
-	Cmd_AddCommand ("r_ppdlights_debug_mode", R_PPdlights_DebugModeCompat_f);
-	Cmd_AddCommand ("r_ppdlights_world_blendop", R_PPdlights_WorldBlendOpCompat_f);
-	Cmd_AddCommand ("r_ppd_emissive", R_PPdlights_EmissiveShortAlias_f);
-	Cmd_AddCommand ("r_ppd_emisdbg", R_PPdlights_EmissiveDebugShortAlias_f);
-	Cmd_AddCommand ("r_ppdlights_participation", R_PPdlights_Participation_f);
 }
 
 void R_PPdlights_CollectFrame (void)
@@ -558,11 +355,7 @@ void R_PPdlights_CollectFrame (void)
 	memset (rl_source_summaries, 0, sizeof (rl_source_summaries));
 	rl_source_summary_count = 0;
 
-	collect_enabled = (r_dynamic.value > 0.f)
-		&& (r_ppdlights.value > 0.f
-			|| r_ppdlights_debug.value > 0.f
-			|| r_ppdlights_emissive.value > 0.f
-			|| r_ppdlights_emissive_debug.value > 0.f);
+	collect_enabled = (r_dynamic.value > 0.f);
 	if (!collect_enabled)
 		return;
 
@@ -595,12 +388,6 @@ void R_PPdlights_CollectFrame (void)
 			if (!CL_DlightIsActive (dl))
 			{
 				rl_frame_stats.rejected_inactive++;
-				continue;
-			}
-
-			if (dl->kind == DL_PERSISTENT && r_dlight_entities.value <= 0.f)
-			{
-				rl_frame_stats.rejected_persistent_disabled++;
 				continue;
 			}
 
@@ -644,9 +431,9 @@ void R_PPdlights_CollectFrame (void)
 			rl_frame_stats.accepted_dlights++;
 	}
 
-	if (r_ppdlights_debug.value >= 2.f && (r_framecount % 60) == 0)
+	if (rl_debug_enabled && (r_framecount % 60) == 0)
 	{
-		Con_DPrintf ("r_ppdlights_collect: src(d=%d e=%d) accepted(d=%d e=%d) frustum=%d budget=%d\n",
+		Con_DPrintf ("dlight_collect: src(d=%d e=%d) accepted(d=%d e=%d) frustum=%d budget=%d\n",
 			rl_frame_stats.source_dlights,
 			rl_frame_stats.source_emissive,
 			rl_frame_stats.accepted_dlights,
@@ -671,23 +458,9 @@ void R_PPdlights_GetFrameStats (rl_light_collect_stats_t *out_stats)
 		*out_stats = rl_frame_stats;
 }
 
-qboolean R_PPdlights_WorldPathEnabled (void)
-{
-	return (r_dynamic.value > 0.f
-		&& r_ppdlights.value > 0.f
-		&& r_ppdlights_world.value > 0.f);
-}
-
 int R_PPdlights_BuildWorldGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights)
 {
 	return R_PPdlights_BuildGpuLightsForConsumer (RL_CONSUMER_WORLD, out_buffer, out_sources, max_lights);
-}
-
-qboolean R_PPdlights_ModelPathEnabled (void)
-{
-	return (r_dynamic.value > 0.f
-		&& r_ppdlights.value > 0.f
-		&& r_ppdlights_models.value > 0.f);
 }
 
 int R_PPdlights_BuildModelGpuLights (gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights)
@@ -717,7 +490,7 @@ static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, 
 		R_PPdlights_RecordConsumerConsidered (consumer, src->source_id);
 		if (require_dynamic_points && src->type != RL_LIGHT_POINT)
 		{
-			/* Keep world/model dlight consumers parity with legacy dynamic lights. */
+			/* World/model consumers only accept runtime point dlights. */
 			R_PPdlights_RecordConsumerReject (consumer, src->source_id, RL_REJECT_NON_CONTRIB);
 			continue;
 		}
