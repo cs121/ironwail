@@ -631,9 +631,17 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 
 	for (bit = 1u; bit != 0; bit <<= 1)
 	{
+		qboolean read_required = true;
 		render_backend_resource_slot_t slot;
 		const render_backend_resource_ref_t *resource_ref;
 		if ((pass->reads & bit) == 0)
+			continue;
+		if (bit == RENDER_RES_SHADOW_SUN_DEPTH)
+		{
+			/* Shadow-map reads are optional for passes that still run with shadows disabled. */
+			read_required = (ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps);
+		}
+		if (!read_required)
 			continue;
 		if (!FG_GetResourceSlotForBit (bit, &slot))
 			continue;
