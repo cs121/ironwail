@@ -70,13 +70,13 @@ static const fg_resource_bit_mapping_t s_fg_resource_mappings[] = {
 	{ RENDER_RES_DECALS, R_BACKEND_RESOURCE_SLOT_NONE, false },
 	{ RENDER_RES_SSAO_FOG_STATE, R_BACKEND_RESOURCE_SLOT_NONE, false }
 };
-static render_backend_resource_state_t s_resource_states[q_countof (s_fg_resource_mappings)];
+static render_backend_resource_state_t s_resource_states[Q_COUNTOF (s_fg_resource_mappings)];
 
 static const fg_resource_bit_mapping_t *FG_FindResourceMapping (unsigned bit)
 {
 	int i;
 
-	for (i = 0; i < (int)q_countof (s_fg_resource_mappings); ++i)
+	for (i = 0; i < (int)Q_COUNTOF (s_fg_resource_mappings); ++i)
 	{
 		if (s_fg_resource_mappings[i].bit == bit)
 			return &s_fg_resource_mappings[i];
@@ -98,7 +98,7 @@ static qboolean FG_GetResourceSlotForBit (unsigned bit, render_backend_resource_
 static int FG_FindResourceMappingIndex (unsigned bit)
 {
 	int i;
-	for (i = 0; i < (int)q_countof (s_fg_resource_mappings); ++i)
+	for (i = 0; i < (int)Q_COUNTOF (s_fg_resource_mappings); ++i)
 	{
 		if (s_fg_resource_mappings[i].bit == bit)
 			return i;
@@ -168,7 +168,7 @@ static void FG_EmitPassBarriers (const RenderPassDesc *pass, RenderPassContext *
 		if (before_state == desired_state)
 			continue;
 
-		if (barrier_count >= q_countof (barriers))
+		if (barrier_count >= Q_COUNTOF (barriers))
 			break;
 		barriers[barrier_count].resource = resource_ref;
 		barriers[barrier_count].before = before_state;
@@ -790,8 +790,8 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	{
 		unsigned i;
 		unsigned color_count = pass->num_color_attachments;
-		if (color_count > q_countof (color_attachments))
-			color_count = q_countof (color_attachments);
+		if (color_count > Q_COUNTOF (color_attachments))
+			color_count = Q_COUNTOF (color_attachments);
 		for (i = 0; i < color_count; ++i)
 		{
 			render_backend_resource_slot_t slot = R_BACKEND_RESOURCE_SLOT_NONE;

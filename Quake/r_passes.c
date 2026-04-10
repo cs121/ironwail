@@ -125,13 +125,13 @@ static void R_Pass_CaptureSSAOFogHandoff (RenderPassContext *ctx)
 {
 	(void)ctx;
 	/* Capture global fog parameters for deterministic postprocess SSAO suppression. */
-	R_SSAO_CaptureFogState (&r_framedata, &r_ssao_fog_state);
+	R_CaptureSSAOFogHandoffState ();
 }
 
 static void R_Pass_StorePrevFrame (RenderPassContext *ctx)
 {
 	(void)ctx;
-	r_frame_rendered_this_update = true;
+	R_MarkFrameRenderedThisUpdate ();
 	R_StorePrevFrameState ();
 }
 

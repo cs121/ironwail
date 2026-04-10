@@ -4464,6 +4464,16 @@ void R_StorePrevFrameState (void)
 	r_frame_rendered_this_update = false;
 }
 
+void R_CaptureSSAOFogHandoffState (void)
+{
+	R_SSAO_CaptureFogState (&r_framedata, &r_ssao_fog_state);
+}
+
+void R_MarkFrameRenderedThisUpdate (void)
+{
+	r_frame_rendered_this_update = true;
+}
+
 qboolean R_PrevFrameValid (void)
 {
         return r_prev_frame_valid;

@@ -47,7 +47,7 @@ static unsigned short GLBackend_RegisterResource (RenderGraphResourceHandle *han
 
 	if (!handles || type == R_BACKEND_RESOURCE_NONE || slot <= R_BACKEND_RESOURCE_SLOT_NONE || slot >= R_BACKEND_RESOURCE_SLOT_COUNT)
 		return 0u;
-	if (handles->registry_count >= (unsigned char)q_countof (handles->registry))
+	if (handles->registry_count >= (unsigned char)Q_COUNTOF (handles->registry))
 		return 0u;
 
 	index = (unsigned)handles->registry_count;
@@ -134,11 +134,8 @@ static void GLBackend_DetectCaps (void)
 
 	glGetIntegerv (GL_MAX_TEXTURE_IMAGE_UNITS, &max_textures);
 	glGetIntegerv (GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_samplers);
-	if (GL_GetIntegervFunc)
-	{
-		GL_GetIntegervFunc (GL_MAX_UNIFORM_BUFFER_BINDINGS, &max_ubos);
-		GL_GetIntegervFunc (GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &max_ssbos);
-	}
+	glGetIntegerv (GL_MAX_UNIFORM_BUFFER_BINDINGS, &max_ubos);
+	glGetIntegerv (GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &max_ssbos);
 
 	s_gl_backend_caps.max_textures = (max_textures > 0) ? (unsigned)max_textures : 0u;
 	s_gl_backend_caps.max_samplers = (max_samplers > 0) ? (unsigned)max_samplers : 0u;
@@ -575,12 +572,12 @@ void GL_Backend_Register (void)
 		GLBackend_Shutdown,
 		GLBackend_OnResize,
 		GLBackend_CanActivate,
+		NULL,
+		NULL,
+		NULL,
 		GLBackend_BeginPassEx,
 		GLBackend_EndPassEx,
 		GLBackend_ResourceBarrier,
-		NULL,
-		NULL,
-		NULL,
 		NULL,
 		NULL,
 		NULL,

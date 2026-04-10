@@ -601,6 +601,8 @@ void R_TranslateNewPlayerSkin (int playernum); //johnfitz -- this handles cases 
 
 void R_UploadFrameData (void);
 void R_StorePrevFrameState (void);
+void R_CaptureSSAOFogHandoffState (void);
+void R_MarkFrameRenderedThisUpdate (void);
 qboolean R_PrevFrameValid (void);
 
 void R_DrawBrushModels (entity_t **ents, int count);
@@ -620,6 +622,9 @@ void R_DrawAliasModels_ShowTris (entity_t **ents, int count);
 void R_DrawSpriteModels_ShowTris (entity_t **ents, int count);
 void R_GLStateDump (const char *tag);
 void R_RenderShadowMaps (void);
+void R_SetupView (void);
+void R_RenderScene (const RenderGraphResourceHandle *resources);
+void R_WarpScaleView (const RenderGraphResourceHandle *resources);
 qboolean R_Shadow_GetSunOcclusionData (float out_viewproj[16], float *out_bias, float *out_pcf_uv);
 qboolean R_Shadow_GetSunCascadeData (float out_viewproj[4][16], float out_splits[4], int *out_count, float *out_bias, float *out_pcf_uv);
 void R_Shadow_ApplyWorldReceiverUniforms (GLuint program);
