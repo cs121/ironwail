@@ -178,6 +178,13 @@ typedef struct render_backend_descriptor_binding_s
 	unsigned range;
 } RenderBackendDescriptorBinding;
 
+typedef struct fg_pass_attachment_config_s
+{
+	unsigned resource_bit;
+	render_backend_load_op_t load_op;
+	render_backend_store_op_t store_op;
+} FGPassAttachmentConfig;
+
 typedef struct render_pass_context_s RenderPassContext;
 
 typedef struct i_render_backend_s
@@ -237,6 +244,9 @@ typedef struct render_pass_desc_s
 	unsigned char viewport_mode;
 	qboolean (*enabled)(const RenderPassContext *ctx);
 	void (*execute)(RenderPassContext *ctx);
+	const FGPassAttachmentConfig *color_attachments;
+	unsigned char num_color_attachments;
+	const FGPassAttachmentConfig *depth_attachment;
 	unsigned char stage;
 	unsigned char stats_channel;
 } RenderPassDesc;

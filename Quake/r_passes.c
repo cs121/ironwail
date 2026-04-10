@@ -135,117 +135,149 @@ static void R_Pass_StorePrevFrame (RenderPassContext *ctx)
 	R_StorePrevFrameState ();
 }
 
+static const FGPassAttachmentConfig s_scene_color_attachments[] = {
+	{ RENDER_RES_SCENE_COLOR, R_BACKEND_LOAD_OP_CLEAR, R_BACKEND_STORE_OP_STORE }
+};
+
+static const FGPassAttachmentConfig s_scene_depth_attachment = {
+	RENDER_RES_SCENE_DEPTH,
+	R_BACKEND_LOAD_OP_CLEAR,
+	R_BACKEND_STORE_OP_STORE
+};
+
+static const FGPassAttachmentConfig s_warp_color_attachments[] = {
+	{ RENDER_RES_COMPOSITE_COLOR, R_BACKEND_LOAD_OP_CLEAR, R_BACKEND_STORE_OP_STORE }
+};
+
+static const FGPassAttachmentConfig s_warp_depth_attachment = {
+	RENDER_RES_COMPOSITE_DEPTH,
+	R_BACKEND_LOAD_OP_CLEAR,
+	R_BACKEND_STORE_OP_STORE
+};
+
+static const FGPassAttachmentConfig s_postprocess_color_attachments[] = {
+	{ RENDER_RES_COMPOSITE_COLOR, R_BACKEND_LOAD_OP_LOAD, R_BACKEND_STORE_OP_STORE }
+};
+
 static const RenderPassDesc s_setup_view_framegraph_pass = {
-	"Setup view",
-	RENDER_RES_NONE,
-	RENDER_RES_NONE,
-	1u << 0,
-	FG_PASS_OUTPUT_KEEP,
-	FG_PASS_VIEWPORT_KEEP,
-	NULL,
-	R_Pass_SetupView,
-	FG_PASS_STAGE_SETUP,
-	FG_PASS_STATS_SETUP
+	.name = "Setup view",
+	.reads = RENDER_RES_NONE,
+	.writes = RENDER_RES_NONE,
+	.side_effects = 1u << 0,
+	.output_target = FG_PASS_OUTPUT_KEEP,
+	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
+	.enabled = NULL,
+	.execute = R_Pass_SetupView,
+	.stage = FG_PASS_STAGE_SETUP,
+	.stats_channel = FG_PASS_STATS_SETUP
 };
 
 static const RenderPassDesc s_shadowmaps_framegraph_pass = {
-	"Shadow maps",
-	RENDER_RES_NONE,
-	RENDER_RES_SHADOW_SUN_DEPTH,
-	0,
-	FG_PASS_OUTPUT_KEEP,
-	FG_PASS_VIEWPORT_KEEP,
-	R_FG_PassWhenShadowEnabled,
-	R_Pass_RenderShadowMaps,
-	FG_PASS_STAGE_MAIN,
-	FG_PASS_STATS_SHADOW
+	.name = "Shadow maps",
+	.reads = RENDER_RES_NONE,
+	.writes = RENDER_RES_SHADOW_SUN_DEPTH,
+	.side_effects = 0,
+	.output_target = FG_PASS_OUTPUT_KEEP,
+	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
+	.enabled = R_FG_PassWhenShadowEnabled,
+	.execute = R_Pass_RenderShadowMaps,
+	.stage = FG_PASS_STAGE_MAIN,
+	.stats_channel = FG_PASS_STATS_SHADOW
 };
 
 static const RenderPassDesc s_scene_framegraph_pass = {
-	"Render scene",
-	RENDER_RES_DECALS | RENDER_RES_SHADOW_SUN_DEPTH,
-	RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_VELOCITY,
-	0,
-	FG_PASS_OUTPUT_AUTO_SCENE,
-	FG_PASS_VIEWPORT_VIEW_RECT_SCALED,
-	NULL,
-	R_Pass_RenderScene,
-	FG_PASS_STAGE_MAIN,
-	FG_PASS_STATS_SCENE
+	.name = "Render scene",
+	.reads = RENDER_RES_DECALS | RENDER_RES_SHADOW_SUN_DEPTH,
+	.writes = RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_VELOCITY,
+	.side_effects = 0,
+	.output_target = FG_PASS_OUTPUT_AUTO_SCENE,
+	.viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT_SCALED,
+	.enabled = NULL,
+	.execute = R_Pass_RenderScene,
+	.color_attachments = s_scene_color_attachments,
+	.num_color_attachments = 1,
+	.depth_attachment = &s_scene_depth_attachment,
+	.stage = FG_PASS_STAGE_MAIN,
+	.stats_channel = FG_PASS_STATS_SCENE
 };
 
 static const RenderPassDesc s_warp_resolve_framegraph_pass = {
-	"Warp/resolve",
-	RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH,
-	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_COMPOSITE_DEPTH,
-	1u << 0,
-	FG_PASS_OUTPUT_AUTO_WARP,
-	FG_PASS_VIEWPORT_VIEW_RECT,
-	NULL,
-	R_Pass_WarpResolve,
-	FG_PASS_STAGE_MAIN,
-	FG_PASS_STATS_WARP
+	.name = "Warp/resolve",
+	.reads = RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH,
+	.writes = RENDER_RES_COMPOSITE_COLOR | RENDER_RES_COMPOSITE_DEPTH,
+	.side_effects = 1u << 0,
+	.output_target = FG_PASS_OUTPUT_AUTO_WARP,
+	.viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT,
+	.enabled = NULL,
+	.execute = R_Pass_WarpResolve,
+	.color_attachments = s_warp_color_attachments,
+	.num_color_attachments = 1,
+	.depth_attachment = &s_warp_depth_attachment,
+	.stage = FG_PASS_STAGE_MAIN,
+	.stats_channel = FG_PASS_STATS_WARP
 };
 
 static const RenderPassDesc s_ssao_fog_handoff_framegraph_pass = {
-	"Capture fog handoff",
-	RENDER_RES_NONE,
-	RENDER_RES_SSAO_FOG_STATE,
-	0,
-	FG_PASS_OUTPUT_KEEP,
-	FG_PASS_VIEWPORT_KEEP,
-	NULL,
-	R_Pass_CaptureSSAOFogHandoff
+	.name = "Capture fog handoff",
+	.reads = RENDER_RES_NONE,
+	.writes = RENDER_RES_SSAO_FOG_STATE,
+	.side_effects = 0,
+	.output_target = FG_PASS_OUTPUT_KEEP,
+	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
+	.enabled = NULL,
+	.execute = R_Pass_CaptureSSAOFogHandoff
 };
 
 static const RenderPassDesc s_postprocess_framegraph_pass = {
-	"Postprocess",
-	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_COMPOSITE_DEPTH | RENDER_RES_SSAO_FOG_STATE,
-	RENDER_RES_COMPOSITE_COLOR,
-	1u << 0,
-	FG_PASS_OUTPUT_BACKBUFFER,
-	FG_PASS_VIEWPORT_FULL_WINDOW,
-	R_FG_PassWhenPostprocessEnabled,
-	R_Pass_PostProcess,
-	FG_PASS_STAGE_MAIN,
-	FG_PASS_STATS_POST
+	.name = "Postprocess",
+	.reads = RENDER_RES_COMPOSITE_COLOR | RENDER_RES_COMPOSITE_DEPTH | RENDER_RES_SSAO_FOG_STATE,
+	.writes = RENDER_RES_COMPOSITE_COLOR,
+	.side_effects = 1u << 0,
+	.output_target = FG_PASS_OUTPUT_BACKBUFFER,
+	.viewport_mode = FG_PASS_VIEWPORT_FULL_WINDOW,
+	.enabled = R_FG_PassWhenPostprocessEnabled,
+	.execute = R_Pass_PostProcess,
+	.color_attachments = s_postprocess_color_attachments,
+	.num_color_attachments = 1,
+	.stage = FG_PASS_STAGE_MAIN,
+	.stats_channel = FG_PASS_STATS_POST
 };
 
 static const RenderPassDesc s_viewmodel_framegraph_pass = {
-	"Draw viewmodel",
-	RENDER_RES_COMPOSITE_COLOR,
-	RENDER_RES_COMPOSITE_COLOR,
-	1u << 0,
-	FG_PASS_OUTPUT_BACKBUFFER,
-	FG_PASS_VIEWPORT_VIEW_RECT,
-	R_FG_PassWhenViewmodelEnabled,
-	R_Pass_DrawViewmodel,
-	FG_PASS_STAGE_MAIN,
-	FG_PASS_STATS_OVERLAY
+	.name = "Draw viewmodel",
+	.reads = RENDER_RES_COMPOSITE_COLOR,
+	.writes = RENDER_RES_COMPOSITE_COLOR,
+	.side_effects = 1u << 0,
+	.output_target = FG_PASS_OUTPUT_BACKBUFFER,
+	.viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT,
+	.enabled = R_FG_PassWhenViewmodelEnabled,
+	.execute = R_Pass_DrawViewmodel,
+	.stage = FG_PASS_STAGE_MAIN,
+	.stats_channel = FG_PASS_STATS_OVERLAY
 };
 
 static const RenderPassDesc s_polyblend_framegraph_pass = {
-	"Polyblend",
-	RENDER_RES_COMPOSITE_COLOR,
-	RENDER_RES_COMPOSITE_COLOR,
-	1u << 0,
-	FG_PASS_OUTPUT_BACKBUFFER,
-	FG_PASS_VIEWPORT_VIEW_RECT,
-	R_FG_PassWhenPolyblendEnabled,
-	R_Pass_DrawPolyblend,
-	FG_PASS_STAGE_MAIN,
-	FG_PASS_STATS_OVERLAY
+	.name = "Polyblend",
+	.reads = RENDER_RES_COMPOSITE_COLOR,
+	.writes = RENDER_RES_COMPOSITE_COLOR,
+	.side_effects = 1u << 0,
+	.output_target = FG_PASS_OUTPUT_BACKBUFFER,
+	.viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT,
+	.enabled = R_FG_PassWhenPolyblendEnabled,
+	.execute = R_Pass_DrawPolyblend,
+	.stage = FG_PASS_STAGE_MAIN,
+	.stats_channel = FG_PASS_STATS_OVERLAY
 };
 
 static const RenderPassDesc s_storeprev_framegraph_pass = {
-	"Store previous frame",
-	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH,
-	RENDER_RES_NONE,
-	1u << 0,
-	FG_PASS_OUTPUT_KEEP,
-	FG_PASS_VIEWPORT_KEEP,
-	R_FG_PassWhenStorePrevEnabled,
-	R_Pass_StorePrevFrame
+	.name = "Store previous frame",
+	.reads = RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH,
+	.writes = RENDER_RES_NONE,
+	.side_effects = 1u << 0,
+	.output_target = FG_PASS_OUTPUT_KEEP,
+	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
+	.enabled = R_FG_PassWhenStorePrevEnabled,
+	.execute = R_Pass_StorePrevFrame
 };
 
 void R_RegisterFrameGraphPasses (void)

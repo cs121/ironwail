@@ -1277,14 +1277,14 @@ static void R_Decals_ExecFrameGraphPass (RenderPassContext *ctx)
 }
 
 static const RenderPassDesc s_decals_framegraph_pass = {
-	"Update decals",
-	RENDER_RES_NONE,
-	RENDER_RES_DECALS,
-	0,
-	FG_PASS_OUTPUT_KEEP,
-	FG_PASS_VIEWPORT_KEEP,
-	NULL,
-	R_Decals_ExecFrameGraphPass
+	.name = "Update decals",
+	.reads = RENDER_RES_NONE,
+	.writes = RENDER_RES_DECALS,
+	.side_effects = 0,
+	.output_target = FG_PASS_OUTPUT_KEEP,
+	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
+	.enabled = NULL,
+	.execute = R_Decals_ExecFrameGraphPass
 };
 
 void R_Decals_RegisterFrameGraphPasses (void)
