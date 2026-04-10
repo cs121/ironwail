@@ -193,6 +193,89 @@ const RenderBackendCaps *R_Backend_GetCaps (void)
 	return &s_active_backend_caps;
 }
 
+void R_Backend_BeginFrame (void)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->begin_frame)
+		backend->begin_frame ();
+}
+
+void R_Backend_EndFrame (void)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->end_frame)
+		backend->end_frame ();
+}
+
+void R_Backend_Present (void)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->present)
+		backend->present ();
+}
+
+void R_Backend_BeginPassEx (const RenderBackendPassDesc *pass_desc)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+
+	if (!backend)
+		return;
+
+	if (backend->begin_pass_ex)
+		backend->begin_pass_ex (pass_desc);
+	else if (backend->begin_pass)
+		backend->begin_pass ((pass_desc && pass_desc->name) ? pass_desc->name : "<unnamed>");
+}
+
+void R_Backend_EndPassEx (void)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+
+	if (!backend)
+		return;
+
+	if (backend->end_pass_ex)
+		backend->end_pass_ex ();
+	else if (backend->end_pass)
+		backend->end_pass ();
+}
+
+void R_Backend_ResourceBarrier (const RenderGraphResourceHandle *resources, const RenderBackendResourceBarrier *barriers, unsigned count)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->resource_barrier && barriers && count > 0u)
+		backend->resource_barrier (resources, barriers, count);
+}
+
+void R_Backend_BindPipeline (const RenderBackendPipelineDesc *pipeline)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+
+	if (!backend)
+		return;
+
+	if (backend->bind_pipeline)
+		backend->bind_pipeline (pipeline);
+	else if (pipeline && backend->set_pipeline_state)
+		backend->set_pipeline_state (pipeline->state_bits);
+}
+
+void R_Backend_SetDynamicState (const RenderBackendDynamicState *dynamic_state)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	(void)dynamic_state;
+
+	if (backend && backend->set_dynamic_state)
+		backend->set_dynamic_state (dynamic_state);
+}
+
+void R_Backend_BindDescriptors (const RenderBackendDescriptorBinding *bindings, unsigned count)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->bind_descriptors && bindings && count > 0u)
+		backend->bind_descriptors (bindings, count);
+}
+
 const render_backend_resource_ref_t *R_FrameGraph_GetResourceRef (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot)
 {
 	if (!resources)

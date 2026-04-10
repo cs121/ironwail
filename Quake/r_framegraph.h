@@ -66,6 +66,29 @@ typedef enum fg_pass_stage_e
 	FG_PASS_STAGE_SETUP
 } fg_pass_stage_t;
 
+typedef enum render_backend_load_op_e
+{
+	R_BACKEND_LOAD_OP_LOAD = 0,
+	R_BACKEND_LOAD_OP_CLEAR,
+	R_BACKEND_LOAD_OP_DONT_CARE
+} render_backend_load_op_t;
+
+typedef enum render_backend_store_op_e
+{
+	R_BACKEND_STORE_OP_STORE = 0,
+	R_BACKEND_STORE_OP_DONT_CARE
+} render_backend_store_op_t;
+
+typedef enum render_backend_resource_state_e
+{
+	R_BACKEND_RESOURCE_STATE_UNKNOWN = 0,
+	R_BACKEND_RESOURCE_STATE_COLOR_ATTACHMENT,
+	R_BACKEND_RESOURCE_STATE_DEPTH_ATTACHMENT,
+	R_BACKEND_RESOURCE_STATE_SHADER_READ,
+	R_BACKEND_RESOURCE_STATE_SHADER_WRITE,
+	R_BACKEND_RESOURCE_STATE_PRESENT
+} render_backend_resource_state_t;
+
 typedef enum fg_pass_stats_channel_e
 {
 	FG_PASS_STATS_NONE = 0,
@@ -85,6 +108,60 @@ typedef struct render_graph_resource_handle_s
 	int scene_samples;
 } RenderGraphResourceHandle;
 
+typedef struct render_backend_pass_attachment_desc_s
+{
+	const render_backend_resource_ref_t *resource;
+	render_backend_load_op_t load_op;
+	render_backend_store_op_t store_op;
+} RenderBackendPassAttachmentDesc;
+
+typedef struct render_backend_pass_desc_s
+{
+	const char *name;
+	const RenderGraphResourceHandle *resources;
+	const RenderBackendPassAttachmentDesc *color_attachments;
+	unsigned num_color_attachments;
+	const RenderBackendPassAttachmentDesc *depth_attachment;
+	qboolean backbuffer;
+} RenderBackendPassDesc;
+
+typedef struct render_backend_resource_barrier_s
+{
+	const render_backend_resource_ref_t *resource;
+	render_backend_resource_state_t before;
+	render_backend_resource_state_t after;
+} RenderBackendResourceBarrier;
+
+typedef struct render_backend_pipeline_desc_s
+{
+	unsigned pipeline_id;
+	unsigned state_bits;
+} RenderBackendPipelineDesc;
+
+typedef struct render_backend_dynamic_state_s
+{
+	unsigned blend_state;
+	unsigned depth_state;
+	unsigned raster_state;
+} RenderBackendDynamicState;
+
+typedef enum render_backend_descriptor_type_e
+{
+	R_BACKEND_DESCRIPTOR_TEXTURE = 0,
+	R_BACKEND_DESCRIPTOR_SAMPLER,
+	R_BACKEND_DESCRIPTOR_UNIFORM_BUFFER,
+	R_BACKEND_DESCRIPTOR_STORAGE_BUFFER
+} render_backend_descriptor_type_t;
+
+typedef struct render_backend_descriptor_binding_s
+{
+	render_backend_descriptor_type_t type;
+	unsigned slot;
+	unsigned resource_id;
+	unsigned offset;
+	unsigned range;
+} RenderBackendDescriptorBinding;
+
 typedef struct render_pass_context_s RenderPassContext;
 
 typedef struct i_render_backend_s
@@ -94,6 +171,17 @@ typedef struct i_render_backend_s
 	void (*shutdown)(void);
 	void (*on_resize)(int width, int height);
 	qboolean (*can_activate)(qboolean runtime_switch);
+	void (*begin_frame)(void);
+	void (*end_frame)(void);
+	void (*present)(void);
+	void (*begin_pass_ex)(const RenderBackendPassDesc *pass_desc);
+	void (*end_pass_ex)(void);
+	void (*resource_barrier)(const RenderGraphResourceHandle *resources, const RenderBackendResourceBarrier *barriers, unsigned count);
+	void (*bind_pipeline)(const RenderBackendPipelineDesc *pipeline);
+	void (*set_dynamic_state)(const RenderBackendDynamicState *dynamic_state);
+	void (*bind_descriptors)(const RenderBackendDescriptorBinding *bindings, unsigned count);
+
+	/* Compatibility path for legacy OpenGL backend integration. */
 	void (*begin_pass)(const char *name);
 	void (*end_pass)(void);
 	void (*validate_pass_state)(const char *pass_name, qboolean before_pass);
@@ -149,6 +237,15 @@ qboolean R_Backend_Select (const char *backend_name);
 void R_Backend_OnResize (int width, int height);
 const IRenderBackend *R_GetRenderBackend (void);
 const RenderBackendCaps *R_Backend_GetCaps (void);
+void R_Backend_BeginFrame (void);
+void R_Backend_EndFrame (void);
+void R_Backend_Present (void);
+void R_Backend_BeginPassEx (const RenderBackendPassDesc *pass_desc);
+void R_Backend_EndPassEx (void);
+void R_Backend_ResourceBarrier (const RenderGraphResourceHandle *resources, const RenderBackendResourceBarrier *barriers, unsigned count);
+void R_Backend_BindPipeline (const RenderBackendPipelineDesc *pipeline);
+void R_Backend_SetDynamicState (const RenderBackendDynamicState *dynamic_state);
+void R_Backend_BindDescriptors (const RenderBackendDescriptorBinding *bindings, unsigned count);
 const render_backend_resource_ref_t *R_FrameGraph_GetResourceRef (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
 unsigned R_FrameGraph_ResolveResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
 qboolean R_FrameGraph_HasResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
