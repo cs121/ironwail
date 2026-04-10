@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "glquake.h"
 
 #include "gl_shadow.h"
 #include "gl_shadow_runtime.h"

@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "glquake.h"
 
 #include "gl_backend.h"
 #include "r_framegraph.h"

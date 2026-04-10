@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "glquake.h"
 
 #include "gl_dlight.h"
 #include "r_realtimelight.h"

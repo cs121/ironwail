@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // on the same machine.
 
 #include "quakedef.h"
+#include "glquake.h"
 #include "gl_lightgrid.h"
 #include "gl_ktx2.h"
 #include "mat_material.h"

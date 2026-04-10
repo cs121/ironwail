@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "glquake.h"
 
 #include "r_sanitize.h"
 #include "r_ssao.h"

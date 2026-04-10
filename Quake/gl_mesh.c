@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // gl_mesh.c: triangle model functions
 
 #include "quakedef.h"
+#include "glquake.h"
 
 static void GLMesh_BuildTangents (float (*tangents)[4], const float (*xyz)[3], const float (*normals)[3], const float (*st)[2], int numverts, const unsigned short *indexes, int numindexes)
 {

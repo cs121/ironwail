@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // r_world.c: world model rendering
 
 #include "quakedef.h"
+#include "glquake.h"
 #include "mat_material.h"
 #include "r_framegraph.h"
 #include "r_realtimelight.h"
