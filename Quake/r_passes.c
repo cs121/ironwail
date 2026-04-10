@@ -30,10 +30,14 @@ static qboolean R_FG_PassWhenStorePrevEnabled (const RenderPassContext *ctx)
 	return ctx && ctx->frame_plan && ctx->frame_plan->run_store_prev;
 }
 
-static qboolean R_Pass_IsOpenGLBackend (const RenderPassContext *ctx)
+static qboolean R_Pass_AllowLegacyFallback (const RenderPassContext *ctx)
 {
-	return ctx && ctx->backend && ctx->backend->name
-		&& !q_strcasecmp (ctx->backend->name, "OpenGL");
+	const RenderBackendCaps *caps = R_Backend_GetCaps ();
+
+	if (!ctx || !ctx->backend)
+		return true;
+
+	return caps && caps->supports_legacy_pass_fallbacks;
 }
 
 void R_Pass_SetupView (RenderPassContext *ctx)
@@ -44,8 +48,8 @@ void R_Pass_SetupView (RenderPassContext *ctx)
 		return;
 	}
 
-	/* Legacy fallback: keep OpenGL framegraph path working. */
-	if (!ctx || R_Pass_IsOpenGLBackend (ctx))
+	/* Compatibility fallback: backend opt-in via capability contract. */
+	if (R_Pass_AllowLegacyFallback (ctx))
 		R_SetupView ();
 }
 
@@ -57,7 +61,7 @@ void R_Pass_RenderShadowMaps (RenderPassContext *ctx)
 		return;
 	}
 
-	if (!ctx || R_Pass_IsOpenGLBackend (ctx))
+	if (R_Pass_AllowLegacyFallback (ctx))
 		R_RenderShadowMaps ();
 }
 
@@ -69,7 +73,7 @@ void R_Pass_RenderScene (RenderPassContext *ctx)
 		return;
 	}
 
-	if (!ctx || R_Pass_IsOpenGLBackend (ctx))
+	if (R_Pass_AllowLegacyFallback (ctx))
 		R_RenderScene (ctx ? ctx->resources : NULL);
 }
 
@@ -81,7 +85,7 @@ void R_Pass_WarpResolve (RenderPassContext *ctx)
 		return;
 	}
 
-	if (!ctx || R_Pass_IsOpenGLBackend (ctx))
+	if (R_Pass_AllowLegacyFallback (ctx))
 		R_WarpScaleView (ctx ? ctx->resources : NULL);
 }
 
@@ -93,7 +97,7 @@ void R_Pass_PostProcess (RenderPassContext *ctx)
 		return;
 	}
 
-	if (!ctx || R_Pass_IsOpenGLBackend (ctx))
+	if (R_Pass_AllowLegacyFallback (ctx))
 		GL_PostProcess (ctx ? ctx->resources : NULL);
 }
 
@@ -105,7 +109,7 @@ void R_Pass_DrawViewmodel (RenderPassContext *ctx)
 		return;
 	}
 
-	if (!ctx || R_Pass_IsOpenGLBackend (ctx))
+	if (R_Pass_AllowLegacyFallback (ctx))
 		R_DrawViewModel ();
 }
 
@@ -117,7 +121,7 @@ void R_Pass_DrawPolyblend (RenderPassContext *ctx)
 		return;
 	}
 
-	if (!ctx || R_Pass_IsOpenGLBackend (ctx))
+	if (R_Pass_AllowLegacyFallback (ctx))
 		V_PolyBlend ();
 }
 

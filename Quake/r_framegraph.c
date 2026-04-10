@@ -181,11 +181,89 @@ static void FG_EmitPassBarriers (const RenderPassDesc *pass, RenderPassContext *
 		R_Backend_ResourceBarrier (ctx->resources, barriers, barrier_count);
 }
 
+static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, qboolean emit_warning)
+{
+	unsigned bit;
+	unsigned i;
+
+	if (!pass_desc)
+		return false;
+
+	for (bit = 1u; bit != 0; bit <<= 1)
+	{
+		const fg_resource_bit_mapping_t *mapping;
+		if (((pass_desc->reads | pass_desc->writes) & bit) == 0u)
+			continue;
+		mapping = FG_FindResourceMapping (bit);
+		if (!mapping)
+		{
+			if (emit_warning)
+				Con_Warning ("FrameGraph: pass '%s' uses unmapped resource bit 0x%x\n",
+					pass_desc->name ? pass_desc->name : "<unnamed>", bit);
+			SDL_assert (!"FrameGraph pass uses unmapped resource bit");
+			return false;
+		}
+	}
+
+	if (pass_desc->color_attachments && pass_desc->num_color_attachments > 0)
+	{
+		for (i = 0; i < pass_desc->num_color_attachments; ++i)
+		{
+			unsigned resource_bit = pass_desc->color_attachments[i].resource_bit;
+			const fg_resource_bit_mapping_t *mapping = FG_FindResourceMapping (resource_bit);
+
+			if (!mapping || !mapping->requires_backend_resource || mapping->slot == R_BACKEND_RESOURCE_SLOT_NONE)
+			{
+				if (emit_warning)
+					Con_Warning ("FrameGraph: pass '%s' color attachment[%u] does not map to backend resource\n",
+						pass_desc->name ? pass_desc->name : "<unnamed>", i);
+				SDL_assert (!"FrameGraph pass attachment requires backend resource mapping");
+				return false;
+			}
+			if ((pass_desc->writes & resource_bit) == 0u)
+			{
+				if (emit_warning)
+					Con_Warning ("FrameGraph: pass '%s' color attachment[%u] must be declared in writes mask\n",
+						pass_desc->name ? pass_desc->name : "<unnamed>", i);
+				SDL_assert (!"FrameGraph pass attachment must be declared in writes mask");
+				return false;
+			}
+		}
+	}
+
+	if (pass_desc->depth_attachment)
+	{
+		unsigned resource_bit = pass_desc->depth_attachment->resource_bit;
+		const fg_resource_bit_mapping_t *mapping = FG_FindResourceMapping (resource_bit);
+
+		if (!mapping || !mapping->requires_backend_resource || mapping->slot == R_BACKEND_RESOURCE_SLOT_NONE)
+		{
+			if (emit_warning)
+				Con_Warning ("FrameGraph: pass '%s' depth attachment does not map to backend resource\n",
+					pass_desc->name ? pass_desc->name : "<unnamed>");
+			SDL_assert (!"FrameGraph pass depth attachment requires backend resource mapping");
+			return false;
+		}
+		if ((pass_desc->writes & resource_bit) == 0u)
+		{
+			if (emit_warning)
+				Con_Warning ("FrameGraph: pass '%s' depth attachment must be declared in writes mask\n",
+					pass_desc->name ? pass_desc->name : "<unnamed>");
+			SDL_assert (!"FrameGraph pass depth attachment must be declared in writes mask");
+			return false;
+		}
+	}
+
+	return true;
+}
+
 static qboolean FG_AddRuntimePassInternal (const RenderPassDesc *pass_desc)
 {
 	int profile_slot;
 
 	if (!pass_desc || !pass_desc->name || !pass_desc->execute)
+		return false;
+	if (!FG_ValidatePassResourceDecls (pass_desc, true))
 		return false;
 	if (s_runtime_pass_count >= FG_MAX_RUNTIME_PASSES)
 	{
@@ -740,6 +818,8 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 		return;
 	if (pass->enabled && !pass->enabled (ctx))
 		return;
+	if (!FG_ValidatePassResourceDecls (pass, false))
+		return;
 
 	for (bit = 1u; bit != 0; bit <<= 1)
 	{
@@ -798,6 +878,12 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 			if (!FG_GetResourceSlotForBit (pass->color_attachments[i].resource_bit, &slot))
 				continue;
 			color_attachments[i].resource = R_FrameGraph_GetResourceRef (ctx->resources, slot);
+			if (!color_attachments[i].resource || (ctx->backend && ctx->backend->is_resource_valid
+				&& !ctx->backend->is_resource_valid (ctx->resources, color_attachments[i].resource)))
+			{
+				Con_DWarning ("FrameGraph: pass '%s' color attachment[%u] resolved invalid resource\n", pass->name, i);
+				SDL_assert (!"FrameGraph pass color attachment resolved invalid resource");
+			}
 			color_attachments[i].load_op = pass->color_attachments[i].load_op;
 			color_attachments[i].store_op = pass->color_attachments[i].store_op;
 		}
@@ -811,6 +897,12 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 		if (FG_GetResourceSlotForBit (pass->depth_attachment->resource_bit, &depth_slot))
 		{
 			depth_attachment.resource = R_FrameGraph_GetResourceRef (ctx->resources, depth_slot);
+			if (!depth_attachment.resource || (ctx->backend && ctx->backend->is_resource_valid
+				&& !ctx->backend->is_resource_valid (ctx->resources, depth_attachment.resource)))
+			{
+				Con_DWarning ("FrameGraph: pass '%s' depth attachment resolved invalid resource\n", pass->name);
+				SDL_assert (!"FrameGraph pass depth attachment resolved invalid resource");
+			}
 			depth_attachment.load_op = pass->depth_attachment->load_op;
 			depth_attachment.store_op = pass->depth_attachment->store_op;
 			has_depth_attachment = true;

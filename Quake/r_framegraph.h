@@ -20,6 +20,7 @@ typedef struct render_backend_caps_s
 {
 	qboolean supports_timestamps;
 	qboolean supports_compute;
+	qboolean supports_legacy_pass_fallbacks;
 	unsigned msaa_mode_mask;
 	unsigned max_msaa_samples;
 	unsigned shader_model;

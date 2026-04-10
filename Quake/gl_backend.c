@@ -125,6 +125,7 @@ static void GLBackend_DetectCaps (void)
 	memset (&s_gl_backend_caps, 0, sizeof (s_gl_backend_caps));
 	s_gl_backend_caps.supports_timestamps = GLBackend_HasTimestampQueries ();
 	s_gl_backend_caps.supports_compute = (GL_DispatchComputeFunc != NULL);
+	s_gl_backend_caps.supports_legacy_pass_fallbacks = true;
 	s_gl_backend_caps.supports_bindless = gl_bindless_able;
 	s_gl_backend_caps.shader_model = 50u;
 	s_gl_backend_caps.max_msaa_samples = (framebufs.max_samples > 0) ? (unsigned)framebufs.max_samples : 1u;

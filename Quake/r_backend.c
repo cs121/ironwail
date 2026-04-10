@@ -15,8 +15,26 @@ static RenderBackendCaps s_active_backend_caps;
 static qboolean s_backend_initialized = false;
 static qboolean s_applying_backend_cvar = false;
 static qboolean s_backend_active = false;
+static qboolean s_backend_audit_cmd_registered = false;
 
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
+
+/*
+================
+R_Backend_WrapperAudit_f
+
+Tracks high-value legacy wrappers still in heavy use so migration work can be
+planned around backend-neutral pipeline/descriptors/dynamic-state APIs.
+================
+*/
+static void R_Backend_WrapperAudit_f (void)
+{
+	Con_Printf ("Renderer wrapper migration priorities:\n");
+	Con_Printf ("  P0: R_Backend_SetPipelineState (most draw-path callsites; migrate material/decal/particle state to pipeline + dynamic state)\n");
+	Con_Printf ("  P1: direct glDraw*/GL_Draw* callsites (route through R_Backend_Draw/descriptor-driven draw plans)\n");
+	Con_Printf ("  P2: bind-time texture/program glue in legacy passes (move to descriptor sets + explicit pipeline binding)\n");
+	Con_Printf ("  P3: optional compute/dispatch paths (already abstracted via R_Backend_Dispatch where available)\n");
+}
 
 /*
 ================
@@ -247,6 +265,11 @@ void R_Backend_Init (void)
 	s_backend_initialized = true;
 	Cvar_RegisterVariable (&r_backend);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
+	if (!s_backend_audit_cmd_registered)
+	{
+		Cmd_AddCommand ("r_backend_wrapper_audit", R_Backend_WrapperAudit_f);
+		s_backend_audit_cmd_registered = true;
+	}
 
 	GL_Backend_Register ();
 
