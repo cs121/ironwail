@@ -1,8 +1,3 @@
-// FogVol Composite Contract:
-//   RGB = fog radiance composited over scene color (display-space contribution).
-//   A   = fog coverage proxy = 1.0 - transmittance (0=no fog medium, 1=opaque medium).
-//   Valid only when CPU marks fogvol composite as ready for this frame.
-
 layout(binding=0) uniform sampler2D GammaTexture;
 layout(binding=1) uniform usampler3D PaletteLUT;
 layout(binding=2) uniform sampler2D DepthTexture;
@@ -10,10 +5,6 @@ layout(binding=3) uniform sampler2D BloomTexture;
 layout(binding=4) uniform sampler2D VelocityTexture;
 layout(binding=8) uniform sampler2D SSAOTexture;
 layout(binding=9) uniform sampler2DArray PostFXLUT;
-// FogVol composite texture input for post effects.
-// Sample alpha (A = 1-transmittance) for fog-aware suppression logic.
-// Binding may be left unbound when fogvol is inactive; callers must gate via CPU validity.
-layout(binding=10) uniform sampler2D FogVolTexture;
 layout(std430, binding=0) restrict readonly buffer PaletteBuffer
 {
 	uint Palette[256];
@@ -144,10 +135,6 @@ layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: 
 layout(location=24) uniform vec4 PostFXFogColor; // rgb: underwater fog color, w: scene fog density (saved before Fog_DisableGFog)
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
 layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
-// Volumetric fog params for SSAO suppression.
-// x: fogvol active flag (1.0 = fogvol texture is bound and valid, 0.0 = inactive)
-// y: transmittance source policy (0=global only, 1=fogvol preferred with global fallback)
-layout(location=27) uniform vec4 FogVolParams;
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -238,41 +225,6 @@ float FogTransmittanceFromGlobalFog(float depth)
                 return 1.0;
         float fog = exp2(-density * depth * depth);
         return clamp(fog, 0.0, 1.0);
-}
-
-// Returns volumetric fog transmittance [0..1] for the current pixel from the
-// Returns volumetric fog transmittance [0..1] for SSAO suppression.
-// fogvol.frag writes alpha = (1.0 - transmittance) into composite_tex.
-// The temporal and upsample passes propagate this alpha unchanged.
-// transmittance=1.0 (alpha=0) → no fog → full SSAO.
-// transmittance=0.0 (alpha=1) → fully dense fog → SSAO completely suppressed.
-// Reading alpha is correct for ALL fog colors including dark ones (purple,
-// red, brown) where RGB luminance was near-zero even at full opacity.
-float FogVolTransmittance(vec2 uv)
-{
-        if (FogVolParams.x < 0.5)
-                return 1.0; // fogvol inactive — no suppression
-        float fogDensity = texture(FogVolTexture, uv).a; // 0=no fog, 1=full fog
-        return clamp(1.0 - fogDensity, 0.0, 1.0);
-}
-
-// Deterministic SSAO suppression source selection:
-//  - Policy 1 + valid fogvol -> use fogvol transmittance.
-//  - Otherwise              -> use global fog transmittance fallback.
-// outSource: 1=global, 2=fogvol.
-float SelectSuppressionTransmittance(vec2 uv, float depth, out float outSource)
-{
-        float policy = floor(FogVolParams.y + 0.5);
-        bool fogvolValid = FogVolParams.x > 0.5;
-        bool useFogVol = (policy >= 1.0) && fogvolValid;
-        if (useFogVol)
-        {
-                outSource = 2.0;
-                return FogVolTransmittance(uv);
-        }
-
-        outSource = 1.0;
-        return FogTransmittanceFromGlobalFog(depth);
 }
 
 float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)
@@ -587,16 +539,16 @@ void main()
                                 float ao = SampleSSAO(uv, depthInfo, ssaoCenterDepth, useDepthUpscale);
                                 float ssaoFogStrength = clamp(SSAOParams.w, 0.0, 1.0);
                                 float ssaoFogPower = max(SSAOBlurParams.w, 0.01);
-                                float fogTransmittance = 1.0;
-                                float fogSource = 0.0;
-                                if (ssaoUseDepth)
-                                {
-                                        float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
-                                        float underwaterTransmittance = 1.0;
-                                        if (fogStrength > 0.0)
-                                                underwaterTransmittance = FogTransmittanceFromDepth(ssaoCenterDepth, fogStrength);
-                                        fogTransmittance = SelectSuppressionTransmittance(uv, ssaoCenterDepth, fogSource) * underwaterTransmittance;
-                                }
+				float fogTransmittance = 1.0;
+				float fogSource = 1.0;
+				if (ssaoUseDepth)
+				{
+					float fogStrength = clamp(PostFXParams4.z, 0.0, 1.0);
+					float underwaterTransmittance = 1.0;
+					if (fogStrength > 0.0)
+						underwaterTransmittance = FogTransmittanceFromDepth(ssaoCenterDepth, fogStrength);
+					fogTransmittance = FogTransmittanceFromGlobalFog(ssaoCenterDepth) * underwaterTransmittance;
+				}
                                 float aoFogMask = pow(clamp(fogTransmittance, 0.0, 1.0), ssaoFogPower);
                                 float aoFogged = mix(1.0, ao, aoFogMask);
                                 float aoDamped = mix(ao, aoFogged, ssaoFogStrength);
@@ -605,15 +557,13 @@ void main()
                                         float mask = centerOpaque ? (1.0 - ao) : 0.0;
                                         color.rgb = vec3(mask);
                                 }
-                                else if (ssaoDebugMode == 13)
-                                {
-                                        vec3 sourceTint = vec3(0.0);
-                                        if (fogSource > 1.5)
-                                                sourceTint = vec3(0.15, 0.50, 1.0); // fogvol source
-                                        else if (fogSource > 0.5)
-                                                sourceTint = vec3(1.0, 0.45, 0.1); // global source
-                                        color.rgb = mix(vec3(fogTransmittance), sourceTint, 0.75);
-                                }
+				else if (ssaoDebugMode == 13)
+				{
+					vec3 sourceTint = vec3(0.0);
+					if (fogSource > 0.5)
+						sourceTint = vec3(1.0, 0.45, 0.1); // global source
+					color.rgb = mix(vec3(fogTransmittance), sourceTint, 0.75);
+				}
                                 else if (ssaoDebugMode == 14)
                                 {
                                         color.rgb = vec3(aoDamped);

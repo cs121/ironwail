@@ -8,7 +8,6 @@ typedef struct render_frame_plan_s
 	qboolean needs_scene_effects;
 	qboolean needs_postprocess;
 	qboolean run_shadowmaps;
-	qboolean run_fogvol;
 	qboolean run_postprocess;
 	qboolean run_viewmodel;
 	qboolean run_polyblend;
@@ -22,11 +21,9 @@ typedef enum render_graph_resource_bits_e
 	RENDER_RES_SCENE_DEPTH = 1u << 1,
 	RENDER_RES_COMPOSITE_COLOR = 1u << 2,
 	RENDER_RES_SHADOW_SUN_DEPTH = 1u << 3,
-	RENDER_RES_FOGVOL_HISTORY = 1u << 4,
-	RENDER_RES_VELOCITY = 1u << 5,
-	RENDER_RES_DECALS = 1u << 6,
-	RENDER_RES_FOGVOL_INPUTS = 1u << 7,
-	RENDER_RES_SSAO_FOG_STATE = 1u << 8
+	RENDER_RES_VELOCITY = 1u << 4,
+	RENDER_RES_DECALS = 1u << 5,
+	RENDER_RES_SSAO_FOG_STATE = 1u << 6
 } render_graph_resource_bits_t;
 
 typedef enum fg_pass_output_target_e
@@ -80,7 +77,6 @@ typedef struct render_graph_resource_handle_s
 	unsigned composite_color_tex;
 	unsigned composite_depth_tex;
 	unsigned shadow_sun_depth_tex;
-	unsigned fogvol_history_tex;
 	unsigned velocity_tex;
 } RenderGraphResourceHandle;
 

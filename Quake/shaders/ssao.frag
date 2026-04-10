@@ -1,9 +1,5 @@
 layout(binding=0) uniform sampler2D DepthTexture;
 layout(binding=1) uniform sampler2D NoiseTexture;
-// Fog volume composite texture: RGB=composited fog color, A=unused.
-// We derive volumetric transmittance from luminance: bright fog = low transmittance.
-// Binding=2 is left unbound (white = transmittance 1.0 = no fog damping) when fogvol is inactive.
-layout(binding=2) uniform sampler2D FogVolTexture;
 
 #include "frame_uniforms.glsl"
 
@@ -22,10 +18,6 @@ layout(location=11) uniform int u_normalSource; // 0: neighbor, 1: derivatives
 layout(location=12) uniform int u_yFlip; // 0: none, 1: flip Y
 layout(location=13) uniform int u_noiseMode; // 0: off, 1: IGN, 2: texture
 layout(location=14) uniform vec4 u_fogParams; // x: max distance, y: scene fog density
-// Volumetric fog damping for SSAO.
-// u_fogvolParams.x: fogvol transmittance damping strength (0=off, 1=full suppress)
-// u_fogvolParams.y: 1.0 if fogvol texture is available, 0.0 otherwise
-layout(location=15) uniform vec4 u_fogvolParams;
 
 layout(location=0) out vec4 outColor;
 

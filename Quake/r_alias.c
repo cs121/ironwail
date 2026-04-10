@@ -1273,7 +1273,7 @@ void R_DrawAliasModels (entity_t **ents, int count)
 	dlight_t *saved_sources[DLIGHT_GPU_MAX] = {0};
 
 	/* Shared-light architecture: consumes the same frame-collected list as
-	 * world dlights/froxel fog, but filtered for forward alias/model shading. */
+	 * world dlights, but filtered for forward alias/model shading. */
 
 	if (use_shared_model_lights)
 	{

@@ -1040,11 +1040,8 @@ void GL_CreateShaders (void)
 	glprogs.bloom_combine = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_combine.frag"), "bloom combine");
 	glprogs.ssao = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao.frag"), "ssao");
 	glprogs.ssao_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao_blur.frag"), "ssao blur");
-	glprogs.fogvol = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("fogvol.frag"), "fog volumes");
-	glprogs.fogvol_global = 0;
-	glprogs.fogvol_froxel_inject = GL_CreateComputeProgram (GLSL_PATH("froxel_inject.comp"), "fogvol froxel inject");
-        for (mode = 0; mode < 2; mode++)
-                glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
+	for (mode = 0; mode < 2; mode++)
+		glprogs.oit_resolve[mode] = GL_CreateProgram (GLSL_PATH("oit_resolve.vert"), GLSL_PATH("oit_resolve.frag"), "oit resolve|MSAA %d", mode);
 
         for (oit = 0; oit < (skip_intel_oit_variants ? 1 : 2); oit++)
                 for (dither = 0; dither < 3; dither++)

@@ -326,11 +326,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClCompile Include="..\..\Quake\r_brush.c" />
     <ClCompile Include="..\..\Quake\r_dlight_pool.c" />
     <ClCompile Include="..\..\Quake\r_framegraph.c" />
-    <ClCompile Include="..\..\Quake\r_fogvol.c" />
-    <ClCompile Include="..\..\Quake\r_fogvol_entities.c" />
-    <ClCompile Include="..\..\Quake\r_fogvol_froxel.c" />
-    <ClCompile Include="..\..\Quake\r_fogvol_froxel_runtime.c" />
-    <ClCompile Include="..\..\Quake\r_fogvol_static_stub.c" />
     <ClCompile Include="..\..\Quake\r_quality.c" />
     <ClCompile Include="..\..\Quake\r_sanitize.c" />
     <ClCompile Include="..\..\Quake\r_postfx.c" />
@@ -447,7 +442,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
     <ClInclude Include="..\..\Quake\render.h" />
     <ClInclude Include="..\..\Quake\r_realtimelight.h" />
     <ClInclude Include="..\..\Quake\r_dlight_pool.h" />
-    <ClInclude Include="..\..\Quake\r_fogvol.h" />
     <ClInclude Include="..\..\Quake\resource.h" />
     <ClInclude Include="..\..\Quake\sbar.h" />
     <ClInclude Include="..\..\Quake\screen.h" />

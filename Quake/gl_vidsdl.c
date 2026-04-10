@@ -23,7 +23,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // gl_vidsdl.c -- SDL GL vid component
 
 #include "quakedef.h"
-#include "r_fogvol.h"
 #include "r_framegraph.h"
 #include "cfgfile.h"
 #include "bgmusic.h"
@@ -699,7 +698,7 @@ static void VID_RecreateRenderTargets (const char *reason, qboolean delete_exist
 	if (reason && *reason)
 		Con_DPrintf ("Recreating render targets (%s)\n", reason);
 
-	/* Drop cached frame-plan decisions before/after RT rebuilds so AA/FogVol
+	/* Drop cached frame-plan decisions before/after RT rebuilds so AA
 	 * toggles cannot reuse stale pass selection from the previous layout. */
 	R_FrameGraph_SetRenderFramePlan (NULL);
 
@@ -707,7 +706,6 @@ static void VID_RecreateRenderTargets (const char *reason, qboolean delete_exist
 		GL_DeleteFrameBuffers ();
 
 	GL_CreateFrameBuffers ();
-	R_FogVol_ClearHistory ();
 	R_FrameGraph_SetRenderFramePlan (NULL);
 }
 
@@ -1522,7 +1520,6 @@ GL_EndRendering
 */
 void GL_EndRendering (void)
 {
-	R_FogVol_LogEndFrameState ();
 	GL_ReleaseFrameResources ();
 
 	if (!scr_skipupdate)

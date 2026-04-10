@@ -158,7 +158,7 @@ static qboolean R_PPdlights_AddFrameLightCandidate (rl_frame_light_candidate_t *
 		return false;
 	}
 
-	/* Volumetric contributors should remain available for froxel fog injection. */
+	/* Volumetric contributors should remain available for volumetric effects. */
 	if (R_PPdlights_IsFrustumCulled (origin, radius)
 		&& (flags & RL_LIGHT_VOLUMETRIC_CONTRIB) == 0u)
 	{
@@ -362,7 +362,7 @@ void R_PPdlights_CollectFrame (void)
 	/*
 	 * Architecture: this is the sole frame-level gather point.
 	 * We merge dynamic + emissive contributors once, then downstream passes
-	 * (world forward lights, alias/model forward lights, froxel fog/GI) each
+	 * (world forward lights, alias/model forward lights) each
 	 * consume filtered views of this same array in their own pass budgets.
 	 */
 	active = DLightPool_GetActiveList (&active_count);

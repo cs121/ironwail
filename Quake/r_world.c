@@ -1759,8 +1759,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 	 *   decals                no (pass-order excl.)
 	 *   particles             no (pass-order excl.)
 	 * Notes:
-	 * - Alias opaque/translucent are handled in alias paths, not brush paths.
-	 * - Fog receives dlights via froxel injection, never via this pass. */
+	 * - Alias opaque/translucent are handled in alias paths, not brush paths. */
 
         if (!count)
                 return;

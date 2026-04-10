@@ -29,7 +29,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_postfx.h"
 #include "r_quality.h"
 #include "r_ssao.h"
-#include "r_fogvol.h"
 #include "r_godrays.h"
 #include "r_realtimelight.h"
 #include "r_skyvis.h"
@@ -674,11 +673,8 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_SetCallback (&r_telealpha, R_SetTelealpha_f);
 	Cvar_SetCallback (&r_slimealpha, R_SetSlimealpha_f);
 
-	/* CVar owner: r_fogvol* in r_fogvol.c. */
-	R_FogVol_RegisterCvars ();
 	R_Quality_Init ();
 	R_PostFX_Init ();
-	R_FogVol_Init ();
 
 	R_InitParticles ();
 	R_InitDecals ();
@@ -789,7 +785,7 @@ void R_Sun_ResetToDefaults (sun_t *s)
 	s->volumetric_intensity = 1.f;
 	s->anisotropy = 0.f;
 	s->shadow_bias = 0.001f;
-	s->shadow_strength = CLAMP (0.f, r_fogvol_shadow_strength.value, 4.f);
+	s->shadow_strength = 0.8f;
 	s->shadow_distance = 0.f;
 	s->ray_decay = CLAMP (0.f, r_godrays_decay.value, 1.f);
 	s->ray_density = q_max (0.f, r_godrays_density.value);
@@ -1032,7 +1028,6 @@ void R_NewMap (void)
 	VEC_CLEAR (r_pointfile);
 
 	R_ResetGodraysStabilization ();
-	R_FogVol_ClearHistory ();
 	R_ReloadDecals ();
 	R_ClearDecals ();
 
@@ -1048,10 +1043,9 @@ void R_NewMap (void)
 
         Sky_NewMap (); //johnfitz -- skybox in worldspawn
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
-        R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
-        R_Sun_UpdateFromWorld ();
-        R_ParseDlightEntities (); // persistent dlights from BSP entities
-        R_FogVol_ParseEntities (); // fog volume entities from BSP
+	R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
+	R_Sun_UpdateFromWorld ();
+	R_ParseDlightEntities (); // persistent dlights from BSP entities
 
 	// Load pointfile if map has no vis data and either developer mode is on or the game was started from a map editing tool
 	if (developer.value || map_checks.value)

@@ -25,7 +25,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cl_postfx.h"
 #include "r_postfx.h"
 #include "r_framegraph.h"
-#include "r_fogvol.h"
 #include "r_godrays.h"
 #include "r_skyvis.h"
 #include "r_ssao.h"
@@ -59,9 +58,6 @@ qboolean	r_cache_thrash;		// compatability
 
 gpuframedata_t r_framedata;
 
-static int r_fogvol_update_called = 0;
-static int r_fogvol_draw_called = 0;
-
 /* BUG FIX #1 (SSAO/Fog): GL_GenerateSSAOTexture runs inside GL_PostProcess, after
  * the 3D scene pass in R_RenderView.
  * Fog_DisableGFog clears r_framedata.fogdata[3] (density) to 0 so 2D overlays stay
@@ -71,7 +67,7 @@ static int r_fogvol_draw_called = 0;
  * fading to AO=1.0.
  * Fix: save fog params just before Fog_DisableGFog and pass them explicitly to
  * ssao.frag via uniform 14 .yzw (previously unused, only .x = max_distance). */
-/* Cached global fogvol parameters for SSAO/postprocess fog damping. */
+/* Cached global fog parameters for SSAO/postprocess fog damping. */
 static r_ssao_fog_state_t r_ssao_fog_state;
 static qboolean r_ssao_invalid_warned = false;
 
@@ -300,7 +296,7 @@ static float GL_ConsoleVisibility (void)
 	return CLAMP (0.f, scr_con_current / height, 1.f);
 }
 
-static void R_DebugDRSNativeEffects (qboolean bloom_enabled, qboolean ssao_enabled, qboolean fogvol_enabled,
+static void R_DebugDRSNativeEffects (qboolean bloom_enabled, qboolean ssao_enabled,
 	qboolean godrays_enabled, qboolean motion_enabled)
 {
 	static int last_logged_scale = 0;
@@ -327,12 +323,10 @@ static void R_DebugDRSNativeEffects (qboolean bloom_enabled, qboolean ssao_enabl
 		mask |= 1 << 0;
 	if (ssao_enabled)
 		mask |= 1 << 1;
-	if (fogvol_enabled)
-		mask |= 1 << 2;
 	if (godrays_enabled)
-		mask |= 1 << 3;
+		mask |= 1 << 2;
 	if (motion_enabled)
-		mask |= 1 << 4;
+		mask |= 1 << 3;
 
 	if (mask == 0)
 		return;
@@ -343,11 +337,10 @@ static void R_DebugDRSNativeEffects (qboolean bloom_enabled, qboolean ssao_enabl
 	last_logged_scale = scene_scale;
 	last_logged_mask = mask;
 
-	Con_DPrintf ("drs note: scene=1/%d with native-domain postfx bloom=%d ssao=%d fogvol=%d godrays=%d motion=%d\n",
+	Con_DPrintf ("drs note: scene=1/%d with native-domain postfx bloom=%d ssao=%d godrays=%d motion=%d\n",
 		scene_scale,
 		bloom_enabled ? 1 : 0,
 		ssao_enabled ? 1 : 0,
-		fogvol_enabled ? 1 : 0,
 		godrays_enabled ? 1 : 0,
 		motion_enabled ? 1 : 0);
 }
@@ -1382,38 +1375,6 @@ void GL_CreateFrameBuffers (void)
 		"composite fbo"
 	);
 	R_Shadow_CreateFrameBuffers ();
-	framebufs.fogvol.width = native_w;
-	framebufs.fogvol.height = native_h;
-	if (r_fogvol_halfres.value > 0.f)
-	{
-		framebufs.fogvol.width = q_max (1, native_w / 2);
-		framebufs.fogvol.height = q_max (1, native_h / 2);
-	}
-	for (int i = 0; i < 2; ++i)
-	{
-		const char *suffix = (i == 0) ? "fogvol color 0" : "fogvol color 1";
-		const char *fbo_suffix = (i == 0) ? "fogvol fbo 0" : "fogvol fbo 1";
-		framebufs.fogvol.color_tex[i] = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
-			framebufs.fogvol.height, GL_NEAREST, suffix);
-		framebufs.fogvol.fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.color_tex[i], 0, 0, fbo_suffix);
-	}
-	for (int i = 0; i < 2; ++i)
-	{
-		const char *suffix = (i == 0) ? "fogvol history 0" : "fogvol history 1";
-		const char *fbo_suffix = (i == 0) ? "fogvol history fbo 0" : "fogvol history fbo 1";
-		const char *composite_suffix = (i == 0) ? "fogvol composite 0" : "fogvol composite 1";
-		const char *composite_fbo_suffix = (i == 0) ? "fogvol composite fbo 0" : "fogvol composite fbo 1";
-		framebufs.fogvol.history_tex[i] = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
-			framebufs.fogvol.height, GL_NEAREST, suffix);
-		framebufs.fogvol.history_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.history_tex[i], 0, 0, fbo_suffix);
-		framebufs.fogvol.composite_tex[i] = GL_CreateTexture2D (GL_RGBA16F, framebufs.fogvol.width,
-			framebufs.fogvol.height, GL_NEAREST, composite_suffix);
-		framebufs.fogvol.composite_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.composite_tex[i], 0, 0, composite_fbo_suffix);
-	}
-	/* finalcopy stores the upscaled fog result, so it must match native output size. */
-	framebufs.fogvol.finalcopy_tex = GL_CreateTexture2D (GL_RGBA16F, native_w,
-		native_h, GL_NEAREST, "fogvol finalcopy");
-	framebufs.fogvol.finalcopy_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.fogvol.finalcopy_tex, 0, 0, "fogvol finalcopy fbo");
 
 	framebufs.autoexposure.width = 16;
 	framebufs.autoexposure.height = 16;
@@ -1571,11 +1532,6 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_scene);
 	GL_DeleteFramebuffersFunc (1, &framebufs.scene.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.composite.fbo);
-	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.fbo);
-	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.history_fbo);
-	GL_DeleteFramebuffersFunc (2, framebufs.fogvol.composite_fbo);
-	GL_DeleteFramebuffersFunc (1, &framebufs.fogvol.finalcopy_fbo);
-	R_Froxel_ResetResources ();
 	GL_DeleteFramebuffersFunc (1, &framebufs.autoexposure.fbo);
 	GL_AutoExposureDeletePBOs ();
 	for (int level = 0; level < BLOOM_MAX_LEVELS; ++level)
@@ -1596,13 +1552,6 @@ void GL_DeleteFrameBuffers (void)
 
 	GL_DeleteNativeTexture (framebufs.resolved_scene.color_tex);
 	GL_DeleteNativeTexture (framebufs.resolved_scene.velocity_tex);
-	GL_DeleteNativeTexture (framebufs.fogvol.color_tex[0]);
-	GL_DeleteNativeTexture (framebufs.fogvol.color_tex[1]);
-	GL_DeleteNativeTexture (framebufs.fogvol.history_tex[0]);
-	GL_DeleteNativeTexture (framebufs.fogvol.history_tex[1]);
-	GL_DeleteNativeTexture (framebufs.fogvol.composite_tex[0]);
-	GL_DeleteNativeTexture (framebufs.fogvol.composite_tex[1]);
-	GL_DeleteNativeTexture (framebufs.fogvol.finalcopy_tex);
 	GL_DeleteNativeTexture (framebufs.oit.revealage_tex);
 	GL_DeleteNativeTexture (framebufs.oit.accum_tex);
 	GL_DeleteNativeTexture (framebufs.scene.depth_stencil_tex);
@@ -2074,7 +2023,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_Uniform1iFunc (11, normal_source);
 	GL_Uniform1iFunc (12, 0);
 	GL_Uniform1iFunc (13, noise_mode);
-	/* Feed cached fogvol global density to SSAO instead of the removed analytic
+	/* Feed cached global fog density to SSAO instead of the removed analytic
 	 * GL fog UBO channel. */
 	GL_Uniform4fFunc (14, max_distance, r_ssao_fog_state.density,
 		r_ssao_fog_state.color[0] * 0.299f + r_ssao_fog_state.color[1] * 0.587f + r_ssao_fog_state.color[2] * 0.114f,
@@ -2163,7 +2112,6 @@ static void R_InvalidateGodraysFrameCache (void)
 
 static void R_InvalidateTemporalHistoryOnSceneResize (void)
 {
-	R_FogVol_ClearHistory ();
 	R_ResetGodraysStabilization ();
 	R_InvalidateGodraysFrameCache ();
 	r_prev_frame_valid = false;
@@ -2171,9 +2119,7 @@ static void R_InvalidateTemporalHistoryOnSceneResize (void)
 
 static qboolean R_GodraysMediumEnabled (void)
 {
-	/* Godrays are a volumetric effect and should only run when a volumetric
-	 * fog medium path is active (fog volumes and/or froxel fog). */
-	return R_FogVol_ShouldAffectPostFX ();
+	return true;
 }
 
 static void R_GetGodraysLightPos_Current (float *out_x, float *out_y)
@@ -2296,34 +2242,6 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 }
 
 
-typedef struct medium_scatter_source_s {
-	GLuint texture;
-	float valid;
-} medium_scatter_source_t;
-
-static medium_scatter_source_t GL_GetMediumScatterSource (void)
-{
-	medium_scatter_source_t medium = { 0, 0.f };
-
-	/*
-	 * Medium scatter/transmittance texture contract (shared by postprocess + godrays):
-	 *  - RGB: medium in-scatter/radiance already composited in display space.
-	 *  - A:   medium coverage proxy = 1 - transmittance.
-	 *         Expected normalized range: [0, 1] where 0 means no medium and 1 means
-	 *         fully opaque medium for this pixel.
-	 *  - valid: CPU-side frame validity gate. Only sample texture when valid > 0.5.
-	 *
-	 * Compatibility layer: FogVol is the first implementation of this interface.
-	 */
-	if (R_FogVol_HasValidComposite ())
-	{
-		medium.texture = R_FogVol_GetCompositeTex ();
-		medium.valid = 1.f;
-	}
-
-	return medium;
-}
-
 static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 {
 	int width = framebufs.godrays.width;
@@ -2368,18 +2286,13 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 	float light_y = 0.5f;
 	float stabilized_x = light_x;
 	float stabilized_y = light_y;
-	medium_scatter_source_t medium = { 0, 0.f };
 	GLuint volumetric_tex = 0;
 	float volumetric_enabled = 0.f;
 
 	R_GetGodraysLightPos_Current (&light_x, &light_y);
 
-	if (r_godrays.value > 0.f)
-	{
-		medium = GL_GetMediumScatterSource ();
-		volumetric_tex = medium.texture;
-		volumetric_enabled = medium.valid;
-	}
+	(void)volumetric_tex;
+	(void)volumetric_enabled;
 
 	{
 		r_godrays_stabilize_input_t stabilize_input;
@@ -2544,25 +2457,6 @@ static void R_EnsureGodraysTexturesForFrame (qboolean allow_debug_source)
 
 	r_godrays_cached_source = framebufs.godrays.source_tex;
 }
-
-static void R_PrepareFogVolInputs (void)
-{
-	const qboolean need_godray_inputs = R_FogVol_IsEnabledForFrame () && R_FogVol_HasRenderableContent ();
-
-	if (!need_godray_inputs || !R_FogVol_IsEnabledForFrame () || !R_FogVol_HasRenderableContent ())
-	{
-		R_FogVol_SetGodrayCouplingTextures (0, 0, 0, false);
-		return;
-	}
-
-	R_EnsureGodraysTexturesForFrame (false);
-	R_FogVol_SetGodrayCouplingTextures (
-		r_godrays_cached_shafts,
-		r_godrays_cached_mask,
-		r_godrays_cached_source,
-		r_godrays_cached_shafts != 0);
-}
-
 
 static qboolean GL_ShouldApplyMotionBlur (void)
 {
@@ -2932,27 +2826,6 @@ static float GL_UpdateAutoExposure (void)
 }
 
 
-static void GL_PostProcess_SetMediumScatterUniforms (const r_ssao_fog_state_t *fog_state)
-{
-	medium_scatter_source_t medium = { 0, 0.f };
-	float fogvol_valid = 0.f;
-	float transmittance_policy = (float)R_SSAO_FOG_TRANS_GLOBAL_ONLY;
-
-	if (fog_state)
-	{
-		fogvol_valid = fog_state->fogvol_valid ? 1.f : 0.f;
-		transmittance_policy = (float)fog_state->transmittance_policy;
-	}
-
-	/* Framegraph fog handoff captures whether FogVol composite is valid for this
-	 * frame; only sample the medium texture when that handoff says it's ready. */
-	if (fogvol_valid > 0.5f)
-		medium = GL_GetMediumScatterSource ();
-
-	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, medium.texture);
-	GL_Uniform4fFunc (27, medium.valid, transmittance_policy, 0.f, 0.f);
-}
-
 static float GL_ComputeEffectiveBloomIntensity (float bloom_base, float bloom_boost)
 {
 	float base = q_max (0.f, bloom_base);
@@ -3232,7 +3105,6 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	R_DebugDRSNativeEffects (
 		bloom_intensity_effective > 0.f,
 		ssao_texture != 0 && ssao_intensity > 0.f,
-		R_FogVol_ShouldAffectPostFX (),
 		godrays_texture != 0,
 		motion_enabled);
 
@@ -3263,10 +3135,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, godrays_source);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, ssao_texture);
 	GL_BindNative (GL_TEXTURE9, GL_TEXTURE_2D_ARRAY, R_PostFX_GetLUTTexture ());
-	/* Bind medium scatter/transmittance texture at slot 10 for SSAO suppression
-	 * in postprocess.frag. The current implementation sources FogVol composite via
-	 * GL_GetMediumScatterSource(), preserving validity gating and stale-handle safety. */
-	GL_PostProcess_SetMediumScatterUniforms (&r_ssao_fog_state);
+	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, 0);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	{
 		float post_contrast = CLAMP (0.8f, r_color_contrast.value, 1.2f);
@@ -3315,7 +3184,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		postfx_state.underwater_postfx_active ? postfx_state.underwater_fog_strength : 0.f,
 		postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
-	/* Postprocess SSAO damping uses the cached fogvol global density instead of
+	/* Postprocess SSAO damping uses the cached global fog density instead of
 	 * the removed analytic GL fog UBO channel. */
 	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, r_ssao_fog_state.density);
 	{
@@ -4018,11 +3887,10 @@ GL_NeedsSceneEffects
 =============
 */
 
-static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
+static qboolean GL_NeedsPostprocess_Internal (void)
 {
 	float saturation;
 	qboolean godrays_medium;
-	qboolean fogvol_requested = R_FogVol_IsEnabledForFrame ();
 
 	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
@@ -4040,15 +3908,11 @@ static qboolean GL_NeedsPostprocess_Internal (qboolean include_fogvol)
 	godrays_medium = R_GodraysMediumEnabled ();
 	if (r_godrays.value > 0.f && godrays_medium)
 		return true;
-	if (include_fogvol && fogvol_requested)
-		return true;
 	return false;
 }
 
 qboolean GL_NeedsSceneEffects (void)
 {
-	qboolean fogvol_active = R_FogVol_IsEnabledForFrame ();
-
 	if (framebufs.scene.samples > 1 || water_warp || R_GetSceneRenderScale () != 1)
 		return true;
 
@@ -4059,10 +3923,7 @@ qboolean GL_NeedsSceneEffects (void)
         if (GL_ShouldApplyMotionBlur ())
 		return true;
 
-        if (R_DoFEnabled ())
-		return true;
-
-	if (fogvol_active)
+	if (R_DoFEnabled ())
 		return true;
 
 	return false;
@@ -4075,7 +3936,7 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
-	return GL_NeedsPostprocess_Internal (true);
+	return GL_NeedsPostprocess_Internal ();
 }
 
 static void R_GetFramePlanDecisions (qboolean *out_needs_scene_effects, qboolean *out_needs_postprocess)
@@ -4117,13 +3978,8 @@ static void R_EnsureRenderTargetSampleState (void)
 	int desired_scene_h = R_GetSceneRenderHeight ();
 	int current_scene_w = framebufs.scene.width > 0 ? framebufs.scene.width : desired_scene_w;
 	int current_scene_h = framebufs.scene.height > 0 ? framebufs.scene.height : desired_scene_h;
-	int desired_fog_w = (r_fogvol_halfres.value > 0.f) ? q_max (1, R_GetNativeRenderWidth () / 2) : R_GetNativeRenderWidth ();
-	int desired_fog_h = (r_fogvol_halfres.value > 0.f) ? q_max (1, R_GetNativeRenderHeight () / 2) : R_GetNativeRenderHeight ();
-	int current_fog_w = framebufs.fogvol.width > 0 ? framebufs.fogvol.width : desired_fog_w;
-	int current_fog_h = framebufs.fogvol.height > 0 ? framebufs.fogvol.height : desired_fog_h;
 	qboolean sample_changed = (current_samples != desired_samples);
 	qboolean size_grow_required = (current_scene_w < desired_scene_w || current_scene_h < desired_scene_h);
-	qboolean fog_size_changed = (current_fog_w != desired_fog_w || current_fog_h != desired_fog_h);
 
 	if (r_scene_resize_pending_invalidation)
 	{
@@ -4131,12 +3987,11 @@ static void R_EnsureRenderTargetSampleState (void)
 		r_scene_resize_pending_invalidation = false;
 	}
 
-	if (!sample_changed && !size_grow_required && !fog_size_changed)
+	if (!sample_changed && !size_grow_required)
 		return;
 
-	Con_DPrintf ("Recreating render targets (scene %dx%d -> %dx%d, fog %dx%d -> %dx%d, samples %d -> %d)\n",
+	Con_DPrintf ("Recreating render targets (scene %dx%d -> %dx%d, samples %d -> %d)\n",
 		current_scene_w, current_scene_h, desired_scene_w, desired_scene_h,
-		current_fog_w, current_fog_h, desired_fog_w, desired_fog_h,
 		current_samples, desired_samples);
 	GL_DeleteFrameBuffers ();
 	GL_CreateFrameBuffers ();
@@ -4555,7 +4410,7 @@ void R_SetupView (void)
 
 	R_PushDlights ();
 	/* Build one shared light-collection list for this frame; forward world/model
-	 * and froxel fog/GI passes consume it later. This is scene-light plumbing,
+	 * passes consume it later. This is scene-light plumbing,
 	 * not a fullscreen postprocess lighting pass. */
 	R_PPdlights_CollectFrame ();
 
@@ -5633,7 +5488,6 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	qboolean force_blit_upscale;
 	qboolean effective_dof_enabled;
 	qboolean effective_ssao_enabled;
-	qboolean effective_fogvol_enabled;
 	qboolean effective_godrays_preview;
 	qboolean needs_scene_effects = false;
 	qboolean needs_postprocess = false;
@@ -5654,10 +5508,9 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	fbodest = needs_postprocess ? composite_fbo : 0;
 	effective_dof_enabled = R_PostFX_DoFEnabledEffective ();
 	effective_ssao_enabled = ((r_ssao.value > 0.f && r_ssao_intensity.value > 0.f) || r_ssao_debug.value > 0.f);
-	effective_fogvol_enabled = R_FogVol_ShouldAffectPostFX ();
 	effective_godrays_preview = R_PostFX_GodraysPreviewEnabledEffective ();
 	need_depth_resolve = (fbodest == composite_fbo)
-		&& (effective_dof_enabled || effective_ssao_enabled || effective_fogvol_enabled || effective_godrays_preview);
+		&& (effective_dof_enabled || effective_ssao_enabled || effective_godrays_preview);
 
 	if (msaa)
 	{
@@ -5784,12 +5637,6 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 		framesetup.composite_ready = true;
 }
 
-static void R_FG_ExecFogVolPrepare (RenderPassContext *ctx)
-{
-	(void)ctx;
-	R_PrepareFogVolInputs ();
-}
-
 static void R_FG_ExecSetupView (RenderPassContext *ctx)
 {
 	(void)ctx;
@@ -5870,17 +5717,6 @@ static const RenderPassDesc s_warp_resolve_framegraph_pass = {
 	FG_PASS_STATS_WARP
 };
 
-static const RenderPassDesc s_fogvol_prepare_framegraph_pass = {
-	"Prepare fogvol inputs",
-	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH,
-	RENDER_RES_FOGVOL_INPUTS,
-	0,
-	FG_PASS_OUTPUT_KEEP,
-	FG_PASS_VIEWPORT_KEEP,
-	NULL,
-	R_FG_ExecFogVolPrepare
-};
-
 static qboolean R_FG_HasResources (const RenderPassContext *ctx, unsigned required)
 {
 	unsigned available = RENDER_RES_NONE;
@@ -5896,103 +5732,22 @@ static qboolean R_FG_HasResources (const RenderPassContext *ctx, unsigned requir
 		available |= RENDER_RES_COMPOSITE_COLOR;
 	if (ctx->resources->shadow_sun_depth_tex)
 		available |= RENDER_RES_SHADOW_SUN_DEPTH;
-	if (ctx->resources->fogvol_history_tex)
-		available |= RENDER_RES_FOGVOL_HISTORY;
 	if (ctx->resources->velocity_tex)
 		available |= RENDER_RES_VELOCITY;
 
 	return (available & required) == required;
 }
 
-static qboolean R_FG_PassWhenFogVolEnabled (const RenderPassContext *ctx)
-{
-	return ctx && ctx->frame_plan
-		&& ctx->frame_plan->run_fogvol
-		&& R_FG_HasResources (ctx, RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_FOGVOL_HISTORY);
-}
-
-static qboolean R_FG_FogVolNeedsSunShadow (const RenderPassContext *ctx)
-{
-	return ctx
-		&& ctx->frame_plan
-		&& ctx->frame_plan->run_shadowmaps
-		&& ctx->resources
-		&& ctx->resources->shadow_sun_depth_tex
-		&& (r_fogvol_shadow.value > 0.f)
-		&& (r_fogvol_froxel_sun.value > 0.f);
-}
-
-static qboolean R_FG_PassWhenFogVolWithShadow (const RenderPassContext *ctx)
-{
-	return R_FG_PassWhenFogVolEnabled (ctx)
-		&& R_FG_FogVolNeedsSunShadow (ctx);
-}
-
-static qboolean R_FG_PassWhenFogVolNoShadow (const RenderPassContext *ctx)
-{
-	return R_FG_PassWhenFogVolEnabled (ctx)
-		&& !R_FG_FogVolNeedsSunShadow (ctx);
-}
-
-static void R_FG_ExecFogVol (RenderPassContext *ctx)
-{
-	(void)ctx;
-	r_fogvol_update_called++;
-	R_FogVol_BuildList ();
-	r_fogvol_draw_called++;
-	R_FogVol_Render ();
-}
-
-static void R_FG_ExecFogVolNoShadow (RenderPassContext *ctx)
-{
-	if (r_framegraph_debug.value > 0.f)
-	{
-		if (ctx && ctx->resources && ctx->resources->shadow_sun_depth_tex == 0)
-			Con_DPrintf ("FrameGraph: fogvol using no-shadow resource contract (shadow depth optional)\n");
-		else if (ctx && ctx->resources && ctx->resources->shadow_sun_depth_tex != 0)
-			Con_DPrintf ("FrameGraph: fogvol selected no-shadow contract while shadow depth exists (feature toggle path)\n");
-	}
-
-	R_FG_ExecFogVol (ctx);
-}
-
-static const RenderPassDesc s_fogvol_framegraph_pass_shadow = {
-	"Render fog volumes (shadowed)",
-	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_SHADOW_SUN_DEPTH | RENDER_RES_FOGVOL_HISTORY | RENDER_RES_VELOCITY | RENDER_RES_FOGVOL_INPUTS,
-	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_FOGVOL_HISTORY,
-	1u << 0,
-	FG_PASS_OUTPUT_KEEP,
-	FG_PASS_VIEWPORT_KEEP,
-	R_FG_PassWhenFogVolWithShadow,
-	R_FG_ExecFogVol,
-	FG_PASS_STAGE_MAIN,
-	FG_PASS_STATS_FOG
-};
-
-static const RenderPassDesc s_fogvol_framegraph_pass_noshadow = {
-	"Render fog volumes (no-shadow)",
-	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_FOGVOL_HISTORY | RENDER_RES_VELOCITY | RENDER_RES_FOGVOL_INPUTS,
-	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_FOGVOL_HISTORY,
-	1u << 0,
-	FG_PASS_OUTPUT_KEEP,
-	FG_PASS_VIEWPORT_KEEP,
-	R_FG_PassWhenFogVolNoShadow,
-	R_FG_ExecFogVolNoShadow,
-	FG_PASS_STAGE_MAIN,
-	FG_PASS_STATS_FOG
-};
-
 static void R_FG_ExecSSAOFogHandoff (RenderPassContext *ctx)
 {
 	(void)ctx;
-	/* Capture both global fog parameters and fogvol composite validity so
-	 * postprocess SSAO suppression uses deterministic source selection. */
+	/* Capture global fog parameters for deterministic postprocess SSAO suppression. */
 	R_SSAO_CaptureFogState (&r_framedata, &r_ssao_fog_state);
 }
 
 static const RenderPassDesc s_ssao_fog_handoff_framegraph_pass = {
 	"Capture fog handoff",
-	/* Captures CPU-side global fog + fogvol availability into SSAO handoff data. */
+	/* Captures CPU-side global fog into SSAO handoff data. */
 	RENDER_RES_NONE,
 	RENDER_RES_SSAO_FOG_STATE,
 	0,
@@ -6104,10 +5859,7 @@ void R_RegisterFrameGraphPasses (void)
 	(void)R_FrameGraph_AddPass (&s_shadowmaps_framegraph_pass);
 	(void)R_FrameGraph_AddPass (&s_scene_framegraph_pass);
 	(void)R_FrameGraph_AddPass (&s_warp_resolve_framegraph_pass);
-	(void)R_FrameGraph_AddPass (&s_fogvol_prepare_framegraph_pass);
 	R_Decals_RegisterFrameGraphPasses ();
-	(void)R_FrameGraph_AddPass (&s_fogvol_framegraph_pass_shadow);
-	(void)R_FrameGraph_AddPass (&s_fogvol_framegraph_pass_noshadow);
 	(void)R_FrameGraph_AddPass (&s_ssao_fog_handoff_framegraph_pass);
 	(void)R_FrameGraph_AddPass (&s_postprocess_framegraph_pass);
 	(void)R_FrameGraph_AddPass (&s_viewmodel_framegraph_pass);
@@ -6147,11 +5899,6 @@ void R_RenderView (void)
 
 	R_InvalidateGodraysFrameCache ();
 	R_FrameGraph_RenderView ();
-	if (r_gl_state_validate.value > 0.f && r_framegraph_debug.value > 0.f)
-	{
-		Con_DPrintf ("fogvol_update_called=%d r_fogvol=%.1f\n", r_fogvol_update_called, r_fogvol.value);
-		Con_DPrintf ("fogvol_draw_called=%d r_fogvol=%.1f\n", r_fogvol_draw_called, r_fogvol.value);
-	}
 
 	//johnfitz -- modified r_speeds output
 	time2 = Sys_DoubleTime ();

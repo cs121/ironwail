@@ -10,7 +10,7 @@
  * 3) Fan the same list out to each consumer:
  *    - forward world dlight pass
  *    - forward alias/model pass
- *    - froxel fog + GI injection
+ *    - additional volumetric/light consumers
  *
  * This is not a fullscreen postprocess pass; it is shared scene-light plumbing.
  */

@@ -709,15 +709,10 @@ typedef struct glprogs_s {
 	GLuint		ssao;
 	GLuint		ssao_blur;
 	GLuint		godrays_mask;
-	GLuint		godrays;
-	GLuint		godrays_source;
-	GLuint		godrays_source_sky;
-	GLuint		fogvol;
-	GLuint		fogvol_global;
-	GLuint		fogvol_clustered;
-	GLuint		fogvol_temporal;
-	GLuint		fogvol_froxel_inject;
-	GLuint		oit_resolve[2];		// [msaa]
+		GLuint		godrays;
+		GLuint		godrays_source;
+		GLuint		godrays_source_sky;
+		GLuint		oit_resolve[2];		// [msaa]
 
 	/* 3d */
 	GLuint		world[2][3][3];		// [OIT][standard/dithered/banded][solid/alpha test/water]
@@ -739,15 +734,13 @@ typedef struct glprogs_s {
 	/* compute */
 	GLuint		clear_indirect;
 	GLuint		gather_indirect;
-	GLuint		cull_mark;
-	GLuint		q3p_sim;
-	GLuint		q3p_cull_key;
-	GLuint		gpu_bitonic_pairs;
-	GLuint		fogvol_dlight_score;
-	GLuint		fogvol_static_build;
-	GLuint		palette_init[3];	// [metric:naive/riemersma/oklab]
-	GLuint		palette_postprocess;
-} glprogs_t;
+		GLuint		cull_mark;
+		GLuint		q3p_sim;
+		GLuint		q3p_cull_key;
+		GLuint		gpu_bitonic_pairs;
+		GLuint		palette_init[3];	// [metric:naive/riemersma/oklab]
+		GLuint		palette_postprocess;
+	} glprogs_t;
 
 extern glprogs_t glprogs;
 
@@ -791,19 +784,6 @@ typedef struct glframebufs_s {
 		GLuint		depth_stencil_tex;
 		GLuint		fbo;
 	}				composite;
-
-	struct {
-		GLuint		color_tex[2];
-		GLuint		fbo[2];
-		GLuint		history_tex[2];
-		GLuint		history_fbo[2];
-		GLuint		composite_tex[2];
-		GLuint		composite_fbo[2];
-		GLuint		finalcopy_tex;
-		GLuint		finalcopy_fbo;
-		int			width;
-		int			height;
-	}				fogvol;
 
 	struct {
 		GLuint		extract_tex[BLOOM_MAX_LEVELS];

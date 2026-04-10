@@ -19,10 +19,9 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
-//gl_fog.c -- global and volumetric fog
+//gl_fog.c -- global fog
 
 #include "quakedef.h"
-#include "r_fogvol.h"
 
 //==============================================================================
 //
@@ -187,8 +186,7 @@ called at map load
 */
 void Fog_ParseWorldspawn (void)
 {
-	/* Keep the legacy state initialized to "no fog", but do not parse the
-	 * worldspawn fog key anymore. Global fog is owned by r_fogvol cvars now. */
+	/* Keep legacy state initialized to "no fog"; worldspawn parsing stays disabled. */
 	fog_density = DEFAULT_DENSITY;
 	fog_red = DEFAULT_GRAY;
 	fog_green = DEFAULT_GRAY;
@@ -328,7 +326,7 @@ called whenever a map is loaded
 void Fog_NewMap (void)
 {
 	Fog_ParseWorldspawn ();
-	Fog_MarkModels (); //for volumetric fog
+	Fog_MarkModels ();
 }
 
 /*
@@ -342,8 +340,7 @@ void Fog_Init (void)
 {
 	//Cvar_RegisterVariable (&r_vfog);
 
-	/* Legacy analytic fog command/path removed; volumetric fog is configured
-	 * entirely through r_fogvol_* cvars. */
+	/* Legacy analytic fog command/path removed. */
 	fog_density = DEFAULT_DENSITY;
 	fog_red = DEFAULT_GRAY;
 	fog_green = DEFAULT_GRAY;

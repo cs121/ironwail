@@ -13,7 +13,6 @@ This directory tracks engine-facing implementation notes and feature references.
 - `ssao.md` - SSAO conventions, debug modes, and controls.
 
 ## Design/debug notes
-- `fogvol_debug_notes.md`
 - `particle_debug_mvp.md`
 - `particle_material_contract.md`
 - `q3p_phase0_particle_mapping.md`

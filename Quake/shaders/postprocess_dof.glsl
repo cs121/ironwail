@@ -1,6 +1,6 @@
 void ApplyDepthOfField(inout vec4 color, vec2 uv, vec2 invTexSize, bool inView, bool centerOpaque, DepthSamplingInfo depthInfo, float viewModelMask)
 {
-        // Do not gate DoF on color alpha: fogvol/medium passes may repurpose alpha
+	// Do not gate DoF on color alpha: intermediate passes may repurpose alpha
         // while depth remains valid for DoF classification.
         if (!(DoFParams0.x > 0.5 && inView && depthInfo.valid && viewModelMask < 0.5))
                 return;

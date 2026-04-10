@@ -2,8 +2,6 @@
 
 #include "r_framegraph.h"
 
-#include "r_fogvol.h"
-
 #ifndef GL_CLIP_DEPTH_MODE
 #define GL_CLIP_DEPTH_MODE 0x935D
 #endif
@@ -553,7 +551,6 @@ static void FG_BuildResourceHandles (RenderGraphResourceHandle *out_handles)
 	out_handles->resolved_scene_color_tex = framebufs.resolved_scene.color_tex;
 	out_handles->resolved_scene_velocity_tex = framebufs.resolved_scene.velocity_tex;
 	out_handles->shadow_sun_depth_tex = framebufs.shadow.sun_depth_tex;
-	out_handles->fogvol_history_tex = framebufs.fogvol.history_tex[0];
 	out_handles->velocity_tex = (framebufs.scene.samples > 1) ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
 }
 
@@ -851,7 +848,6 @@ void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan)
 	out_plan->needs_scene_effects = GL_NeedsSceneEffects ();
 	out_plan->needs_postprocess = GL_NeedsPostprocess ();
 	out_plan->run_shadowmaps = (r_shadow.value > 0.f);
-	out_plan->run_fogvol = R_FogVol_IsEnabledForFrame ();
 	out_plan->run_postprocess = out_plan->needs_postprocess;
 	out_plan->run_viewmodel = true;
 	out_plan->run_polyblend = true;

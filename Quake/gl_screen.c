@@ -24,7 +24,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // screen.c -- master for refresh, status bar, console, chat, notify, etc
 
 #include "quakedef.h"
-#include "r_fogvol.h"
 #include "steam.h"
 #include <time.h>
 
@@ -2219,7 +2218,6 @@ void SCR_UpdateScreen (void)
 	GL_BeginGroup ("2D");
 
 	GL_Set2D ();
-	R_FogVol_DrawDebug2D ();
 
 	//FIXME: only call this when needed
 	SCR_TileClear ();
