@@ -2,26 +2,12 @@
 
 #include "r_framegraph.h"
 
-#ifndef GL_CLIP_DEPTH_MODE
-#define GL_CLIP_DEPTH_MODE 0x935D
-#endif
-#ifndef GL_NEGATIVE_ONE_TO_ONE
-#define GL_NEGATIVE_ONE_TO_ONE 0x935E
-#endif
-#ifndef GL_ZERO_TO_ONE
-#define GL_ZERO_TO_ONE 0x935F
-#endif
-#ifndef GL_TIMESTAMP
-#define GL_TIMESTAMP 0x8E28
-#endif
-
 void R_RegisterFrameGraphPasses (void);
 
 enum
 {
-	FG_TIMER_QUERY_RING = 3,
 	FG_MAX_RUNTIME_PASSES = 64,
-	FG_MAX_PROFILE_SLOTS = 128
+	FG_MAX_PROFILE_SLOTS = R_BACKEND_MAX_PROFILE_SLOTS
 };
 
 typedef struct fg_runtime_pass_entry_s
@@ -29,14 +15,6 @@ typedef struct fg_runtime_pass_entry_s
 	const RenderPassDesc *desc;
 	int profile_slot;
 } fg_runtime_pass_entry_t;
-
-typedef struct framegraph_timer_slot_s
-{
-	GLuint start_query;
-	GLuint end_query;
-	int frame_index;
-	qboolean issued;
-} framegraph_timer_slot_t;
 
 typedef struct framegraph_pass_stats_s
 {
@@ -46,9 +24,6 @@ typedef struct framegraph_pass_stats_s
 	double gpu_avg_ms;
 	unsigned cpu_samples;
 	unsigned gpu_samples;
-	framegraph_timer_slot_t timer_slots[FG_TIMER_QUERY_RING];
-	int timer_write_index;
-	int timer_active_slot_plus_one;
 } framegraph_pass_stats_t;
 
 typedef struct framegraph_channel_stats_s
@@ -72,26 +47,12 @@ static qboolean s_pass_registration_locked = false;
 static unsigned s_cycle_warning_signature = 0u;
 static qboolean s_cycle_warning_emitted = false;
 
-static void FG_Backend_BeginPass (const char *name);
-static void FG_Backend_EndPass (void);
-static void FG_Backend_ValidatePassState (const char *pass_name, qboolean before_pass);
-static void FG_Backend_BeginTimer (int pass_id);
-static void FG_Backend_EndTimer (int pass_id);
-static void FG_Backend_ResolveTimers (void);
+static render_backend_resource_ref_t FG_MakeResourceRef (render_backend_resource_type_t type, render_backend_resource_slot_t slot);
 static qboolean FG_AddRuntimePassInternal (const RenderPassDesc *pass_desc);
 static int FG_FindOrCreateProfileSlot (const RenderPassDesc *pass_desc);
 static int FG_MoveSetupStagePassesToFront (void);
 static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count);
-
-static const IRenderBackend s_gl_backend = {
-	"OpenGL",
-	FG_Backend_BeginPass,
-	FG_Backend_EndPass,
-	FG_Backend_ValidatePassState,
-	FG_Backend_BeginTimer,
-	FG_Backend_EndTimer,
-	FG_Backend_ResolveTimers
-};
+static void FG_ConsumeBackendTimerSamples (const IRenderBackend *backend);
 
 static qboolean FG_AddRuntimePassInternal (const RenderPassDesc *pass_desc)
 {
@@ -353,183 +314,30 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 		s_runtime_passes[first_pass + i] = sorted[i];
 }
 
-static qboolean FG_Backend_HasTimestampQueries (void)
+static render_backend_resource_ref_t FG_MakeResourceRef (render_backend_resource_type_t type, render_backend_resource_slot_t slot)
 {
-	return (GL_GenQueriesFunc && GL_DeleteQueriesFunc
-		&& GL_QueryCounterFunc
-		&& GL_GetQueryObjectuivFunc
-		&& GL_GetQueryObjectui64vFunc);
+	render_backend_resource_ref_t ref;
+	ref.type = (unsigned char)type;
+	ref.slot = (unsigned short)slot;
+	return ref;
 }
 
-static void FG_Backend_BeginPass (const char *name)
+static void FG_ConsumeBackendTimerSamples (const IRenderBackend *backend)
 {
-	GL_BeginGroup (name);
-}
+	int i;
 
-static void FG_Backend_EndPass (void)
-{
-	GL_EndGroup ();
-}
-
-static void FG_Backend_ValidatePassState (const char *pass_name, qboolean before_pass)
-{
-	GLenum err;
-
-	if (r_gl_state_validate.value <= 0.f)
-		return;
-
-	err = glGetError ();
-	if (err != GL_NO_ERROR)
-		Con_Warning ("FrameGraph %s(%s): GL error 0x%x\n", before_pass ? "before" : "after", pass_name, (unsigned)err);
-
-	{
-		GLint draw_fbo = 0;
-		GLint viewport[4] = {0};
-		glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
-		glGetIntegerv (GL_VIEWPORT, viewport);
-		if (viewport[2] <= 0 || viewport[3] <= 0)
-			Con_Warning ("FrameGraph %s(%s): invalid viewport %d %d %d %d\n",
-				before_pass ? "before" : "after",
-				pass_name,
-				viewport[0], viewport[1], viewport[2], viewport[3]);
-		if (draw_fbo && GL_CheckFramebufferStatusFunc)
-		{
-			GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
-			if (status != GL_FRAMEBUFFER_COMPLETE)
-				Con_Warning ("FrameGraph %s(%s): incomplete FBO %d status=0x%x\n",
-					before_pass ? "before" : "after",
-					pass_name, draw_fbo, (unsigned)status);
-		}
-	}
-
-	if (gl_clipcontrol_able)
-	{
-		GLint clip_depth_mode = GL_ZERO_TO_ONE;
-		glGetIntegerv (GL_CLIP_DEPTH_MODE, &clip_depth_mode);
-		if (clip_depth_mode != GL_ZERO_TO_ONE && clip_depth_mode != GL_NEGATIVE_ONE_TO_ONE)
-			Con_Warning ("FrameGraph %s(%s): invalid clip depth mode 0x%x\n",
-				before_pass ? "before" : "after",
-				pass_name, (unsigned)clip_depth_mode);
-	}
-}
-
-static void FG_Backend_BeginTimer (int pass_id)
-{
-	framegraph_timer_slot_t *slot;
-	framegraph_pass_stats_t *stats;
-	int attempts;
-	int slot_index;
-
-	if (!FG_Backend_HasTimestampQueries ())
-		return;
-	if (pass_id < 0 || pass_id >= s_profile_slot_count)
-		return;
-
-	stats = &s_pass_stats[pass_id];
-	if (stats->timer_active_slot_plus_one != 0)
-		return;
-
-	for (attempts = 0; attempts < FG_TIMER_QUERY_RING; ++attempts)
-	{
-		slot_index = (stats->timer_write_index + attempts) % FG_TIMER_QUERY_RING;
-		slot = &stats->timer_slots[slot_index];
-		if (slot->issued)
-			continue;
-
-		if (!slot->start_query || !slot->end_query)
-		{
-			GL_GenQueriesFunc (1, &slot->start_query);
-			GL_GenQueriesFunc (1, &slot->end_query);
-			if (!slot->start_query || !slot->end_query)
-			{
-				if (slot->start_query)
-					GL_DeleteQueriesFunc (1, &slot->start_query);
-				if (slot->end_query)
-					GL_DeleteQueriesFunc (1, &slot->end_query);
-				slot->start_query = 0;
-				slot->end_query = 0;
-				return;
-			}
-		}
-
-		stats->timer_active_slot_plus_one = slot_index + 1;
-		GL_QueryCounterFunc (slot->start_query, GL_TIMESTAMP);
-		return;
-	}
-}
-
-static void FG_Backend_EndTimer (int pass_id)
-{
-	framegraph_timer_slot_t *slot;
-	framegraph_pass_stats_t *stats;
-	int slot_index;
-
-	if (!FG_Backend_HasTimestampQueries ())
-		return;
-	if (pass_id < 0 || pass_id >= s_profile_slot_count)
-		return;
-
-	stats = &s_pass_stats[pass_id];
-	if (stats->timer_active_slot_plus_one == 0)
-		return;
-
-	slot_index = stats->timer_active_slot_plus_one - 1;
-	slot = &stats->timer_slots[slot_index];
-
-	if (!slot->start_query || !slot->end_query)
-	{
-		stats->timer_active_slot_plus_one = 0;
-		return;
-	}
-
-	GL_QueryCounterFunc (slot->end_query, GL_TIMESTAMP);
-	slot->issued = true;
-	slot->frame_index = r_framecount;
-	stats->timer_active_slot_plus_one = 0;
-	stats->timer_write_index = (slot_index + 1) % FG_TIMER_QUERY_RING;
-}
-
-static void FG_Backend_ResolveTimers (void)
-{
-	int i, slot_index;
-
-	if (!FG_Backend_HasTimestampQueries ())
+	if (!backend || !backend->consume_timer_sample)
 		return;
 
 	for (i = 0; i < s_profile_slot_count; ++i)
 	{
+		double gpu_ms = 0.0;
 		framegraph_pass_stats_t *stats = &s_pass_stats[i];
-
-		for (slot_index = 0; slot_index < FG_TIMER_QUERY_RING; ++slot_index)
-		{
-			framegraph_timer_slot_t *slot = &stats->timer_slots[slot_index];
-			GLuint available = 0;
-			GLuint64 start_ns = 0;
-			GLuint64 end_ns = 0;
-			double gpu_ms;
-
-			if (!slot->issued || !slot->start_query || !slot->end_query)
-				continue;
-			if (slot->frame_index > r_framecount - FG_TIMER_QUERY_RING)
-				continue;
-
-			GL_GetQueryObjectuivFunc (slot->end_query, GL_QUERY_RESULT_AVAILABLE, &available);
-			if (!available)
-				continue;
-
-			GL_GetQueryObjectui64vFunc (slot->start_query, GL_QUERY_RESULT, &start_ns);
-			GL_GetQueryObjectui64vFunc (slot->end_query, GL_QUERY_RESULT, &end_ns);
-
-			if (end_ns >= start_ns)
-				gpu_ms = (double)(end_ns - start_ns) / 1000000.0;
-			else
-				gpu_ms = 0.0;
-
-			stats->gpu_ms = gpu_ms;
-			stats->gpu_avg_ms = (stats->gpu_samples == 0) ? gpu_ms : (stats->gpu_avg_ms * 0.8 + gpu_ms * 0.2);
-			stats->gpu_samples++;
-			slot->issued = false;
-		}
+		if (!backend->consume_timer_sample (i, &gpu_ms))
+			continue;
+		stats->gpu_ms = gpu_ms;
+		stats->gpu_avg_ms = (stats->gpu_samples == 0) ? gpu_ms : (stats->gpu_avg_ms * 0.8 + gpu_ms * 0.2);
+		stats->gpu_samples++;
 	}
 }
 
@@ -539,19 +347,19 @@ static void FG_BuildResourceHandles (RenderGraphResourceHandle *out_handles)
 		return;
 
 	memset (out_handles, 0, sizeof (*out_handles));
-	out_handles->scene_fbo = framebufs.scene.fbo;
-	out_handles->scene_color_tex = framebufs.scene.color_tex;
-	out_handles->scene_velocity_tex = framebufs.scene.velocity_tex;
-	out_handles->composite_fbo = framebufs.composite.fbo;
-	out_handles->composite_color_tex = framebufs.composite.color_tex;
-	out_handles->composite_depth_tex = framebufs.composite.depth_stencil_tex;
-	out_handles->scene_depth_tex = framebufs.scene.depth_stencil_tex;
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_SCENE_FBO] = FG_MakeResourceRef (R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_SCENE_FBO);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_SCENE_COLOR] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO] = FG_MakeResourceRef (R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO] = FG_MakeResourceRef (R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);
+	out_handles->refs[R_BACKEND_RESOURCE_SLOT_VELOCITY] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_VELOCITY);
 	out_handles->scene_samples = framebufs.scene.samples;
-	out_handles->resolved_scene_fbo = framebufs.resolved_scene.fbo;
-	out_handles->resolved_scene_color_tex = framebufs.resolved_scene.color_tex;
-	out_handles->resolved_scene_velocity_tex = framebufs.resolved_scene.velocity_tex;
-	out_handles->shadow_sun_depth_tex = framebufs.shadow.sun_depth_tex;
-	out_handles->velocity_tex = (framebufs.scene.samples > 1) ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
 }
 
 static unsigned long long FG_BuildActivePassMask (const RenderPassContext *ctx, int first_pass, int pass_count)
@@ -693,10 +501,12 @@ static void FG_MaybePrintStats (void)
 
 static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderPassContext *ctx)
 {
-	GLuint target_fbo = 0;
+	const render_backend_resource_ref_t *target_resource = NULL;
+	const IRenderBackend *backend = ctx ? ctx->backend : NULL;
 	int view_x, view_y, view_w, view_h;
 	unsigned output_target;
 	unsigned viewport_mode;
+	qboolean bind_backbuffer = false;
 	qboolean bind_target = false;
 
 	if (r_framegraph_autobind.value <= 0.f)
@@ -739,20 +549,26 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderP
 	{
 	case FG_PASS_OUTPUT_BACKBUFFER:
 		bind_target = true;
-		target_fbo = 0;
+		bind_backbuffer = true;
 		break;
 	case FG_PASS_OUTPUT_SCENE_FBO:
-		if (ctx && ctx->resources && ctx->resources->scene_fbo)
+		target_resource = R_FrameGraph_GetResourceRef (ctx ? ctx->resources : NULL, R_BACKEND_RESOURCE_SLOT_SCENE_FBO);
+		if (target_resource
+			&& backend
+			&& backend->is_resource_valid
+			&& backend->is_resource_valid (ctx->resources, target_resource))
 		{
 			bind_target = true;
-			target_fbo = ctx->resources->scene_fbo;
 		}
 		break;
 	case FG_PASS_OUTPUT_COMPOSITE_FBO:
-		if (ctx && ctx->resources && ctx->resources->composite_fbo)
+		target_resource = R_FrameGraph_GetResourceRef (ctx ? ctx->resources : NULL, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO);
+		if (target_resource
+			&& backend
+			&& backend->is_resource_valid
+			&& backend->is_resource_valid (ctx->resources, target_resource))
 		{
 			bind_target = true;
-			target_fbo = ctx->resources->composite_fbo;
 		}
 		break;
 	case FG_PASS_OUTPUT_AUTO_SCENE:
@@ -764,30 +580,23 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderP
 
 	if (bind_target)
 	{
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, target_fbo);
-		if (target_fbo == 0)
-		{
-			glDrawBuffer (GL_BACK);
-			glReadBuffer (GL_BACK);
-		}
-		else
-		{
-			glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			glReadBuffer (GL_COLOR_ATTACHMENT0);
-		}
+		if (backend && backend->bind_render_target)
+			backend->bind_render_target (ctx ? ctx->resources : NULL, target_resource, bind_backbuffer);
 	}
 
 	switch (viewport_mode)
 	{
 	case FG_PASS_VIEWPORT_FULL_WINDOW:
-		glViewport (glx, gly, glwidth, glheight);
+		if (backend && backend->set_viewport)
+			backend->set_viewport (glx, gly, glwidth, glheight);
 		break;
 	case FG_PASS_VIEWPORT_VIEW_RECT:
 		view_x = glx + r_refdef.vrect.x;
 		view_y = gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height;
 		view_w = q_max (1, r_refdef.vrect.width);
 		view_h = q_max (1, r_refdef.vrect.height);
-		glViewport (view_x, view_y, view_w, view_h);
+		if (backend && backend->set_viewport)
+			backend->set_viewport (view_x, view_y, view_w, view_h);
 		break;
 	case FG_PASS_VIEWPORT_VIEW_RECT_SCALED:
 	{
@@ -797,7 +606,8 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderP
 		view_y = 0;
 		view_w = R_GetSceneRenderWidth ();
 		view_h = R_GetSceneRenderHeight ();
-		glViewport (view_x, view_y, view_w, view_h);
+		if (backend && backend->set_viewport)
+			backend->set_viewport (view_x, view_y, view_w, view_h);
 		break;
 	}
 	case FG_PASS_VIEWPORT_KEEP:
@@ -881,6 +691,7 @@ void R_FrameGraph_GetTimingSummary (double *out_gpu_ms, double *out_cpu_ms, qboo
 	double gpu_total = 0.0;
 	double cpu_total = 0.0;
 	qboolean gpu_valid = false;
+	const IRenderBackend *backend = R_GetRenderBackend ();
 	int i;
 
 	for (i = 1; i < FG_PASS_STATS_COUNT; ++i)
@@ -907,7 +718,7 @@ void R_FrameGraph_GetTimingSummary (double *out_gpu_ms, double *out_cpu_ms, qboo
 			gpu_valid = true;
 	}
 
-	if (!FG_Backend_HasTimestampQueries ())
+	if (!backend || !backend->consume_timer_sample)
 		gpu_valid = false;
 
 	if (out_gpu_ms)
@@ -942,10 +753,11 @@ void R_FrameGraph_RenderView (void)
 
 	pass_ctx.frame_plan = &frame_plan;
 	pass_ctx.resources = &resources;
-	pass_ctx.backend = &s_gl_backend;
+	pass_ctx.backend = R_GetRenderBackend ();
 
 	if (pass_ctx.backend && pass_ctx.backend->resolve_timers)
 		pass_ctx.backend->resolve_timers ();
+	FG_ConsumeBackendTimerSamples (pass_ctx.backend);
 
 	/* Setup-stage passes run before plan build so frame state is current. */
 	setup_pass_count = FG_MoveSetupStagePassesToFront ();

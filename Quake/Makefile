@@ -218,7 +218,9 @@ GLOBJS = \
 	gl_refrag.o \
 	gl_rlight.o \
 	gl_rmain.o \
+	gl_backend.o \
 	r_framegraph.o \
+	r_backend.o \
 	r_ssao.o \
 	r_tonemap.o \
 	gl_fog.o \

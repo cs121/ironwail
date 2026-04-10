@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define MAT_MATERIAL_H
 
 #include "quakedef.h"
+#include "r_backend.h"
 
 typedef enum
 {
@@ -217,8 +218,8 @@ typedef struct mat_material_stage_s
 	mat_wave_t	rgb_wave;
 	mat_wave_t	alpha_wave;
 	mat_blend_mode_t	blend_mode;
-	int			blend_src;
-	int			blend_dst;
+	render_blend_factor_t	blend_src;
+	render_blend_factor_t	blend_dst;
 	qboolean		depth_write;
 	mat_depthfunc_t		depth_func;
 	mat_map_type_t		map_type;

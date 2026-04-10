@@ -36,11 +36,11 @@ void R_EndTranslucency (void)
 		glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
 
 		GL_UseProgram (glprogs.oit_resolve[framebufs.scene.samples > 1]);
-		GL_SetState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		R_Backend_SetPipelineState (GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
 		GL_BindNative (GL_TEXTURE0, framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D, framebufs.oit.accum_tex);
 		GL_BindNative (GL_TEXTURE1, framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D, framebufs.oit.revealage_tex);
 
-		glDrawArrays (GL_TRIANGLES, 0, 3);
+		R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
 
 		glDisable (GL_STENCIL_TEST);
 
@@ -49,3 +49,4 @@ void R_EndTranslucency (void)
 
 	GL_EndGroup ();
 }
+

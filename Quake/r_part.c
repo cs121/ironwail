@@ -1400,9 +1400,9 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	GL_Uniform3fFunc (0, scalex, scaley, uvscale);
 
 	if (alpha)
-		GL_SetState (GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
+		R_Backend_SetPipelineState (GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
 	else
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
+		R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
 
 	numpartverts = 0;
 	for (i = 0, p = particles; i < r_numactiveparticles; i++, p++)
@@ -1456,3 +1456,4 @@ void R_DrawParticles_ShowTris (void)
 {
 	R_DrawParticles_Real (false, true);
 }
+

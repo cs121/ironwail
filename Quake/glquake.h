@@ -24,6 +24,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #ifndef GLQUAKE_H
 #define GLQUAKE_H
 
+#include "r_backend.h"
+
 void GL_BeginRendering (int *x, int *y, int *width, int *height);
 void GL_EndRendering (void);
 void GL_Set2D (void);
@@ -379,6 +381,13 @@ typedef enum {
 extern unsigned glstate;
 void GL_SetState (unsigned mask);
 void GL_ResetState (void);
+void R_Backend_SetViewport (int x, int y, int width, int height);
+void R_Backend_SetScissor (qboolean enabled, int x, int y, int width, int height);
+void R_Backend_SetPipelineState (unsigned state_bits);
+void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count);
+void R_Backend_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z);
+void R_Backend_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst);
+void R_Backend_Finish (void);
 
 extern GLint ssbo_align; // SSBO alignment - 1
 extern GLint ubo_align; // UBO alignment - 1

@@ -721,7 +721,7 @@ static qboolean Material_ParseSortKey (const char *token, mat_sort_key_t *out)
 	return false;
 }
 
-static qboolean Material_ParseBlendFactor (const char *token, int *out)
+static qboolean Material_ParseBlendFactor (const char *token, render_blend_factor_t *out)
 {
 	const char *name;
 
@@ -734,25 +734,25 @@ static qboolean Material_ParseBlendFactor (const char *token, int *out)
 		name = token;
 
 	if (!q_strcasecmp (name, "ONE"))
-		*out = GL_ONE;
+		*out = R_BLEND_FACTOR_ONE;
 	else if (!q_strcasecmp (name, "ZERO"))
-		*out = GL_ZERO;
+		*out = R_BLEND_FACTOR_ZERO;
 	else if (!q_strcasecmp (name, "SRC_ALPHA"))
-		*out = GL_SRC_ALPHA;
+		*out = R_BLEND_FACTOR_SRC_ALPHA;
 	else if (!q_strcasecmp (name, "ONE_MINUS_SRC_ALPHA"))
-		*out = GL_ONE_MINUS_SRC_ALPHA;
+		*out = R_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 	else if (!q_strcasecmp (name, "DST_ALPHA"))
-		*out = GL_DST_ALPHA;
+		*out = R_BLEND_FACTOR_DST_ALPHA;
 	else if (!q_strcasecmp (name, "ONE_MINUS_DST_ALPHA"))
-		*out = GL_ONE_MINUS_DST_ALPHA;
+		*out = R_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
 	else if (!q_strcasecmp (name, "SRC_COLOR"))
-		*out = GL_SRC_COLOR;
+		*out = R_BLEND_FACTOR_SRC_COLOR;
 	else if (!q_strcasecmp (name, "ONE_MINUS_SRC_COLOR"))
-		*out = GL_ONE_MINUS_SRC_COLOR;
+		*out = R_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
 	else if (!q_strcasecmp (name, "DST_COLOR"))
-		*out = GL_DST_COLOR;
+		*out = R_BLEND_FACTOR_DST_COLOR;
 	else if (!q_strcasecmp (name, "ONE_MINUS_DST_COLOR"))
-		*out = GL_ONE_MINUS_DST_COLOR;
+		*out = R_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
 	else
 		return false;
 
@@ -943,8 +943,8 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 	stage.depth_write = true;
 	stage.depth_func = MAT_DEPTHFUNC_LEQUAL;
 	stage.map_type = MAT_MAP_MAP;
-	stage.blend_src = GL_ONE;
-	stage.blend_dst = GL_ZERO;
+	stage.blend_src = R_BLEND_FACTOR_ONE;
+	stage.blend_dst = R_BLEND_FACTOR_ZERO;
 	stage.tcgen = MAT_TCGEN_BASE;
 	stage.normal_scale = 1.f;
 	stage.spec_power = 1.f;
@@ -1286,8 +1286,8 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 		if (!q_strcasecmp (com_token, "blendFunc"))
 		{
 			Material_MarkKeywordSeen ("blendFunc", MATERIAL_KEYWORD_SCOPE_STAGE);
-			int src;
-			int dst;
+			render_blend_factor_t src;
+			render_blend_factor_t dst;
 			char mode_buffer[MAX_TOKEN_CHARS];
 			const char *mode_token;
 			const char *comma;
@@ -1337,24 +1337,24 @@ static const char *ParseStageBlock (const char *data, material_t *material, size
 				switch (stage.blend_mode)
 				{
 				case MAT_BLEND_ALPHA:
-					stage.blend_src = GL_SRC_ALPHA;
-					stage.blend_dst = GL_ONE_MINUS_SRC_ALPHA;
+					stage.blend_src = R_BLEND_FACTOR_SRC_ALPHA;
+					stage.blend_dst = R_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 					break;
 				case MAT_BLEND_ADD:
-					stage.blend_src = GL_ONE;
-					stage.blend_dst = GL_ONE;
+					stage.blend_src = R_BLEND_FACTOR_ONE;
+					stage.blend_dst = R_BLEND_FACTOR_ONE;
 					break;
 				case MAT_BLEND_MULT:
-					stage.blend_src = GL_ZERO;
-					stage.blend_dst = GL_SRC_COLOR;
+					stage.blend_src = R_BLEND_FACTOR_ZERO;
+					stage.blend_dst = R_BLEND_FACTOR_SRC_COLOR;
 					break;
 				case MAT_BLEND_PREMULT:
-					stage.blend_src = GL_ONE;
-					stage.blend_dst = GL_ONE_MINUS_SRC_ALPHA;
+					stage.blend_src = R_BLEND_FACTOR_ONE;
+					stage.blend_dst = R_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 					break;
 				default:
-					stage.blend_src = GL_ONE;
-					stage.blend_dst = GL_ZERO;
+					stage.blend_src = R_BLEND_FACTOR_ONE;
+					stage.blend_dst = R_BLEND_FACTOR_ZERO;
 					break;
 				}
 				continue;

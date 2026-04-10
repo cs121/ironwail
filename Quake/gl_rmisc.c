@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_lightgrid.h"
 #include "mat_material.h"
 #include "r_dlight_pool.h"
+#include "r_framegraph.h"
 #include "r_postfx.h"
 #include "r_quality.h"
 #include "r_ssao.h"
@@ -469,6 +470,7 @@ void R_Init (void)
         Lightgrid_Init ();
         R_SkyVis_Init ();
         Material_Init ();
+	R_Backend_Init ();
 
 Cvar_RegisterVariable (&r_norefresh);
 Cvar_RegisterVariable (&r_lightmap);
@@ -1080,7 +1082,7 @@ void R_TimeRefresh_f (void)
 		GL_EndRendering ();
 	}
 
-	glFinish ();
+	R_Backend_Finish ();
 	stop = Sys_DoubleTime ();
 	time = stop-start;
 	Con_Printf ("%lf seconds (%.1lf fps)\n", time, 128/time);
@@ -1387,7 +1389,7 @@ void GL_DeleteFrameResources (void)
 {
 	size_t i, j, num_garbage_bufs;
 
-	glFinish ();
+	R_Backend_Finish ();
 
 	for (i = 0; i < countof (frameres); i++)
 	{
@@ -1441,7 +1443,7 @@ static void GL_WaitFrameFence (GLsync *fence, const char *label)
 	if (result == GL_TIMEOUT_EXPIRED)
 	{
 		Con_DWarning ("GL_WaitFrameFence: %s fence wait timed out, forcing glFinish\n", label);
-		glFinish ();
+		R_Backend_Finish ();
 		result = GL_ClientWaitSyncFunc (*fence, GL_SYNC_FLUSH_COMMANDS_BIT, 0);
 	}
 

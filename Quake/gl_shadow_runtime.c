@@ -1269,7 +1269,7 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 	GL_EndGroup ();
 
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	GL_SetState (saved_state);
+	R_Backend_SetPipelineState (saved_state);
 	if (clip_depth_mode_changed)
 		GL_ClipControlFunc (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
 	if (gl_clipcontrol_able)
@@ -1348,3 +1348,4 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 
 	r_shadow_state.valid = (want_sun_shadow || want_dlight_shadows);
 }
+

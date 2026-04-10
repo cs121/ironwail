@@ -1715,9 +1715,9 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 
 	saved_state = glstate;
 	if (alpha)
-		GL_SetState (GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
+		R_Backend_SetPipelineState (GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
 	else
-		GL_SetState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
+		R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
 
 	for (stage_index = 0; stage_index < max_stage_count; ++stage_index)
 	{
@@ -1777,7 +1777,7 @@ void Q3P_Draw (qboolean alpha, qboolean showtris)
 		Q3P_FlushParticleBatch ();
 	}
 
-	GL_SetState (saved_state);
+	R_Backend_SetPipelineState (saved_state);
 	GL_EndGroup ();
 }
 
@@ -1839,3 +1839,4 @@ void Q3P_ClearWorldEmitters (void)
 {
 	memset (q3p_emitters, 0, sizeof (q3p_emitters));
 }
+

@@ -464,88 +464,82 @@ static qboolean VID_ValidMode (int width, int height, int refreshrate, qboolean 
 
 /*
 ================
-VID_SetMode
+VID_ConfigureGLContextAttributes
 ================
 */
-static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fullscreen)
+static void VID_ConfigureGLContextAttributes (void)
 {
-	int		temp;
-	Uint32	flags;
-	Uint32	fullscreen_flag;
-	char		caption[50];
-	int		depthbits, stencilbits;
-	int		previous_display;
-	int		expected_width, expected_height;
-	int		actual_width, actual_height;
+	SDL_GL_SetAttribute (SDL_GL_CONTEXT_MAJOR_VERSION, MIN_GL_VERSION_MAJOR);
+	SDL_GL_SetAttribute (SDL_GL_CONTEXT_MINOR_VERSION, MIN_GL_VERSION_MINOR);
+	SDL_GL_SetAttribute (SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+#ifndef NDEBUG
+	SDL_GL_SetAttribute (SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+#endif
+}
 
-	// so Con_Printfs don't mess us up by forcing vid and snd updates
-	temp = scr_disabled_for_loading;
-	scr_disabled_for_loading = true;
+/*
+================
+VID_CreateWindowIfNeeded
+================
+*/
+static int VID_CreateWindowIfNeeded (const char *caption, int width, int height)
+{
+	Uint32 flags;
 
-	CDAudio_Pause ();
-	BGM_Pause ();
+	if (draw_context)
+		return SDL_GetWindowDisplayIndex (draw_context);
 
-	/* z-buffer depth */
-	depthbits = 24;
-	stencilbits = 8;
-	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, depthbits);
-	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, stencilbits);
-	SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
+	flags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE;
+	if (vid_borderless.value)
+		flags |= SDL_WINDOW_BORDERLESS;
 
-	q_snprintf(caption, sizeof(caption), WINDOW_TITLE_STRING);
-
-	/* Create the window if needed, hidden */
+	VID_ConfigureGLContextAttributes ();
+	draw_context = SDL_CreateWindow (caption, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, flags);
 	if (!draw_context)
 	{
-		flags = SDL_WINDOW_OPENGL | SDL_WINDOW_HIDDEN | SDL_WINDOW_RESIZABLE;
-
-		if (vid_borderless.value)
-			flags |= SDL_WINDOW_BORDERLESS;
-
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, MIN_GL_VERSION_MAJOR);
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, MIN_GL_VERSION_MINOR);
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-#ifndef NDEBUG
-		SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
-#endif
+		SDL_GL_SetAttribute (SDL_GL_DEPTH_SIZE, 16);
 		draw_context = SDL_CreateWindow (caption, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, flags);
-		if (!draw_context) { // scale back SDL_GL_DEPTH_SIZE
-			SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 16);
-			draw_context = SDL_CreateWindow (caption, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, flags);
-		}
-		if (!draw_context)
-			Sys_Error ("Couldn't create window");
-
-		SDL_SetWindowMinimumSize (draw_context, 320, 240);
-
-		previous_display = -1;
 	}
-	else
-	{
-		previous_display = SDL_GetWindowDisplayIndex(draw_context);
-	}
+	if (!draw_context)
+		Sys_Error ("Couldn't create window");
 
-	/* Ensure the window is not fullscreen */
+	SDL_SetWindowMinimumSize (draw_context, 320, 240);
+	return -1;
+}
+
+/*
+================
+VID_ApplyWindowMode
+================
+*/
+static qboolean VID_ApplyWindowMode (int width, int height, int refreshrate, qboolean fullscreen)
+{
+	Uint32 fullscreen_flag;
+	int previous_display;
+	int expected_width;
+	int expected_height;
+	int actual_width;
+	int actual_height;
+
+	previous_display = VID_CreateWindowIfNeeded (WINDOW_TITLE_STRING, width, height);
+
 	if (VID_GetFullscreen ())
 	{
 		if (SDL_SetWindowFullscreen (draw_context, 0) != 0)
-			Sys_Error("Couldn't set fullscreen state mode");
+			Sys_Error ("Couldn't set fullscreen state mode");
 	}
 
-	/* Set window size and display mode */
 	SDL_SetWindowSize (draw_context, width, height);
 	if (previous_display >= 0)
-		SDL_SetWindowPosition (draw_context, SDL_WINDOWPOS_CENTERED_DISPLAY(previous_display), SDL_WINDOWPOS_CENTERED_DISPLAY(previous_display));
+		SDL_SetWindowPosition (draw_context, SDL_WINDOWPOS_CENTERED_DISPLAY (previous_display), SDL_WINDOWPOS_CENTERED_DISPLAY (previous_display));
 	else
-		SDL_SetWindowPosition(draw_context, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
-	SDL_SetWindowDisplayMode (draw_context, VID_SDL2_GetDisplayMode(width, height, refreshrate));
+		SDL_SetWindowPosition (draw_context, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+	SDL_SetWindowDisplayMode (draw_context, VID_SDL2_GetDisplayMode (width, height, refreshrate));
 	SDL_SetWindowBordered (draw_context, vid_borderless.value ? SDL_FALSE : SDL_TRUE);
 
-	/* Make window fullscreen if needed, and show the window */
-
-	if (fullscreen) {
-		fullscreen_flag = vid_desktopfullscreen.value ?
-				SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN;
+	if (fullscreen)
+	{
+		fullscreen_flag = vid_desktopfullscreen.value ? SDL_WINDOW_FULLSCREEN_DESKTOP : SDL_WINDOW_FULLSCREEN;
 		if (SDL_SetWindowFullscreen (draw_context, fullscreen_flag) != 0)
 			Sys_Error ("Couldn't set fullscreen state mode");
 
@@ -576,10 +570,19 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fu
 
 	SDL_ShowWindow (draw_context);
 	SDL_RaiseWindow (draw_context);
+	return true;
+}
 
-	/* Create GL context if needed */
-	if (!gl_context) {
-		gl_context = SDL_GL_CreateContext(draw_context);
+/*
+================
+VID_EnsureGLContext
+================
+*/
+static void VID_EnsureGLContext (void)
+{
+	if (!gl_context)
+	{
+		gl_context = SDL_GL_CreateContext (draw_context);
 		if (!gl_context)
 		{
 			// Couldn't create an OpenGL context with our minimum requirements.
@@ -588,32 +591,84 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fu
 			int major, minor;
 			const char *version;
 
-			SDL_GL_ResetAttributes();
-			gl_context = SDL_GL_CreateContext(draw_context);
-			version = gl_context ? (const char *) glGetString(GL_VERSION) : NULL;
-			if (!version || sscanf(version, "%d.%d", &major, &minor) != 2)
+			SDL_GL_ResetAttributes ();
+			gl_context = SDL_GL_CreateContext (draw_context);
+			version = gl_context ? (const char *) glGetString (GL_VERSION) : NULL;
+			if (!version || sscanf (version, "%d.%d", &major, &minor) != 2)
 				major = minor = 0;
 
-			if (major && MAKE_GL_VERSION(major, minor) < MIN_GL_VERSION)
-				Sys_Error(
+			if (major && MAKE_GL_VERSION (major, minor) < MIN_GL_VERSION)
+				Sys_Error (
 					"This engine requires OpenGL %d.%d, but only version %d.%d was found.\n"
 					"Please make sure that your GPU (%s) meets the minimum requirements and that the graphics drivers are up to date.",
-					MIN_GL_VERSION_MAJOR, MIN_GL_VERSION_MINOR, major, minor, (const char *) glGetString(GL_RENDERER)
+					MIN_GL_VERSION_MAJOR, MIN_GL_VERSION_MINOR, major, minor, (const char *) glGetString (GL_RENDERER)
 				);
 			else if (gl_context)
-				Sys_Error(
+				Sys_Error (
 					"Could not create OpenGL %d.%d context.\n"
 					"Please make sure that your GPU (%s) meets the minimum requirements and that the graphics drivers are up to date.",
-					MIN_GL_VERSION_MAJOR, MIN_GL_VERSION_MINOR, (const char *) glGetString(GL_RENDERER)
+					MIN_GL_VERSION_MAJOR, MIN_GL_VERSION_MINOR, (const char *) glGetString (GL_RENDERER)
 				);
 			else
-				Sys_Error(
+				Sys_Error (
 					"Could not create OpenGL %d.%d context. " // no newline
 					"Please make sure that your GPU meets the minimum requirements and that the graphics drivers are up to date.",
 					MIN_GL_VERSION_MAJOR, MIN_GL_VERSION_MINOR
 				);
 		}
 	}
+}
+
+/*
+================
+VID_UpdateWindowMetrics
+================
+*/
+static void VID_UpdateWindowMetrics (int *out_depthbits, int *out_stencilbits)
+{
+	vid.width = VID_GetCurrentWidth ();
+	vid.height = VID_GetCurrentHeight ();
+	vid.maxscale = q_max (4, vid.height / 240);
+	vid.refreshrate = VID_GetCurrentRefreshRate ();
+	vid.conwidth = vid.width & 0xFFFFFFF8;
+	vid.conheight = vid.conwidth * vid.height / vid.width;
+	vid.numpages = 2;
+
+	VID_RecalcInterfaceSize ();
+
+	if (SDL_GL_GetAttribute (SDL_GL_DEPTH_SIZE, out_depthbits) == -1)
+		*out_depthbits = 0;
+	if (SDL_GL_GetAttribute (SDL_GL_STENCIL_SIZE, out_stencilbits) == -1)
+		*out_stencilbits = 0;
+}
+
+/*
+================
+VID_SetMode
+================
+*/
+static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fullscreen)
+{
+	int		temp;
+	int		depthbits, stencilbits;
+
+	// so Con_Printfs don't mess us up by forcing vid and snd updates
+	temp = scr_disabled_for_loading;
+	scr_disabled_for_loading = true;
+
+	CDAudio_Pause ();
+	BGM_Pause ();
+
+	/* z-buffer depth */
+	depthbits = 24;
+	stencilbits = 8;
+	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, depthbits);
+	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, stencilbits);
+	SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
+
+	if (!VID_ApplyWindowMode (width, height, refreshrate, fullscreen))
+		return false;
+	VID_EnsureGLContext ();
 	{
 		int srgb_capable = 0;
 		if (SDL_GL_GetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, &srgb_capable) == 0)
@@ -622,23 +677,8 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fu
 			vid_framebuffer_srgb_capable = false;
 	}
 
-	vid.width = VID_GetCurrentWidth();
-	vid.height = VID_GetCurrentHeight();
-	vid.maxscale = q_max (4, vid.height / 240);
-	vid.refreshrate = VID_GetCurrentRefreshRate();
-	vid.conwidth = vid.width & 0xFFFFFFF8;
-	vid.conheight = vid.conwidth * vid.height / vid.width;
-	vid.numpages = 2;
-
-	VID_RecalcInterfaceSize ();
-
-// read the obtained z-buffer depth
-	if (SDL_GL_GetAttribute(SDL_GL_DEPTH_SIZE, &depthbits) == -1)
-		depthbits = 0;
-
-// read stencil bits
-	if (SDL_GL_GetAttribute(SDL_GL_STENCIL_SIZE, &gl_stencilbits) == -1)
-		gl_stencilbits = 0;
+	VID_UpdateWindowMetrics (&depthbits, &gl_stencilbits);
+	stencilbits = gl_stencilbits;
 
 	modestate = VID_GetFullscreen() ? MS_FULLSCREEN : MS_WINDOWED;
 
@@ -1394,10 +1434,10 @@ static void GL_SetupState (void)
 
 /*
 ===============
-GL_Init
+GL_ReadContextInfo
 ===============
 */
-static void GL_Init (void)
+static void GL_ReadContextInfo (void)
 {
 	gl_vendor = (const char *) glGetString (GL_VENDOR);
 	gl_renderer = (const char *) glGetString (GL_RENDERER);
@@ -1414,8 +1454,28 @@ static void GL_Init (void)
 		gl_version_minor = 0;
 	}
 	gl_version_number = MAKE_GL_VERSION(gl_version_major, gl_version_minor);
+}
+
+/*
+===============
+GL_ValidateContextVersion
+===============
+*/
+static void GL_ValidateContextVersion (void)
+{
 	if (gl_version_number < MIN_GL_VERSION)
 		Sys_Error("OpenGL " MIN_GL_VERSION_STR " required, found %d.%d\n", gl_version_major, gl_version_minor);
+}
+
+/*
+===============
+GL_Init
+===============
+*/
+static void GL_Init (void)
+{
+	GL_ReadContextInfo ();
+	GL_ValidateContextVersion ();
 
 	GL_CheckExtensions ();
 
@@ -1515,17 +1575,24 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 
 /*
 =================
+VID_PresentFrame
+=================
+*/
+static void VID_PresentFrame (void)
+{
+	if (!scr_skipupdate)
+		SDL_GL_SwapWindow (draw_context);
+}
+
+/*
+=================
 GL_EndRendering
 =================
 */
 void GL_EndRendering (void)
 {
 	GL_ReleaseFrameResources ();
-
-	if (!scr_skipupdate)
-	{
-		SDL_GL_SwapWindow(draw_context);
-	}
+	VID_PresentFrame ();
 }
 
 

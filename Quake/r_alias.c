@@ -784,7 +784,7 @@ void R_FlushAliasInstances (qboolean showtris)
 	{
 		state |= (oit ? GLS_BLEND_ALPHA_OIT : GLS_BLEND_ALPHA) | GLS_NO_ZWRITE;
 	}
-	GL_SetState (state);
+	R_Backend_SetPipelineState (state);
 
 	memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
 memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
@@ -952,7 +952,7 @@ static void R_FlushAliasInstances_Shadow (qboolean dlight)
 		state = GLS_CULL_BACK | GLS_BLEND_OPAQUE | GLS_ATTRIBS (6);
 	else
 		state = GLS_CULL_BACK | GLS_BLEND_OPAQUE | GLS_ATTRIBS (2);
-	GL_SetState (state);
+	R_Backend_SetPipelineState (state);
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, ibuf.inst, sizeof (ibuf.inst[0]) * ibuf.count, &instance_buf, &instance_ofs);
 
@@ -1344,3 +1344,4 @@ void R_DrawAliasModels_ShowTris (entity_t **ents, int count)
 		R_UploadFrameData ();
 	}
 }
+

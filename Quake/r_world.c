@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "mat_material.h"
+#include "r_framegraph.h"
 #include "r_realtimelight.h"
 
 extern cvar_t gl_fullbrights, r_oldskyleaf, r_showtris; //johnfitz
@@ -1341,8 +1342,8 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	unsigned current_state = ~0u;
 	GLenum current_depth = GL_INVALID_ENUM;
 	mat_blend_mode_t current_blend_mode = MAT_BLEND_REPLACE;
-	int current_blend_src = GL_ONE;
-	int current_blend_dst = GL_ZERO;
+	render_blend_factor_t current_blend_src = R_BLEND_FACTOR_ONE;
+	render_blend_factor_t current_blend_dst = R_BLEND_FACTOR_ZERO;
 	GLuint program;
 	GLuint buf;
 	GLbyte *ofs;
@@ -1526,15 +1527,15 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					if (num_bmodel_calls)
 						R_FlushBModelCalls ();
 					R_ResetBModelCalls (program);
-					GL_SetState (stage_state);
+					R_Backend_SetPipelineState (stage_state);
 					current_state = stage_state;
 					glDepthFunc (depth_func);
 					current_depth = depth_func;
 
 					if (stage->blend_mode == MAT_BLEND_PREMULT)
-						glBlendFunc (GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+						R_Backend_SetBlendFactors (R_BLEND_FACTOR_ONE, R_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
 					else if (stage->blend_mode == MAT_BLEND_CUSTOM)
-						glBlendFunc (stage->blend_src, stage->blend_dst);
+						R_Backend_SetBlendFactors (stage->blend_src, stage->blend_dst);
 					current_blend_mode = stage->blend_mode;
 					current_blend_src = stage->blend_src;
 					current_blend_dst = stage->blend_dst;
@@ -1598,7 +1599,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 		return;
 
 	R_ResetBModelCalls (glprogs.godrays_source);
-	GL_SetState (GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (8));
+	R_Backend_SetPipelineState (GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (8));
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 	GL_Bind (GL_TEXTURE5, greytexture);
@@ -1868,7 +1869,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 
         R_ResetBModelCalls (program);
-        GL_SetState (state);
+        R_Backend_SetPipelineState (state);
         GL_UseProgram (program);
 if (pass <= BP_ALPHATEST)
 {
@@ -2120,7 +2121,7 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	R_ResetBModelCalls (program);
 	GL_UseProgram (program);
 	R_Water_SetTimeUniform (program, (float)shader_time);
-	GL_SetState (state);
+	R_Backend_SetPipelineState (state);
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 	GL_Bind (GL_TEXTURE5, greytexture);
@@ -2372,3 +2373,4 @@ void R_DrawBrushModels_ShowTris (entity_t **ents, int count)
 {
 	R_DrawBrushModels_Real (ents, count, BP_SHOWTRIS, false);
 }
+

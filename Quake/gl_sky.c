@@ -724,7 +724,7 @@ void Sky_DrawSkyBox (void)
 	fog[3] = r_framedata.fogdata[3] > 0.f ? skyfog : 0.f;
 
 	GL_UseProgram (glprogs.skyboxside[softemu == SOFTEMU_COARSE]);
-	GL_SetState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(2));
+	R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(2));
 
 	GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, r_matviewproj);
         GL_Uniform3fvFunc (1, 1, r_refdef.vieworg);
@@ -754,7 +754,7 @@ void Sky_DrawSkyBox (void)
 		GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof(verts[0]), ofs + offsetof(struct skyboxvert_s, uv));
 
 		GL_Bind (GL_TEXTURE0, skybox->textures[skytexorder[i]]);
-		glDrawArrays (GL_TRIANGLE_FAN, 0, 4);
+		R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLE_FAN, 0, 4);
 	}
 }
 
@@ -836,3 +836,4 @@ void Sky_SetupFrame (void)
         r_framedata.wind[2] = -dist * cp * cy;
         r_framedata.wind[3] = phase;
 }
+

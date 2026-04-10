@@ -2,6 +2,7 @@
 #define R_FRAMEGRAPH_H
 
 #include "quakedef.h"
+#include "r_backend.h"
 
 typedef struct render_frame_plan_s
 {
@@ -65,19 +66,8 @@ typedef enum fg_pass_stats_channel_e
 
 typedef struct render_graph_resource_handle_s
 {
-	unsigned scene_fbo;
-	unsigned scene_color_tex;
-	unsigned scene_velocity_tex;
-	unsigned scene_depth_tex;
+	render_backend_resource_ref_t refs[R_BACKEND_RESOURCE_SLOT_COUNT];
 	int scene_samples;
-	unsigned resolved_scene_fbo;
-	unsigned resolved_scene_color_tex;
-	unsigned resolved_scene_velocity_tex;
-	unsigned composite_fbo;
-	unsigned composite_color_tex;
-	unsigned composite_depth_tex;
-	unsigned shadow_sun_depth_tex;
-	unsigned velocity_tex;
 } RenderGraphResourceHandle;
 
 typedef struct render_pass_context_s RenderPassContext;
@@ -91,6 +81,17 @@ typedef struct i_render_backend_s
 	void (*begin_timer)(int pass_id);
 	void (*end_timer)(int pass_id);
 	void (*resolve_timers)(void);
+	qboolean (*consume_timer_sample)(int pass_id, double *out_gpu_ms);
+	unsigned (*resolve_resource_id)(const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource);
+	qboolean (*is_resource_valid)(const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource);
+	void (*bind_render_target)(const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource, qboolean backbuffer);
+	void (*set_viewport)(int x, int y, int width, int height);
+	void (*set_scissor)(qboolean enabled, int x, int y, int width, int height);
+	void (*set_pipeline_state)(unsigned state_bits);
+	void (*draw)(render_backend_primitive_t primitive, int first, int count);
+	void (*dispatch)(unsigned group_x, unsigned group_y, unsigned group_z);
+	void (*set_blend_factors)(render_blend_factor_t src, render_blend_factor_t dst);
+	void (*finish)(void);
 } IRenderBackend;
 
 typedef struct render_pass_desc_s
@@ -121,5 +122,19 @@ void R_FrameGraph_GetTimingSummary (double *out_gpu_ms, double *out_cpu_ms, qboo
 void R_FrameGraph_ResetPasses (void);
 qboolean R_FrameGraph_AddPass (const RenderPassDesc *pass_desc);
 void R_FrameGraph_RenderView (void);
+void R_Backend_Init (void);
+void R_Backend_Register (const IRenderBackend *backend);
+qboolean R_Backend_Select (const char *backend_name);
+const IRenderBackend *R_GetRenderBackend (void);
+const render_backend_resource_ref_t *R_FrameGraph_GetResourceRef (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
+unsigned R_FrameGraph_ResolveResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
+qboolean R_FrameGraph_HasResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
+void R_Backend_SetViewport (int x, int y, int width, int height);
+void R_Backend_SetScissor (qboolean enabled, int x, int y, int width, int height);
+void R_Backend_SetPipelineState (unsigned state_bits);
+void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count);
+void R_Backend_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z);
+void R_Backend_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst);
+void R_Backend_Finish (void);
 
 #endif

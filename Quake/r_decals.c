@@ -1474,7 +1474,7 @@ static qboolean R_DrawDecalsLegacy (decalinst_t **draw, int draw_count)
 
 		if (current_blend != (int)cmds[i].blend)
 		{
-			GL_SetState (blendstate | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3) | GLS_INSTANCED_ATTRIBS (0));
+			R_Backend_SetPipelineState (blendstate | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3) | GLS_INSTANCED_ATTRIBS (0));
 			current_blend = (int)cmds[i].blend;
 			current_texture = NULL;
 		}
@@ -1588,7 +1588,7 @@ static qboolean R_DrawDecalsInstanced (decalinst_t **draw, int draw_count)
 
 		if (current_blend != (int)cmds[i].blend)
 		{
-			GL_SetState (blendstate | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (0) | GLS_INSTANCED_ATTRIBS (0));
+			R_Backend_SetPipelineState (blendstate | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (0) | GLS_INSTANCED_ATTRIBS (0));
 			current_blend = (int)cmds[i].blend;
 			current_texture = NULL;
 		}
@@ -1663,3 +1663,4 @@ void R_DrawDecals (void)
 
 	R_DecalsDebugPrintFrameStats ();
 }
+

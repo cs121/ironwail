@@ -366,6 +366,12 @@
     <ClCompile Include="..\..\Quake\snd_mpg123.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\gl_backend.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Quake\r_backend.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\Quake\anorm_dots.h">
@@ -615,6 +621,12 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\jsmn.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Quake\gl_backend.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\Quake\r_backend.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

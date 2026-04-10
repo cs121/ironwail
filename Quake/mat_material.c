@@ -1182,7 +1182,7 @@ mat_particle_stage_support_t Material_ClassifyParticleStage (const material_stag
 
 	if (stage->blend_mode == MAT_BLEND_CUSTOM)
 	{
-		if (stage->blend_src < 0 || stage->blend_dst < 0)
+		if (stage->blend_src == R_BLEND_FACTOR_INVALID || stage->blend_dst == R_BLEND_FACTOR_INVALID)
 		{
 			if (reason && reason_size)
 				q_strlcpy (reason, "invalid custom blend factors", reason_size);
