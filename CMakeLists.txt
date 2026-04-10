@@ -40,6 +40,7 @@ set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/Quake/bc7enc.c PROPERTIE
 
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.h)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/lodepng.c)
+list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/renderer_builtin_gl_plugin.c)
 
 if (UNIX)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/pl_win.c)
@@ -118,6 +119,9 @@ if (ENABLE_USERDIRS)
 	target_compile_definitions(ironwail PRIVATE DO_USERDIRS=1)
 endif()
 
+add_library(ironwail_renderer_opengl MODULE Quake/renderer_builtin_gl_plugin.c)
+set_target_properties(ironwail_renderer_opengl PROPERTIES PREFIX "")
+
 if (PC_MPG123_FOUND)
 	target_compile_definitions(ironwail PRIVATE USE_CODEC_MP3)
     target_link_libraries(ironwail PUBLIC PkgConfig::PC_MPG123)
@@ -193,4 +197,7 @@ if (WIN32)
 				COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ZLIB1_DLL} $<TARGET_FILE_DIR:ironwail>
 				COMMAND_EXPAND_LISTS)
 	endif()
+
+	add_custom_command(TARGET ironwail_renderer_opengl POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ironwail_renderer_opengl> $<TARGET_FILE_DIR:ironwail>)
 endif()

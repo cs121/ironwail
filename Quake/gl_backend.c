@@ -1,5 +1,6 @@
 #include "quakedef.h"
 #include "glquake.h"
+#include "gl_backend.h"
 
 #include "r_framegraph.h"
 
@@ -41,6 +42,19 @@ typedef struct gl_backend_timer_pass_s
 static gl_backend_timer_pass_t s_timer_passes[R_BACKEND_MAX_PROFILE_SLOTS];
 static RenderBackendCaps s_gl_backend_caps;
 static int s_legacy_pass_resource_fallback_frame = -1;
+static gl_proc_address_loader_t s_gl_proc_loader = NULL;
+
+void GL_Backend_SetProcAddressLoader (gl_proc_address_loader_t loader)
+{
+	s_gl_proc_loader = loader;
+}
+
+void *GL_Backend_GetProcAddress (const char *name)
+{
+	if (!s_gl_proc_loader || !name || !name[0])
+		return NULL;
+	return s_gl_proc_loader (name);
+}
 
 static unsigned short GLBackend_RegisterResource (RenderGraphResourceHandle *handles, render_backend_resource_type_t type, render_backend_resource_slot_t slot, render_backend_resource_lifetime_t lifetime, unsigned native_id)
 {

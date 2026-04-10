@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bgmusic.h"
 #include "resource.h"
 #include "gl_lightgrid.h"
+#include "gl_backend.h"
 #if defined(SDL_FRAMEWORK) || defined(NO_SDL_CONFIG)
 #include <SDL2/SDL.h>
 #else
@@ -85,6 +86,7 @@ extern cvar_t r_viewmodel_minlight;
 static void ClearAllStates (void);
 static void GL_Init (void);
 static void GL_SetupState (void); //johnfitz
+static void *VID_GetGLProcAddress (const char *name);
 
 viddef_t	vid;				// global video state
 modestate_t	modestate = MS_UNINIT;
@@ -478,6 +480,11 @@ static void VID_ConfigureGLContextAttributes (void)
 #endif
 }
 
+static void *VID_GetGLProcAddress (const char *name)
+{
+	return SDL_GL_GetProcAddress (name);
+}
+
 /*
 ================
 VID_CreateWindowIfNeeded
@@ -618,6 +625,8 @@ static void VID_EnsureGLContext (void)
 				);
 		}
 	}
+
+	GL_Backend_SetProcAddressLoader (VID_GetGLProcAddress);
 }
 
 /*
@@ -1138,7 +1147,7 @@ qboolean GL_InitFunctions (const glfunc_t *funcs, qboolean required)
 
 	while (funcs->name)
 	{
-		if ((*funcs->ptr = SDL_GL_GetProcAddress (funcs->name)) == NULL)
+		if ((*funcs->ptr = GL_Backend_GetProcAddress (funcs->name)) == NULL)
 		{
 			if (required)
 			{
@@ -1628,6 +1637,7 @@ void	VID_Shutdown (void)
 		R_Backend_Shutdown ();
 		Lightgrid_Shutdown ();
 		VID_FreeMouseCursors();
+		GL_Backend_SetProcAddressLoader (NULL);
 		SDL_GL_DeleteContext(gl_context);
 		gl_context = NULL;
 		SDL_DestroyWindow(draw_context);

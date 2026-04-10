@@ -294,6 +294,7 @@ typedef struct
 #include "sidebar.h"
 #include "cdaudio.h"
 #include "render_api.h"
+#include "glquake.h"
 
 
 //=============================================================================

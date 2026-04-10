@@ -3,10 +3,12 @@
 
 #include "gl_backend.h"
 #include "r_framegraph.h"
+#include "renderer_plugin.h"
 
 enum
 {
-	R_BACKEND_MAX_REGISTERED = 8
+	R_BACKEND_MAX_REGISTERED = 8,
+	R_BACKEND_MAX_PLUGIN_LIBS = 8
 };
 
 static const IRenderBackend *s_registered_backends[R_BACKEND_MAX_REGISTERED];
@@ -19,6 +21,8 @@ static qboolean s_backend_active = false;
 static qboolean s_backend_audit_cmd_registered = false;
 static qboolean s_backend_vulkan_status_cmd_registered = false;
 static int s_missing_resource_warn_frame[R_BACKEND_RESOURCE_SLOT_COUNT];
+static void *s_plugin_libs[R_BACKEND_MAX_PLUGIN_LIBS];
+static int s_plugin_lib_count = 0;
 
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
 
@@ -145,6 +149,163 @@ static const IRenderBackend *R_Backend_FindByName (const char *backend_name)
 	}
 
 	return NULL;
+}
+
+static qboolean R_Backend_HasRegisteredName (const char *backend_name)
+{
+	return R_Backend_FindByName (backend_name) != NULL;
+}
+
+static qboolean R_Backend_RegisterBuiltinByName (const char *backend_name)
+{
+	if (!backend_name || !backend_name[0])
+		return false;
+
+	if (!q_strcasecmp (backend_name, "OpenGL"))
+	{
+		GL_Backend_Register ();
+		return R_Backend_HasRegisteredName ("OpenGL");
+	}
+
+	return false;
+}
+
+static void R_Backend_RecordPluginLibrary (void *lib)
+{
+	if (!lib)
+		return;
+	if (s_plugin_lib_count >= R_BACKEND_MAX_PLUGIN_LIBS)
+	{
+		Sys_CloseLibrary (lib);
+		Con_Warning ("Renderer plugin loader reached capacity (%d); ignoring extra plugin library.\n", R_BACKEND_MAX_PLUGIN_LIBS);
+		return;
+	}
+
+	s_plugin_libs[s_plugin_lib_count++] = lib;
+}
+
+static void R_Backend_UnloadPluginLibraries (void)
+{
+	while (s_plugin_lib_count > 0)
+	{
+		void *lib = s_plugin_libs[--s_plugin_lib_count];
+		if (lib)
+			Sys_CloseLibrary (lib);
+		s_plugin_libs[s_plugin_lib_count] = NULL;
+	}
+}
+
+static qboolean R_Backend_LoadPluginFromPath (const char *path)
+{
+	iw_renderer_plugin_query_fn query_fn;
+	const iw_renderer_plugin_descriptor_t *descriptor;
+	iw_renderer_plugin_host_api_t host_api;
+	void *lib;
+	const char *plugin_name;
+
+	if (!path || !path[0])
+		return false;
+
+	lib = Sys_LoadLibrary (path);
+	if (!lib)
+		return false;
+
+	query_fn = (iw_renderer_plugin_query_fn) Sys_GetLibraryFunction (lib, "IW_RendererPlugin_Query");
+	if (!query_fn)
+	{
+		Con_Warning ("Renderer plugin '%s' does not export IW_RendererPlugin_Query.\n", path);
+		Sys_CloseLibrary (lib);
+		return false;
+	}
+
+	descriptor = query_fn ();
+	if (!descriptor || descriptor->struct_size < sizeof (*descriptor))
+	{
+		Con_Warning ("Renderer plugin '%s' returned an invalid descriptor.\n", path);
+		Sys_CloseLibrary (lib);
+		return false;
+	}
+
+	plugin_name = (descriptor->plugin_name && descriptor->plugin_name[0]) ? descriptor->plugin_name : path;
+	if (descriptor->abi_major != IW_RENDERER_PLUGIN_ABI_MAJOR)
+	{
+		Con_Warning (
+			"Renderer plugin '%s' ABI mismatch: host=%u.%u plugin=%u.%u (major mismatch)\n",
+			plugin_name,
+			IW_RENDERER_PLUGIN_ABI_MAJOR,
+			IW_RENDERER_PLUGIN_ABI_MINOR,
+			descriptor->abi_major,
+			descriptor->abi_minor);
+		Sys_CloseLibrary (lib);
+		return false;
+	}
+	if (descriptor->abi_minor > IW_RENDERER_PLUGIN_ABI_MINOR)
+	{
+		Con_Warning (
+			"Renderer plugin '%s' requires newer ABI %u.%u than host %u.%u.\n",
+			plugin_name,
+			descriptor->abi_major,
+			descriptor->abi_minor,
+			IW_RENDERER_PLUGIN_ABI_MAJOR,
+			IW_RENDERER_PLUGIN_ABI_MINOR);
+		Sys_CloseLibrary (lib);
+		return false;
+	}
+	if (!descriptor->register_plugin)
+	{
+		Con_Warning ("Renderer plugin '%s' has no register_plugin callback.\n", plugin_name);
+		Sys_CloseLibrary (lib);
+		return false;
+	}
+
+	memset (&host_api, 0, sizeof (host_api));
+	host_api.struct_size = sizeof (host_api);
+	host_api.abi_major = IW_RENDERER_PLUGIN_ABI_MAJOR;
+	host_api.abi_minor = IW_RENDERER_PLUGIN_ABI_MINOR;
+	host_api.register_builtin_backend = R_Backend_RegisterBuiltinByName;
+
+	if (!descriptor->register_plugin (&host_api))
+	{
+		Con_Warning ("Renderer plugin '%s' registration callback failed.\n", plugin_name);
+		Sys_CloseLibrary (lib);
+		return false;
+	}
+
+	Con_DPrintf ("Renderer plugin loaded: %s (%s)\n", plugin_name, path);
+	R_Backend_RecordPluginLibrary (lib);
+	return true;
+}
+
+static void R_Backend_LoadRendererPlugins (void)
+{
+	char path[MAX_OSPATH];
+	const char *plugin_base;
+	const char *ext;
+
+#ifdef _WIN32
+	ext = ".dll";
+#elif defined(__APPLE__)
+	ext = ".dylib";
+#else
+	ext = ".so";
+#endif
+
+	plugin_base = "ironwail_renderer_opengl";
+
+	if (host_parms && host_parms->exedir && host_parms->exedir[0])
+	{
+		if ((size_t) q_snprintf (path, sizeof (path), "%s/%s%s", host_parms->exedir, plugin_base, ext) < sizeof (path))
+			R_Backend_LoadPluginFromPath (path);
+	}
+
+	if (host_parms && host_parms->basedir && host_parms->basedir[0])
+	{
+		if ((size_t) q_snprintf (path, sizeof (path), "%s/%s%s", host_parms->basedir, plugin_base, ext) < sizeof (path))
+			R_Backend_LoadPluginFromPath (path);
+	}
+
+	if ((size_t) q_snprintf (path, sizeof (path), "%s%s", plugin_base, ext) < sizeof (path))
+		R_Backend_LoadPluginFromPath (path);
 }
 
 static void R_Backend_ApplySelectionToCvar (void)
@@ -421,8 +582,12 @@ void R_Backend_Init (void)
 		s_backend_vulkan_status_cmd_registered = true;
 	}
 
-	GL_Backend_Register ();
 	R_Backend_Register (&s_vulkan_stub_backend);
+	R_Backend_LoadRendererPlugins ();
+
+	/* Runtime plugin loading is optional; keep built-in OpenGL as a hard fallback. */
+	if (!R_Backend_HasRegisteredName ("OpenGL"))
+		GL_Backend_Register ();
 
 	if (!s_active_backend && s_registered_backend_count > 0)
 		s_active_backend = s_registered_backends[0];
@@ -437,6 +602,15 @@ void R_Backend_Shutdown (void)
 		s_active_backend->shutdown ();
 	s_backend_active = false;
 	R_Backend_ClearActiveCaps ();
+	R_Backend_UnloadPluginLibraries ();
+	{
+		int i;
+		for (i = 0; i < R_BACKEND_MAX_REGISTERED; ++i)
+			s_registered_backends[i] = NULL;
+	}
+	s_registered_backend_count = 0;
+	s_active_backend = NULL;
+	s_backend_initialized = false;
 }
 
 void R_Backend_OnResize (int width, int height)

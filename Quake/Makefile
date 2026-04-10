@@ -185,6 +185,8 @@ COMMON_LIBS= -lGL -ldl -lm
 endif
 
 LIBS = $(COMMON_LIBS) $(NET_LIBS) $(CODECLIBS)
+RENDERER_PLUGIN_BASENAME = ironwail_renderer_opengl
+RENDERER_PLUGIN_TARGET = $(RENDERER_PLUGIN_BASENAME).so
 
 # name of this makefile, so we can use it as a dependency
 MAKEFILE := $(lastword $(MAKEFILE_LIST))
@@ -305,6 +307,9 @@ OBJS = strlcat.o \
 
 OBJDEPS := $(OBJS:%.o=%.d)
 OBJS += $(SYSOBJ_RES)
+RENDERER_PLUGIN_OBJS = renderer_builtin_gl_plugin.o
+RENDERER_PLUGIN_DEPS = $(RENDERER_PLUGIN_OBJS:%.o=%.d)
+renderer_builtin_gl_plugin.o: CFLAGS += -fPIC
 
 bc7enc.o: bc7enc.c bc7enc.h $(MAKEFILE)
 	@echo "Compiling $<" && \
@@ -316,8 +321,8 @@ bc7enc.o: bc7enc.c bc7enc.h $(MAKEFILE)
 
 .PHONY:	clean debug release
 
-DEFAULT_TARGET = ironwail
-all: $(DEFAULT_TARGET)
+DEFAULT_TARGETS = ironwail $(RENDERER_PLUGIN_TARGET)
+all: $(DEFAULT_TARGETS)
 
 %.d:	%.c $(MAKEFILE)
 	@echo "Generating dependencies for $<" && \
@@ -338,12 +343,16 @@ ironwail:	$(OBJS) $(MAKEFILE)
 	$(LINKER) $(OBJS) $(LDFLAGS) $(LIBS) $(SDL_LIBS) -o $@
 	$(call do_strip,$@)
 
+$(RENDERER_PLUGIN_TARGET): $(RENDERER_PLUGIN_OBJS) $(MAKEFILE)
+	@echo "Linking $@" && \
+	$(CC) -shared $(RENDERER_PLUGIN_OBJS) -o $@
+
 release:	ironwail
 debug:
 	$(error Use "make DEBUG=1")
 
 clean: $(MAKEFILE)
-	$(RM) *.o *.d $(DEFAULT_TARGET)
+	$(RM) *.o *.d ironwail $(RENDERER_PLUGIN_TARGET)
 
 ifeq ($(HOST_OS),haiku)
 IW_APP_DIR=$(shell finddir B_APPS_DIRECTORY)/ironwail/
@@ -362,7 +371,7 @@ endif
 #---------------------------------------------------------------
 
 ifneq ($(strip $(MAKECMDGOALS)),clean)
-ifneq ($(strip $(OBJDEPS)),)
--include $(OBJDEPS)
+ifneq ($(strip $(OBJDEPS) $(RENDERER_PLUGIN_DEPS)),)
+-include $(OBJDEPS) $(RENDERER_PLUGIN_DEPS)
 endif
 endif

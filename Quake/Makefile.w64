@@ -183,6 +183,7 @@ CFLAGS+= $(CODEC_INC)
 COMMON_LIBS= -lopengl32 -lwinmm -luuid -lole32
 
 LIBS = $(COMMON_LIBS) $(NET_LIBS) $(CODEC_LINK) $(CODECLIBS)
+RENDERER_PLUGIN_TARGET = ironwail_renderer_opengl.dll
 
 # name of this makefile, so we can use it as a dependency
 MAKEFILE := $(lastword $(MAKEFILE_LIST))
@@ -293,6 +294,8 @@ OBJS = strlcat.o \
 
 OBJDEPS := $(OBJS:%.o=%.d)
 OBJS += $(SYSOBJ_RES)
+RENDERER_PLUGIN_OBJS = renderer_builtin_gl_plugin.o
+RENDERER_PLUGIN_DEPS = $(RENDERER_PLUGIN_OBJS:%.o=%.d)
 
 # ---------------------------
 # targets / rules
@@ -300,8 +303,8 @@ OBJS += $(SYSOBJ_RES)
 
 .PHONY:	clean debug release
 
-DEFAULT_TARGET = ironwail.exe
-all: $(DEFAULT_TARGET)
+DEFAULT_TARGETS = ironwail.exe $(RENDERER_PLUGIN_TARGET)
+all: $(DEFAULT_TARGETS)
 
 %.d:	%.c $(MAKEFILE)
 	@echo "Generating dependencies for $<" && \
@@ -325,19 +328,23 @@ ironwail.exe:	$(OBJS) $(MAKEFILE)
 	$(LINKER) $(OBJS) $(LDFLAGS) $(LIBS) $(SDL_LIBS) -o $@
 	$(call do_strip,$@)
 
+$(RENDERER_PLUGIN_TARGET): $(RENDERER_PLUGIN_OBJS) $(MAKEFILE)
+	@echo "Linking $@" && \
+	$(CC) -shared $(RENDERER_PLUGIN_OBJS) -o $@
+
 release:	ironwail.exe
 debug:
 	$(error Use "make DEBUG=1")
 
 clean: $(MAKEFILE)
-	$(RM) *.o *.d *.res $(DEFAULT_TARGET)
+	$(RM) *.o *.d *.res ironwail.exe $(RENDERER_PLUGIN_TARGET)
 
 #---------------------------------------------------------------
 # include dependencies (if not running 'clean' target)
 #---------------------------------------------------------------
 
 ifneq ($(strip $(MAKECMDGOALS)),clean)
-ifneq ($(strip $(OBJDEPS)),)
--include $(OBJDEPS)
+ifneq ($(strip $(OBJDEPS) $(RENDERER_PLUGIN_DEPS)),)
+-include $(OBJDEPS) $(RENDERER_PLUGIN_DEPS)
 endif
 endif
