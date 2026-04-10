@@ -191,6 +191,42 @@ static void GLBackend_EndPass (void)
 	GL_EndGroup ();
 }
 
+static void GLBackend_BeginPassEx (const RenderBackendPassDesc *pass_desc)
+{
+	GLBackend_BeginPass ((pass_desc && pass_desc->name) ? pass_desc->name : "<unnamed>");
+}
+
+static void GLBackend_EndPassEx (void)
+{
+	GLBackend_EndPass ();
+}
+
+static void GLBackend_ResourceBarrier (const RenderGraphResourceHandle *resources, const RenderBackendResourceBarrier *barriers, unsigned count)
+{
+	unsigned i;
+	qboolean needs_memory_barrier = false;
+	(void)resources;
+
+	if (!barriers || count == 0u)
+		return;
+
+	for (i = 0; i < count; ++i)
+	{
+		if (!barriers[i].resource)
+			continue;
+		if (barriers[i].before == R_BACKEND_RESOURCE_STATE_SHADER_WRITE
+			|| barriers[i].after == R_BACKEND_RESOURCE_STATE_SHADER_READ
+			|| barriers[i].after == R_BACKEND_RESOURCE_STATE_SHADER_WRITE)
+		{
+			needs_memory_barrier = true;
+			break;
+		}
+	}
+
+	if (needs_memory_barrier && GL_MemoryBarrierFunc)
+		GL_MemoryBarrierFunc (GL_FRAMEBUFFER_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+}
+
 static void GLBackend_ValidatePassState (const char *pass_name, qboolean before_pass)
 {
 	GLenum err;
@@ -539,9 +575,9 @@ void GL_Backend_Register (void)
 		GLBackend_Shutdown,
 		GLBackend_OnResize,
 		GLBackend_CanActivate,
-		NULL,
-		NULL,
-		NULL,
+		GLBackend_BeginPassEx,
+		GLBackend_EndPassEx,
+		GLBackend_ResourceBarrier,
 		NULL,
 		NULL,
 		NULL,

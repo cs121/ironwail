@@ -70,6 +70,7 @@ static const fg_resource_bit_mapping_t s_fg_resource_mappings[] = {
 	{ RENDER_RES_DECALS, R_BACKEND_RESOURCE_SLOT_NONE, false },
 	{ RENDER_RES_SSAO_FOG_STATE, R_BACKEND_RESOURCE_SLOT_NONE, false }
 };
+static render_backend_resource_state_t s_resource_states[q_countof (s_fg_resource_mappings)];
 
 static const fg_resource_bit_mapping_t *FG_FindResourceMapping (unsigned bit)
 {
@@ -92,6 +93,92 @@ static qboolean FG_GetResourceSlotForBit (unsigned bit, render_backend_resource_
 	if (out_slot)
 		*out_slot = mapping->slot;
 	return true;
+}
+
+static int FG_FindResourceMappingIndex (unsigned bit)
+{
+	int i;
+	for (i = 0; i < (int)q_countof (s_fg_resource_mappings); ++i)
+	{
+		if (s_fg_resource_mappings[i].bit == bit)
+			return i;
+	}
+	return -1;
+}
+
+static render_backend_resource_state_t FG_GetWriteStateForBit (unsigned bit)
+{
+	switch (bit)
+	{
+	case RENDER_RES_SCENE_DEPTH:
+	case RENDER_RES_COMPOSITE_DEPTH:
+	case RENDER_RES_SHADOW_SUN_DEPTH:
+		return R_BACKEND_RESOURCE_STATE_DEPTH_ATTACHMENT;
+	default:
+		return R_BACKEND_RESOURCE_STATE_COLOR_ATTACHMENT;
+	}
+}
+
+static void FG_ResetResourceStates (void)
+{
+	memset (s_resource_states, 0, sizeof (s_resource_states));
+}
+
+static void FG_EmitPassBarriers (const RenderPassDesc *pass, RenderPassContext *ctx)
+{
+	RenderBackendResourceBarrier barriers[16];
+	unsigned barrier_count = 0;
+	unsigned bit;
+
+	if (!pass || !ctx || !ctx->resources)
+		return;
+
+	for (bit = 1u; bit != 0; bit <<= 1)
+	{
+		render_backend_resource_state_t desired_state = R_BACKEND_RESOURCE_STATE_UNKNOWN;
+		const fg_resource_bit_mapping_t *mapping;
+		const render_backend_resource_ref_t *resource_ref;
+		int mapping_index;
+		render_backend_resource_state_t before_state;
+
+		if (((pass->reads | pass->writes) & bit) == 0u)
+			continue;
+
+		mapping = FG_FindResourceMapping (bit);
+		if (!mapping || !mapping->requires_backend_resource)
+			continue;
+
+		if ((pass->writes & bit) != 0u)
+			desired_state = FG_GetWriteStateForBit (bit);
+		else if ((pass->reads & bit) != 0u)
+			desired_state = R_BACKEND_RESOURCE_STATE_SHADER_READ;
+
+		if (desired_state == R_BACKEND_RESOURCE_STATE_UNKNOWN)
+			continue;
+
+		resource_ref = R_FrameGraph_GetResourceRef (ctx->resources, mapping->slot);
+		if (!resource_ref || (ctx->backend && ctx->backend->is_resource_valid
+			&& !ctx->backend->is_resource_valid (ctx->resources, resource_ref)))
+			continue;
+
+		mapping_index = FG_FindResourceMappingIndex (bit);
+		if (mapping_index < 0)
+			continue;
+		before_state = s_resource_states[mapping_index];
+		if (before_state == desired_state)
+			continue;
+
+		if (barrier_count >= q_countof (barriers))
+			break;
+		barriers[barrier_count].resource = resource_ref;
+		barriers[barrier_count].before = before_state;
+		barriers[barrier_count].after = desired_state;
+		s_resource_states[mapping_index] = desired_state;
+		barrier_count++;
+	}
+
+	if (barrier_count > 0)
+		R_Backend_ResourceBarrier (ctx->resources, barriers, barrier_count);
 }
 
 static qboolean FG_AddRuntimePassInternal (const RenderPassDesc *pass_desc)
@@ -643,6 +730,11 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	double cpu_start;
 	double cpu_ms;
 	unsigned bit;
+	RenderBackendPassAttachmentDesc color_attachments[4];
+	RenderBackendPassAttachmentDesc depth_attachment;
+	RenderBackendPassDesc backend_pass_desc;
+	qboolean has_depth_attachment = false;
+	qboolean has_legacy_validation = false;
 
 	if (!pass || !ctx)
 		return;
@@ -687,10 +779,54 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 
 	FG_ApplyPassOutputBinding (pass, ctx);
 
-	if (ctx->backend && ctx->backend->validate_pass_state)
+	memset (color_attachments, 0, sizeof (color_attachments));
+	memset (&depth_attachment, 0, sizeof (depth_attachment));
+	memset (&backend_pass_desc, 0, sizeof (backend_pass_desc));
+	backend_pass_desc.name = pass->name;
+	backend_pass_desc.resources = ctx->resources;
+	backend_pass_desc.backbuffer = (pass->output_target == FG_PASS_OUTPUT_BACKBUFFER);
+
+	if (pass->color_attachments && pass->num_color_attachments > 0)
+	{
+		unsigned i;
+		unsigned color_count = pass->num_color_attachments;
+		if (color_count > q_countof (color_attachments))
+			color_count = q_countof (color_attachments);
+		for (i = 0; i < color_count; ++i)
+		{
+			render_backend_resource_slot_t slot = R_BACKEND_RESOURCE_SLOT_NONE;
+			if (!FG_GetResourceSlotForBit (pass->color_attachments[i].resource_bit, &slot))
+				continue;
+			color_attachments[i].resource = R_FrameGraph_GetResourceRef (ctx->resources, slot);
+			color_attachments[i].load_op = pass->color_attachments[i].load_op;
+			color_attachments[i].store_op = pass->color_attachments[i].store_op;
+		}
+		backend_pass_desc.color_attachments = color_attachments;
+		backend_pass_desc.num_color_attachments = color_count;
+	}
+
+	if (pass->depth_attachment)
+	{
+		render_backend_resource_slot_t depth_slot = R_BACKEND_RESOURCE_SLOT_NONE;
+		if (FG_GetResourceSlotForBit (pass->depth_attachment->resource_bit, &depth_slot))
+		{
+			depth_attachment.resource = R_FrameGraph_GetResourceRef (ctx->resources, depth_slot);
+			depth_attachment.load_op = pass->depth_attachment->load_op;
+			depth_attachment.store_op = pass->depth_attachment->store_op;
+			has_depth_attachment = true;
+		}
+	}
+
+	if (has_depth_attachment)
+		backend_pass_desc.depth_attachment = &depth_attachment;
+
+	FG_EmitPassBarriers (pass, ctx);
+
+	has_legacy_validation = (ctx->backend && ctx->backend->validate_pass_state
+		&& !ctx->backend->begin_pass_ex);
+	if (has_legacy_validation)
 		ctx->backend->validate_pass_state (pass->name, true);
-	if (ctx->backend && ctx->backend->begin_pass)
-		ctx->backend->begin_pass (pass->name);
+	R_Backend_BeginPassEx (&backend_pass_desc);
 	if (ctx->frame_plan && ctx->frame_plan->run_gpu_timers && ctx->backend && ctx->backend->begin_timer)
 		ctx->backend->begin_timer (profile_slot);
 
@@ -702,9 +838,8 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 
 	if (ctx->frame_plan && ctx->frame_plan->run_gpu_timers && ctx->backend && ctx->backend->end_timer)
 		ctx->backend->end_timer (profile_slot);
-	if (ctx->backend && ctx->backend->end_pass)
-		ctx->backend->end_pass ();
-	if (ctx->backend && ctx->backend->validate_pass_state)
+	R_Backend_EndPassEx ();
+	if (has_legacy_validation)
 		ctx->backend->validate_pass_state (pass->name, false);
 }
 
@@ -825,6 +960,7 @@ void R_FrameGraph_RenderView (void)
 		&& pass_ctx.backend && pass_ctx.backend->resolve_timers)
 		pass_ctx.backend->resolve_timers ();
 	FG_ConsumeBackendTimerSamples (pass_ctx.backend);
+	FG_ResetResourceStates ();
 
 	/* Setup-stage passes run before plan build so frame state is current. */
 	setup_pass_count = FG_MoveSetupStagePassesToFront ();
