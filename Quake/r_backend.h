@@ -50,6 +50,7 @@ typedef struct render_backend_resource_ref_s
 {
 	unsigned char type;
 	unsigned short slot;
+	unsigned short opaque_id;
 } render_backend_resource_ref_t;
 
 typedef enum render_backend_primitive_e
