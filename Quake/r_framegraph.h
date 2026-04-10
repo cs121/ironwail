@@ -13,7 +13,22 @@ typedef struct render_frame_plan_s
 	qboolean run_viewmodel;
 	qboolean run_polyblend;
 	qboolean run_store_prev;
+	qboolean run_gpu_timers;
 } RenderFramePlan;
+
+typedef struct render_backend_caps_s
+{
+	qboolean supports_timestamps;
+	qboolean supports_compute;
+	unsigned msaa_mode_mask;
+	unsigned max_msaa_samples;
+	unsigned shader_model;
+	qboolean supports_bindless;
+	unsigned max_textures;
+	unsigned max_samplers;
+	unsigned max_ubos;
+	unsigned max_ssbos;
+} RenderBackendCaps;
 
 typedef enum render_graph_resource_bits_e
 {
@@ -82,6 +97,7 @@ typedef struct i_render_backend_s
 	void (*end_timer)(int pass_id);
 	void (*resolve_timers)(void);
 	qboolean (*consume_timer_sample)(int pass_id, double *out_gpu_ms);
+	const RenderBackendCaps *(*get_caps)(void);
 	unsigned (*resolve_resource_id)(const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource);
 	qboolean (*is_resource_valid)(const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource);
 	void (*bind_render_target)(const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource, qboolean backbuffer);
@@ -126,6 +142,7 @@ void R_Backend_Init (void);
 void R_Backend_Register (const IRenderBackend *backend);
 qboolean R_Backend_Select (const char *backend_name);
 const IRenderBackend *R_GetRenderBackend (void);
+const RenderBackendCaps *R_Backend_GetCaps (void);
 const render_backend_resource_ref_t *R_FrameGraph_GetResourceRef (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
 unsigned R_FrameGraph_ResolveResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
 qboolean R_FrameGraph_HasResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);

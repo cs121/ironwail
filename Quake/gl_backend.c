@@ -38,6 +38,7 @@ typedef struct gl_backend_timer_pass_s
 } gl_backend_timer_pass_t;
 
 static gl_backend_timer_pass_t s_timer_passes[R_BACKEND_MAX_PROFILE_SLOTS];
+static RenderBackendCaps s_gl_backend_caps;
 
 static qboolean GLBackend_HasTimestampQueries (void)
 {
@@ -45,6 +46,43 @@ static qboolean GLBackend_HasTimestampQueries (void)
 		&& GL_QueryCounterFunc
 		&& GL_GetQueryObjectuivFunc
 		&& GL_GetQueryObjectui64vFunc);
+}
+
+static void GLBackend_DetectCaps (void)
+{
+	GLint max_textures = 0;
+	GLint max_samplers = 0;
+	GLint max_ubos = 0;
+	GLint max_ssbos = 0;
+	unsigned sample;
+
+	memset (&s_gl_backend_caps, 0, sizeof (s_gl_backend_caps));
+	s_gl_backend_caps.supports_timestamps = GLBackend_HasTimestampQueries ();
+	s_gl_backend_caps.supports_compute = (GL_DispatchComputeFunc != NULL);
+	s_gl_backend_caps.supports_bindless = gl_bindless_able;
+	s_gl_backend_caps.shader_model = 50u;
+	s_gl_backend_caps.max_msaa_samples = (framebufs.max_samples > 0) ? (unsigned)framebufs.max_samples : 1u;
+	s_gl_backend_caps.msaa_mode_mask = 1u;
+	for (sample = 2u; sample <= s_gl_backend_caps.max_msaa_samples && sample <= 32u; sample <<= 1)
+		s_gl_backend_caps.msaa_mode_mask |= sample;
+
+	glGetIntegerv (GL_MAX_TEXTURE_IMAGE_UNITS, &max_textures);
+	glGetIntegerv (GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &max_samplers);
+	if (GL_GetIntegervFunc)
+	{
+		GL_GetIntegervFunc (GL_MAX_UNIFORM_BUFFER_BINDINGS, &max_ubos);
+		GL_GetIntegervFunc (GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS, &max_ssbos);
+	}
+
+	s_gl_backend_caps.max_textures = (max_textures > 0) ? (unsigned)max_textures : 0u;
+	s_gl_backend_caps.max_samplers = (max_samplers > 0) ? (unsigned)max_samplers : 0u;
+	s_gl_backend_caps.max_ubos = (max_ubos > 0) ? (unsigned)max_ubos : 0u;
+	s_gl_backend_caps.max_ssbos = (max_ssbos > 0) ? (unsigned)max_ssbos : 0u;
+}
+
+static const RenderBackendCaps *GLBackend_GetCaps (void)
+{
+	return &s_gl_backend_caps;
 }
 
 static GLenum GLBackend_MapBlendFactor (render_blend_factor_t factor)
@@ -136,7 +174,7 @@ static void GLBackend_BeginTimer (int pass_id)
 	int attempts;
 	int slot_index;
 
-	if (!GLBackend_HasTimestampQueries ())
+	if (!s_gl_backend_caps.supports_timestamps)
 		return;
 	if (pass_id < 0 || pass_id >= R_BACKEND_MAX_PROFILE_SLOTS)
 		return;
@@ -180,7 +218,7 @@ static void GLBackend_EndTimer (int pass_id)
 	gl_backend_timer_pass_t *stats;
 	int slot_index;
 
-	if (!GLBackend_HasTimestampQueries ())
+	if (!s_gl_backend_caps.supports_timestamps)
 		return;
 	if (pass_id < 0 || pass_id >= R_BACKEND_MAX_PROFILE_SLOTS)
 		return;
@@ -210,7 +248,7 @@ static void GLBackend_ResolveTimers (void)
 	int pass_id;
 	int slot_index;
 
-	if (!GLBackend_HasTimestampQueries ())
+	if (!s_gl_backend_caps.supports_timestamps)
 		return;
 
 	for (pass_id = 0; pass_id < R_BACKEND_MAX_PROFILE_SLOTS; ++pass_id)
@@ -383,7 +421,7 @@ static void GLBackend_Draw (render_backend_primitive_t primitive, int first, int
 
 static void GLBackend_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z)
 {
-	if (GL_DispatchComputeFunc)
+	if (s_gl_backend_caps.supports_compute)
 		GL_DispatchComputeFunc (group_x, group_y, group_z);
 }
 
@@ -401,6 +439,8 @@ static void GLBackend_Finish (void)
 
 void GL_Backend_Register (void)
 {
+	GLBackend_DetectCaps ();
+
 	static const IRenderBackend gl_backend = {
 		"OpenGL",
 		GLBackend_BeginPass,
@@ -410,6 +450,7 @@ void GL_Backend_Register (void)
 		GLBackend_EndTimer,
 		GLBackend_ResolveTimers,
 		GLBackend_ConsumeTimerSample,
+		GLBackend_GetCaps,
 		GLBackend_ResolveResourceId,
 		GLBackend_IsResourceValid,
 		GLBackend_BindRenderTarget,

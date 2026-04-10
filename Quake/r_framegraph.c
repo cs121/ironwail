@@ -324,9 +324,12 @@ static render_backend_resource_ref_t FG_MakeResourceRef (render_backend_resource
 
 static void FG_ConsumeBackendTimerSamples (const IRenderBackend *backend)
 {
+	const RenderBackendCaps *caps = R_Backend_GetCaps ();
 	int i;
 
 	if (!backend || !backend->consume_timer_sample)
+		return;
+	if (!caps || !caps->supports_timestamps)
 		return;
 
 	for (i = 0; i < s_profile_slot_count; ++i)
@@ -632,7 +635,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 		ctx->backend->validate_pass_state (pass->name, true);
 	if (ctx->backend && ctx->backend->begin_pass)
 		ctx->backend->begin_pass (pass->name);
-	if (ctx->backend && ctx->backend->begin_timer)
+	if (ctx->frame_plan && ctx->frame_plan->run_gpu_timers && ctx->backend && ctx->backend->begin_timer)
 		ctx->backend->begin_timer (profile_slot);
 
 	cpu_start = Sys_DoubleTime ();
@@ -641,7 +644,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	FG_AccumulateCPUStats (profile_slot, cpu_ms);
 	FG_AccumulateChannelCPUStats (pass->stats_channel, cpu_ms);
 
-	if (ctx->backend && ctx->backend->end_timer)
+	if (ctx->frame_plan && ctx->frame_plan->run_gpu_timers && ctx->backend && ctx->backend->end_timer)
 		ctx->backend->end_timer (profile_slot);
 	if (ctx->backend && ctx->backend->end_pass)
 		ctx->backend->end_pass ();
@@ -651,6 +654,8 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 
 void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan)
 {
+	const RenderBackendCaps *caps;
+
 	if (!out_plan)
 		return;
 
@@ -662,6 +667,8 @@ void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan)
 	out_plan->run_viewmodel = true;
 	out_plan->run_polyblend = true;
 	out_plan->run_store_prev = true;
+	caps = R_Backend_GetCaps ();
+	out_plan->run_gpu_timers = (caps && caps->supports_timestamps);
 }
 
 void R_FrameGraph_SetRenderFramePlan (const RenderFramePlan *plan)
@@ -692,6 +699,7 @@ void R_FrameGraph_GetTimingSummary (double *out_gpu_ms, double *out_cpu_ms, qboo
 	double cpu_total = 0.0;
 	qboolean gpu_valid = false;
 	const IRenderBackend *backend = R_GetRenderBackend ();
+	const RenderBackendCaps *caps = R_Backend_GetCaps ();
 	int i;
 
 	for (i = 1; i < FG_PASS_STATS_COUNT; ++i)
@@ -718,7 +726,7 @@ void R_FrameGraph_GetTimingSummary (double *out_gpu_ms, double *out_cpu_ms, qboo
 			gpu_valid = true;
 	}
 
-	if (!backend || !backend->consume_timer_sample)
+	if (!backend || !backend->consume_timer_sample || !caps || !caps->supports_timestamps)
 		gpu_valid = false;
 
 	if (out_gpu_ms)
@@ -741,6 +749,7 @@ void R_FrameGraph_RenderView (void)
 	RenderFramePlan frame_plan;
 	RenderGraphResourceHandle resources;
 	RenderPassContext pass_ctx;
+	const RenderBackendCaps *caps;
 	unsigned long long active_pass_mask;
 	int setup_pass_count;
 	int pass_count;
@@ -754,8 +763,10 @@ void R_FrameGraph_RenderView (void)
 	pass_ctx.frame_plan = &frame_plan;
 	pass_ctx.resources = &resources;
 	pass_ctx.backend = R_GetRenderBackend ();
+	caps = R_Backend_GetCaps ();
 
-	if (pass_ctx.backend && pass_ctx.backend->resolve_timers)
+	if (caps && caps->supports_timestamps
+		&& pass_ctx.backend && pass_ctx.backend->resolve_timers)
 		pass_ctx.backend->resolve_timers ();
 	FG_ConsumeBackendTimerSamples (pass_ctx.backend);
 
