@@ -5738,7 +5738,7 @@ static void R_FG_ExecWarpResolve (RenderPassContext *ctx)
 static const RenderPassDesc s_warp_resolve_framegraph_pass = {
 	"Warp/resolve",
 	RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH,
-	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH,
+	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_COMPOSITE_DEPTH,
 	1u << 0,
 	FG_PASS_OUTPUT_AUTO_WARP,
 	FG_PASS_VIEWPORT_VIEW_RECT,
@@ -5750,24 +5750,39 @@ static const RenderPassDesc s_warp_resolve_framegraph_pass = {
 
 static qboolean R_FG_HasResources (const RenderPassContext *ctx, unsigned required)
 {
-	unsigned available = RENDER_RES_NONE;
+	unsigned mask;
 	const RenderGraphResourceHandle *resources = ctx ? ctx->resources : NULL;
 
 	if (!resources)
 		return false;
 
-	if (R_FrameGraph_HasResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO))
-		available |= RENDER_RES_SCENE_COLOR;
-	if (R_FrameGraph_HasResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH))
-		available |= RENDER_RES_SCENE_DEPTH;
-	if (R_FrameGraph_HasResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO))
-		available |= RENDER_RES_COMPOSITE_COLOR;
-	if (R_FrameGraph_HasResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH))
-		available |= RENDER_RES_SHADOW_SUN_DEPTH;
-	if (R_FrameGraph_HasResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_VELOCITY))
-		available |= RENDER_RES_VELOCITY;
+	for (mask = 1u; mask != 0; mask <<= 1)
+	{
+		render_backend_resource_slot_t slot = R_BACKEND_RESOURCE_SLOT_NONE;
+		if ((required & mask) == 0)
+			continue;
 
-	return (available & required) == required;
+		switch (mask)
+		{
+		case RENDER_RES_SCENE_COLOR: slot = R_BACKEND_RESOURCE_SLOT_SCENE_COLOR; break;
+		case RENDER_RES_SCENE_DEPTH: slot = R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH; break;
+		case RENDER_RES_COMPOSITE_COLOR: slot = R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR; break;
+		case RENDER_RES_COMPOSITE_DEPTH: slot = R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH; break;
+		case RENDER_RES_SHADOW_SUN_DEPTH: slot = R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH; break;
+		case RENDER_RES_VELOCITY: slot = R_BACKEND_RESOURCE_SLOT_VELOCITY; break;
+		case RENDER_RES_DECALS:
+		case RENDER_RES_SSAO_FOG_STATE:
+			/* Internal logical framegraph resources; no backend slot backing. */
+			continue;
+		default:
+			return false;
+		}
+
+		if (!R_FrameGraph_HasResourceBySlot (resources, slot))
+			return false;
+	}
+
+	return true;
 }
 
 static void R_FG_ExecSSAOFogHandoff (RenderPassContext *ctx)
@@ -5793,7 +5808,7 @@ static qboolean R_FG_PassWhenPostprocessEnabled (const RenderPassContext *ctx)
 {
 	return ctx && ctx->frame_plan
 		&& ctx->frame_plan->run_postprocess
-		&& R_FG_HasResources (ctx, RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH);
+		&& R_FG_HasResources (ctx, RENDER_RES_COMPOSITE_COLOR | RENDER_RES_COMPOSITE_DEPTH);
 }
 
 static void R_FG_ExecPostprocess (RenderPassContext *ctx)
@@ -5803,7 +5818,7 @@ static void R_FG_ExecPostprocess (RenderPassContext *ctx)
 
 static const RenderPassDesc s_postprocess_framegraph_pass = {
 	"Postprocess",
-	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_SSAO_FOG_STATE,
+	RENDER_RES_COMPOSITE_COLOR | RENDER_RES_COMPOSITE_DEPTH | RENDER_RES_SSAO_FOG_STATE,
 	RENDER_RES_COMPOSITE_COLOR,
 	1u << 0,
 	FG_PASS_OUTPUT_BACKBUFFER,
