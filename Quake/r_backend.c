@@ -11,6 +11,7 @@ enum
 static const IRenderBackend *s_registered_backends[R_BACKEND_MAX_REGISTERED];
 static int s_registered_backend_count = 0;
 static const IRenderBackend *s_active_backend = NULL;
+static RenderBackendCaps s_active_backend_caps;
 static qboolean s_backend_initialized = false;
 static qboolean s_applying_backend_cvar = false;
 static qboolean s_backend_active = false;
@@ -183,6 +184,13 @@ const IRenderBackend *R_GetRenderBackend (void)
 	if (!s_backend_initialized)
 		R_Backend_Init ();
 	return s_active_backend;
+}
+
+const RenderBackendCaps *R_Backend_GetCaps (void)
+{
+	if (!s_backend_initialized)
+		R_Backend_Init ();
+	return &s_active_backend_caps;
 }
 
 const render_backend_resource_ref_t *R_FrameGraph_GetResourceRef (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot)
