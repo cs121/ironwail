@@ -105,8 +105,23 @@ typedef enum fg_pass_stats_channel_e
 typedef struct render_graph_resource_handle_s
 {
 	render_backend_resource_ref_t refs[R_BACKEND_RESOURCE_SLOT_COUNT];
-	int scene_samples;
+	unsigned short slot_resource_ids[R_BACKEND_RESOURCE_SLOT_COUNT];
+	struct render_graph_backend_resource_entry_s
+	{
+		unsigned resource_id;
+		unsigned native_id;
+		unsigned char type;
+		unsigned char lifetime;
+		unsigned short slot;
+	} registry[32];
+	unsigned char registry_count;
 } RenderGraphResourceHandle;
+
+typedef enum render_backend_resource_lifetime_e
+{
+	R_BACKEND_RESOURCE_LIFETIME_FRAME = 0,
+	R_BACKEND_RESOURCE_LIFETIME_PERSISTENT
+} render_backend_resource_lifetime_t;
 
 typedef struct render_backend_pass_attachment_desc_s
 {
@@ -200,6 +215,8 @@ typedef struct i_render_backend_s
 	void (*dispatch)(unsigned group_x, unsigned group_y, unsigned group_z);
 	void (*set_blend_factors)(render_blend_factor_t src, render_blend_factor_t dst);
 	void (*finish)(void);
+	void (*populate_framegraph_resources)(RenderGraphResourceHandle *out_handles);
+	int (*get_scene_sample_count)(void);
 } IRenderBackend;
 
 typedef struct render_pass_desc_s
@@ -256,5 +273,7 @@ void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count)
 void R_Backend_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z);
 void R_Backend_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst);
 void R_Backend_Finish (void);
+void R_Backend_PopulateFrameGraphResources (RenderGraphResourceHandle *out_handles);
+int R_Backend_GetSceneSampleCount (void);
 
 #endif

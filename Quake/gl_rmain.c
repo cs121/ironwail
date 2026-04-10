@@ -2915,7 +2915,9 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	GLuint composite_fbo = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO);
 	GLuint composite_color_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR);
 	GLuint composite_depth_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH);
-	int scene_samples = (resources && resources->scene_samples > 0) ? resources->scene_samples : framebufs.scene.samples;
+	int scene_samples = R_Backend_GetSceneSampleCount ();
+	if (scene_samples <= 0)
+		scene_samples = framebufs.scene.samples;
 	if (!scene_fbo)
 		scene_fbo = framebufs.scene.fbo;
 	if (!scene_velocity_tex)
@@ -5493,7 +5495,9 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	GLuint resolved_scene_color_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR);
 	GLuint resolved_scene_velocity_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY);
 	GLuint composite_fbo = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO);
-	int scene_samples = (resources && resources->scene_samples > 0) ? resources->scene_samples : framebufs.scene.samples;
+	int scene_samples = R_Backend_GetSceneSampleCount ();
+	if (scene_samples <= 0)
+		scene_samples = framebufs.scene.samples;
 	qboolean msaa = scene_samples > 1;
 	qboolean needwarpscale;
 	qboolean need_depth_resolve;

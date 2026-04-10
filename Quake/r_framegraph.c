@@ -47,7 +47,6 @@ static qboolean s_pass_registration_locked = false;
 static unsigned s_cycle_warning_signature = 0u;
 static qboolean s_cycle_warning_emitted = false;
 
-static render_backend_resource_ref_t FG_MakeResourceRef (render_backend_resource_type_t type, render_backend_resource_slot_t slot);
 static qboolean FG_AddRuntimePassInternal (const RenderPassDesc *pass_desc);
 static int FG_FindOrCreateProfileSlot (const RenderPassDesc *pass_desc);
 static int FG_MoveSetupStagePassesToFront (void);
@@ -314,14 +313,6 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 		s_runtime_passes[first_pass + i] = sorted[i];
 }
 
-static render_backend_resource_ref_t FG_MakeResourceRef (render_backend_resource_type_t type, render_backend_resource_slot_t slot)
-{
-	render_backend_resource_ref_t ref;
-	ref.type = (unsigned char)type;
-	ref.slot = (unsigned short)slot;
-	return ref;
-}
-
 static void FG_ConsumeBackendTimerSamples (const IRenderBackend *backend)
 {
 	const RenderBackendCaps *caps = R_Backend_GetCaps ();
@@ -349,20 +340,7 @@ static void FG_BuildResourceHandles (RenderGraphResourceHandle *out_handles)
 	if (!out_handles)
 		return;
 
-	memset (out_handles, 0, sizeof (*out_handles));
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_SCENE_FBO] = FG_MakeResourceRef (R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_SCENE_FBO);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_SCENE_COLOR] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO] = FG_MakeResourceRef (R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO] = FG_MakeResourceRef (R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);
-	out_handles->refs[R_BACKEND_RESOURCE_SLOT_VELOCITY] = FG_MakeResourceRef (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_VELOCITY);
-	out_handles->scene_samples = framebufs.scene.samples;
+	R_Backend_PopulateFrameGraphResources (out_handles);
 }
 
 static unsigned long long FG_BuildActivePassMask (const RenderPassContext *ctx, int first_pass, int pass_count)

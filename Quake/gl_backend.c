@@ -40,6 +40,72 @@ typedef struct gl_backend_timer_pass_s
 static gl_backend_timer_pass_t s_timer_passes[R_BACKEND_MAX_PROFILE_SLOTS];
 static RenderBackendCaps s_gl_backend_caps;
 
+static unsigned short GLBackend_RegisterResource (RenderGraphResourceHandle *handles, render_backend_resource_type_t type, render_backend_resource_slot_t slot, render_backend_resource_lifetime_t lifetime, unsigned native_id)
+{
+	unsigned index;
+	unsigned short resource_id;
+
+	if (!handles || type == R_BACKEND_RESOURCE_NONE || slot <= R_BACKEND_RESOURCE_SLOT_NONE || slot >= R_BACKEND_RESOURCE_SLOT_COUNT)
+		return 0u;
+	if (handles->registry_count >= (unsigned char)q_countof (handles->registry))
+		return 0u;
+
+	index = (unsigned)handles->registry_count;
+	resource_id = (unsigned short)(index + 1u);
+	handles->registry[index].resource_id = resource_id;
+	handles->registry[index].native_id = native_id;
+	handles->registry[index].type = (unsigned char)type;
+	handles->registry[index].lifetime = (unsigned char)lifetime;
+	handles->registry[index].slot = (unsigned short)slot;
+	handles->registry_count++;
+
+	handles->slot_resource_ids[slot] = resource_id;
+	handles->refs[slot].type = (unsigned char)type;
+	handles->refs[slot].slot = (unsigned short)slot; /* Compatibility path while slot enums are still in use. */
+	handles->refs[slot].opaque_id = resource_id;
+	return resource_id;
+}
+
+static unsigned GLBackend_ResolveResourceOpaqueId (const RenderGraphResourceHandle *resources, unsigned short opaque_id)
+{
+	unsigned i;
+
+	if (!resources || opaque_id == 0u)
+		return 0u;
+
+	for (i = 0; i < (unsigned)resources->registry_count; ++i)
+	{
+		if (resources->registry[i].resource_id == opaque_id)
+			return resources->registry[i].native_id;
+	}
+
+	return 0u;
+}
+
+static void GLBackend_PopulateFrameGraphResources (RenderGraphResourceHandle *out_handles)
+{
+	if (!out_handles)
+		return;
+
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.scene.fbo);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.scene.color_tex);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.scene.velocity_tex);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.scene.depth_stencil_tex);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.resolved_scene.fbo);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.resolved_scene.color_tex);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.resolved_scene.velocity_tex);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.composite.fbo);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.composite.color_tex);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.composite.depth_stencil_tex);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH, R_BACKEND_RESOURCE_LIFETIME_PERSISTENT, framebufs.shadow.sun_depth_tex);
+	GLBackend_RegisterResource (out_handles, R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_VELOCITY, R_BACKEND_RESOURCE_LIFETIME_FRAME, (framebufs.scene.samples > 1) ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex);
+}
+
+static int GLBackend_GetSceneSampleCount (void)
+{
+	return framebufs.scene.samples;
+}
+
 static qboolean GLBackend_HasTimestampQueries (void)
 {
 	return (GL_GenQueriesFunc && GL_DeleteQueriesFunc
@@ -306,45 +372,12 @@ static qboolean GLBackend_ConsumeTimerSample (int pass_id, double *out_gpu_ms)
 
 static unsigned GLBackend_ResolveResourceId (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource)
 {
-	render_backend_resource_slot_t slot;
-
-	(void)resources;
-
 	if (!resource || resource->type == R_BACKEND_RESOURCE_NONE)
 		return 0u;
 
-	slot = (render_backend_resource_slot_t)resource->slot;
-	switch (slot)
-	{
-	case R_BACKEND_RESOURCE_SLOT_SCENE_FBO:
-		return framebufs.scene.fbo;
-	case R_BACKEND_RESOURCE_SLOT_SCENE_COLOR:
-		return framebufs.scene.color_tex;
-	case R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY:
-		return framebufs.scene.velocity_tex;
-	case R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH:
-		return framebufs.scene.depth_stencil_tex;
-	case R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO:
-		return framebufs.resolved_scene.fbo;
-	case R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR:
-		return framebufs.resolved_scene.color_tex;
-	case R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY:
-		return framebufs.resolved_scene.velocity_tex;
-	case R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO:
-		return framebufs.composite.fbo;
-	case R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR:
-		return framebufs.composite.color_tex;
-	case R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH:
-		return framebufs.composite.depth_stencil_tex;
-	case R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH:
-		return framebufs.shadow.sun_depth_tex;
-	case R_BACKEND_RESOURCE_SLOT_VELOCITY:
-		return (framebufs.scene.samples > 1) ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
-	case R_BACKEND_RESOURCE_SLOT_NONE:
-	case R_BACKEND_RESOURCE_SLOT_COUNT:
-	default:
-		return 0u;
-	}
+	if (resource->opaque_id != 0u)
+		return GLBackend_ResolveResourceOpaqueId (resources, resource->opaque_id);
+	return 0u;
 }
 
 static qboolean GLBackend_IsResourceValid (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource)
@@ -493,7 +526,9 @@ void GL_Backend_Register (void)
 		GLBackend_Draw,
 		GLBackend_Dispatch,
 		GLBackend_SetBlendFactors,
-		GLBackend_Finish
+		GLBackend_Finish,
+		GLBackend_PopulateFrameGraphResources,
+		GLBackend_GetSceneSampleCount
 	};
 
 	R_Backend_Register (&gl_backend);

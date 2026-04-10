@@ -353,3 +353,24 @@ void R_Backend_Finish (void)
 	if (backend && backend->finish)
 		backend->finish ();
 }
+
+void R_Backend_PopulateFrameGraphResources (RenderGraphResourceHandle *out_handles)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+
+	if (!out_handles)
+		return;
+
+	memset (out_handles, 0, sizeof (*out_handles));
+	if (backend && backend->populate_framegraph_resources)
+		backend->populate_framegraph_resources (out_handles);
+}
+
+int R_Backend_GetSceneSampleCount (void)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+
+	if (backend && backend->get_scene_sample_count)
+		return backend->get_scene_sample_count ();
+	return 1;
+}
