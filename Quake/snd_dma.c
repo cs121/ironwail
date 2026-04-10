@@ -119,6 +119,7 @@ static struct
 static int snd_next_voice_id = 1;
 static int snd_next_def_instance_id = 1;
 static vec3_t snd_listener_velocity;
+static qboolean snd_static_nonloop_warning_emitted = false;
 
 typedef struct legacy_sounddef_map_s
 {
@@ -1239,6 +1240,7 @@ void S_StopAllSounds (qboolean clear)
 	memset(snd_channels, 0, MAX_CHANNELS * sizeof(channel_t));
 	snd_next_voice_id = 1;
 	snd_next_def_instance_id = 1;
+	snd_static_nonloop_warning_emitted = false;
 
 	if (clear)
 		S_ClearBuffer ();
@@ -1303,7 +1305,11 @@ void S_StaticSound (sfx_t *sfx, vec3_t origin, float vol, float attenuation)
 
 	if (sc->loopstart == -1)
 	{
-		Con_Printf ("Sound %s not looped\n", sfx->name);
+		if (!snd_static_nonloop_warning_emitted)
+		{
+			Con_DWarning ("Sound %s not looped (further static ambient warnings suppressed)\n", sfx->name);
+			snd_static_nonloop_warning_emitted = true;
+		}
 		return;
 	}
 
