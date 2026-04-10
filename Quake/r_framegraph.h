@@ -90,6 +90,10 @@ typedef struct render_pass_context_s RenderPassContext;
 typedef struct i_render_backend_s
 {
 	const char *name;
+	qboolean (*init)(void);
+	void (*shutdown)(void);
+	void (*on_resize)(int width, int height);
+	qboolean (*can_activate)(qboolean runtime_switch);
 	void (*begin_pass)(const char *name);
 	void (*end_pass)(void);
 	void (*validate_pass_state)(const char *pass_name, qboolean before_pass);
@@ -139,8 +143,10 @@ void R_FrameGraph_ResetPasses (void);
 qboolean R_FrameGraph_AddPass (const RenderPassDesc *pass_desc);
 void R_FrameGraph_RenderView (void);
 void R_Backend_Init (void);
+void R_Backend_Shutdown (void);
 void R_Backend_Register (const IRenderBackend *backend);
 qboolean R_Backend_Select (const char *backend_name);
+void R_Backend_OnResize (int width, int height);
 const IRenderBackend *R_GetRenderBackend (void);
 const RenderBackendCaps *R_Backend_GetCaps (void);
 const render_backend_resource_ref_t *R_FrameGraph_GetResourceRef (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
