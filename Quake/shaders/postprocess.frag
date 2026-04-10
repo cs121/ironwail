@@ -393,14 +393,17 @@ void main()
 		return;
 	}
 
-        bool hasVelocityTexture = MotionParams1.z > 0.5;
-        vec2 velocity = vec2(0.0);
-        float viewModelMask = 0.0;
-        int materialMask = 0;
+	bool hasVelocityTexture = MotionParams1.z > 0.5;
+	vec2 velocity = vec2(0.0);
+	float viewModelMask = 0.0;
+	int materialMask = 0;
 	if (hasVelocityTexture && inView)
 	{
+		ivec2 velocitySize = textureSize(VelocityTexture, 0);
 		vec2 velocityUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
-		vec4 velocitySample = texture(VelocityTexture, velocityUV);
+		ivec2 velocityCoord = ivec2(velocityUV * vec2(velocitySize));
+		velocityCoord = clamp(velocityCoord, ivec2(0), max(velocitySize - ivec2(1), ivec2(0)));
+		vec4 velocitySample = texelFetch(VelocityTexture, velocityCoord, 0);
 		velocity = velocitySample.xy;
 		viewModelMask = velocitySample.z;
 		materialMask = int(floor(velocitySample.w + 0.5));

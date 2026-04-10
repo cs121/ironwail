@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //gl_texmgr.c -- fitzquake's texture manager. manages opengl texture images
 
 #include "quakedef.h"
+#include "r_framegraph.h"
 #include "glquake.h"
 #include "bc7enc.h"
 #include "gl_ktx2.h"
@@ -3031,10 +3032,10 @@ void GLPalette_UpdateLookupTable (void)
 	for (i = 0; i < 128; i++)
 	{
 		GL_Uniform1iFunc (0, i << 16);
-		GL_DispatchComputeFunc (1, 128, 1);
+		R_Backend_Dispatch (1u, 128u, 1u);
 	}
 
-	GL_MemoryBarrierFunc (GL_TEXTURE_FETCH_BARRIER_BIT);
+	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_TEXTURE_FETCH);
 }
 
 /*
@@ -3082,8 +3083,8 @@ Returns index of palette buffer to use:
 		GL_Uniform1fFunc (0, contrast);
 	}
 	GL_Uniform4fvFunc (1, 1, blend);
-	GL_DispatchComputeFunc (256/64, 1, 1);
-	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+	R_Backend_Dispatch (256u / 64u, 1u, 1u);
+	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_SHADER_STORAGE);
 
 	GL_EndGroup ();
 

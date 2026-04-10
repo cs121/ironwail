@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 */
 
 #include "quakedef.h"
+#include "r_framegraph.h"
 #include "r_part_q3p.h"
 
 #define MAX_PARTICLES			16384	// default max # of particles at one
@@ -1337,7 +1338,7 @@ static void R_FlushParticleBatch (void)
 	GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof(partverts[0]), ofs + offsetof(particlevert_t, pos));
 	GL_VertexAttribPointerFunc (1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(partverts[0]), ofs + offsetof(particlevert_t, color));
 
-	GL_DrawArraysInstancedFunc (GL_TRIANGLE_STRIP, 0, 4, numpartverts);
+	R_Backend_DrawInstanced (R_BACKEND_PRIMITIVE_TRIANGLE_STRIP, 0, 4, numpartverts);
 
 	numpartverts = 0;
 }

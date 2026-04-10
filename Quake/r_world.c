@@ -283,8 +283,8 @@ static void R_MarkVisSurfaces (byte *vis, GLuint cull_flags, qboolean oldskyleaf
 
 	GL_UseProgram (glprogs.clear_indirect);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, gl_bmodel_indirect_buffer, 0, cl.worldmodel->texofs[TEXTYPE_COUNT] * sizeof(bmodel_draw_indirect_t));
-	GL_DispatchComputeFunc ((cl.worldmodel->texofs[TEXTYPE_COUNT] + 63) / 64, 1, 1);
-	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+	R_Backend_Dispatch ((unsigned)((cl.worldmodel->texofs[TEXTYPE_COUNT] + 63) / 64), 1u, 1u);
+	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_SHADER_STORAGE);
 
 	GL_UseProgram (glprogs.cull_mark);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, gl_bmodel_ibo, 0, gl_bmodel_ibo_size);
@@ -295,8 +295,8 @@ static void R_MarkVisSurfaces (byte *vis, GLuint cull_flags, qboolean oldskyleaf
 	GL_Upload (GL_UNIFORM_BUFFER, &frame, sizeof(frame), &buf, &ofs);
 	GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr)ofs, sizeof(frame));
 
-	GL_DispatchComputeFunc ((nummark + 63) / 64, 1, 1);
-	GL_MemoryBarrierFunc (GL_COMMAND_BARRIER_BIT | GL_SHADER_STORAGE_BARRIER_BIT | GL_ELEMENT_ARRAY_BARRIER_BIT);
+	R_Backend_Dispatch ((unsigned)((nummark + 63) / 64), 1u, 1u);
+	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_COMMAND | R_BACKEND_BARRIER_SHADER_STORAGE | R_BACKEND_BARRIER_ELEMENT_ARRAY);
 
 	GL_EndGroup ();
 }
@@ -745,8 +745,8 @@ static void R_FlushBModelCalls (void)
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 6, cmdbuf, dstcmdofs, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls);
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_call_remap, sizeof (bmodel_call_remap[0]) * num_bmodel_calls, &buf, &ofs);
 	GL_BindBufferRange  (GL_SHADER_STORAGE_BUFFER, 7, buf, (GLintptr)ofs, sizeof (bmodel_call_remap[0]) * num_bmodel_calls);
-	GL_DispatchComputeFunc ((num_bmodel_calls + 63) / 64, 1, 1);
-	GL_MemoryBarrierFunc (GL_COMMAND_BARRIER_BIT);
+	R_Backend_Dispatch ((unsigned)((num_bmodel_calls + 63) / 64), 1u, 1u);
+	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_COMMAND);
 
 	GL_UseProgram (bmodel_batch_program);
 	if (R_IsWorldLightingProgram (bmodel_batch_program))
@@ -769,7 +769,7 @@ static void R_FlushBModelCalls (void)
 	{
 		GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_calls.bindless.params, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls, &buf, &ofs);
 		GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls);
-		GL_MultiDrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const void *)dstcmdofs, num_bmodel_calls, sizeof (bmodel_draw_indirect_t));
+		R_Backend_MultiDrawIndexedIndirect (R_BACKEND_PRIMITIVE_TRIANGLES, R_BACKEND_INDEX_TYPE_UINT32, (intptr_t)dstcmdofs, num_bmodel_calls, sizeof (bmodel_draw_indirect_t));
 	}
 	else
 	{
@@ -785,7 +785,7 @@ static void R_FlushBModelCalls (void)
 			GL_Bind (GL_TEXTURE4, bmodel_calls.bound.textures[i][BMODEL_TEX_SLOT_EMISSIVE]);
 			GL_Bind (GL_TEXTURE5, bmodel_calls.bound.textures[i][BMODEL_TEX_SLOT_NORMAL]);
 			GL_Bind (GL_TEXTURE6, bmodel_calls.bound.textures[i][BMODEL_TEX_SLOT_SPECULAR_OR_ORM]);
-			GL_DrawElementsIndirectFunc (GL_TRIANGLES, GL_UNSIGNED_INT, (const byte *)(dstcmdofs + i * sizeof (bmodel_draw_indirect_t)));
+			R_Backend_DrawIndexedIndirect (R_BACKEND_PRIMITIVE_TRIANGLES, R_BACKEND_INDEX_TYPE_UINT32, (intptr_t)(dstcmdofs + i * sizeof (bmodel_draw_indirect_t)));
 		}
 	}
 

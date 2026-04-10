@@ -1,6 +1,7 @@
 #include "quakedef.h"
 
 #include "r_framegraph.h"
+#include "gl_shadow_runtime.h"
 
 void R_RegisterFrameGraphPasses (void);
 
@@ -46,6 +47,7 @@ static int s_runtime_pass_count = 0;
 static qboolean s_pass_registration_locked = false;
 static unsigned s_cycle_warning_signature = 0u;
 static qboolean s_cycle_warning_emitted = false;
+static int s_pass_baseline_autobind_warn_frame = -1;
 
 static qboolean FG_AddRuntimePassInternal (const RenderPassDesc *pass_desc);
 static int FG_FindOrCreateProfileSlot (const RenderPassDesc *pass_desc);
@@ -686,6 +688,30 @@ static void FG_MaybePrintStats (void)
 	s_last_stats_print = r_framecount;
 }
 
+static void FG_ApplyPassBaseline (const RenderPassDesc *pass, const RenderPassContext *ctx)
+{
+	const IRenderBackend *backend = ctx ? ctx->backend : NULL;
+	unsigned baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR;
+
+	if (pass && pass->baseline_bits != 0u)
+		baseline_bits = pass->baseline_bits;
+
+	if ((baseline_bits & FG_PASS_BASELINE_REQUIRE_AUTOBIND) != 0u
+		&& r_framegraph_autobind.value <= 0.f
+		&& s_pass_baseline_autobind_warn_frame != r_framecount)
+	{
+		Con_DWarning ("FrameGraph: pass baseline requires r_framegraph_autobind 1, but it is disabled\n");
+		s_pass_baseline_autobind_warn_frame = r_framecount;
+	}
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_SCISSOR) != 0u
+		&& backend
+		&& backend->set_scissor)
+	{
+		backend->set_scissor (false, 0, 0, 0, 0);
+	}
+}
+
 static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderPassContext *ctx)
 {
 	const render_backend_resource_ref_t *target_resource = NULL;
@@ -693,12 +719,15 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderP
 	int view_x, view_y, view_w, view_h;
 	unsigned output_target;
 	unsigned viewport_mode;
+	qboolean autobind_enabled = (r_framegraph_autobind.value > 0.f);
 	qboolean bind_backbuffer = false;
 	qboolean bind_target = false;
 
-	if (r_framegraph_autobind.value <= 0.f)
-		return;
 	if (!pass)
+		return;
+	if (pass->baseline_bits & FG_PASS_BASELINE_REQUIRE_AUTOBIND)
+		autobind_enabled = true;
+	if (!autobind_enabled)
 		return;
 
 	output_target = pass->output_target;
@@ -820,6 +849,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 		return;
 	if (!FG_ValidatePassResourceDecls (pass, false))
 		return;
+	FG_ApplyPassBaseline (pass, ctx);
 
 	for (bit = 1u; bit != 0; bit <<= 1)
 	{
@@ -838,8 +868,9 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 		}
 		if (bit == RENDER_RES_SHADOW_SUN_DEPTH)
 		{
-			/* Shadow-map reads are optional for passes that still run with shadows disabled. */
-			read_required = (ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps);
+			/* Sun-shadow reads are optional when sun shadows are inactive
+			 * (e.g. maps without sun), even if other shadow paths still run. */
+			read_required = (ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps && R_Shadow_SunEnabled ());
 		}
 		if (!read_required)
 			continue;

@@ -1554,7 +1554,31 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 	*x = *y = 0;
 	*width = vid.width;
 	*height = vid.height;
+	R_Backend_BeginFrame ();
+}
 
+/*
+=================
+VID_PresentFrame
+=================
+*/
+static void VID_PresentFrame (void)
+{
+	if (!scr_skipupdate)
+		SDL_GL_SwapWindow (draw_context);
+}
+
+/*
+=================
+GL_BackendBeginFrame
+
+OpenGL backend frame prologue kept in the platform layer for now so existing
+resource/state setup remains unchanged while ownership moves behind backend
+lifecycle callbacks.
+=================
+*/
+void GL_BackendBeginFrame (void)
+{
 	// reset state/bindings, just in case some other process
 	// injects code that makes changes without cleaning up
 	GL_ResetState ();
@@ -1574,15 +1598,14 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 	}
 }
 
-/*
-=================
-VID_PresentFrame
-=================
-*/
-static void VID_PresentFrame (void)
+void GL_BackendEndFrame (void)
 {
-	if (!scr_skipupdate)
-		SDL_GL_SwapWindow (draw_context);
+	GL_ReleaseFrameResources ();
+}
+
+void GL_BackendPresent (void)
+{
+	VID_PresentFrame ();
 }
 
 /*
@@ -1592,8 +1615,8 @@ GL_EndRendering
 */
 void GL_EndRendering (void)
 {
-	GL_ReleaseFrameResources ();
-	VID_PresentFrame ();
+	R_Backend_EndFrame ();
+	R_Backend_Present ();
 }
 
 

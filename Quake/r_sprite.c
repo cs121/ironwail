@@ -169,7 +169,7 @@ static void R_FlushSpriteInstances (void)
 
 	GL_Upload (GL_ELEMENT_ARRAY_BUFFER, batchindices, sizeof(batchindices[0]) * 6 * numbatchquads, &buf, &ofs);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-	glDrawElements (GL_TRIANGLES, 6 * numbatchquads, GL_UNSIGNED_SHORT, ofs);
+	R_Backend_DrawIndexed (R_BACKEND_PRIMITIVE_TRIANGLES, R_BACKEND_INDEX_TYPE_UINT16, 6 * numbatchquads, (intptr_t)ofs);
 
 	//johnfitz: offset decals
 	if (psprite->type == SPR_ORIENTED)

@@ -1,5 +1,6 @@
 #include "quakedef.h"
 #include "mat_material.h"
+#include "r_framegraph.h"
 #include "r_part_q3p.h"
 
 extern cvar_t r_particles_max;
@@ -966,8 +967,10 @@ static int Q3P_NextPow2 (int value)
 
 static qboolean Q3P_GPU_ComputeAvailable (void)
 {
-	return GL_DispatchComputeFunc
-		&& GL_MemoryBarrierFunc
+	const RenderBackendCaps *caps = R_Backend_GetCaps ();
+	return caps
+		&& caps->supports_compute
+		&& caps->supports_memory_barrier
 		&& GL_MapBufferRangeFunc
 		&& GL_UnmapBufferFunc
 		&& glprogs.q3p_sim
@@ -1118,8 +1121,8 @@ static void Q3P_GPU_BitonicSortEntries (int count)
 		for (j = k >> 1; j > 0; j >>= 1)
 		{
 			GL_Uniform4fFunc (0, (float)count, (float)j, (float)k, 0.f);
-			GL_DispatchComputeFunc (groups, 1, 1);
-			GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+			R_Backend_Dispatch ((unsigned)groups, 1u, 1u);
+			R_Backend_MemoryBarrier (R_BACKEND_BARRIER_SHADER_STORAGE);
 		}
 	}
 }
@@ -1155,8 +1158,8 @@ static qboolean Q3P_GPU_RunSim (float frametime, qboolean collision_enabled)
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, dst_buffer, 0, sizeof (q3p_particle_gpu_t) * q3p_numactive);
 	GL_Uniform4fFunc (0, cl.time, frametime, allow_gpu_collision ? 1.f : 0.f, (float)q3p_numactive);
 	GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
-	GL_DispatchComputeFunc (groups, 1, 1);
-	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+	R_Backend_Dispatch ((unsigned)groups, 1u, 1u);
+	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_SHADER_STORAGE);
 
 	if (!Q3P_GPU_ReadBuffer (dst_buffer, sizeof (q3p_particle_gpu_t) * q3p_numactive, q3p_gpu.particle_staging))
 		return false;
@@ -1222,8 +1225,8 @@ static qboolean Q3P_GPU_BuildDrawList (qboolean alpha, qboolean showtris)
 	GL_Uniform4fFunc (5, frustum[3].normal[0], frustum[3].normal[1], frustum[3].normal[2], frustum[3].dist);
 	GL_Uniform4fFunc (6, r_origin[0], r_origin[1], r_origin[2], 0.f);
 	GL_Uniform4fFunc (7, vpn[0], vpn[1], vpn[2], 0.f);
-	GL_DispatchComputeFunc (groups, 1, 1);
-	GL_MemoryBarrierFunc (GL_SHADER_STORAGE_BARRIER_BIT);
+	R_Backend_Dispatch ((unsigned)groups, 1u, 1u);
+	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_SHADER_STORAGE);
 
 	Q3P_GPU_BitonicSortEntries (sort_count);
 
@@ -1622,7 +1625,7 @@ static void Q3P_FlushParticleBatch (void)
 	GL_BindBuffer (GL_ARRAY_BUFFER, buf);
 	GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof(q3p_partverts[0]), ofs + offsetof(q3p_particlevert_t, pos));
 	GL_VertexAttribPointerFunc (1, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(q3p_partverts[0]), ofs + offsetof(q3p_particlevert_t, color));
-	GL_DrawArraysInstancedFunc (GL_TRIANGLE_STRIP, 0, 4, q3p_numpartverts);
+	R_Backend_DrawInstanced (R_BACKEND_PRIMITIVE_TRIANGLE_STRIP, 0, 4, q3p_numpartverts);
 
 	q3p_numpartverts = 0;
 }

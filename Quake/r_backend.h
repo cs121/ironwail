@@ -57,8 +57,26 @@ typedef enum render_backend_primitive_e
 {
 	R_BACKEND_PRIMITIVE_TRIANGLES = 0,
 	R_BACKEND_PRIMITIVE_TRIANGLE_FAN,
+	R_BACKEND_PRIMITIVE_TRIANGLE_STRIP,
 	R_BACKEND_PRIMITIVE_LINES,
 	R_BACKEND_PRIMITIVE_POINTS
 } render_backend_primitive_t;
+
+typedef enum render_backend_index_type_e
+{
+	R_BACKEND_INDEX_TYPE_UINT16 = 0,
+	R_BACKEND_INDEX_TYPE_UINT32
+} render_backend_index_type_t;
+
+typedef enum render_backend_barrier_bits_e
+{
+	R_BACKEND_BARRIER_NONE = 0,
+	R_BACKEND_BARRIER_TEXTURE_FETCH = 1u << 0,
+	R_BACKEND_BARRIER_SHADER_IMAGE_ACCESS = 1u << 1,
+	R_BACKEND_BARRIER_SHADER_STORAGE = 1u << 2,
+	R_BACKEND_BARRIER_COMMAND = 1u << 3,
+	R_BACKEND_BARRIER_ELEMENT_ARRAY = 1u << 4,
+	R_BACKEND_BARRIER_FRAMEBUFFER = 1u << 5
+} render_backend_barrier_bits_t;
 
 #endif

@@ -1470,7 +1470,7 @@ static qboolean R_DrawDecalsLegacy (decalinst_t **draw, int draw_count)
 	for (i = 0; i < cmd_count; ++i)
 	{
 		unsigned blendstate = R_DecalBlendState (cmds[i].blend);
-		const GLvoid *first_index = iofs + cmds[i].first_index * sizeof (GLushort);
+		intptr_t index_offset = (intptr_t)iofs + (intptr_t)(cmds[i].first_index * sizeof (GLushort));
 
 		if (current_blend != (int)cmds[i].blend)
 		{
@@ -1485,7 +1485,7 @@ static qboolean R_DrawDecalsLegacy (decalinst_t **draw, int draw_count)
 			current_texture = cmds[i].texture;
 		}
 
-		glDrawElements (GL_TRIANGLES, cmds[i].index_count, GL_UNSIGNED_SHORT, first_index);
+		R_Backend_DrawIndexed (R_BACKEND_PRIMITIVE_TRIANGLES, R_BACKEND_INDEX_TYPE_UINT16, cmds[i].index_count, index_offset);
 		decal_stats.draw_calls++;
 	}
 
@@ -1494,6 +1494,7 @@ static qboolean R_DrawDecalsLegacy (decalinst_t **draw, int draw_count)
 
 static qboolean R_DrawDecalsInstanced (decalinst_t **draw, int draw_count)
 {
+	const RenderBackendCaps *caps = R_Backend_GetCaps ();
 	decalinstcmd_t cmds[MAX_DECAL_INSTANCES];
 	GLuint ssbo;
 	GLbyte *ssbo_ofs;
@@ -1506,7 +1507,7 @@ static qboolean R_DrawDecalsInstanced (decalinst_t **draw, int draw_count)
 	gltexture_t *current_texture = NULL;
 	int i;
 
-	if (!GL_DrawArraysInstancedFunc || !glprogs.decal_instanced)
+	if (!caps || !caps->supports_draw_instanced || !glprogs.decal_instanced)
 		return false;
 
 	for (i = 0; i < draw_count; ++i)
@@ -1600,7 +1601,7 @@ static qboolean R_DrawDecalsInstanced (decalinst_t **draw, int draw_count)
 		}
 
 		GL_Uniform1iFunc (0, cmds[i].first_instance);
-		GL_DrawArraysInstancedFunc (GL_TRIANGLES, 0, DECAL_TRI_VERTS_PER_INSTANCE, cmds[i].instance_count);
+		R_Backend_DrawInstanced (R_BACKEND_PRIMITIVE_TRIANGLES, 0, DECAL_TRI_VERTS_PER_INSTANCE, cmds[i].instance_count);
 		decal_stats.draw_calls++;
 		decal_stats.instanced_draws++;
 	}

@@ -20,6 +20,10 @@ typedef struct render_backend_caps_s
 {
 	qboolean supports_timestamps;
 	qboolean supports_compute;
+	qboolean supports_draw_instanced;
+	qboolean supports_draw_indirect;
+	qboolean supports_multi_draw_indirect;
+	qboolean supports_memory_barrier;
 	qboolean supports_legacy_pass_fallbacks;
 	unsigned msaa_mode_mask;
 	unsigned max_msaa_samples;
@@ -67,6 +71,12 @@ typedef enum fg_pass_stage_e
 	FG_PASS_STAGE_MAIN = 0,
 	FG_PASS_STAGE_SETUP
 } fg_pass_stage_t;
+
+typedef enum fg_pass_baseline_bits_e
+{
+	FG_PASS_BASELINE_RESET_SCISSOR = 1u << 0,
+	FG_PASS_BASELINE_REQUIRE_AUTOBIND = 1u << 1
+} fg_pass_baseline_bits_t;
 
 typedef enum render_backend_load_op_e
 {
@@ -228,7 +238,13 @@ typedef struct i_render_backend_s
 	void (*set_scissor)(qboolean enabled, int x, int y, int width, int height);
 	void (*set_pipeline_state)(unsigned state_bits);
 	void (*draw)(render_backend_primitive_t primitive, int first, int count);
+	void (*draw_indexed)(render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes);
+	void (*draw_instanced)(render_backend_primitive_t primitive, int first, int count, int instance_count);
+	void (*draw_indexed_instanced)(render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes, int instance_count);
+	void (*draw_indexed_indirect)(render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes);
+	void (*multi_draw_indexed_indirect)(render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes, int draw_count, int stride_bytes);
 	void (*dispatch)(unsigned group_x, unsigned group_y, unsigned group_z);
+	void (*memory_barrier)(unsigned barrier_bits);
 	void (*set_blend_factors)(render_blend_factor_t src, render_blend_factor_t dst);
 	void (*finish)(void);
 	void (*populate_framegraph_resources)(RenderGraphResourceHandle *out_handles);
@@ -241,6 +257,7 @@ typedef struct render_pass_desc_s
 	unsigned reads;
 	unsigned writes;
 	unsigned side_effects;
+	unsigned baseline_bits;
 	unsigned char output_target;
 	unsigned char viewport_mode;
 	qboolean (*enabled)(const RenderPassContext *ctx);
@@ -284,12 +301,19 @@ void R_Backend_SetDynamicState (const RenderBackendDynamicState *dynamic_state);
 void R_Backend_BindDescriptors (const RenderBackendDescriptorBinding *bindings, unsigned count);
 const render_backend_resource_ref_t *R_FrameGraph_GetResourceRef (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
 unsigned R_FrameGraph_ResolveResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
+unsigned R_FrameGraph_ResolveRequiredResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot, const char *usage_tag);
 qboolean R_FrameGraph_HasResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
 void R_Backend_SetViewport (int x, int y, int width, int height);
 void R_Backend_SetScissor (qboolean enabled, int x, int y, int width, int height);
 void R_Backend_SetPipelineState (unsigned state_bits);
 void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count);
+void R_Backend_DrawIndexed (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes);
+void R_Backend_DrawInstanced (render_backend_primitive_t primitive, int first, int count, int instance_count);
+void R_Backend_DrawIndexedInstanced (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes, int instance_count);
+void R_Backend_DrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes);
+void R_Backend_MultiDrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes, int draw_count, int stride_bytes);
 void R_Backend_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z);
+void R_Backend_MemoryBarrier (unsigned barrier_bits);
 void R_Backend_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst);
 void R_Backend_Finish (void);
 void R_Backend_PopulateFrameGraphResources (RenderGraphResourceHandle *out_handles);

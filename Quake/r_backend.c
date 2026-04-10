@@ -16,6 +16,8 @@ static qboolean s_backend_initialized = false;
 static qboolean s_applying_backend_cvar = false;
 static qboolean s_backend_active = false;
 static qboolean s_backend_audit_cmd_registered = false;
+static qboolean s_backend_vulkan_status_cmd_registered = false;
+static int s_missing_resource_warn_frame[R_BACKEND_RESOURCE_SLOT_COUNT];
 
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
 
@@ -31,7 +33,7 @@ static void R_Backend_WrapperAudit_f (void)
 {
 	Con_Printf ("Renderer wrapper migration priorities:\n");
 	Con_Printf ("  P0: R_Backend_SetPipelineState (most draw-path callsites; migrate material/decal/particle state to pipeline + dynamic state)\n");
-	Con_Printf ("  P1: direct glDraw*/GL_Draw* callsites (route through R_Backend_Draw/descriptor-driven draw plans)\n");
+	Con_Printf ("  P1: direct glDraw*/GL_Draw* callsites (route through R_Backend_Draw/R_Backend_DrawIndexed + descriptor-driven draw plans)\n");
 	Con_Printf ("  P2: bind-time texture/program glue in legacy passes (move to descriptor sets + explicit pipeline binding)\n");
 	Con_Printf ("  P3: optional compute/dispatch paths (already abstracted via R_Backend_Dispatch where available)\n");
 }
@@ -61,6 +63,7 @@ static qboolean R_Backend_ValidateContract (const IRenderBackend *backend, qbool
 		|| !backend->bind_render_target
 		|| !backend->set_viewport
 		|| !backend->draw
+		|| !backend->draw_indexed
 		|| !backend->populate_framegraph_resources)
 	{
 		if (emit_warning)
@@ -78,6 +81,26 @@ static qboolean R_Backend_ValidateContract (const IRenderBackend *backend, qbool
 static void R_Backend_ClearActiveCaps (void)
 {
 	memset (&s_active_backend_caps, 0, sizeof (s_active_backend_caps));
+}
+
+static const char *R_Backend_ResourceSlotName (render_backend_resource_slot_t slot)
+{
+	switch (slot)
+	{
+	case R_BACKEND_RESOURCE_SLOT_SCENE_FBO: return "scene_fbo";
+	case R_BACKEND_RESOURCE_SLOT_SCENE_COLOR: return "scene_color";
+	case R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY: return "scene_velocity";
+	case R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH: return "scene_depth";
+	case R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO: return "resolved_scene_fbo";
+	case R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR: return "resolved_scene_color";
+	case R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY: return "resolved_scene_velocity";
+	case R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO: return "composite_fbo";
+	case R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR: return "composite_color";
+	case R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH: return "composite_depth";
+	case R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH: return "shadow_sun_depth";
+	case R_BACKEND_RESOURCE_SLOT_VELOCITY: return "velocity";
+	default: return "unknown";
+	}
 }
 
 static qboolean R_Backend_RefreshActiveCaps (const IRenderBackend *backend, qboolean emit_warning)
@@ -145,6 +168,126 @@ static void R_Backend_Changed_f (cvar_t *var)
 			(s_active_backend && s_active_backend->name) ? s_active_backend->name : "<none>");
 		R_Backend_ApplySelectionToCvar ();
 	}
+}
+
+static const RenderBackendCaps *R_VulkanStub_GetCaps (void)
+{
+	static const RenderBackendCaps caps = {0};
+	return &caps;
+}
+
+static qboolean R_VulkanStub_CanActivate (qboolean runtime_switch)
+{
+	(void)runtime_switch;
+	return false;
+}
+
+static qboolean R_VulkanStub_Init (void)
+{
+	return false;
+}
+
+static void R_VulkanStub_Shutdown (void) {}
+static void R_VulkanStub_OnResize (int width, int height) { (void)width; (void)height; }
+static void R_VulkanStub_BeginFrame (void) {}
+static void R_VulkanStub_EndFrame (void) {}
+static void R_VulkanStub_Present (void) {}
+static void R_VulkanStub_BeginPassEx (const RenderBackendPassDesc *pass_desc) { (void)pass_desc; }
+static void R_VulkanStub_EndPassEx (void) {}
+static void R_VulkanStub_ResourceBarrier (const RenderGraphResourceHandle *resources, const RenderBackendResourceBarrier *barriers, unsigned count) { (void)resources; (void)barriers; (void)count; }
+static void R_VulkanStub_BindPipeline (const RenderBackendPipelineDesc *pipeline) { (void)pipeline; }
+static void R_VulkanStub_SetDynamicState (const RenderBackendDynamicState *dynamic_state) { (void)dynamic_state; }
+static void R_VulkanStub_BindDescriptors (const RenderBackendDescriptorBinding *bindings, unsigned count) { (void)bindings; (void)count; }
+static void R_VulkanStub_PassSetupView (RenderPassContext *ctx) { (void)ctx; }
+static void R_VulkanStub_PassShadowmaps (RenderPassContext *ctx) { (void)ctx; }
+static void R_VulkanStub_PassRenderScene (RenderPassContext *ctx) { (void)ctx; }
+static void R_VulkanStub_PassWarpResolve (RenderPassContext *ctx) { (void)ctx; }
+static void R_VulkanStub_PassPostprocess (RenderPassContext *ctx) { (void)ctx; }
+static void R_VulkanStub_PassOverlayViewmodel (RenderPassContext *ctx) { (void)ctx; }
+static void R_VulkanStub_PassOverlayPolyblend (RenderPassContext *ctx) { (void)ctx; }
+static void R_VulkanStub_BeginPass (const char *name) { (void)name; }
+static void R_VulkanStub_EndPass (void) {}
+static void R_VulkanStub_ValidatePassState (const char *pass_name, qboolean before_pass) { (void)pass_name; (void)before_pass; }
+static void R_VulkanStub_BeginTimer (int pass_id) { (void)pass_id; }
+static void R_VulkanStub_EndTimer (int pass_id) { (void)pass_id; }
+static void R_VulkanStub_ResolveTimers (void) {}
+static qboolean R_VulkanStub_ConsumeTimerSample (int pass_id, double *out_gpu_ms) { (void)pass_id; (void)out_gpu_ms; return false; }
+static unsigned R_VulkanStub_ResolveResourceId (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource) { (void)resources; (void)resource; return 0u; }
+static qboolean R_VulkanStub_IsResourceValid (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource) { (void)resources; (void)resource; return false; }
+static void R_VulkanStub_BindRenderTarget (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource, qboolean backbuffer) { (void)resources; (void)resource; (void)backbuffer; }
+static void R_VulkanStub_SetViewport (int x, int y, int width, int height) { (void)x; (void)y; (void)width; (void)height; }
+static void R_VulkanStub_SetScissor (qboolean enabled, int x, int y, int width, int height) { (void)enabled; (void)x; (void)y; (void)width; (void)height; }
+static void R_VulkanStub_SetPipelineState (unsigned state_bits) { (void)state_bits; }
+static void R_VulkanStub_Draw (render_backend_primitive_t primitive, int first, int count) { (void)primitive; (void)first; (void)count; }
+static void R_VulkanStub_DrawIndexed (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes) { (void)primitive; (void)index_type; (void)count; (void)index_offset_bytes; }
+static void R_VulkanStub_DrawInstanced (render_backend_primitive_t primitive, int first, int count, int instance_count) { (void)primitive; (void)first; (void)count; (void)instance_count; }
+static void R_VulkanStub_DrawIndexedInstanced (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes, int instance_count) { (void)primitive; (void)index_type; (void)count; (void)index_offset_bytes; (void)instance_count; }
+static void R_VulkanStub_DrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes) { (void)primitive; (void)index_type; (void)indirect_offset_bytes; }
+static void R_VulkanStub_MultiDrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes, int draw_count, int stride_bytes) { (void)primitive; (void)index_type; (void)indirect_offset_bytes; (void)draw_count; (void)stride_bytes; }
+static void R_VulkanStub_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z) { (void)group_x; (void)group_y; (void)group_z; }
+static void R_VulkanStub_MemoryBarrier (unsigned barrier_bits) { (void)barrier_bits; }
+static void R_VulkanStub_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst) { (void)src; (void)dst; }
+static void R_VulkanStub_Finish (void) {}
+static void R_VulkanStub_PopulateFrameGraphResources (RenderGraphResourceHandle *out_handles) { (void)out_handles; }
+static int R_VulkanStub_GetSceneSampleCount (void) { return 1; }
+
+static const IRenderBackend s_vulkan_stub_backend = {
+	"Vulkan",
+	R_VulkanStub_Init,
+	R_VulkanStub_Shutdown,
+	R_VulkanStub_OnResize,
+	R_VulkanStub_CanActivate,
+	R_VulkanStub_BeginFrame,
+	R_VulkanStub_EndFrame,
+	R_VulkanStub_Present,
+	R_VulkanStub_BeginPassEx,
+	R_VulkanStub_EndPassEx,
+	R_VulkanStub_ResourceBarrier,
+	R_VulkanStub_BindPipeline,
+	R_VulkanStub_SetDynamicState,
+	R_VulkanStub_BindDescriptors,
+	R_VulkanStub_PassSetupView,
+	R_VulkanStub_PassShadowmaps,
+	R_VulkanStub_PassRenderScene,
+	R_VulkanStub_PassWarpResolve,
+	R_VulkanStub_PassPostprocess,
+	R_VulkanStub_PassOverlayViewmodel,
+	R_VulkanStub_PassOverlayPolyblend,
+	R_VulkanStub_BeginPass,
+	R_VulkanStub_EndPass,
+	R_VulkanStub_ValidatePassState,
+	R_VulkanStub_BeginTimer,
+	R_VulkanStub_EndTimer,
+	R_VulkanStub_ResolveTimers,
+	R_VulkanStub_ConsumeTimerSample,
+	R_VulkanStub_GetCaps,
+	R_VulkanStub_ResolveResourceId,
+	R_VulkanStub_IsResourceValid,
+	R_VulkanStub_BindRenderTarget,
+	R_VulkanStub_SetViewport,
+	R_VulkanStub_SetScissor,
+	R_VulkanStub_SetPipelineState,
+	R_VulkanStub_Draw,
+	R_VulkanStub_DrawIndexed,
+	R_VulkanStub_DrawInstanced,
+	R_VulkanStub_DrawIndexedInstanced,
+	R_VulkanStub_DrawIndexedIndirect,
+	R_VulkanStub_MultiDrawIndexedIndirect,
+	R_VulkanStub_Dispatch,
+	R_VulkanStub_MemoryBarrier,
+	R_VulkanStub_SetBlendFactors,
+	R_VulkanStub_Finish,
+	R_VulkanStub_PopulateFrameGraphResources,
+	R_VulkanStub_GetSceneSampleCount
+};
+
+static void R_Backend_VulkanStatus_f (void)
+{
+	Con_Printf ("Vulkan backend status:\n");
+	Con_Printf ("  registration: present as stub backend ('Vulkan').\n");
+	Con_Printf ("  activation gate: blocked (can_activate=false).\n");
+	Con_Printf ("  implemented callbacks: contract no-op stubs only.\n");
+	Con_Printf ("  remaining work: swapchain + command buffers + pass graph execution + resource lifetime + descriptor/pipeline cache.\n");
 }
 
 void R_Backend_Register (const IRenderBackend *backend)
@@ -263,6 +406,7 @@ void R_Backend_Init (void)
 		return;
 
 	s_backend_initialized = true;
+	memset (s_missing_resource_warn_frame, 0xff, sizeof (s_missing_resource_warn_frame));
 	Cvar_RegisterVariable (&r_backend);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
 	if (!s_backend_audit_cmd_registered)
@@ -270,8 +414,14 @@ void R_Backend_Init (void)
 		Cmd_AddCommand ("r_backend_wrapper_audit", R_Backend_WrapperAudit_f);
 		s_backend_audit_cmd_registered = true;
 	}
+	if (!s_backend_vulkan_status_cmd_registered)
+	{
+		Cmd_AddCommand ("r_backend_vulkan_status", R_Backend_VulkanStatus_f);
+		s_backend_vulkan_status_cmd_registered = true;
+	}
 
 	GL_Backend_Register ();
+	R_Backend_Register (&s_vulkan_stub_backend);
 
 	if (!s_active_backend && s_registered_backend_count > 0)
 		s_active_backend = s_registered_backends[0];
@@ -417,6 +567,31 @@ unsigned R_FrameGraph_ResolveResourceBySlot (const RenderGraphResourceHandle *re
 	return backend->resolve_resource_id (resources, resource);
 }
 
+unsigned R_FrameGraph_ResolveRequiredResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot, const char *usage_tag)
+{
+	unsigned resolved;
+	const char *resolved_usage = (usage_tag && usage_tag[0]) ? usage_tag : "unknown";
+
+	if (!resources)
+		return 0u;
+
+	resolved = R_FrameGraph_ResolveResourceBySlot (resources, slot);
+	if (resolved != 0u)
+		return resolved;
+	if (slot <= R_BACKEND_RESOURCE_SLOT_NONE || slot >= R_BACKEND_RESOURCE_SLOT_COUNT)
+		return 0u;
+
+	if (s_missing_resource_warn_frame[slot] != r_framecount)
+	{
+		Con_DWarning ("FrameGraph resource contract: '%s' requires slot '%s' but it resolved to 0\n",
+			resolved_usage,
+			R_Backend_ResourceSlotName (slot));
+		s_missing_resource_warn_frame[slot] = r_framecount;
+	}
+
+	return 0u;
+}
+
 qboolean R_FrameGraph_HasResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
@@ -455,11 +630,53 @@ void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count)
 		backend->draw (primitive, first, count);
 }
 
+void R_Backend_DrawIndexed (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->draw_indexed)
+		backend->draw_indexed (primitive, index_type, count, index_offset_bytes);
+}
+
+void R_Backend_DrawInstanced (render_backend_primitive_t primitive, int first, int count, int instance_count)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->draw_instanced)
+		backend->draw_instanced (primitive, first, count, instance_count);
+}
+
+void R_Backend_DrawIndexedInstanced (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes, int instance_count)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->draw_indexed_instanced)
+		backend->draw_indexed_instanced (primitive, index_type, count, index_offset_bytes, instance_count);
+}
+
+void R_Backend_DrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->draw_indexed_indirect)
+		backend->draw_indexed_indirect (primitive, index_type, indirect_offset_bytes);
+}
+
+void R_Backend_MultiDrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes, int draw_count, int stride_bytes)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->multi_draw_indexed_indirect)
+		backend->multi_draw_indexed_indirect (primitive, index_type, indirect_offset_bytes, draw_count, stride_bytes);
+}
+
 void R_Backend_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
 	if (backend && backend->dispatch)
 		backend->dispatch (group_x, group_y, group_z);
+}
+
+void R_Backend_MemoryBarrier (unsigned barrier_bits)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->memory_barrier && barrier_bits != R_BACKEND_BARRIER_NONE)
+		backend->memory_barrier (barrier_bits);
 }
 
 void R_Backend_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst)

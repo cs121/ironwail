@@ -39,6 +39,7 @@ typedef struct gl_backend_timer_pass_s
 
 static gl_backend_timer_pass_t s_timer_passes[R_BACKEND_MAX_PROFILE_SLOTS];
 static RenderBackendCaps s_gl_backend_caps;
+static int s_legacy_pass_resource_fallback_frame = -1;
 
 static unsigned short GLBackend_RegisterResource (RenderGraphResourceHandle *handles, render_backend_resource_type_t type, render_backend_resource_slot_t slot, render_backend_resource_lifetime_t lifetime, unsigned native_id)
 {
@@ -125,6 +126,10 @@ static void GLBackend_DetectCaps (void)
 	memset (&s_gl_backend_caps, 0, sizeof (s_gl_backend_caps));
 	s_gl_backend_caps.supports_timestamps = GLBackend_HasTimestampQueries ();
 	s_gl_backend_caps.supports_compute = (GL_DispatchComputeFunc != NULL);
+	s_gl_backend_caps.supports_draw_instanced = (GL_DrawArraysInstancedFunc != NULL && GL_DrawElementsInstancedFunc != NULL);
+	s_gl_backend_caps.supports_draw_indirect = (GL_DrawElementsIndirectFunc != NULL);
+	s_gl_backend_caps.supports_multi_draw_indirect = (GL_MultiDrawElementsIndirectFunc != NULL);
+	s_gl_backend_caps.supports_memory_barrier = (GL_MemoryBarrierFunc != NULL);
 	s_gl_backend_caps.supports_legacy_pass_fallbacks = true;
 	s_gl_backend_caps.supports_bindless = gl_bindless_able;
 	s_gl_backend_caps.shader_model = 50u;
@@ -147,6 +152,56 @@ static void GLBackend_DetectCaps (void)
 static const RenderBackendCaps *GLBackend_GetCaps (void)
 {
 	return &s_gl_backend_caps;
+}
+
+static GLenum GLBackend_MapPrimitive (render_backend_primitive_t primitive)
+{
+	switch (primitive)
+	{
+	case R_BACKEND_PRIMITIVE_TRIANGLE_FAN:
+		return GL_TRIANGLE_FAN;
+	case R_BACKEND_PRIMITIVE_TRIANGLE_STRIP:
+		return GL_TRIANGLE_STRIP;
+	case R_BACKEND_PRIMITIVE_LINES:
+		return GL_LINES;
+	case R_BACKEND_PRIMITIVE_POINTS:
+		return GL_POINTS;
+	case R_BACKEND_PRIMITIVE_TRIANGLES:
+	default:
+		return GL_TRIANGLES;
+	}
+}
+
+static GLenum GLBackend_MapIndexType (render_backend_index_type_t index_type)
+{
+	switch (index_type)
+	{
+	case R_BACKEND_INDEX_TYPE_UINT32:
+		return GL_UNSIGNED_INT;
+	case R_BACKEND_INDEX_TYPE_UINT16:
+	default:
+		return GL_UNSIGNED_SHORT;
+	}
+}
+
+static GLbitfield GLBackend_MapBarrierBits (unsigned barrier_bits)
+{
+	GLbitfield gl_bits = 0u;
+
+	if (barrier_bits & R_BACKEND_BARRIER_TEXTURE_FETCH)
+		gl_bits |= GL_TEXTURE_FETCH_BARRIER_BIT;
+	if (barrier_bits & R_BACKEND_BARRIER_SHADER_IMAGE_ACCESS)
+		gl_bits |= GL_SHADER_IMAGE_ACCESS_BARRIER_BIT;
+	if (barrier_bits & R_BACKEND_BARRIER_SHADER_STORAGE)
+		gl_bits |= GL_SHADER_STORAGE_BARRIER_BIT;
+	if (barrier_bits & R_BACKEND_BARRIER_COMMAND)
+		gl_bits |= GL_COMMAND_BARRIER_BIT;
+	if (barrier_bits & R_BACKEND_BARRIER_ELEMENT_ARRAY)
+		gl_bits |= GL_ELEMENT_ARRAY_BARRIER_BIT;
+	if (barrier_bits & R_BACKEND_BARRIER_FRAMEBUFFER)
+		gl_bits |= GL_FRAMEBUFFER_BARRIER_BIT;
+
+	return gl_bits;
 }
 
 static GLenum GLBackend_MapBlendFactor (render_blend_factor_t factor)
@@ -221,8 +276,8 @@ static void GLBackend_ResourceBarrier (const RenderGraphResourceHandle *resource
 		}
 	}
 
-	if (needs_memory_barrier && GL_MemoryBarrierFunc)
-		GL_MemoryBarrierFunc (GL_FRAMEBUFFER_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT | GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+	if (needs_memory_barrier)
+		R_Backend_MemoryBarrier (R_BACKEND_BARRIER_FRAMEBUFFER | R_BACKEND_BARRIER_TEXTURE_FETCH | R_BACKEND_BARRIER_SHADER_IMAGE_ACCESS);
 }
 
 static void GLBackend_ValidatePassState (const char *pass_name, qboolean before_pass)
@@ -464,32 +519,84 @@ static void GLBackend_SetPipelineState (unsigned state_bits)
 
 static void GLBackend_Draw (render_backend_primitive_t primitive, int first, int count)
 {
-	GLenum mode = GL_TRIANGLES;
+	glDrawArrays (GLBackend_MapPrimitive (primitive), first, count);
+}
 
-	switch (primitive)
+static void GLBackend_DrawIndexed (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes)
+{
+	glDrawElements (GLBackend_MapPrimitive (primitive), count, GLBackend_MapIndexType (index_type), (const GLvoid *)index_offset_bytes);
+}
+
+static void GLBackend_DrawInstanced (render_backend_primitive_t primitive, int first, int count, int instance_count)
+{
+	if (!GL_DrawArraysInstancedFunc || instance_count <= 0)
+		return;
+
+	GL_DrawArraysInstancedFunc (GLBackend_MapPrimitive (primitive), first, count, instance_count);
+}
+
+static void GLBackend_DrawIndexedInstanced (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes, int instance_count)
+{
+	if (!GL_DrawElementsInstancedFunc || instance_count <= 0)
+		return;
+
+	GL_DrawElementsInstancedFunc (GLBackend_MapPrimitive (primitive), count, GLBackend_MapIndexType (index_type), (const GLvoid *)index_offset_bytes, instance_count);
+}
+
+static void GLBackend_DrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes)
+{
+	if (!GL_DrawElementsIndirectFunc)
+		return;
+
+	GL_DrawElementsIndirectFunc (GLBackend_MapPrimitive (primitive), GLBackend_MapIndexType (index_type), (const void *)indirect_offset_bytes);
+}
+
+static void GLBackend_MultiDrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes, int draw_count, int stride_bytes)
+{
+	if (draw_count <= 0)
+		return;
+
+	if (GL_MultiDrawElementsIndirectFunc)
 	{
-	case R_BACKEND_PRIMITIVE_TRIANGLE_FAN:
-		mode = GL_TRIANGLE_FAN;
-		break;
-	case R_BACKEND_PRIMITIVE_LINES:
-		mode = GL_LINES;
-		break;
-	case R_BACKEND_PRIMITIVE_POINTS:
-		mode = GL_POINTS;
-		break;
-	case R_BACKEND_PRIMITIVE_TRIANGLES:
-	default:
-		mode = GL_TRIANGLES;
-		break;
+		GL_MultiDrawElementsIndirectFunc (
+			GLBackend_MapPrimitive (primitive),
+			GLBackend_MapIndexType (index_type),
+			(const void *)indirect_offset_bytes,
+			draw_count,
+			stride_bytes);
+		return;
 	}
 
-	glDrawArrays (mode, first, count);
+	if (GL_DrawElementsIndirectFunc)
+	{
+		int i;
+		const byte *base = (const byte *)indirect_offset_bytes;
+		const int stride = (stride_bytes > 0) ? stride_bytes : (int)sizeof (unsigned) * 5;
+
+		for (i = 0; i < draw_count; ++i)
+		{
+			GL_DrawElementsIndirectFunc (
+				GLBackend_MapPrimitive (primitive),
+				GLBackend_MapIndexType (index_type),
+				base + (i * stride));
+		}
+	}
 }
 
 static void GLBackend_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z)
 {
-	if (s_gl_backend_caps.supports_compute)
+	if (GL_DispatchComputeFunc)
 		GL_DispatchComputeFunc (group_x, group_y, group_z);
+}
+
+static void GLBackend_MemoryBarrier (unsigned barrier_bits)
+{
+	const GLbitfield gl_bits = GLBackend_MapBarrierBits (barrier_bits);
+
+	if (!GL_MemoryBarrierFunc || gl_bits == 0u)
+		return;
+
+	GL_MemoryBarrierFunc (gl_bits);
 }
 
 static void GLBackend_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst)
@@ -521,14 +628,36 @@ static void GLBackend_PassRenderScene (RenderPassContext *ctx)
 	R_RenderScene (ctx ? ctx->resources : NULL);
 }
 
+static const RenderGraphResourceHandle *GLBackend_GetPassResourcesOrFallback (const RenderPassContext *ctx, RenderGraphResourceHandle *fallback_resources, const char *pass_name)
+{
+	if (ctx && ctx->resources)
+		return ctx->resources;
+	if (!fallback_resources)
+		return NULL;
+
+	memset (fallback_resources, 0, sizeof (*fallback_resources));
+	GLBackend_PopulateFrameGraphResources (fallback_resources);
+	if (r_framegraph_debug.value > 0.f && s_legacy_pass_resource_fallback_frame != r_framecount)
+	{
+		Con_DWarning ("FrameGraph seam: '%s' ran without pass resources; using backend fallback handles\n",
+			pass_name ? pass_name : "<unnamed>");
+		s_legacy_pass_resource_fallback_frame = r_framecount;
+	}
+	return fallback_resources;
+}
+
 static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
 {
-	R_WarpScaleView (ctx ? ctx->resources : NULL);
+	RenderGraphResourceHandle fallback_resources;
+	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesOrFallback (ctx, &fallback_resources, "Warp/resolve");
+	R_WarpScaleView (resources);
 }
 
 static void GLBackend_PassPostProcess (RenderPassContext *ctx)
 {
-	GL_PostProcess (ctx ? ctx->resources : NULL);
+	RenderGraphResourceHandle fallback_resources;
+	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesOrFallback (ctx, &fallback_resources, "Postprocess");
+	GL_PostProcess (resources);
 }
 
 static void GLBackend_PassOverlayViewmodel (RenderPassContext *ctx)
@@ -563,6 +692,32 @@ static qboolean GLBackend_CanActivate (qboolean runtime_switch)
 	return !runtime_switch;
 }
 
+static void GLBackend_BeginFrame (void)
+{
+	if ((!s_gl_backend_caps.supports_compute && GL_DispatchComputeFunc)
+		|| (!s_gl_backend_caps.supports_draw_instanced && GL_DrawArraysInstancedFunc && GL_DrawElementsInstancedFunc)
+		|| (!s_gl_backend_caps.supports_draw_indirect && GL_DrawElementsIndirectFunc)
+		|| (!s_gl_backend_caps.supports_multi_draw_indirect && GL_MultiDrawElementsIndirectFunc)
+		|| (!s_gl_backend_caps.supports_memory_barrier && GL_MemoryBarrierFunc))
+	{
+		/* VID resize can initialize backend registration before GL extension
+		 * entry points are loaded. Refresh caps lazily on first render frame. */
+		GLBackend_DetectCaps ();
+	}
+
+	GL_BackendBeginFrame ();
+}
+
+static void GLBackend_EndFrame (void)
+{
+	GL_BackendEndFrame ();
+}
+
+static void GLBackend_Present (void)
+{
+	GL_BackendPresent ();
+}
+
 void GL_Backend_Register (void)
 {
 	GLBackend_DetectCaps ();
@@ -573,9 +728,9 @@ void GL_Backend_Register (void)
 		GLBackend_Shutdown,
 		GLBackend_OnResize,
 		GLBackend_CanActivate,
-		NULL,
-		NULL,
-		NULL,
+		GLBackend_BeginFrame,
+		GLBackend_EndFrame,
+		GLBackend_Present,
 		GLBackend_BeginPassEx,
 		GLBackend_EndPassEx,
 		GLBackend_ResourceBarrier,
@@ -604,7 +759,13 @@ void GL_Backend_Register (void)
 		GLBackend_SetScissor,
 		GLBackend_SetPipelineState,
 		GLBackend_Draw,
+		GLBackend_DrawIndexed,
+		GLBackend_DrawInstanced,
+		GLBackend_DrawIndexedInstanced,
+		GLBackend_DrawIndexedIndirect,
+		GLBackend_MultiDrawIndexedIndirect,
 		GLBackend_Dispatch,
+		GLBackend_MemoryBarrier,
 		GLBackend_SetBlendFactors,
 		GLBackend_Finish,
 		GLBackend_PopulateFrameGraphResources,

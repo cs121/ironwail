@@ -30,6 +30,9 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height);
 void GL_EndRendering (void);
 void GL_Set2D (void);
 void GL_SetScissorEnabled (qboolean enabled);
+void GL_BackendBeginFrame (void);
+void GL_BackendEndFrame (void);
+void GL_BackendPresent (void);
 
 extern	int glx, gly, glwidth, glheight;
 
@@ -385,6 +388,7 @@ void R_Backend_SetViewport (int x, int y, int width, int height);
 void R_Backend_SetScissor (qboolean enabled, int x, int y, int width, int height);
 void R_Backend_SetPipelineState (unsigned state_bits);
 void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count);
+void R_Backend_DrawIndexed (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes);
 void R_Backend_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z);
 void R_Backend_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst);
 void R_Backend_Finish (void);

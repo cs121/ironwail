@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_alias.c -- alias model rendering
 
 #include "quakedef.h"
+#include "r_framegraph.h"
 #include "../common/lightgrid.h"
 #include "r_realtimelight.h"
 #include "r_skyvis.h"
@@ -914,7 +915,7 @@ ibuf.global._pad_tail[1] = 0.f;
 		GL_BindTextures (0, 3, textures);
 		GL_Bind (GL_TEXTURE3, blacktexture);
 
-		GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *)hdr->eboofs, ibuf.count);
+		R_Backend_DrawIndexedInstanced (R_BACKEND_PRIMITIVE_TRIANGLES, R_BACKEND_INDEX_TYPE_UINT16, hdr->numindexes, (intptr_t)hdr->eboofs, ibuf.count);
 
 		rs_aliaspasses += hdr->numtris * ibuf.count;
 	}
@@ -989,7 +990,7 @@ static void R_FlushAliasInstances_Shadow (qboolean dlight)
 		}
 
 		GL_BindBuffersRange (GL_SHADER_STORAGE_BUFFER, 1, 2, buffers, offsets, sizes);
-		GL_DrawElementsInstancedFunc (GL_TRIANGLES, hdr->numindexes, GL_UNSIGNED_SHORT, (void *)hdr->eboofs, ibuf.count);
+		R_Backend_DrawIndexedInstanced (R_BACKEND_PRIMITIVE_TRIANGLES, R_BACKEND_INDEX_TYPE_UINT16, hdr->numindexes, (intptr_t)hdr->eboofs, ibuf.count);
 	}
 
 	ibuf.count = 0;

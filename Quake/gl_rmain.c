@@ -98,6 +98,8 @@ static float r_prev_matviewproj[16] = {
 static vec3_t r_prev_vieworg = { 0.f, 0.f, 0.f };
 static double r_prev_frame_time = 0.0;
 static qboolean r_prev_frame_valid = false;
+static float r_motionblur_shutter_scale_filtered = 1.f;
+static qboolean r_motionblur_shutter_scale_valid = false;
 static qboolean r_frame_rendered_this_update;
 
 static godrays_stabilization_t r_godrays_stabilization;
@@ -433,7 +435,7 @@ cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 cvar_t  r_gl_state_validate = { "r_gl_state_validate", "0", CVAR_NONE };
-cvar_t  r_framegraph_autobind = { "r_framegraph_autobind", "0", CVAR_NONE };
+cvar_t  r_framegraph_autobind = { "r_framegraph_autobind", "1", CVAR_NONE };
 cvar_t  r_framegraph_debug = { "r_framegraph_debug", "0", CVAR_NONE };
 cvar_t	r_quality = { "r_quality", "high", CVAR_ARCHIVE };
 cvar_t  r_shadow = { "r_shadow", "1", CVAR_ARCHIVE };
@@ -2115,6 +2117,8 @@ static void R_InvalidateTemporalHistoryOnSceneResize (void)
 	R_ResetGodraysStabilization ();
 	R_InvalidateGodraysFrameCache ();
 	r_prev_frame_valid = false;
+	r_motionblur_shutter_scale_valid = false;
+	r_motionblur_shutter_scale_filtered = 1.f;
 }
 
 static qboolean R_GodraysMediumEnabled (void)
@@ -2909,15 +2913,18 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	float dv_quality;
 	float dv_debug;
 	float dv_time;
-	GLuint scene_fbo = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO);
-	GLuint scene_velocity_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY);
-	GLuint resolved_scene_velocity_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY);
-	GLuint composite_fbo = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO);
-	GLuint composite_color_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR);
-	GLuint composite_depth_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH);
+	GLuint scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, "Postprocess");
+	GLuint scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, "Postprocess");
+	GLuint resolved_scene_velocity_tex = 0;
+	GLuint composite_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO, "Postprocess");
+	GLuint composite_color_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR, "Postprocess");
+	GLuint composite_depth_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH, "Postprocess");
 	int scene_samples = R_Backend_GetSceneSampleCount ();
 	if (scene_samples <= 0)
 		scene_samples = framebufs.scene.samples;
+	msaa = scene_samples > 1;
+	if (msaa)
+		resolved_scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY, "Postprocess");
 	if (!scene_fbo)
 		scene_fbo = framebufs.scene.fbo;
 	if (!scene_velocity_tex)
@@ -3078,7 +3085,6 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	ssao_fog_strength = CLAMP (0.f, r_ssao_fog_strength.value, 1.f);
 	ssao_fog_power = q_max (0.01f, r_ssao_fog_power.value);
 
-	msaa = scene_samples > 1;
 	motion_strength = q_max (0.f, r_motionblur.value);
 	if (!GL_ShouldApplyMotionBlur ())
 		motion_strength = 0.f;
@@ -3093,9 +3099,29 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		{
 			const double reference_delta = 1.0 / 60.0;
 			float frame_scale = (float)(reference_delta / frame_delta);
-			frame_scale = q_min (4.f, q_max (1.f, frame_scale));
-			motion_effective_shutter *= frame_scale;
+			frame_scale = q_min (2.f, q_max (0.5f, frame_scale));
+			if (!r_motionblur_shutter_scale_valid)
+			{
+				r_motionblur_shutter_scale_filtered = frame_scale;
+				r_motionblur_shutter_scale_valid = true;
+			}
+			else
+			{
+				const float alpha = 0.2f;
+				r_motionblur_shutter_scale_filtered += (frame_scale - r_motionblur_shutter_scale_filtered) * alpha;
+			}
+			motion_effective_shutter *= r_motionblur_shutter_scale_filtered;
 		}
+		else
+		{
+			r_motionblur_shutter_scale_valid = false;
+			r_motionblur_shutter_scale_filtered = 1.f;
+		}
+	}
+	else
+	{
+		r_motionblur_shutter_scale_valid = false;
+		r_motionblur_shutter_scale_filtered = 1.f;
 	}
 	motion_max_radius = q_max (0.f, r_motionblur_maxradiuspixels.value);
 	motion_min_velocity = q_max (0.f, r_motionblur_minvelocity.value);
@@ -4648,7 +4674,7 @@ static void R_FlushDebugGeometry (void)
 
 		GL_Upload (GL_ELEMENT_ARRAY_BUFFER, debugidx, sizeof (debugidx[0]) * numdebugidx, &buf, &ofs);
 		GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-		glDrawElements (GL_LINES, numdebugidx, GL_UNSIGNED_SHORT, ofs);
+		R_Backend_DrawIndexed (R_BACKEND_PRIMITIVE_LINES, R_BACKEND_INDEX_TYPE_UINT16, numdebugidx, (intptr_t)ofs);
 	}
 
 	numdebugverts = 0;
@@ -5498,13 +5524,13 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 {
 	int srcx, srcy, srcw, srch;
 	float smax, tmax;
-	GLuint scene_fbo = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO);
-	GLuint scene_color_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR);
-	GLuint scene_velocity_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY);
-	GLuint resolved_scene_fbo = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO);
-	GLuint resolved_scene_color_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR);
-	GLuint resolved_scene_velocity_tex = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY);
-	GLuint composite_fbo = (GLuint)R_FrameGraph_ResolveResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO);
+	GLuint scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, "Warp/resolve");
+	GLuint scene_color_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, "Warp/resolve");
+	GLuint scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, "Warp/resolve");
+	GLuint resolved_scene_fbo = 0;
+	GLuint resolved_scene_color_tex = 0;
+	GLuint resolved_scene_velocity_tex = 0;
+	GLuint composite_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO, "Warp/resolve");
 	int scene_samples = R_Backend_GetSceneSampleCount ();
 	if (scene_samples <= 0)
 		scene_samples = framebufs.scene.samples;
@@ -5526,6 +5552,12 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 		scene_color_tex = framebufs.scene.color_tex;
 	if (!scene_velocity_tex)
 		scene_velocity_tex = framebufs.scene.velocity_tex;
+	if (msaa)
+	{
+		resolved_scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO, "Warp/resolve");
+		resolved_scene_color_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR, "Warp/resolve");
+		resolved_scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY, "Warp/resolve");
+	}
 	if (!resolved_scene_fbo)
 		resolved_scene_fbo = framebufs.resolved_scene.fbo;
 	if (!resolved_scene_color_tex)

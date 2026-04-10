@@ -604,7 +604,7 @@ void Draw_Flush (void)
 
 	GL_Upload (GL_ELEMENT_ARRAY_BUFFER, batchindices, sizeof(batchindices[0]) * 6 * numbatchquads, &buf, &ofs);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-	glDrawElements (GL_TRIANGLES, numbatchquads * 6, GL_UNSIGNED_SHORT, ofs);
+	R_Backend_DrawIndexed (R_BACKEND_PRIMITIVE_TRIANGLES, R_BACKEND_INDEX_TYPE_UINT16, numbatchquads * 6, (intptr_t)ofs);
 
 	numbatchquads = 0;
 }
