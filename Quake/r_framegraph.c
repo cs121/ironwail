@@ -53,6 +53,27 @@ static int FG_MoveSetupStagePassesToFront (void);
 static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count);
 static void FG_ConsumeBackendTimerSamples (const IRenderBackend *backend);
 
+static qboolean FG_GetResourceSlotForBit (unsigned bit, render_backend_resource_slot_t *out_slot)
+{
+	render_backend_resource_slot_t slot = R_BACKEND_RESOURCE_SLOT_NONE;
+
+	switch (bit)
+	{
+	case RENDER_RES_SCENE_COLOR: slot = R_BACKEND_RESOURCE_SLOT_SCENE_COLOR; break;
+	case RENDER_RES_SCENE_DEPTH: slot = R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH; break;
+	case RENDER_RES_COMPOSITE_COLOR: slot = R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR; break;
+	case RENDER_RES_COMPOSITE_DEPTH: slot = R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH; break;
+	case RENDER_RES_SHADOW_SUN_DEPTH: slot = R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH; break;
+	case RENDER_RES_VELOCITY: slot = R_BACKEND_RESOURCE_SLOT_VELOCITY; break;
+	default:
+		return false;
+	}
+
+	if (out_slot)
+		*out_slot = slot;
+	return true;
+}
+
 static qboolean FG_AddRuntimePassInternal (const RenderPassDesc *pass_desc)
 {
 	int profile_slot;
@@ -601,11 +622,30 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 {
 	double cpu_start;
 	double cpu_ms;
+	unsigned bit;
 
 	if (!pass || !ctx)
 		return;
 	if (pass->enabled && !pass->enabled (ctx))
 		return;
+
+	for (bit = 1u; bit != 0; bit <<= 1)
+	{
+		render_backend_resource_slot_t slot;
+		const render_backend_resource_ref_t *resource_ref;
+		if ((pass->reads & bit) == 0)
+			continue;
+		if (!FG_GetResourceSlotForBit (bit, &slot))
+			continue;
+
+		resource_ref = R_FrameGraph_GetResourceRef (ctx->resources, slot);
+		if (!ctx->backend || !ctx->backend->is_resource_valid || !resource_ref
+			|| !ctx->backend->is_resource_valid (ctx->resources, resource_ref))
+		{
+			Con_DWarning ("FrameGraph: pass '%s' read slot %d resolved invalid resource\n", pass->name, (int)slot);
+			SDL_assert (!"FrameGraph pass declares read dependency on invalid resource");
+		}
+	}
 
 	FG_ApplyPassOutputBinding (pass, ctx);
 

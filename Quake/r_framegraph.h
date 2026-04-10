@@ -36,10 +36,11 @@ typedef enum render_graph_resource_bits_e
 	RENDER_RES_SCENE_COLOR = 1u << 0,
 	RENDER_RES_SCENE_DEPTH = 1u << 1,
 	RENDER_RES_COMPOSITE_COLOR = 1u << 2,
-	RENDER_RES_SHADOW_SUN_DEPTH = 1u << 3,
-	RENDER_RES_VELOCITY = 1u << 4,
-	RENDER_RES_DECALS = 1u << 5,
-	RENDER_RES_SSAO_FOG_STATE = 1u << 6
+	RENDER_RES_COMPOSITE_DEPTH = 1u << 3,
+	RENDER_RES_SHADOW_SUN_DEPTH = 1u << 4,
+	RENDER_RES_VELOCITY = 1u << 5,
+	RENDER_RES_DECALS = 1u << 6,
+	RENDER_RES_SSAO_FOG_STATE = 1u << 7
 } render_graph_resource_bits_t;
 
 typedef enum fg_pass_output_target_e
