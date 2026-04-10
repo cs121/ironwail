@@ -293,7 +293,7 @@ typedef struct
 #include "menu.h"
 #include "sidebar.h"
 #include "cdaudio.h"
-#include "glquake.h"
+#include "render_api.h"
 
 
 //=============================================================================

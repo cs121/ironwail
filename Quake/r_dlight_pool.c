@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "glquake.h"
 #include "r_dlight_pool.h"
 #include <float.h>
 #include <stdlib.h>

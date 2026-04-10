@@ -10,6 +10,7 @@ of the License, or (at your option) any later version.
 */
 
 #include "quakedef.h"
+#include "glquake.h"
 #include "r_framegraph.h"
 
 typedef enum

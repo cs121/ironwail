@@ -4,6 +4,7 @@
 //
 
 #include "quakedef.h"
+#include "glquake.h"
 #include "gl_lightgrid.h"
 #include <float.h>
 #include <math.h>

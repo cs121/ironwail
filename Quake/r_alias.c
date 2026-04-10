@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //r_alias.c -- alias model rendering
 
 #include "quakedef.h"
+#include "glquake.h"
 #include "r_framegraph.h"
 #include "../common/lightgrid.h"
 #include "r_realtimelight.h"

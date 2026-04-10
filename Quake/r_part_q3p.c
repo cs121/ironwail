@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "glquake.h"
 #include "mat_material.h"
 #include "r_framegraph.h"
 #include "r_part_q3p.h"
