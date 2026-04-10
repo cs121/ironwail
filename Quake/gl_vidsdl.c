@@ -635,6 +635,7 @@ static void VID_UpdateWindowMetrics (int *out_depthbits, int *out_stencilbits)
 	vid.numpages = 2;
 
 	VID_RecalcInterfaceSize ();
+	R_Backend_OnResize (vid.width, vid.height);
 
 	if (SDL_GL_GetAttribute (SDL_GL_DEPTH_SIZE, out_depthbits) == -1)
 		*out_depthbits = 0;
@@ -1600,6 +1601,7 @@ void	VID_Shutdown (void)
 {
 	if (vid_initialized)
 	{
+		R_Backend_Shutdown ();
 		Lightgrid_Shutdown ();
 		VID_FreeMouseCursors();
 		SDL_GL_DeleteContext(gl_context);

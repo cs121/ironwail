@@ -13,6 +13,7 @@ static int s_registered_backend_count = 0;
 static const IRenderBackend *s_active_backend = NULL;
 static qboolean s_backend_initialized = false;
 static qboolean s_applying_backend_cvar = false;
+static qboolean s_backend_active = false;
 
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
 
@@ -50,7 +51,7 @@ static void R_Backend_Changed_f (cvar_t *var)
 
 	if (!R_Backend_Select (var->string))
 	{
-		Con_Warning ("Renderer backend '%s' not found; keeping '%s'\n",
+		Con_Warning ("Renderer backend change to '%s' rejected; keeping '%s'\n",
 			var->string,
 			(s_active_backend && s_active_backend->name) ? s_active_backend->name : "<none>");
 		R_Backend_ApplySelectionToCvar ();
@@ -87,11 +88,60 @@ void R_Backend_Register (const IRenderBackend *backend)
 qboolean R_Backend_Select (const char *backend_name)
 {
 	const IRenderBackend *backend = R_Backend_FindByName (backend_name);
+	const IRenderBackend *previous = s_active_backend;
+	const qboolean runtime_switch = s_backend_active && previous && backend && (previous != backend);
+	qboolean activated = false;
 
 	if (!backend)
 		return false;
 
+	if (runtime_switch && (!backend->can_activate || !backend->can_activate (true)))
+	{
+		Con_Warning (
+			"Renderer backend '%s' cannot be activated at runtime; set r_backend and restart the engine.\n",
+			backend->name ? backend->name : "<unnamed>");
+		return false;
+	}
+
+	if (backend->can_activate && !backend->can_activate (false))
+	{
+		Con_Warning ("Renderer backend '%s' is not ready for activation.\n",
+			backend->name ? backend->name : "<unnamed>");
+		return false;
+	}
+
+	if (s_backend_active && previous && previous->shutdown)
+		previous->shutdown ();
+
 	s_active_backend = backend;
+	if (!backend->init || backend->init ())
+		activated = true;
+
+	if (!activated)
+	{
+		Con_Warning ("Renderer backend '%s' failed to activate.\n",
+			backend->name ? backend->name : "<unnamed>");
+
+		if (previous && previous != backend)
+		{
+			Con_Warning ("Reverting renderer backend to '%s'.\n",
+				previous->name ? previous->name : "<unnamed>");
+			s_active_backend = previous;
+			if (!previous->init || previous->init ())
+				activated = true;
+		}
+
+		if (!activated)
+		{
+			Con_Warning ("Failed to restore previous renderer backend; no active backend available.\n");
+			s_active_backend = NULL;
+			s_backend_active = false;
+			return false;
+		}
+	}
+
+	s_backend_active = true;
+	R_Backend_ApplySelectionToCvar ();
 	return true;
 }
 
@@ -111,6 +161,21 @@ void R_Backend_Init (void)
 
 	if (!R_Backend_Select (r_backend.string))
 		R_Backend_ApplySelectionToCvar ();
+}
+
+void R_Backend_Shutdown (void)
+{
+	if (s_backend_active && s_active_backend && s_active_backend->shutdown)
+		s_active_backend->shutdown ();
+	s_backend_active = false;
+}
+
+void R_Backend_OnResize (int width, int height)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+
+	if (backend && backend->on_resize)
+		backend->on_resize (width, height);
 }
 
 const IRenderBackend *R_GetRenderBackend (void)

@@ -399,10 +399,34 @@ static void GLBackend_Finish (void)
 	glFinish ();
 }
 
+static qboolean GLBackend_Init (void)
+{
+	return true;
+}
+
+static void GLBackend_Shutdown (void)
+{
+}
+
+static void GLBackend_OnResize (int width, int height)
+{
+	(void)width;
+	(void)height;
+}
+
+static qboolean GLBackend_CanActivate (qboolean runtime_switch)
+{
+	return !runtime_switch;
+}
+
 void GL_Backend_Register (void)
 {
 	static const IRenderBackend gl_backend = {
 		"OpenGL",
+		GLBackend_Init,
+		GLBackend_Shutdown,
+		GLBackend_OnResize,
+		GLBackend_CanActivate,
 		GLBackend_BeginPass,
 		GLBackend_EndPass,
 		GLBackend_ValidatePassState,
