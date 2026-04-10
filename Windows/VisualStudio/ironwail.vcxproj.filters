@@ -225,6 +225,9 @@
     <ClCompile Include="..\..\Quake\r_framegraph.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\r_passes.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\r_quality.c">
       <Filter>Source Files</Filter>
     </ClCompile>

@@ -470,6 +470,45 @@ static void GLBackend_Finish (void)
 	glFinish ();
 }
 
+static void GLBackend_PassSetupView (RenderPassContext *ctx)
+{
+	(void)ctx;
+	R_SetupView ();
+}
+
+static void GLBackend_PassShadowMaps (RenderPassContext *ctx)
+{
+	(void)ctx;
+	R_RenderShadowMaps ();
+}
+
+static void GLBackend_PassRenderScene (RenderPassContext *ctx)
+{
+	R_RenderScene (ctx ? ctx->resources : NULL);
+}
+
+static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
+{
+	R_WarpScaleView (ctx ? ctx->resources : NULL);
+}
+
+static void GLBackend_PassPostProcess (RenderPassContext *ctx)
+{
+	GL_PostProcess (ctx ? ctx->resources : NULL);
+}
+
+static void GLBackend_PassOverlayViewmodel (RenderPassContext *ctx)
+{
+	(void)ctx;
+	R_DrawViewModel ();
+}
+
+static void GLBackend_PassOverlayPolyblend (RenderPassContext *ctx)
+{
+	(void)ctx;
+	V_PolyBlend ();
+}
+
 static qboolean GLBackend_Init (void)
 {
 	return true;
@@ -509,6 +548,13 @@ void GL_Backend_Register (void)
 		NULL,
 		NULL,
 		NULL,
+		GLBackend_PassSetupView,
+		GLBackend_PassShadowMaps,
+		GLBackend_PassRenderScene,
+		GLBackend_PassWarpResolve,
+		GLBackend_PassPostProcess,
+		GLBackend_PassOverlayViewmodel,
+		GLBackend_PassOverlayPolyblend,
 		GLBackend_BeginPass,
 		GLBackend_EndPass,
 		GLBackend_ValidatePassState,

@@ -196,6 +196,13 @@ typedef struct i_render_backend_s
 	void (*bind_pipeline)(const RenderBackendPipelineDesc *pipeline);
 	void (*set_dynamic_state)(const RenderBackendDynamicState *dynamic_state);
 	void (*bind_descriptors)(const RenderBackendDescriptorBinding *bindings, unsigned count);
+	void (*pass_setup_view)(RenderPassContext *ctx);
+	void (*pass_shadowmaps)(RenderPassContext *ctx);
+	void (*pass_render_scene)(RenderPassContext *ctx);
+	void (*pass_warp_resolve)(RenderPassContext *ctx);
+	void (*pass_postprocess)(RenderPassContext *ctx);
+	void (*pass_overlay_viewmodel)(RenderPassContext *ctx);
+	void (*pass_overlay_polyblend)(RenderPassContext *ctx);
 
 	/* Compatibility path for legacy OpenGL backend integration. */
 	void (*begin_pass)(const char *name);
