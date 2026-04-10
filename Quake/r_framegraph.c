@@ -53,24 +53,44 @@ static int FG_MoveSetupStagePassesToFront (void);
 static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count);
 static void FG_ConsumeBackendTimerSamples (const IRenderBackend *backend);
 
-static qboolean FG_GetResourceSlotForBit (unsigned bit, render_backend_resource_slot_t *out_slot)
+typedef struct fg_resource_bit_mapping_s
 {
-	render_backend_resource_slot_t slot = R_BACKEND_RESOURCE_SLOT_NONE;
+	unsigned bit;
+	render_backend_resource_slot_t slot;
+	qboolean requires_backend_resource;
+} fg_resource_bit_mapping_t;
 
-	switch (bit)
+static const fg_resource_bit_mapping_t s_fg_resource_mappings[] = {
+	{ RENDER_RES_SCENE_COLOR, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, true },
+	{ RENDER_RES_SCENE_DEPTH, R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH, true },
+	{ RENDER_RES_COMPOSITE_COLOR, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR, true },
+	{ RENDER_RES_COMPOSITE_DEPTH, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH, true },
+	{ RENDER_RES_SHADOW_SUN_DEPTH, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH, true },
+	{ RENDER_RES_VELOCITY, R_BACKEND_RESOURCE_SLOT_VELOCITY, true },
+	{ RENDER_RES_DECALS, R_BACKEND_RESOURCE_SLOT_NONE, false },
+	{ RENDER_RES_SSAO_FOG_STATE, R_BACKEND_RESOURCE_SLOT_NONE, false }
+};
+
+static const fg_resource_bit_mapping_t *FG_FindResourceMapping (unsigned bit)
+{
+	int i;
+
+	for (i = 0; i < (int)q_countof (s_fg_resource_mappings); ++i)
 	{
-	case RENDER_RES_SCENE_COLOR: slot = R_BACKEND_RESOURCE_SLOT_SCENE_COLOR; break;
-	case RENDER_RES_SCENE_DEPTH: slot = R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH; break;
-	case RENDER_RES_COMPOSITE_COLOR: slot = R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR; break;
-	case RENDER_RES_COMPOSITE_DEPTH: slot = R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH; break;
-	case RENDER_RES_SHADOW_SUN_DEPTH: slot = R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH; break;
-	case RENDER_RES_VELOCITY: slot = R_BACKEND_RESOURCE_SLOT_VELOCITY; break;
-	default:
-		return false;
+		if (s_fg_resource_mappings[i].bit == bit)
+			return &s_fg_resource_mappings[i];
 	}
 
+	return NULL;
+}
+
+static qboolean FG_GetResourceSlotForBit (unsigned bit, render_backend_resource_slot_t *out_slot)
+{
+	const fg_resource_bit_mapping_t *mapping = FG_FindResourceMapping (bit);
+	if (!mapping)
+		return false;
 	if (out_slot)
-		*out_slot = slot;
+		*out_slot = mapping->slot;
 	return true;
 }
 
@@ -632,16 +652,26 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	for (bit = 1u; bit != 0; bit <<= 1)
 	{
 		qboolean read_required = true;
+		const fg_resource_bit_mapping_t *mapping;
 		render_backend_resource_slot_t slot;
 		const render_backend_resource_ref_t *resource_ref;
 		if ((pass->reads & bit) == 0)
 			continue;
+		mapping = FG_FindResourceMapping (bit);
+		if (!mapping)
+		{
+			Con_DWarning ("FrameGraph: pass '%s' uses unmapped resource bit 0x%x\n", pass->name, bit);
+			SDL_assert (!"FrameGraph pass uses unmapped resource bit");
+			continue;
+		}
 		if (bit == RENDER_RES_SHADOW_SUN_DEPTH)
 		{
 			/* Shadow-map reads are optional for passes that still run with shadows disabled. */
 			read_required = (ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps);
 		}
 		if (!read_required)
+			continue;
+		if (!mapping->requires_backend_resource)
 			continue;
 		if (!FG_GetResourceSlotForBit (bit, &slot))
 			continue;

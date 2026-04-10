@@ -18,6 +18,76 @@ static qboolean s_backend_active = false;
 
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
 
+/*
+================
+R_Backend_ValidateContract
+
+Minimal "functional backend" contract:
+- must expose capability data via get_caps().
+- must support framegraph resource translation/validation callbacks.
+- must expose the legacy draw and viewport hooks used by current passes.
+- must populate framegraph resources each frame.
+
+Backends that fail this contract are rejected during registration/selection so
+runtime framegraph code can assert these callbacks are safe to use.
+================
+*/
+static qboolean R_Backend_ValidateContract (const IRenderBackend *backend, qboolean emit_warning)
+{
+	if (!backend)
+		return false;
+
+	if (!backend->get_caps
+		|| !backend->resolve_resource_id
+		|| !backend->is_resource_valid
+		|| !backend->bind_render_target
+		|| !backend->set_viewport
+		|| !backend->draw
+		|| !backend->populate_framegraph_resources)
+	{
+		if (emit_warning)
+		{
+			Con_Warning ("Renderer backend '%s' is missing required callbacks for functional operation.\n",
+				backend->name ? backend->name : "<unnamed>");
+		}
+		SDL_assert (!"Renderer backend contract violation");
+		return false;
+	}
+
+	return true;
+}
+
+static void R_Backend_ClearActiveCaps (void)
+{
+	memset (&s_active_backend_caps, 0, sizeof (s_active_backend_caps));
+}
+
+static qboolean R_Backend_RefreshActiveCaps (const IRenderBackend *backend, qboolean emit_warning)
+{
+	const RenderBackendCaps *caps;
+
+	R_Backend_ClearActiveCaps ();
+	if (!backend || !backend->get_caps)
+	{
+		if (emit_warning)
+			Con_Warning ("Renderer backend '%s' did not provide a caps callback.\n",
+				(backend && backend->name) ? backend->name : "<none>");
+		return false;
+	}
+
+	caps = backend->get_caps ();
+	if (!caps)
+	{
+		if (emit_warning)
+			Con_Warning ("Renderer backend '%s' returned null caps.\n",
+				backend->name ? backend->name : "<unnamed>");
+		return false;
+	}
+
+	s_active_backend_caps = *caps;
+	return true;
+}
+
 static const IRenderBackend *R_Backend_FindByName (const char *backend_name)
 {
 	int i;
@@ -65,6 +135,8 @@ void R_Backend_Register (const IRenderBackend *backend)
 
 	if (!backend || !backend->name || !backend->name[0])
 		return;
+	if (!R_Backend_ValidateContract (backend, true))
+		return;
 
 	for (i = 0; i < s_registered_backend_count; ++i)
 	{
@@ -95,6 +167,8 @@ qboolean R_Backend_Select (const char *backend_name)
 
 	if (!backend)
 		return false;
+	if (!R_Backend_ValidateContract (backend, true))
+		return false;
 
 	if (runtime_switch && (!backend->can_activate || !backend->can_activate (true)))
 	{
@@ -114,6 +188,8 @@ qboolean R_Backend_Select (const char *backend_name)
 	if (s_backend_active && previous && previous->shutdown)
 		previous->shutdown ();
 
+	R_Backend_ClearActiveCaps ();
+	s_backend_active = false;
 	s_active_backend = backend;
 	if (!backend->init || backend->init ())
 		activated = true;
@@ -128,6 +204,11 @@ qboolean R_Backend_Select (const char *backend_name)
 			Con_Warning ("Reverting renderer backend to '%s'.\n",
 				previous->name ? previous->name : "<unnamed>");
 			s_active_backend = previous;
+			if (!R_Backend_ValidateContract (previous, true))
+			{
+				s_active_backend = NULL;
+				return false;
+			}
 			if (!previous->init || previous->init ())
 				activated = true;
 		}
@@ -139,6 +220,18 @@ qboolean R_Backend_Select (const char *backend_name)
 			s_backend_active = false;
 			return false;
 		}
+	}
+
+	if (!R_Backend_RefreshActiveCaps (s_active_backend, true))
+	{
+		Con_Warning ("Renderer backend '%s' has no valid caps after activation.\n",
+			(s_active_backend && s_active_backend->name) ? s_active_backend->name : "<none>");
+		if (s_active_backend && s_active_backend->shutdown)
+			s_active_backend->shutdown ();
+		s_active_backend = NULL;
+		s_backend_active = false;
+		R_Backend_ClearActiveCaps ();
+		return false;
 	}
 
 	s_backend_active = true;
@@ -169,6 +262,7 @@ void R_Backend_Shutdown (void)
 	if (s_backend_active && s_active_backend && s_active_backend->shutdown)
 		s_active_backend->shutdown ();
 	s_backend_active = false;
+	R_Backend_ClearActiveCaps ();
 }
 
 void R_Backend_OnResize (int width, int height)
@@ -190,6 +284,11 @@ const RenderBackendCaps *R_Backend_GetCaps (void)
 {
 	if (!s_backend_initialized)
 		R_Backend_Init ();
+	if (s_backend_active && s_active_backend)
+	{
+		if (!R_Backend_RefreshActiveCaps (s_active_backend, false))
+			R_Backend_ClearActiveCaps ();
+	}
 	return &s_active_backend_caps;
 }
 
