@@ -1,6 +1,7 @@
 #include "quakedef.h"
 #include "glquake.h"
 
+#include "gl_backend.h"
 #include "gl_shadow.h"
 #include "gl_shadow_runtime.h"
 
@@ -591,6 +592,7 @@ void R_Shadow_CreateFrameBuffers (void)
 		GL_DeleteNativeTexture (framebufs.shadow.dlight_depth_tex);
 		framebufs.shadow.dlight_depth_tex = 0;
 		framebufs.shadow.available = true;
+		GL_Backend_RegisterResource (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH, R_BACKEND_RESOURCE_LIFETIME_LEVEL, framebufs.shadow.sun_depth_tex);
 		return;
 	}
 	if (r_shadow_log.value > 0.f)
@@ -598,6 +600,7 @@ void R_Shadow_CreateFrameBuffers (void)
 			dlight_size, dlight_size, SHADOW_DLIGHT_MAX * SHADOW_DLIGHT_FACES);
 
 	framebufs.shadow.available = true;
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH, R_BACKEND_RESOURCE_LIFETIME_LEVEL, framebufs.shadow.sun_depth_tex);
 }
 
 void R_Shadow_DeleteFrameBuffers (void)
@@ -611,6 +614,7 @@ void R_Shadow_DeleteFrameBuffers (void)
 	framebufs.shadow.dlight_depth_tex = 0;
 	framebufs.shadow.dlight_fbo = 0;
 	framebufs.shadow.available = false;
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);
 	r_shadow_draw_cache.valid = false;
 }
 

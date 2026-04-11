@@ -136,6 +136,8 @@ typedef enum render_backend_resource_state_e
 typedef enum render_backend_resource_lifetime_e
 {
 	R_BACKEND_RESOURCE_LIFETIME_FRAME = 0,
+	R_BACKEND_RESOURCE_LIFETIME_LEVEL,
+	R_BACKEND_RESOURCE_LIFETIME_DEVICE,
 	R_BACKEND_RESOURCE_LIFETIME_PERSISTENT
 } render_backend_resource_lifetime_t;
 
