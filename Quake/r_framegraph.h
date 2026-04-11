@@ -3,6 +3,7 @@
 
 #include "quakedef.h"
 #include "render_api.h"
+#include "r_backend.h"
 
 typedef struct render_frame_plan_s
 {
@@ -116,6 +117,7 @@ void R_Backend_Shutdown (void);
 void R_Backend_Register (const IRenderBackend *backend);
 qboolean R_Backend_Select (const char *backend_name);
 void R_Backend_OnResize (int width, int height);
+void R_Backend_QuerySurfaceInfo (RenderBackendSurfaceInfo *out_info);
 const IRenderBackend *R_GetRenderBackend (void);
 const RenderBackendCaps *R_Backend_GetCaps (void);
 void R_Backend_BeginFrame (void);

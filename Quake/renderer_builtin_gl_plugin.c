@@ -4,7 +4,7 @@ static qboolean IW_RendererBuiltinGL_Register (const iw_renderer_plugin_host_api
 {
 	const IRenderBackend *backend;
 
-	if (!host_api || host_api->struct_size < sizeof (*host_api))
+	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V2_SIZE)
 	{
 		return false;
 	}

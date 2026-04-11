@@ -136,7 +136,7 @@ static const IRenderBackend s_ref_dx12_backend = {
 
 static qboolean IW_RendererRefDX12_Register (const iw_renderer_plugin_host_api_t *host_api)
 {
-	if (!host_api || host_api->struct_size < sizeof (*host_api))
+	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V2_SIZE)
 		return false;
 	if (!host_api->register_backend || !host_api->builtin_opengl_backend)
 		return false;

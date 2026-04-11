@@ -33,3 +33,11 @@ This checklist is the Phase 3 baseline for bringing up a second renderer backend
 - [ ] `r_backend_wrapper_audit` command prints migration priorities.
 - [ ] Framegraph debug validation (`r_framegraph_debug`, `r_gl_state_validate`) reports no attachment/resource declaration warnings.
 - [ ] Frame launches and scene render complete with expected pass timings.
+
+## 6) TODOs for `ref_gl` autonomous extraction
+
+- [ ] `Quake/r_backend.c`: implement `resource_services.register_external_resource` against a backend-owned handle registry (currently explicit stub + warning).
+- [ ] `Quake/r_backend.c`: replace temporary upload epoch shim in `upload_services.query_upload_epoch` / `is_transient_resource_alive` with real transient allocator lifetime tracking.
+- [ ] `Quake/r_backend.c` + `Quake/gl_shaders.c`: add a backend-neutral shader/pipeline metadata registry for `pipeline_services.get_shader_metadata` and `get_pipeline_metadata`.
+- [ ] `Quake/ref_gl_plugin.c`: switch from `builtin_opengl_backend` handoff to a self-owned backend implementation once host services are sufficient.
+- [ ] `Quake/r_framegraph.c`: keep pass data production backend-neutral; continue moving any remaining renderer-global assumptions behind backend service adapters.

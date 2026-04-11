@@ -1,8 +1,13 @@
 #include "quakedef.h"
-#include "glquake.h"
 
 #include "r_framegraph.h"
 #include "gl_shadow_runtime.h"
+
+extern cvar_t r_gl_state_validate;
+extern cvar_t r_framegraph_autobind;
+extern cvar_t r_framegraph_debug;
+extern cvar_t r_speeds;
+extern cvar_t r_shadow;
 
 void R_RegisterFrameGraphPasses (void);
 
@@ -833,6 +838,7 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderP
 {
 	const render_backend_resource_ref_t *target_resource = NULL;
 	const IRenderBackend *backend = ctx ? ctx->backend : NULL;
+	RenderBackendSurfaceInfo surface_info;
 	int view_x, view_y, view_w, view_h;
 	unsigned output_target;
 	unsigned viewport_mode;
@@ -917,17 +923,24 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderP
 			backend->bind_render_target (ctx ? ctx->resources : NULL, target_resource, bind_backbuffer);
 	}
 
+	memset (&surface_info, 0, sizeof (surface_info));
+	R_Backend_QuerySurfaceInfo (&surface_info);
+
 	switch (viewport_mode)
 	{
 	case FG_PASS_VIEWPORT_FULL_WINDOW:
 		if (backend && backend->set_viewport)
-			backend->set_viewport (glx, gly, glwidth, glheight);
+			backend->set_viewport (
+				surface_info.surface_x,
+				surface_info.surface_y,
+				q_max (1, surface_info.surface_width),
+				q_max (1, surface_info.surface_height));
 		break;
 	case FG_PASS_VIEWPORT_VIEW_RECT:
-		view_x = glx + r_refdef.vrect.x;
-		view_y = gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height;
-		view_w = q_max (1, r_refdef.vrect.width);
-		view_h = q_max (1, r_refdef.vrect.height);
+		view_x = surface_info.view_x;
+		view_y = surface_info.view_y;
+		view_w = q_max (1, surface_info.view_width);
+		view_h = q_max (1, surface_info.view_height);
 		if (backend && backend->set_viewport)
 			backend->set_viewport (view_x, view_y, view_w, view_h);
 		break;
@@ -937,8 +950,8 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderP
 		 * origin must be texture-space (0,0), not window/view-rect offset space. */
 		view_x = 0;
 		view_y = 0;
-		view_w = R_GetSceneRenderWidth ();
-		view_h = R_GetSceneRenderHeight ();
+		view_w = q_max (1, surface_info.scene_width);
+		view_h = q_max (1, surface_info.scene_height);
 		if (backend && backend->set_viewport)
 			backend->set_viewport (view_x, view_y, view_w, view_h);
 		break;
@@ -1086,13 +1099,16 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan)
 {
 	const RenderBackendCaps *caps;
+	RenderBackendSurfaceInfo surface_info;
 
 	if (!out_plan)
 		return;
 
 	memset (out_plan, 0, sizeof (*out_plan));
-	out_plan->needs_scene_effects = GL_NeedsSceneEffects ();
-	out_plan->needs_postprocess = GL_NeedsPostprocess ();
+	memset (&surface_info, 0, sizeof (surface_info));
+	R_Backend_QuerySurfaceInfo (&surface_info);
+	out_plan->needs_scene_effects = surface_info.needs_scene_effects;
+	out_plan->needs_postprocess = surface_info.needs_postprocess;
 	out_plan->run_shadowmaps = (r_shadow.value > 0.f);
 	out_plan->run_postprocess = out_plan->needs_postprocess;
 	out_plan->run_viewmodel = true;
