@@ -51,14 +51,6 @@ static qboolean s_warned_host_resource_registration_unimplemented = false;
 static qboolean s_warned_host_shader_metadata_unimplemented = false;
 static qboolean s_warned_host_pipeline_metadata_unimplemented = false;
 
-/* GL-facing globals/functions remain implemented in OpenGL files, but are
- * accessed through backend-neutral wrappers from this translation unit. */
-extern int glx, gly, glwidth, glheight;
-extern qboolean GL_NeedsSceneEffects (void);
-extern qboolean GL_NeedsPostprocess (void);
-extern int R_GetSceneRenderWidth (void);
-extern int R_GetSceneRenderHeight (void);
-
 static qboolean R_Backend_Host_GetSurfaceInfo (iw_renderer_host_surface_info_t *out_info);
 static qboolean R_Backend_Host_ResolveResourceBySlot (render_backend_resource_slot_t slot, iw_renderer_host_resource_handle_t *out_handle);
 static qboolean R_Backend_Host_ResolveResourceByRef (const render_backend_resource_ref_t *ref, iw_renderer_host_resource_handle_t *out_handle);
@@ -251,24 +243,49 @@ static qboolean R_Backend_FillHostResourceHandleFromRef (const RenderGraphResour
 
 void R_Backend_QuerySurfaceInfo (RenderBackendSurfaceInfo *out_info)
 {
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	RenderBackendSurfaceMetrics metrics;
+	qboolean has_metrics = false;
+
 	if (!out_info)
 		return;
 
 	memset (out_info, 0, sizeof (*out_info));
-	out_info->surface_x = glx;
-	out_info->surface_y = gly;
-	out_info->surface_width = (glwidth > 0) ? glwidth : q_max (1, vid.width);
-	out_info->surface_height = (glheight > 0) ? glheight : q_max (1, vid.height);
-	out_info->view_x = out_info->surface_x + r_refdef.vrect.x;
-	out_info->view_y = out_info->surface_y + out_info->surface_height - r_refdef.vrect.y - r_refdef.vrect.height;
-	out_info->view_width = q_max (1, r_refdef.vrect.width);
-	out_info->view_height = q_max (1, r_refdef.vrect.height);
-	out_info->scene_width = q_max (1, R_GetSceneRenderWidth ());
-	out_info->scene_height = q_max (1, R_GetSceneRenderHeight ());
+	memset (&metrics, 0, sizeof (metrics));
+	if (backend && backend->query_surface_metrics)
+		has_metrics = backend->query_surface_metrics (&metrics);
+
+	if (has_metrics)
+	{
+		out_info->surface_x = metrics.surface_x;
+		out_info->surface_y = metrics.surface_y;
+		out_info->surface_width = q_max (1, metrics.surface_width);
+		out_info->surface_height = q_max (1, metrics.surface_height);
+		out_info->view_x = metrics.view_x;
+		out_info->view_y = metrics.view_y;
+		out_info->view_width = q_max (1, metrics.view_width);
+		out_info->view_height = q_max (1, metrics.view_height);
+		out_info->scene_width = q_max (1, metrics.scene_width);
+		out_info->scene_height = q_max (1, metrics.scene_height);
+	}
+	else
+	{
+		out_info->surface_x = 0;
+		out_info->surface_y = 0;
+		out_info->surface_width = q_max (1, vid.width);
+		out_info->surface_height = q_max (1, vid.height);
+		out_info->view_x = out_info->surface_x + r_refdef.vrect.x;
+		out_info->view_y = out_info->surface_y + out_info->surface_height - r_refdef.vrect.y - r_refdef.vrect.height;
+		out_info->view_width = q_max (1, r_refdef.vrect.width);
+		out_info->view_height = q_max (1, r_refdef.vrect.height);
+		out_info->scene_width = out_info->view_width;
+		out_info->scene_height = out_info->view_height;
+	}
+
 	out_info->scene_samples = (unsigned)q_max (1, R_Backend_GetSceneSampleCount ());
 	out_info->frame_index = (unsigned)q_max (0, r_framecount);
-	out_info->needs_scene_effects = GL_NeedsSceneEffects ();
-	out_info->needs_postprocess = GL_NeedsPostprocess ();
+	out_info->needs_scene_effects = (backend && backend->needs_scene_effects) ? backend->needs_scene_effects () : false;
+	out_info->needs_postprocess = (backend && backend->needs_postprocess) ? backend->needs_postprocess () : false;
 }
 
 static void R_Backend_ValidateFrameGraphResourceRegistry (const RenderGraphResourceHandle *resources)
@@ -988,6 +1005,9 @@ static void R_VulkanStub_SetDepthFunc (render_backend_depth_func_t depth_func) {
 static unsigned R_VulkanStub_CreatePostFXLUTTexture (void) { return 0u; }
 static void R_VulkanStub_ConfigurePostFXLUTTexture (unsigned texture_id) { (void)texture_id; }
 static void R_VulkanStub_Finish (void) {}
+static qboolean R_VulkanStub_QuerySurfaceMetrics (RenderBackendSurfaceMetrics *out_metrics) { (void)out_metrics; return false; }
+static qboolean R_VulkanStub_NeedsSceneEffects (void) { return false; }
+static qboolean R_VulkanStub_NeedsPostprocess (void) { return false; }
 static void R_VulkanStub_PopulateFrameGraphResources (RenderGraphResourceHandle *out_handles) { (void)out_handles; }
 static int R_VulkanStub_GetSceneSampleCount (void) { return 1; }
 
@@ -1041,6 +1061,9 @@ static const IRenderBackend s_vulkan_stub_backend = {
 	R_VulkanStub_CreatePostFXLUTTexture,
 	R_VulkanStub_ConfigurePostFXLUTTexture,
 	R_VulkanStub_Finish,
+	R_VulkanStub_QuerySurfaceMetrics,
+	R_VulkanStub_NeedsSceneEffects,
+	R_VulkanStub_NeedsPostprocess,
 	R_VulkanStub_PopulateFrameGraphResources,
 	R_VulkanStub_GetSceneSampleCount
 };
@@ -1130,6 +1153,9 @@ static const IRenderBackend s_dx12_stub_backend = {
 	R_VulkanStub_CreatePostFXLUTTexture,
 	R_VulkanStub_ConfigurePostFXLUTTexture,
 	R_VulkanStub_Finish,
+	R_VulkanStub_QuerySurfaceMetrics,
+	R_VulkanStub_NeedsSceneEffects,
+	R_VulkanStub_NeedsPostprocess,
 	R_VulkanStub_PopulateFrameGraphResources,
 	R_VulkanStub_GetSceneSampleCount
 };

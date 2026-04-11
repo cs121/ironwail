@@ -71,6 +71,9 @@ static void DX12_SetDepthFunc (render_backend_depth_func_t depth_func) { (void)d
 static unsigned DX12_CreatePostFXLUTTexture (void) { return 0u; }
 static void DX12_ConfigurePostFXLUTTexture (unsigned texture_id) { (void)texture_id; }
 static void DX12_Finish (void) {}
+static qboolean DX12_QuerySurfaceMetrics (RenderBackendSurfaceMetrics *out_metrics) { (void)out_metrics; return false; }
+static qboolean DX12_NeedsSceneEffects (void) { return false; }
+static qboolean DX12_NeedsPostprocess (void) { return false; }
 static void DX12_PopulateFramegraphResources (RenderGraphResourceHandle *out_handles) { if (out_handles) memset (out_handles, 0, sizeof (*out_handles)); }
 static int DX12_GetSceneSampleCount (void) { return 1; }
 
@@ -124,6 +127,9 @@ static const IRenderBackend s_ref_dx12_backend = {
 	DX12_CreatePostFXLUTTexture,
 	DX12_ConfigurePostFXLUTTexture,
 	DX12_Finish,
+	DX12_QuerySurfaceMetrics,
+	DX12_NeedsSceneEffects,
+	DX12_NeedsPostprocess,
 	DX12_PopulateFramegraphResources,
 	DX12_GetSceneSampleCount
 };
