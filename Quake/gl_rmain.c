@@ -37,6 +37,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_shadow.h"
 #include "gl_shadow_runtime.h"
 #include "gl_lightgrid.h"
+#include "gl_backend.h"
 #include "mat_material.h"
 #include <float.h>
 #include <math.h>
@@ -1345,6 +1346,41 @@ static qboolean GL_ValidateSimpleFramebuffer (GLuint fbo, const char* name)
 static qboolean GL_AutoExposurePBOAvailable (void);
 static void GL_AutoExposureDeletePBOs (void);
 static void GL_AutoExposureInitPBOs (void);
+static void GL_RegisterFrameGraphResourceSlots (void);
+static void GL_UnregisterFrameGraphResourceSlots (void);
+
+static void GL_RegisterFrameGraphResourceSlots (void)
+{
+	unsigned velocity_tex = (framebufs.scene.samples > 1) ? framebufs.resolved_scene.velocity_tex : framebufs.scene.velocity_tex;
+
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.scene.fbo);
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.scene.color_tex);
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.scene.velocity_tex);
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.scene.depth_stencil_tex);
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.resolved_scene.fbo);
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.resolved_scene.color_tex);
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.resolved_scene.velocity_tex);
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_FRAMEBUFFER, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.composite.fbo);
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.composite.color_tex);
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH, R_BACKEND_RESOURCE_LIFETIME_FRAME, framebufs.composite.depth_stencil_tex);
+	GL_Backend_RegisterResource (R_BACKEND_RESOURCE_TEXTURE, R_BACKEND_RESOURCE_SLOT_VELOCITY, R_BACKEND_RESOURCE_LIFETIME_FRAME, velocity_tex);
+}
+
+static void GL_UnregisterFrameGraphResourceSlots (void)
+{
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_SCENE_FBO);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_SCENE_COLOR);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);
+	GL_Backend_UnregisterResourceBySlot (R_BACKEND_RESOURCE_SLOT_VELOCITY);
+}
 
 /*
 =============
@@ -1520,6 +1556,7 @@ void GL_CreateFrameBuffers (void)
 
         GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
         GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, 0);
+	GL_RegisterFrameGraphResourceSlots ();
 }
 
 /*
@@ -1529,6 +1566,8 @@ GL_DeleteFrameBuffers
 */
 void GL_DeleteFrameBuffers (void)
 {
+	GL_UnregisterFrameGraphResourceSlots ();
+
 	R_Shadow_DeleteFrameBuffers ();
 	GL_DeleteFramebuffersFunc (1, &framebufs.resolved_scene.fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.oit.fbo_composite);
@@ -5957,3 +5996,4 @@ void R_RenderView (void)
 }
 
 
+	GL_UnregisterFrameGraphResourceSlots ();

@@ -105,6 +105,7 @@ unsigned glstate;
 GLint ssbo_align;
 GLint ubo_align;
 static GLuint globalvao;
+static unsigned short globalvao_resource_id;
 
 #define QGL_DEFINE_FUNC(ret, name, args) ret (APIENTRYP GL_##name##Func) args = NULL;
 QGL_ALL_FUNCTIONS(QGL_DEFINE_FUNC)
@@ -1492,6 +1493,7 @@ static void GL_Init (void)
 
 	GL_GenVertexArraysFunc (1, &globalvao);
 	GL_BindVertexArrayFunc (globalvao);
+	globalvao_resource_id = GL_Backend_RegisterNamedResource (R_BACKEND_RESOURCE_BUFFER, GL_BACKEND_RESOURCE_KEY_GLOBAL_VAO, R_BACKEND_RESOURCE_LIFETIME_DEVICE, globalvao);
 
 	glGetIntegerv (GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT, &ssbo_align);
 	glGetIntegerv (GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &ubo_align);
@@ -1634,6 +1636,11 @@ void	VID_Shutdown (void)
 {
 	if (vid_initialized)
 	{
+		if (globalvao_resource_id)
+		{
+			GL_Backend_UnregisterNamedResource (GL_BACKEND_RESOURCE_KEY_GLOBAL_VAO);
+			globalvao_resource_id = 0;
+		}
 		R_Backend_Shutdown ();
 		Lightgrid_Shutdown ();
 		VID_FreeMouseCursors();
