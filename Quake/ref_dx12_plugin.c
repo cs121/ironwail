@@ -7,7 +7,6 @@ static const RenderBackendCaps s_dx12_caps = {
 	false, /* supports_draw_indirect */
 	false, /* supports_multi_draw_indirect */
 	false, /* supports_memory_barrier */
-	false, /* supports_legacy_pass_fallbacks */
 	0u,    /* msaa_mode_mask */
 	1u,    /* max_msaa_samples */
 	0u,    /* shader_model */
@@ -44,6 +43,7 @@ static void DX12_PassWarpResolve (RenderPassContext *ctx) { (void)ctx; }
 static void DX12_PassPostprocess (RenderPassContext *ctx) { (void)ctx; }
 static void DX12_PassOverlayViewmodel (RenderPassContext *ctx) { (void)ctx; }
 static void DX12_PassOverlayPolyblend (RenderPassContext *ctx) { (void)ctx; }
+static qboolean DX12_HasRequiredPassCallbacks (void) { return true; }
 static void DX12_BeginPass (const char *name) { (void)name; }
 static void DX12_EndPass (void) {}
 static void DX12_ValidatePassState (const char *pass_name, qboolean before_pass) { (void)pass_name; (void)before_pass; }
@@ -96,6 +96,7 @@ static const IRenderBackend s_ref_dx12_backend = {
 	DX12_PassPostprocess,
 	DX12_PassOverlayViewmodel,
 	DX12_PassOverlayPolyblend,
+	DX12_HasRequiredPassCallbacks,
 	DX12_BeginPass,
 	DX12_EndPass,
 	DX12_ValidatePassState,
