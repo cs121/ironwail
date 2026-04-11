@@ -138,6 +138,7 @@ unsigned R_FrameGraph_ResolveRequiredResourceBySlot (const RenderGraphResourceHa
 qboolean R_FrameGraph_HasResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
 void R_Backend_SetViewport (int x, int y, int width, int height);
 void R_Backend_SetScissor (qboolean enabled, int x, int y, int width, int height);
+void R_Backend_ApplyLegacyPipelineState (unsigned state_bits);
 void R_Backend_SetPipelineState (unsigned state_bits);
 void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count);
 void R_Backend_DrawIndexed (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes);

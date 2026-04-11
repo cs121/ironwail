@@ -594,7 +594,19 @@ void Draw_Flush (void)
 		Scrap_Upload ();
 
 	GL_UseProgram (glprogs.gui);
-	R_Backend_SetPipelineState (glcanvas.blendmode | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(3));
+	{
+		const unsigned state = glcanvas.blendmode | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(3);
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 	GL_Bind (GL_TEXTURE0, glcanvas.texture);
 
 	GL_Upload (GL_ARRAY_BUFFER, batchverts, sizeof(batchverts[0]) * 4 * numbatchquads, &buf, &ofs);

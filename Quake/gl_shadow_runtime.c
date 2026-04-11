@@ -1270,7 +1270,18 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 	GL_EndGroup ();
 
 	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	R_Backend_SetPipelineState (saved_state);
+	{
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = saved_state;
+		dynamic_state.blend_state = saved_state;
+		dynamic_state.depth_state = saved_state;
+		dynamic_state.raster_state = saved_state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 	if (clip_depth_mode_changed)
 		GL_ClipControlFunc (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
 	if (gl_clipcontrol_able)

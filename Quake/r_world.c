@@ -1528,7 +1528,18 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					if (num_bmodel_calls)
 						R_FlushBModelCalls ();
 					R_ResetBModelCalls (program);
-					R_Backend_SetPipelineState (stage_state);
+					{
+						RenderBackendPipelineDesc pipeline_desc;
+						RenderBackendDynamicState dynamic_state;
+						memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+						memset (&dynamic_state, 0, sizeof (dynamic_state));
+						pipeline_desc.state_bits = stage_state;
+						dynamic_state.blend_state = stage_state;
+						dynamic_state.depth_state = stage_state;
+						dynamic_state.raster_state = stage_state;
+						R_Backend_BindPipeline (&pipeline_desc);
+						R_Backend_SetDynamicState (&dynamic_state);
+					}
 					current_state = stage_state;
 					R_Backend_SetDepthFunc (depth_func);
 					current_depth = depth_func;
@@ -1600,7 +1611,19 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 		return;
 
 	R_ResetBModelCalls (glprogs.godrays_source);
-	R_Backend_SetPipelineState (GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (8));
+	{
+		const unsigned stage_state = GLS_CULL_BACK | GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_ATTRIBS (8);
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = stage_state;
+		dynamic_state.blend_state = stage_state;
+		dynamic_state.depth_state = stage_state;
+		dynamic_state.raster_state = stage_state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 	GL_Bind (GL_TEXTURE5, greytexture);
@@ -1870,7 +1893,18 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
                 state |= GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE;
 
         R_ResetBModelCalls (program);
-        R_Backend_SetPipelineState (state);
+	{
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
         GL_UseProgram (program);
 if (pass <= BP_ALPHATEST)
 {
@@ -2122,7 +2156,18 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	R_ResetBModelCalls (program);
 	GL_UseProgram (program);
 	R_Water_SetTimeUniform (program, (float)shader_time);
-	R_Backend_SetPipelineState (state);
+	{
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 	GL_Bind (GL_TEXTURE2, r_fullbright_cheatsafe ? greytexture : lightmap_texture);
 	GL_Bind (GL_TEXTURE3, (r_lightingdir.value > 0.f && lightmap_dir_texture) ? lightmap_dir_texture : greytexture);
 	GL_Bind (GL_TEXTURE5, greytexture);

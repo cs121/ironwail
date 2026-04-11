@@ -786,7 +786,18 @@ void R_FlushAliasInstances (qboolean showtris)
 	{
 		state |= (oit ? GLS_BLEND_ALPHA_OIT : GLS_BLEND_ALPHA) | GLS_NO_ZWRITE;
 	}
-	R_Backend_SetPipelineState (state);
+	{
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 
 	memcpy (ibuf.global.matviewproj, r_matviewproj, sizeof (r_matviewproj));
 memcpy (ibuf.global.prev_matviewproj, r_framedata.prev_viewproj, sizeof (r_framedata.prev_viewproj));
@@ -964,7 +975,18 @@ static void R_FlushAliasInstances_Shadow (qboolean dlight)
 		state = GLS_CULL_BACK | GLS_BLEND_OPAQUE | GLS_ATTRIBS (6);
 	else
 		state = GLS_CULL_BACK | GLS_BLEND_OPAQUE | GLS_ATTRIBS (2);
-	R_Backend_SetPipelineState (state);
+	{
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, ibuf.inst, sizeof (ibuf.inst[0]) * ibuf.count, &instance_buf, &instance_ofs);
 

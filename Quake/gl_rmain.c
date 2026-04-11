@@ -1654,7 +1654,19 @@ static void GL_BloomExtractLevel (int level, GLuint source_tex, int source_width
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo[level]);
 	glViewport (0, 0, width, height);
 	GL_UseProgram (glprogs.bloom_extract);
-	R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	{
+		const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, source_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, 0);
 	GL_Uniform4fFunc (0, threshold, soft_knee, 0.f, 0.f);
@@ -1679,7 +1691,19 @@ static GLuint GL_BloomBlurLevel (int level, int passes, float radius_scale)
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[level][target_index]);
 		glViewport (0, 0, width, height);
 		GL_UseProgram (glprogs.bloom_blur);
-		R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		{
+			const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+			RenderBackendPipelineDesc pipeline_desc;
+			RenderBackendDynamicState dynamic_state;
+			memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+			memset (&dynamic_state, 0, sizeof (dynamic_state));
+			pipeline_desc.state_bits = state;
+			dynamic_state.blend_state = state;
+			dynamic_state.depth_state = state;
+			dynamic_state.raster_state = state;
+			R_Backend_BindPipeline (&pipeline_desc);
+			R_Backend_SetDynamicState (&dynamic_state);
+		}
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, input_tex);
 		GL_Uniform4fFunc (0, radius_scale / (float)width, radius_scale / (float)height, dirx, diry);
 		R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
@@ -1750,7 +1774,19 @@ static GLuint GL_GenerateBloomTexture (void)
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo[0]);
 	glViewport (0, 0, framebufs.bloom.width[0], framebufs.bloom.height[0]);
 	GL_UseProgram (glprogs.bloom_combine);
-	R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	{
+		const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, blurred[0]);
 	GL_Uniform4fFunc (0, GL_BloomGetRecombineWeight (0, levels), 0.f, 0.f, 0.f);
 	R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
@@ -1761,7 +1797,19 @@ static GLuint GL_GenerateBloomTexture (void)
 		if (!blurred[level] || weight <= 0.f)
 			continue;
 
-		R_Backend_SetPipelineState (GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		{
+			const unsigned state = GLS_BLEND_ADD | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+			RenderBackendPipelineDesc pipeline_desc;
+			RenderBackendDynamicState dynamic_state;
+			memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+			memset (&dynamic_state, 0, sizeof (dynamic_state));
+			pipeline_desc.state_bits = state;
+			dynamic_state.blend_state = state;
+			dynamic_state.depth_state = state;
+			dynamic_state.raster_state = state;
+			R_Backend_BindPipeline (&pipeline_desc);
+			R_Backend_SetDynamicState (&dynamic_state);
+		}
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, blurred[level]);
 		GL_Uniform4fFunc (0, weight, 0.f, 0.f, 0.f);
 		R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
@@ -1996,7 +2044,19 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	GL_LogSSAODepthInfo (framebufs.composite.depth_stencil_tex, framebufs.ssao.ao_tex[index], width, height, view_min_x, view_min_y, view_max_x, view_max_y);
 
 	GL_UseProgram (glprogs.ssao);
-	R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	{
+		const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.ssao.noise_tex);
 	GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, r_matproj);
@@ -2217,7 +2277,19 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 			sky_intensity = 1.f;
 
 		GL_UseProgram (glprogs.godrays_source_sky);
-		R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+		{
+			const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+			RenderBackendPipelineDesc pipeline_desc;
+			RenderBackendDynamicState dynamic_state;
+			memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+			memset (&dynamic_state, 0, sizeof (dynamic_state));
+			pipeline_desc.state_bits = state;
+			dynamic_state.blend_state = state;
+			dynamic_state.depth_state = state;
+			dynamic_state.raster_state = state;
+			R_Backend_BindPipeline (&pipeline_desc);
+			R_Backend_SetDynamicState (&dynamic_state);
+		}
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
 		GL_Uniform4fFunc (0, sky_depth_cutoff, sky_intensity, reversed_z, sky_params.threshold);
 		GL_Uniform4fFunc (1, sky_params.tint[0], sky_params.tint[1], sky_params.tint[2], 0.f);
@@ -2232,7 +2304,19 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 		if (count > 0)
 		{
 			GL_UseProgram (glprogs.godrays_source);
-			R_Backend_SetPipelineState (GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (6));
+			{
+				const unsigned state = GLS_BLEND_ADD | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (6);
+				RenderBackendPipelineDesc pipeline_desc;
+				RenderBackendDynamicState dynamic_state;
+				memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+				memset (&dynamic_state, 0, sizeof (dynamic_state));
+				pipeline_desc.state_bits = state;
+				dynamic_state.blend_state = state;
+				dynamic_state.depth_state = state;
+				dynamic_state.raster_state = state;
+				R_Backend_BindPipeline (&pipeline_desc);
+				R_Backend_SetDynamicState (&dynamic_state);
+			}
 			GL_Uniform4fFunc (0,
 				q_max (0.f, r_godrays_emissive_intensity.value),
 				q_max (0.f, r_godrays_lighttex_intensity.value),
@@ -2341,7 +2425,19 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 				GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 			}
 			GL_UseProgram (glprogs.godrays_mask);
-			R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			{
+				const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+				RenderBackendPipelineDesc pipeline_desc;
+				RenderBackendDynamicState dynamic_state;
+				memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+				memset (&dynamic_state, 0, sizeof (dynamic_state));
+				pipeline_desc.state_bits = state;
+				dynamic_state.blend_state = state;
+				dynamic_state.depth_state = state;
+				dynamic_state.raster_state = state;
+				R_Backend_BindPipeline (&pipeline_desc);
+				R_Backend_SetDynamicState (&dynamic_state);
+			}
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.source_tex);
 			GL_Uniform4fFunc (0, threshold, sky_softness, 1.f, 0.f);
 			GL_Uniform4fFunc (1, (float)R_GetNativeRenderWidth (), (float)R_GetNativeRenderHeight (),
@@ -2354,7 +2450,19 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
 			glViewport (0, 0, width, height);
 			GL_UseProgram (glprogs.godrays);
-			R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			{
+				const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+				RenderBackendPipelineDesc pipeline_desc;
+				RenderBackendDynamicState dynamic_state;
+				memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+				memset (&dynamic_state, 0, sizeof (dynamic_state));
+				pipeline_desc.state_bits = state;
+				dynamic_state.blend_state = state;
+				dynamic_state.depth_state = state;
+				dynamic_state.raster_state = state;
+				R_Backend_BindPipeline (&pipeline_desc);
+				R_Backend_SetDynamicState (&dynamic_state);
+			}
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
 			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, volumetric_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
@@ -2377,7 +2485,19 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 				GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
 			}
 			GL_UseProgram (glprogs.godrays_mask);
-			R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			{
+				const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+				RenderBackendPipelineDesc pipeline_desc;
+				RenderBackendDynamicState dynamic_state;
+				memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+				memset (&dynamic_state, 0, sizeof (dynamic_state));
+				pipeline_desc.state_bits = state;
+				dynamic_state.blend_state = state;
+				dynamic_state.depth_state = state;
+				dynamic_state.raster_state = state;
+				R_Backend_BindPipeline (&pipeline_desc);
+				R_Backend_SetDynamicState (&dynamic_state);
+			}
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.source_tex);
 			GL_Uniform4fFunc (0, threshold, softness, sharpness, 0.f);
 			GL_Uniform4fFunc (1, (float)R_GetNativeRenderWidth (), (float)R_GetNativeRenderHeight (),
@@ -2390,7 +2510,19 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
 			glViewport (0, 0, width, height);
 			GL_UseProgram (glprogs.godrays);
-			R_Backend_SetPipelineState ((first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+			{
+				const unsigned state = (first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+				RenderBackendPipelineDesc pipeline_desc;
+				RenderBackendDynamicState dynamic_state;
+				memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+				memset (&dynamic_state, 0, sizeof (dynamic_state));
+				pipeline_desc.state_bits = state;
+				dynamic_state.blend_state = state;
+				dynamic_state.depth_state = state;
+				dynamic_state.raster_state = state;
+				R_Backend_BindPipeline (&pipeline_desc);
+				R_Backend_SetDynamicState (&dynamic_state);
+			}
 			GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.godrays.mask_tex);
 			GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, volumetric_tex);
 			GL_Uniform4fFunc (0, stabilized_x, stabilized_y, density, weight);
@@ -3166,7 +3298,19 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		return;
 	}
 	GL_UseProgram (glprogs.postprocess[variant]);
-	R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	{
+		const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, composite_color_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_3D, gl_palette_lut);
 	GL_BindNative (GL_TEXTURE3, GL_TEXTURE_2D, bloom_texture);
@@ -4127,7 +4271,19 @@ void R_Clear (void)
 	if (gl_clear.value)
 		clearbits |= GL_COLOR_BUFFER_BIT;
 
-	R_Backend_SetPipelineState (glstate & ~GLS_NO_ZWRITE); // make sure depth writes are enabled
+	{
+		const unsigned state = glstate & ~GLS_NO_ZWRITE; // make sure depth writes are enabled
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 	glStencilMask (~0u);
 	glClear (clearbits);
 }
@@ -4666,7 +4822,18 @@ static void R_FlushDebugGeometry (void)
 		state = GLS_BLEND_ALPHA | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2);
 		if (!debugztest)
 			state |= GLS_NO_ZTEST;
-		R_Backend_SetPipelineState (state);
+		{
+			RenderBackendPipelineDesc pipeline_desc;
+			RenderBackendDynamicState dynamic_state;
+			memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+			memset (&dynamic_state, 0, sizeof (dynamic_state));
+			pipeline_desc.state_bits = state;
+			dynamic_state.blend_state = state;
+			dynamic_state.depth_state = state;
+			dynamic_state.raster_state = state;
+			R_Backend_BindPipeline (&pipeline_desc);
+			R_Backend_SetDynamicState (&dynamic_state);
+		}
 
 		GL_Upload (GL_ARRAY_BUFFER, debugverts, sizeof (debugverts[0]) * numdebugverts, &buf, &ofs);
 		GL_BindBuffer (GL_ARRAY_BUFFER, buf);
@@ -5693,7 +5860,19 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	tmax = 1.f;
 
 	GL_UseProgram (glprogs.warpscale[water_warp]);
-	R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0));
+	{
+		const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 
 	t = M_ForcedUnderwater () ? realtime : cl.time;
 	GL_Uniform4fFunc (0, smax, tmax, water_warp ? 1.f / 256.f : 0.f, (float)t);

@@ -11,6 +11,10 @@ static qboolean IW_RendererOpenGLPlugin_Register (const iw_renderer_plugin_host_
 	if (backend && host_api->register_backend)
 		return host_api->register_backend (backend);
 
+	/* TODO(ref_gl autark, Quake/ref_gl_plugin.c): replace builtin_opengl_backend
+	 * consumption with a plugin-local backend implementation sourced from
+	 * ref_gl-specific translation units. */
+
 	/* Compatibility bridge for older host-side wiring. */
 	if (host_api->register_builtin_backend)
 		return host_api->register_builtin_backend ("OpenGL");

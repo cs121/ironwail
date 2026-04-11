@@ -725,7 +725,19 @@ void Sky_DrawSkyBox (void)
 	fog[3] = r_framedata.fogdata[3] > 0.f ? skyfog : 0.f;
 
 	GL_UseProgram (glprogs.skyboxside[softemu == SOFTEMU_COARSE]);
-	R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(2));
+	{
+		const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(2);
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 
 	GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, r_matviewproj);
         GL_Uniform3fvFunc (1, 1, r_refdef.vieworg);

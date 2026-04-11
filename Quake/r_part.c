@@ -1401,10 +1401,21 @@ static void R_DrawParticles_Real (qboolean alpha, qboolean showtris)
 	scaley *= -r_matproj[2*4 + 1]; // -1 / tan (fovy/2)
 	GL_Uniform3fFunc (0, scalex, scaley, uvscale);
 
-	if (alpha)
-		R_Backend_SetPipelineState (GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
-	else
-		R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
+	{
+		const unsigned state = alpha
+			? (GLS_BLEND_ALPHA_OIT | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2))
+			: (GLS_BLEND_OPAQUE | GLS_CULL_NONE | GLS_ATTRIBS (2) | GLS_INSTANCED_ATTRIBS (2));
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 
 	numpartverts = 0;
 	for (i = 0, p = particles; i < r_numactiveparticles; i++, p++)

@@ -156,10 +156,21 @@ static void R_FlushSpriteInstances (void)
 	dither = (softemu == SOFTEMU_COARSE && !showtris);
 	GL_UseProgram (glprogs.sprites[dither]);
 
-	if (showtris)
-		R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS(2));
-	else
-		R_Backend_SetPipelineState (GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS(2));
+	{
+		const unsigned state = showtris
+			? (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS(2))
+			: (GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS(2));
+		RenderBackendPipelineDesc pipeline_desc;
+		RenderBackendDynamicState dynamic_state;
+		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		pipeline_desc.state_bits = state;
+		dynamic_state.blend_state = state;
+		dynamic_state.depth_state = state;
+		dynamic_state.raster_state = state;
+		R_Backend_BindPipeline (&pipeline_desc);
+		R_Backend_SetDynamicState (&dynamic_state);
+	}
 
 	GL_Bind (GL_TEXTURE0, showtris ? whitetexture : batchtexture);
 

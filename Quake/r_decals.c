@@ -138,6 +138,7 @@ static decalgpuinst_t decal_gpu_instances[MAX_DECAL_INSTANCES];
 static GLushort decal_indexes[MAX_DECAL_INDEXES];
 static int decal_vert_cursor;
 static int decal_inst_count;
+
 static int decal_free_list[MAX_DECAL_INSTANCES];
 static int decal_free_count;
 static int decal_evict_cursor;
@@ -1475,7 +1476,19 @@ static qboolean R_DrawDecalsLegacy (decalinst_t **draw, int draw_count)
 
 		if (current_blend != (int)cmds[i].blend)
 		{
-			R_Backend_SetPipelineState (blendstate | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3) | GLS_INSTANCED_ATTRIBS (0));
+			{
+				const unsigned state = blendstate | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (3) | GLS_INSTANCED_ATTRIBS (0);
+				RenderBackendPipelineDesc pipeline_desc;
+				RenderBackendDynamicState dynamic_state;
+				memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+				memset (&dynamic_state, 0, sizeof (dynamic_state));
+				pipeline_desc.state_bits = state;
+				dynamic_state.blend_state = state;
+				dynamic_state.depth_state = state;
+				dynamic_state.raster_state = state;
+				R_Backend_BindPipeline (&pipeline_desc);
+				R_Backend_SetDynamicState (&dynamic_state);
+			}
 			current_blend = (int)cmds[i].blend;
 			current_texture = NULL;
 		}
@@ -1590,7 +1603,19 @@ static qboolean R_DrawDecalsInstanced (decalinst_t **draw, int draw_count)
 
 		if (current_blend != (int)cmds[i].blend)
 		{
-			R_Backend_SetPipelineState (blendstate | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (0) | GLS_INSTANCED_ATTRIBS (0));
+			{
+				const unsigned state = blendstate | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS (0) | GLS_INSTANCED_ATTRIBS (0);
+				RenderBackendPipelineDesc pipeline_desc;
+				RenderBackendDynamicState dynamic_state;
+				memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+				memset (&dynamic_state, 0, sizeof (dynamic_state));
+				pipeline_desc.state_bits = state;
+				dynamic_state.blend_state = state;
+				dynamic_state.depth_state = state;
+				dynamic_state.raster_state = state;
+				R_Backend_BindPipeline (&pipeline_desc);
+				R_Backend_SetDynamicState (&dynamic_state);
+			}
 			current_blend = (int)cmds[i].blend;
 			current_texture = NULL;
 		}
