@@ -3,6 +3,11 @@
 #include "gl_backend.h"
 
 #include "r_framegraph.h"
+#include "renderer_plugin.h"
+
+#ifndef IW_DISABLE_LEGACY_PASS_FALLBACKS
+#define IW_DISABLE_LEGACY_PASS_FALLBACKS 0
+#endif
 
 #ifndef GL_CLIP_DEPTH_MODE
 #define GL_CLIP_DEPTH_MODE 0x935D
@@ -145,7 +150,7 @@ static void GLBackend_DetectCaps (void)
 	s_gl_backend_caps.supports_draw_indirect = (GL_DrawElementsIndirectFunc != NULL);
 	s_gl_backend_caps.supports_multi_draw_indirect = (GL_MultiDrawElementsIndirectFunc != NULL);
 	s_gl_backend_caps.supports_memory_barrier = (GL_MemoryBarrierFunc != NULL);
-	s_gl_backend_caps.supports_legacy_pass_fallbacks = true;
+	s_gl_backend_caps.supports_legacy_pass_fallbacks = IW_DISABLE_LEGACY_PASS_FALLBACKS ? false : true;
 	s_gl_backend_caps.supports_bindless = gl_bindless_able;
 	s_gl_backend_caps.shader_model = 50u;
 	s_gl_backend_caps.max_msaa_samples = (framebufs.max_samples > 0) ? (unsigned)framebufs.max_samples : 1u;
@@ -249,6 +254,28 @@ static GLenum GLBackend_MapBlendFactor (render_blend_factor_t factor)
 	}
 }
 
+static GLenum GLBackend_MapDepthFunc (render_backend_depth_func_t depth_func)
+{
+	switch (depth_func)
+	{
+	case R_BACKEND_DEPTH_FUNC_LESS:
+		return GL_LESS;
+	case R_BACKEND_DEPTH_FUNC_EQUAL:
+		return GL_EQUAL;
+	case R_BACKEND_DEPTH_FUNC_GREATER:
+		return GL_GREATER;
+	case R_BACKEND_DEPTH_FUNC_GEQUAL:
+		return GL_GEQUAL;
+	case R_BACKEND_DEPTH_FUNC_ALWAYS:
+		return GL_ALWAYS;
+	case R_BACKEND_DEPTH_FUNC_NEVER:
+		return GL_NEVER;
+	case R_BACKEND_DEPTH_FUNC_LEQUAL:
+	default:
+		return GL_LEQUAL;
+	}
+}
+
 static void GLBackend_BeginPass (const char *name)
 {
 	GL_BeginGroup (name);
@@ -282,9 +309,10 @@ static void GLBackend_ResourceBarrier (const RenderGraphResourceHandle *resource
 	{
 		if (!barriers[i].resource)
 			continue;
-		if (barriers[i].before == R_BACKEND_RESOURCE_STATE_SHADER_WRITE
-			|| barriers[i].after == R_BACKEND_RESOURCE_STATE_SHADER_READ
-			|| barriers[i].after == R_BACKEND_RESOURCE_STATE_SHADER_WRITE)
+		if (barriers[i].before == R_BACKEND_RESOURCE_STATE_STORAGE_WRITE
+			|| barriers[i].after == R_BACKEND_RESOURCE_STATE_SAMPLED
+			|| barriers[i].after == R_BACKEND_RESOURCE_STATE_STORAGE_READ
+			|| barriers[i].after == R_BACKEND_RESOURCE_STATE_STORAGE_WRITE)
 		{
 			needs_memory_barrier = true;
 			break;
@@ -532,6 +560,69 @@ static void GLBackend_SetPipelineState (unsigned state_bits)
 	GL_SetState (state_bits);
 }
 
+static void GLBackend_BindPipeline (const RenderBackendPipelineDesc *pipeline)
+{
+	if (!pipeline)
+		return;
+	GLBackend_SetPipelineState (pipeline->state_bits);
+}
+
+static void GLBackend_SetDynamicState (const RenderBackendDynamicState *dynamic_state)
+{
+	/* GL backend still uses legacy packed state bits. Keep dynamic-state path
+	 * available for callsite migration while preserving current behavior. */
+	(void)dynamic_state;
+}
+
+static void GLBackend_BindDescriptors (const RenderBackendDescriptorBinding *bindings, unsigned count)
+{
+	unsigned i;
+	unsigned max_textures = s_gl_backend_caps.max_textures;
+	unsigned max_ubos = s_gl_backend_caps.max_ubos;
+	unsigned max_ssbos = s_gl_backend_caps.max_ssbos;
+
+	if (!bindings || count == 0u)
+		return;
+
+	for (i = 0; i < count; ++i)
+	{
+		const RenderBackendDescriptorBinding *binding = &bindings[i];
+		switch (binding->type)
+		{
+		case R_BACKEND_DESCRIPTOR_TEXTURE:
+		case R_BACKEND_DESCRIPTOR_SAMPLER:
+			if (max_textures > 0u && binding->slot >= max_textures)
+			{
+				Con_DWarning ("GL descriptor bind out of range: type=%u slot=%u max_textures=%u\n",
+					(unsigned)binding->type, binding->slot, max_textures);
+				SDL_assert (!"GL descriptor texture/sampler slot out of range");
+			}
+			break;
+		case R_BACKEND_DESCRIPTOR_UNIFORM_BUFFER:
+			if (max_ubos > 0u && binding->slot >= max_ubos)
+			{
+				Con_DWarning ("GL descriptor bind out of range: UBO slot=%u max_ubos=%u\n",
+					binding->slot, max_ubos);
+				SDL_assert (!"GL descriptor UBO slot out of range");
+			}
+			break;
+		case R_BACKEND_DESCRIPTOR_STORAGE_BUFFER:
+			if (max_ssbos > 0u && binding->slot >= max_ssbos)
+			{
+				Con_DWarning ("GL descriptor bind out of range: SSBO slot=%u max_ssbos=%u\n",
+					binding->slot, max_ssbos);
+				SDL_assert (!"GL descriptor SSBO slot out of range");
+			}
+			break;
+		default:
+			Con_DWarning ("GL descriptor bind has unknown descriptor type=%u (slot=%u)\n",
+				(unsigned)binding->type, binding->slot);
+			SDL_assert (!"GL descriptor unknown descriptor type");
+			break;
+		}
+	}
+}
+
 static void GLBackend_Draw (render_backend_primitive_t primitive, int first, int count)
 {
 	glDrawArrays (GLBackend_MapPrimitive (primitive), first, count);
@@ -619,6 +710,27 @@ static void GLBackend_SetBlendFactors (render_blend_factor_t src, render_blend_f
 	GLenum gl_src = GLBackend_MapBlendFactor (src);
 	GLenum gl_dst = GLBackend_MapBlendFactor (dst);
 	glBlendFunc (gl_src, gl_dst);
+}
+
+static void GLBackend_SetDepthFunc (render_backend_depth_func_t depth_func)
+{
+	glDepthFunc (GLBackend_MapDepthFunc (depth_func));
+}
+
+static unsigned GLBackend_CreatePostFXLUTTexture (void)
+{
+	GLuint texture_id = 0;
+	glGenTextures (1, &texture_id);
+	return (unsigned)texture_id;
+}
+
+static void GLBackend_ConfigurePostFXLUTTexture (unsigned texture_id)
+{
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D_ARRAY, (GLuint)texture_id);
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
 static void GLBackend_Finish (void)
@@ -733,59 +845,71 @@ static void GLBackend_Present (void)
 	GL_BackendPresent ();
 }
 
-void GL_Backend_Register (void)
+static const IRenderBackend s_gl_backend = {
+	"OpenGL",
+	GLBackend_Init,
+	GLBackend_Shutdown,
+	GLBackend_OnResize,
+	GLBackend_CanActivate,
+	GLBackend_BeginFrame,
+	GLBackend_EndFrame,
+	GLBackend_Present,
+	GLBackend_BeginPassEx,
+	GLBackend_EndPassEx,
+	GLBackend_ResourceBarrier,
+	GLBackend_BindPipeline,
+	GLBackend_SetDynamicState,
+	GLBackend_BindDescriptors,
+	GLBackend_PassSetupView,
+	GLBackend_PassShadowMaps,
+	GLBackend_PassRenderScene,
+	GLBackend_PassWarpResolve,
+	GLBackend_PassPostProcess,
+	GLBackend_PassOverlayViewmodel,
+	GLBackend_PassOverlayPolyblend,
+	GLBackend_BeginPass,
+	GLBackend_EndPass,
+	GLBackend_ValidatePassState,
+	GLBackend_BeginTimer,
+	GLBackend_EndTimer,
+	GLBackend_ResolveTimers,
+	GLBackend_ConsumeTimerSample,
+	GLBackend_GetCaps,
+	GLBackend_ResolveResourceId,
+	GLBackend_IsResourceValid,
+	GLBackend_BindRenderTarget,
+	GLBackend_SetViewport,
+	GLBackend_SetScissor,
+	GLBackend_SetPipelineState,
+	GLBackend_Draw,
+	GLBackend_DrawIndexed,
+	GLBackend_DrawInstanced,
+	GLBackend_DrawIndexedInstanced,
+	GLBackend_DrawIndexedIndirect,
+	GLBackend_MultiDrawIndexedIndirect,
+	GLBackend_Dispatch,
+	GLBackend_MemoryBarrier,
+	GLBackend_SetBlendFactors,
+	GLBackend_SetDepthFunc,
+	GLBackend_CreatePostFXLUTTexture,
+	GLBackend_ConfigurePostFXLUTTexture,
+	GLBackend_Finish,
+	GLBackend_PopulateFrameGraphResources,
+	GLBackend_GetSceneSampleCount
+};
+
+const IRenderBackend *GL_Backend_GetInterface (void)
 {
 	GLBackend_DetectCaps ();
+	return &s_gl_backend;
+}
 
-	static const IRenderBackend gl_backend = {
-		"OpenGL",
-		GLBackend_Init,
-		GLBackend_Shutdown,
-		GLBackend_OnResize,
-		GLBackend_CanActivate,
-		GLBackend_BeginFrame,
-		GLBackend_EndFrame,
-		GLBackend_Present,
-		GLBackend_BeginPassEx,
-		GLBackend_EndPassEx,
-		GLBackend_ResourceBarrier,
-		NULL,
-		NULL,
-		NULL,
-		GLBackend_PassSetupView,
-		GLBackend_PassShadowMaps,
-		GLBackend_PassRenderScene,
-		GLBackend_PassWarpResolve,
-		GLBackend_PassPostProcess,
-		GLBackend_PassOverlayViewmodel,
-		GLBackend_PassOverlayPolyblend,
-		GLBackend_BeginPass,
-		GLBackend_EndPass,
-		GLBackend_ValidatePassState,
-		GLBackend_BeginTimer,
-		GLBackend_EndTimer,
-		GLBackend_ResolveTimers,
-		GLBackend_ConsumeTimerSample,
-		GLBackend_GetCaps,
-		GLBackend_ResolveResourceId,
-		GLBackend_IsResourceValid,
-		GLBackend_BindRenderTarget,
-		GLBackend_SetViewport,
-		GLBackend_SetScissor,
-		GLBackend_SetPipelineState,
-		GLBackend_Draw,
-		GLBackend_DrawIndexed,
-		GLBackend_DrawInstanced,
-		GLBackend_DrawIndexedInstanced,
-		GLBackend_DrawIndexedIndirect,
-		GLBackend_MultiDrawIndexedIndirect,
-		GLBackend_Dispatch,
-		GLBackend_MemoryBarrier,
-		GLBackend_SetBlendFactors,
-		GLBackend_Finish,
-		GLBackend_PopulateFrameGraphResources,
-		GLBackend_GetSceneSampleCount
-	};
+const IRenderBackend *IW_RendererPlugin_GetBuiltinOpenGLBackend (void)
+{
+	return GL_Backend_GetInterface ();
+}
 
-	R_Backend_Register (&gl_backend);
+void GL_Backend_Register (void)
+{
+	R_Backend_Register (GL_Backend_GetInterface ());
 }

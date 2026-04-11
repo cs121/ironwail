@@ -916,7 +916,17 @@ ibuf.global._pad_tail[1] = 0.f;
 		GL_BindTextures (0, 3, textures);
 		GL_Bind (GL_TEXTURE3, blacktexture);
 
-		R_Backend_DrawIndexedInstanced (R_BACKEND_PRIMITIVE_TRIANGLES, R_BACKEND_INDEX_TYPE_UINT16, hdr->numindexes, (intptr_t)hdr->eboofs, ibuf.count);
+		{
+			RenderBackendDrawPacket draw_packet;
+			memset (&draw_packet, 0, sizeof (draw_packet));
+			draw_packet.primitive = R_BACKEND_PRIMITIVE_TRIANGLES;
+			draw_packet.index_type = R_BACKEND_INDEX_TYPE_UINT16;
+			draw_packet.count = hdr->numindexes;
+			draw_packet.instance_count = ibuf.count;
+			draw_packet.index_offset_bytes = (intptr_t)hdr->eboofs;
+			draw_packet.flags = R_BACKEND_DRAW_PACKET_INDEXED | R_BACKEND_DRAW_PACKET_INSTANCED;
+			R_Backend_DrawPacket (&draw_packet);
+		}
 
 		rs_aliaspasses += hdr->numtris * ibuf.count;
 	}

@@ -111,13 +111,26 @@ typedef enum render_backend_store_op_e
 	R_BACKEND_STORE_OP_DONT_CARE
 } render_backend_store_op_t;
 
+typedef enum render_backend_depth_func_e
+{
+	R_BACKEND_DEPTH_FUNC_LEQUAL = 0,
+	R_BACKEND_DEPTH_FUNC_LESS,
+	R_BACKEND_DEPTH_FUNC_EQUAL,
+	R_BACKEND_DEPTH_FUNC_GREATER,
+	R_BACKEND_DEPTH_FUNC_GEQUAL,
+	R_BACKEND_DEPTH_FUNC_ALWAYS,
+	R_BACKEND_DEPTH_FUNC_NEVER
+} render_backend_depth_func_t;
+
 typedef enum render_backend_resource_state_e
 {
 	R_BACKEND_RESOURCE_STATE_UNKNOWN = 0,
-	R_BACKEND_RESOURCE_STATE_COLOR_ATTACHMENT,
-	R_BACKEND_RESOURCE_STATE_DEPTH_ATTACHMENT,
-	R_BACKEND_RESOURCE_STATE_SHADER_READ,
-	R_BACKEND_RESOURCE_STATE_SHADER_WRITE,
+	R_BACKEND_RESOURCE_STATE_ATTACHMENT_READ,
+	R_BACKEND_RESOURCE_STATE_ATTACHMENT_WRITE,
+	R_BACKEND_RESOURCE_STATE_ATTACHMENT_READ_WRITE,
+	R_BACKEND_RESOURCE_STATE_SAMPLED,
+	R_BACKEND_RESOURCE_STATE_STORAGE_READ,
+	R_BACKEND_RESOURCE_STATE_STORAGE_WRITE,
 	R_BACKEND_RESOURCE_STATE_PRESENT
 } render_backend_resource_state_t;
 
@@ -196,6 +209,37 @@ typedef struct render_backend_descriptor_binding_s
 	unsigned range;
 } RenderBackendDescriptorBinding;
 
+typedef enum render_backend_command_encoder_flags_e
+{
+	R_BACKEND_COMMAND_ENCODER_NONE = 0,
+	R_BACKEND_COMMAND_ENCODER_DEBUG_LABEL = 1u << 0
+} render_backend_command_encoder_flags_t;
+
+typedef struct render_backend_command_encoder_desc_s
+{
+	const char *name;
+	unsigned frame_index;
+	unsigned flags;
+} RenderBackendCommandEncoderDesc;
+
+typedef enum render_backend_draw_packet_flags_e
+{
+	R_BACKEND_DRAW_PACKET_NONE = 0,
+	R_BACKEND_DRAW_PACKET_INDEXED = 1u << 0,
+	R_BACKEND_DRAW_PACKET_INSTANCED = 1u << 1
+} render_backend_draw_packet_flags_t;
+
+typedef struct render_backend_draw_packet_s
+{
+	render_backend_primitive_t primitive;
+	render_backend_index_type_t index_type;
+	int first;
+	int count;
+	int instance_count;
+	intptr_t index_offset_bytes;
+	unsigned flags;
+} RenderBackendDrawPacket;
+
 typedef struct render_pass_context_s RenderPassContext;
 
 typedef struct i_render_backend_s
@@ -244,6 +288,9 @@ typedef struct i_render_backend_s
 	void (*dispatch)(unsigned group_x, unsigned group_y, unsigned group_z);
 	void (*memory_barrier)(unsigned barrier_bits);
 	void (*set_blend_factors)(render_blend_factor_t src, render_blend_factor_t dst);
+	void (*set_depth_func)(render_backend_depth_func_t depth_func);
+	unsigned (*create_postfx_lut_texture)(void);
+	void (*configure_postfx_lut_texture)(unsigned texture_id);
 	void (*finish)(void);
 	void (*populate_framegraph_resources)(RenderGraphResourceHandle *out_handles);
 	int (*get_scene_sample_count)(void);

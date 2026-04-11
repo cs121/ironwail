@@ -1,7 +1,4 @@
 #include "quakedef.h"
-#include "glquake.h"
-
-#include "gl_backend.h"
 #include "r_framegraph.h"
 #include "renderer_plugin.h"
 
@@ -10,6 +7,8 @@ enum
 	R_BACKEND_MAX_REGISTERED = 8,
 	R_BACKEND_MAX_PLUGIN_LIBS = 8
 };
+
+static const char *s_renderer_plugin_prefix = "ironwail_renderer_";
 
 static const IRenderBackend *s_registered_backends[R_BACKEND_MAX_REGISTERED];
 static int s_registered_backend_count = 0;
@@ -20,11 +19,16 @@ static qboolean s_applying_backend_cvar = false;
 static qboolean s_backend_active = false;
 static qboolean s_backend_audit_cmd_registered = false;
 static qboolean s_backend_vulkan_status_cmd_registered = false;
+static qboolean s_backend_dx12_status_cmd_registered = false;
+static qboolean s_warned_deprecated_builtin_register = false;
 static int s_missing_resource_warn_frame[R_BACKEND_RESOURCE_SLOT_COUNT];
 static void *s_plugin_libs[R_BACKEND_MAX_PLUGIN_LIBS];
 static int s_plugin_lib_count = 0;
+static qboolean s_command_encoder_recording = false;
+static int s_command_encoder_frame = -1;
 
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
+cvar_t r_backend_legacy_fallbacks = { "r_backend_legacy_fallbacks", "1", CVAR_ARCHIVE };
 
 /*
 ================
@@ -134,6 +138,42 @@ static qboolean R_Backend_RefreshActiveCaps (const IRenderBackend *backend, qboo
 	return true;
 }
 
+static void R_Backend_ValidateDescriptorBindings (const RenderBackendDescriptorBinding *bindings, unsigned count)
+{
+	unsigned i;
+	unsigned j;
+
+	if (!bindings || count == 0u)
+		return;
+
+	for (i = 0; i < count; ++i)
+	{
+		const RenderBackendDescriptorBinding *binding = &bindings[i];
+
+		if (binding->resource_id == 0u)
+		{
+			Con_DWarning ("Renderer descriptor binding[%u] has invalid resource_id=0 (type=%u slot=%u)\n",
+				i, (unsigned)binding->type, binding->slot);
+			SDL_assert (!"Renderer descriptor binding has resource_id=0");
+		}
+
+		for (j = i + 1u; j < count; ++j)
+		{
+			const RenderBackendDescriptorBinding *other = &bindings[j];
+			if (binding->type != other->type || binding->slot != other->slot)
+				continue;
+			if (binding->resource_id == other->resource_id
+				&& binding->offset == other->offset
+				&& binding->range == other->range)
+				continue;
+
+			Con_DWarning ("Renderer descriptor conflict: bindings[%u] and [%u] target same type=%u slot=%u with different resources/ranges\n",
+				i, j, (unsigned)binding->type, binding->slot);
+			SDL_assert (!"Renderer descriptor conflict on same type/slot");
+		}
+	}
+}
+
 static const IRenderBackend *R_Backend_FindByName (const char *backend_name)
 {
 	int i;
@@ -156,17 +196,57 @@ static qboolean R_Backend_HasRegisteredName (const char *backend_name)
 	return R_Backend_FindByName (backend_name) != NULL;
 }
 
+static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend);
+static void R_Backend_FillPluginHostApi (iw_renderer_plugin_host_api_t *host_api);
+
 static qboolean R_Backend_RegisterBuiltinByName (const char *backend_name)
 {
+	const IRenderBackend *backend;
+
 	if (!backend_name || !backend_name[0])
 		return false;
 
-	if (!q_strcasecmp (backend_name, "OpenGL"))
+	if (!s_warned_deprecated_builtin_register)
 	{
-		GL_Backend_Register ();
-		return R_Backend_HasRegisteredName ("OpenGL");
+		Con_DWarning ("Renderer plugin used deprecated host callback register_builtin_backend(); switch to register_backend().\n");
+		s_warned_deprecated_builtin_register = true;
 	}
 
+	if (!q_strcasecmp (backend_name, "OpenGL"))
+	{
+		backend = IW_RendererPlugin_GetBuiltinOpenGLBackend ();
+		return R_Backend_RegisterViaHostApi (backend);
+	}
+
+	return false;
+}
+
+static void R_Backend_FillPluginHostApi (iw_renderer_plugin_host_api_t *host_api)
+{
+	if (!host_api)
+		return;
+
+	memset (host_api, 0, sizeof (*host_api));
+	host_api->struct_size = sizeof (*host_api);
+	host_api->abi_major = IW_RENDERER_PLUGIN_ABI_MAJOR;
+	host_api->abi_minor = IW_RENDERER_PLUGIN_ABI_MINOR;
+	host_api->register_backend = R_Backend_RegisterViaHostApi;
+	host_api->builtin_opengl_backend = IW_RendererPlugin_GetBuiltinOpenGLBackend ();
+	host_api->register_builtin_backend = R_Backend_RegisterBuiltinByName;
+}
+
+static qboolean R_Backend_RegisterBuiltinPluginOpenGL (const iw_renderer_plugin_host_api_t *host_api)
+{
+	const IRenderBackend *backend;
+
+	if (!host_api || host_api->struct_size < sizeof (*host_api))
+		return false;
+
+	backend = host_api->builtin_opengl_backend;
+	if (backend && host_api->register_backend)
+		return host_api->register_backend (backend);
+	if (host_api->register_builtin_backend)
+		return host_api->register_builtin_backend ("OpenGL");
 	return false;
 }
 
@@ -258,11 +338,7 @@ static qboolean R_Backend_LoadPluginFromPath (const char *path)
 		return false;
 	}
 
-	memset (&host_api, 0, sizeof (host_api));
-	host_api.struct_size = sizeof (host_api);
-	host_api.abi_major = IW_RENDERER_PLUGIN_ABI_MAJOR;
-	host_api.abi_minor = IW_RENDERER_PLUGIN_ABI_MINOR;
-	host_api.register_builtin_backend = R_Backend_RegisterBuiltinByName;
+	R_Backend_FillPluginHostApi (&host_api);
 
 	if (!descriptor->register_plugin (&host_api))
 	{
@@ -278,34 +354,60 @@ static qboolean R_Backend_LoadPluginFromPath (const char *path)
 
 static void R_Backend_LoadRendererPlugins (void)
 {
-	char path[MAX_OSPATH];
-	const char *plugin_base;
-	const char *ext;
+	findfile_t *find;
+	iw_renderer_plugin_host_api_t host_api;
+	const iw_renderer_plugin_descriptor_t builtin_plugin = {
+		sizeof (iw_renderer_plugin_descriptor_t),
+		IW_RENDERER_PLUGIN_ABI_MAJOR,
+		IW_RENDERER_PLUGIN_ABI_MINOR,
+		"builtin-opengl",
+		R_Backend_RegisterBuiltinPluginOpenGL
+	};
+	const char *search_dirs[3];
+	const char *ext_find;
+	int i;
 
 #ifdef _WIN32
-	ext = ".dll";
+	ext_find = "dll";
 #elif defined(__APPLE__)
-	ext = ".dylib";
+	ext_find = "dylib";
 #else
-	ext = ".so";
+	ext_find = "so";
 #endif
 
-	plugin_base = "ironwail_renderer_opengl";
+	search_dirs[0] = (host_parms && host_parms->exedir && host_parms->exedir[0]) ? host_parms->exedir : NULL;
+	search_dirs[1] = (host_parms && host_parms->basedir && host_parms->basedir[0]) ? host_parms->basedir : NULL;
+	search_dirs[2] = ".";
 
-	if (host_parms && host_parms->exedir && host_parms->exedir[0])
+	for (i = 0; i < (int)Q_COUNTOF (search_dirs); ++i)
 	{
-		if ((size_t) q_snprintf (path, sizeof (path), "%s/%s%s", host_parms->exedir, plugin_base, ext) < sizeof (path))
-			R_Backend_LoadPluginFromPath (path);
+		const char *dir = search_dirs[i];
+		if (!dir || !dir[0])
+			continue;
+		if (i > 0 && search_dirs[0] && !q_strcasecmp (dir, search_dirs[0]))
+			continue;
+
+		for (find = Sys_FindFirst (dir, ext_find); find; find = Sys_FindNext (find))
+		{
+			char plugin_path[MAX_OSPATH];
+
+			if (find->attribs & FA_DIRECTORY)
+				continue;
+			if (q_strncasecmp (find->name, s_renderer_plugin_prefix, strlen (s_renderer_plugin_prefix)) != 0)
+				continue;
+			if ((size_t) q_snprintf (plugin_path, sizeof (plugin_path), "%s/%s", dir, find->name) >= sizeof (plugin_path))
+				continue;
+
+			R_Backend_LoadPluginFromPath (plugin_path);
+		}
 	}
 
-	if (host_parms && host_parms->basedir && host_parms->basedir[0])
+	/* Keep a deterministic in-process OpenGL plugin fallback for installs without DLL/SO deployment. */
+	if (!R_Backend_HasRegisteredName ("OpenGL"))
 	{
-		if ((size_t) q_snprintf (path, sizeof (path), "%s/%s%s", host_parms->basedir, plugin_base, ext) < sizeof (path))
-			R_Backend_LoadPluginFromPath (path);
+		R_Backend_FillPluginHostApi (&host_api);
+		(void)builtin_plugin.register_plugin (&host_api);
 	}
-
-	if ((size_t) q_snprintf (path, sizeof (path), "%s%s", plugin_base, ext) < sizeof (path))
-		R_Backend_LoadPluginFromPath (path);
 }
 
 static void R_Backend_ApplySelectionToCvar (void)
@@ -389,6 +491,9 @@ static void R_VulkanStub_MultiDrawIndexedIndirect (render_backend_primitive_t pr
 static void R_VulkanStub_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z) { (void)group_x; (void)group_y; (void)group_z; }
 static void R_VulkanStub_MemoryBarrier (unsigned barrier_bits) { (void)barrier_bits; }
 static void R_VulkanStub_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst) { (void)src; (void)dst; }
+static void R_VulkanStub_SetDepthFunc (render_backend_depth_func_t depth_func) { (void)depth_func; }
+static unsigned R_VulkanStub_CreatePostFXLUTTexture (void) { return 0u; }
+static void R_VulkanStub_ConfigurePostFXLUTTexture (unsigned texture_id) { (void)texture_id; }
 static void R_VulkanStub_Finish (void) {}
 static void R_VulkanStub_PopulateFrameGraphResources (RenderGraphResourceHandle *out_handles) { (void)out_handles; }
 static int R_VulkanStub_GetSceneSampleCount (void) { return 1; }
@@ -438,6 +543,9 @@ static const IRenderBackend s_vulkan_stub_backend = {
 	R_VulkanStub_Dispatch,
 	R_VulkanStub_MemoryBarrier,
 	R_VulkanStub_SetBlendFactors,
+	R_VulkanStub_SetDepthFunc,
+	R_VulkanStub_CreatePostFXLUTTexture,
+	R_VulkanStub_ConfigurePostFXLUTTexture,
 	R_VulkanStub_Finish,
 	R_VulkanStub_PopulateFrameGraphResources,
 	R_VulkanStub_GetSceneSampleCount
@@ -452,20 +560,82 @@ static void R_Backend_VulkanStatus_f (void)
 	Con_Printf ("  remaining work: swapchain + command buffers + pass graph execution + resource lifetime + descriptor/pipeline cache.\n");
 }
 
-void R_Backend_Register (const IRenderBackend *backend)
+static const IRenderBackend s_dx12_stub_backend = {
+	"DX12",
+	R_VulkanStub_Init,
+	R_VulkanStub_Shutdown,
+	R_VulkanStub_OnResize,
+	R_VulkanStub_CanActivate,
+	R_VulkanStub_BeginFrame,
+	R_VulkanStub_EndFrame,
+	R_VulkanStub_Present,
+	R_VulkanStub_BeginPassEx,
+	R_VulkanStub_EndPassEx,
+	R_VulkanStub_ResourceBarrier,
+	R_VulkanStub_BindPipeline,
+	R_VulkanStub_SetDynamicState,
+	R_VulkanStub_BindDescriptors,
+	R_VulkanStub_PassSetupView,
+	R_VulkanStub_PassShadowmaps,
+	R_VulkanStub_PassRenderScene,
+	R_VulkanStub_PassWarpResolve,
+	R_VulkanStub_PassPostprocess,
+	R_VulkanStub_PassOverlayViewmodel,
+	R_VulkanStub_PassOverlayPolyblend,
+	R_VulkanStub_BeginPass,
+	R_VulkanStub_EndPass,
+	R_VulkanStub_ValidatePassState,
+	R_VulkanStub_BeginTimer,
+	R_VulkanStub_EndTimer,
+	R_VulkanStub_ResolveTimers,
+	R_VulkanStub_ConsumeTimerSample,
+	R_VulkanStub_GetCaps,
+	R_VulkanStub_ResolveResourceId,
+	R_VulkanStub_IsResourceValid,
+	R_VulkanStub_BindRenderTarget,
+	R_VulkanStub_SetViewport,
+	R_VulkanStub_SetScissor,
+	R_VulkanStub_SetPipelineState,
+	R_VulkanStub_Draw,
+	R_VulkanStub_DrawIndexed,
+	R_VulkanStub_DrawInstanced,
+	R_VulkanStub_DrawIndexedInstanced,
+	R_VulkanStub_DrawIndexedIndirect,
+	R_VulkanStub_MultiDrawIndexedIndirect,
+	R_VulkanStub_Dispatch,
+	R_VulkanStub_MemoryBarrier,
+	R_VulkanStub_SetBlendFactors,
+	R_VulkanStub_SetDepthFunc,
+	R_VulkanStub_CreatePostFXLUTTexture,
+	R_VulkanStub_ConfigurePostFXLUTTexture,
+	R_VulkanStub_Finish,
+	R_VulkanStub_PopulateFrameGraphResources,
+	R_VulkanStub_GetSceneSampleCount
+};
+
+static void R_Backend_DX12Status_f (void)
+{
+	Con_Printf ("DX12 backend status:\n");
+	Con_Printf ("  registration: present as stub backend ('DX12').\n");
+	Con_Printf ("  activation gate: blocked (can_activate=false).\n");
+	Con_Printf ("  implemented callbacks: contract no-op stubs only.\n");
+	Con_Printf ("  remaining work: device init + swapchain + command lists + descriptor heaps + resource barriers.\n");
+}
+
+static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend)
 {
 	int i;
 
 	if (!backend || !backend->name || !backend->name[0])
-		return;
+		return false;
 	if (!R_Backend_ValidateContract (backend, true))
-		return;
+		return false;
 
 	for (i = 0; i < s_registered_backend_count; ++i)
 	{
 		if (s_registered_backends[i] == backend
 			|| !q_strcasecmp (s_registered_backends[i]->name, backend->name))
-			return;
+			return true;
 	}
 
 	if (s_registered_backend_count >= R_BACKEND_MAX_REGISTERED)
@@ -473,12 +643,18 @@ void R_Backend_Register (const IRenderBackend *backend)
 		Con_Warning ("Renderer backend registry full (%d), cannot register '%s'\n",
 			R_BACKEND_MAX_REGISTERED,
 			backend->name);
-		return;
+		return false;
 	}
 
 	s_registered_backends[s_registered_backend_count++] = backend;
 	if (!s_active_backend)
 		s_active_backend = backend;
+	return true;
+}
+
+void R_Backend_Register (const IRenderBackend *backend)
+{
+	(void)R_Backend_RegisterViaHostApi (backend);
 }
 
 qboolean R_Backend_Select (const char *backend_name)
@@ -505,6 +681,10 @@ qboolean R_Backend_Select (const char *backend_name)
 	{
 		Con_Warning ("Renderer backend '%s' is not ready for activation.\n",
 			backend->name ? backend->name : "<unnamed>");
+		if (backend->name && !q_strcasecmp (backend->name, "Vulkan"))
+			Con_Warning ("Use command 'r_backend_vulkan_status' for detailed bring-up status.\n");
+		if (backend->name && !q_strcasecmp (backend->name, "DX12"))
+			Con_Warning ("Use command 'r_backend_dx12_status' for detailed bring-up status.\n");
 		return false;
 	}
 
@@ -570,6 +750,7 @@ void R_Backend_Init (void)
 	s_backend_initialized = true;
 	memset (s_missing_resource_warn_frame, 0xff, sizeof (s_missing_resource_warn_frame));
 	Cvar_RegisterVariable (&r_backend);
+	Cvar_RegisterVariable (&r_backend_legacy_fallbacks);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
 	if (!s_backend_audit_cmd_registered)
 	{
@@ -581,13 +762,15 @@ void R_Backend_Init (void)
 		Cmd_AddCommand ("r_backend_vulkan_status", R_Backend_VulkanStatus_f);
 		s_backend_vulkan_status_cmd_registered = true;
 	}
+	if (!s_backend_dx12_status_cmd_registered)
+	{
+		Cmd_AddCommand ("r_backend_dx12_status", R_Backend_DX12Status_f);
+		s_backend_dx12_status_cmd_registered = true;
+	}
 
 	R_Backend_Register (&s_vulkan_stub_backend);
+	R_Backend_Register (&s_dx12_stub_backend);
 	R_Backend_LoadRendererPlugins ();
-
-	/* Runtime plugin loading is optional; keep built-in OpenGL as a hard fallback. */
-	if (!R_Backend_HasRegisteredName ("OpenGL"))
-		GL_Backend_Register ();
 
 	if (!s_active_backend && s_registered_backend_count > 0)
 		s_active_backend = s_registered_backends[0];
@@ -611,6 +794,8 @@ void R_Backend_Shutdown (void)
 	s_registered_backend_count = 0;
 	s_active_backend = NULL;
 	s_backend_initialized = false;
+	s_command_encoder_recording = false;
+	s_command_encoder_frame = -1;
 }
 
 void R_Backend_OnResize (int width, int height)
@@ -720,7 +905,52 @@ void R_Backend_BindDescriptors (const RenderBackendDescriptorBinding *bindings, 
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
 	if (backend && backend->bind_descriptors && bindings && count > 0u)
+	{
+		R_Backend_ValidateDescriptorBindings (bindings, count);
 		backend->bind_descriptors (bindings, count);
+	}
+}
+
+void R_Backend_BeginCommandEncoder (const RenderBackendCommandEncoderDesc *desc)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	const char *label = (desc && desc->name && desc->name[0]) ? desc->name : "framegraph-encoder";
+
+	if (s_command_encoder_recording)
+	{
+		if (r_framegraph_debug.value > 0.f)
+			Con_DWarning ("Renderer command encoder already recording (frame=%d)\n", s_command_encoder_frame);
+		return;
+	}
+
+	s_command_encoder_recording = true;
+	s_command_encoder_frame = r_framecount;
+	if (backend && backend->begin_pass)
+		backend->begin_pass (label);
+}
+
+void R_Backend_EndCommandEncoder (void)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+
+	if (!s_command_encoder_recording)
+		return;
+
+	if (backend && backend->end_pass)
+		backend->end_pass ();
+}
+
+void R_Backend_SubmitCommandEncoder (void)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+
+	if (!s_command_encoder_recording)
+		return;
+
+	if (backend && backend->memory_barrier)
+		backend->memory_barrier (R_BACKEND_BARRIER_COMMAND);
+	s_command_encoder_recording = false;
+	s_command_encoder_frame = -1;
 }
 
 const render_backend_resource_ref_t *R_FrameGraph_GetResourceRef (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot)
@@ -794,7 +1024,19 @@ void R_Backend_SetScissor (qboolean enabled, int x, int y, int width, int height
 void R_Backend_SetPipelineState (unsigned state_bits)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
-	if (backend && backend->set_pipeline_state)
+	if (!backend)
+		return;
+
+	if (backend->bind_pipeline)
+	{
+		RenderBackendPipelineDesc pipeline_desc;
+		pipeline_desc.pipeline_id = 0u;
+		pipeline_desc.state_bits = state_bits;
+		backend->bind_pipeline (&pipeline_desc);
+		return;
+	}
+
+	if (backend->set_pipeline_state)
 		backend->set_pipeline_state (state_bits);
 }
 
@@ -824,6 +1066,45 @@ void R_Backend_DrawIndexedInstanced (render_backend_primitive_t primitive, rende
 	const IRenderBackend *backend = R_GetRenderBackend ();
 	if (backend && backend->draw_indexed_instanced)
 		backend->draw_indexed_instanced (primitive, index_type, count, index_offset_bytes, instance_count);
+}
+
+void R_Backend_DrawPacket (const RenderBackendDrawPacket *packet)
+{
+	if (!packet || packet->count <= 0)
+		return;
+
+	if ((packet->flags & R_BACKEND_DRAW_PACKET_INDEXED) != 0u)
+	{
+		if ((packet->flags & R_BACKEND_DRAW_PACKET_INSTANCED) != 0u)
+		{
+			R_Backend_DrawIndexedInstanced (
+				packet->primitive,
+				packet->index_type,
+				packet->count,
+				packet->index_offset_bytes,
+				packet->instance_count);
+			return;
+		}
+
+		R_Backend_DrawIndexed (
+			packet->primitive,
+			packet->index_type,
+			packet->count,
+			packet->index_offset_bytes);
+		return;
+	}
+
+	if ((packet->flags & R_BACKEND_DRAW_PACKET_INSTANCED) != 0u)
+	{
+		R_Backend_DrawInstanced (
+			packet->primitive,
+			packet->first,
+			packet->count,
+			packet->instance_count);
+		return;
+	}
+
+	R_Backend_Draw (packet->primitive, packet->first, packet->count);
 }
 
 void R_Backend_DrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes)
@@ -859,6 +1140,28 @@ void R_Backend_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t
 	const IRenderBackend *backend = R_GetRenderBackend ();
 	if (backend && backend->set_blend_factors)
 		backend->set_blend_factors (src, dst);
+}
+
+void R_Backend_SetDepthFunc (render_backend_depth_func_t depth_func)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->set_depth_func)
+		backend->set_depth_func (depth_func);
+}
+
+unsigned R_Backend_CreatePostFXLUTTexture (void)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->create_postfx_lut_texture)
+		return backend->create_postfx_lut_texture ();
+	return 0u;
+}
+
+void R_Backend_ConfigurePostFXLUTTexture (unsigned texture_id)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->configure_postfx_lut_texture)
+		backend->configure_postfx_lut_texture (texture_id);
 }
 
 void R_Backend_Finish (void)

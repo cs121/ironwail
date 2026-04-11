@@ -518,7 +518,10 @@ void main()
 		if (to_eye_len_sq > 1e-8)
 		{
 			vec3 view_dir = to_eye * inversesqrt(to_eye_len_sq);
-			float rim_ndotv = 1.0 - clamp(dot(world_nor, view_dir), 0.0, 1.0);
+			/* Drive rim with geometric normal, not normal-map perturbations.
+			 * This keeps the effect on silhouette edges instead of broad
+			 * full-surface brightening on viewmodels. */
+			float rim_ndotv = 1.0 - clamp(abs(dot(world_geo_nor, view_dir)), 0.0, 1.0);
 			float rim_factor = pow(max(rim_ndotv, 0.0), max(RimLightParams0.z, 0.5)) * max(RimLightParams0.y, 0.0);
 			if (rim_factor > 1e-5)
 			{
@@ -530,7 +533,7 @@ void main()
 				if (RimLightParams1.z > 0.0 && ShadowSunDirEnabled.w > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
 				{
 					vec3 sun_to_surface = -ShadowSunDirEnabled.xyz;
-					float sun_back = max(dot(-world_nor, sun_to_surface), 0.0);
+					float sun_back = max(dot(-world_geo_nor, sun_to_surface), 0.0);
 					float rim_sun_shadow = (use_rim_shadows > 0.5) ? SampleSunShadow(world_pos) : 1.0;
 					float sun_vis = max(ShadowSunVisibility, 0.0);
 					rim_light += ShadowSunColorIntensity.rgb * ShadowSunColorIntensity.a

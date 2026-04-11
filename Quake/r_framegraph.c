@@ -109,17 +109,76 @@ static int FG_FindResourceMappingIndex (unsigned bit)
 	return -1;
 }
 
-static render_backend_resource_state_t FG_GetWriteStateForBit (unsigned bit)
+static const char *FG_GetResourceBitName (unsigned bit)
 {
 	switch (bit)
 	{
-	case RENDER_RES_SCENE_DEPTH:
-	case RENDER_RES_COMPOSITE_DEPTH:
-	case RENDER_RES_SHADOW_SUN_DEPTH:
-		return R_BACKEND_RESOURCE_STATE_DEPTH_ATTACHMENT;
-	default:
-		return R_BACKEND_RESOURCE_STATE_COLOR_ATTACHMENT;
+	case RENDER_RES_SCENE_COLOR: return "scene_color";
+	case RENDER_RES_SCENE_DEPTH: return "scene_depth";
+	case RENDER_RES_COMPOSITE_COLOR: return "composite_color";
+	case RENDER_RES_COMPOSITE_DEPTH: return "composite_depth";
+	case RENDER_RES_SHADOW_SUN_DEPTH: return "shadow_sun_depth";
+	case RENDER_RES_VELOCITY: return "velocity";
+	case RENDER_RES_DECALS: return "decals";
+	case RENDER_RES_SSAO_FOG_STATE: return "ssao_fog_state";
+	default: return "unknown";
 	}
+}
+
+static const char *FG_GetResourceStateName (render_backend_resource_state_t state)
+{
+	switch (state)
+	{
+	case R_BACKEND_RESOURCE_STATE_UNKNOWN: return "unknown";
+	case R_BACKEND_RESOURCE_STATE_ATTACHMENT_READ: return "attachment_read";
+	case R_BACKEND_RESOURCE_STATE_ATTACHMENT_WRITE: return "attachment_write";
+	case R_BACKEND_RESOURCE_STATE_ATTACHMENT_READ_WRITE: return "attachment_read_write";
+	case R_BACKEND_RESOURCE_STATE_SAMPLED: return "sampled";
+	case R_BACKEND_RESOURCE_STATE_STORAGE_READ: return "storage_read";
+	case R_BACKEND_RESOURCE_STATE_STORAGE_WRITE: return "storage_write";
+	case R_BACKEND_RESOURCE_STATE_PRESENT: return "present";
+	default: return "invalid";
+	}
+}
+
+static render_backend_resource_state_t FG_GetReadStateForBit (unsigned bit)
+{
+	(void)bit;
+	return R_BACKEND_RESOURCE_STATE_SAMPLED;
+}
+
+static render_backend_resource_state_t FG_GetWriteStateForBit (unsigned bit)
+{
+	(void)bit;
+	return R_BACKEND_RESOURCE_STATE_ATTACHMENT_WRITE;
+}
+
+static render_backend_resource_state_t FG_GetReadWriteStateForBit (unsigned bit)
+{
+	(void)bit;
+	return R_BACKEND_RESOURCE_STATE_ATTACHMENT_READ_WRITE;
+}
+
+static qboolean FG_PassHasAttachmentForBit (const RenderPassDesc *pass_desc, unsigned bit)
+{
+	unsigned i;
+
+	if (!pass_desc)
+		return false;
+
+	if (pass_desc->color_attachments && pass_desc->num_color_attachments > 0)
+	{
+		for (i = 0; i < pass_desc->num_color_attachments; ++i)
+		{
+			if (pass_desc->color_attachments[i].resource_bit == bit)
+				return true;
+		}
+	}
+
+	if (pass_desc->depth_attachment && pass_desc->depth_attachment->resource_bit == bit)
+		return true;
+
+	return false;
 }
 
 static void FG_ResetResourceStates (void)
@@ -152,9 +211,16 @@ static void FG_EmitPassBarriers (const RenderPassDesc *pass, RenderPassContext *
 			continue;
 
 		if ((pass->writes & bit) != 0u)
-			desired_state = FG_GetWriteStateForBit (bit);
+		{
+			if ((pass->reads & bit) != 0u)
+				desired_state = FG_GetReadWriteStateForBit (bit);
+			else
+				desired_state = FG_GetWriteStateForBit (bit);
+		}
 		else if ((pass->reads & bit) != 0u)
-			desired_state = R_BACKEND_RESOURCE_STATE_SHADER_READ;
+		{
+			desired_state = FG_GetReadStateForBit (bit);
+		}
 
 		if (desired_state == R_BACKEND_RESOURCE_STATE_UNKNOWN)
 			continue;
@@ -176,6 +242,14 @@ static void FG_EmitPassBarriers (const RenderPassDesc *pass, RenderPassContext *
 		barriers[barrier_count].resource = resource_ref;
 		barriers[barrier_count].before = before_state;
 		barriers[barrier_count].after = desired_state;
+		if (r_framegraph_debug.value > 0.f)
+		{
+			Con_DPrintf ("FrameGraph barrier: pass='%s' resource='%s' %s -> %s\n",
+				pass->name ? pass->name : "<unnamed>",
+				FG_GetResourceBitName (bit),
+				FG_GetResourceStateName (before_state),
+				FG_GetResourceStateName (desired_state));
+		}
 		s_resource_states[mapping_index] = desired_state;
 		barrier_count++;
 	}
@@ -208,6 +282,27 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 		}
 	}
 
+	for (bit = 1u; bit != 0; bit <<= 1)
+	{
+		const fg_resource_bit_mapping_t *mapping;
+		if ((pass_desc->writes & bit) == 0u)
+			continue;
+		mapping = FG_FindResourceMapping (bit);
+		if (!mapping || !mapping->requires_backend_resource)
+			continue;
+		if (!FG_PassHasAttachmentForBit (pass_desc, bit))
+		{
+			if (emit_warning || r_framegraph_debug.value > 0.f)
+			{
+				Con_Warning ("FrameGraph: pass '%s' writes '%s' without declaring it as pass attachment\n",
+					pass_desc->name ? pass_desc->name : "<unnamed>",
+					FG_GetResourceBitName (bit));
+			}
+			SDL_assert (!"FrameGraph pass writes backend resource without pass attachment declaration");
+			return false;
+		}
+	}
+
 	if (pass_desc->color_attachments && pass_desc->num_color_attachments > 0)
 	{
 		for (i = 0; i < pass_desc->num_color_attachments; ++i)
@@ -229,6 +324,17 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 					Con_Warning ("FrameGraph: pass '%s' color attachment[%u] must be declared in writes mask\n",
 						pass_desc->name ? pass_desc->name : "<unnamed>", i);
 				SDL_assert (!"FrameGraph pass attachment must be declared in writes mask");
+				return false;
+			}
+			if ((pass_desc->reads & resource_bit) != 0u
+				&& pass_desc->color_attachments[i].load_op == R_BACKEND_LOAD_OP_DONT_CARE)
+			{
+				if (emit_warning || r_framegraph_debug.value > 0.f)
+					Con_Warning ("FrameGraph: pass '%s' color attachment[%u] reads and writes '%s' but load_op is DONT_CARE\n",
+						pass_desc->name ? pass_desc->name : "<unnamed>",
+						i,
+						FG_GetResourceBitName (resource_bit));
+				SDL_assert (!"FrameGraph read/write attachment cannot use DONT_CARE load_op");
 				return false;
 			}
 		}
@@ -253,6 +359,16 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 				Con_Warning ("FrameGraph: pass '%s' depth attachment must be declared in writes mask\n",
 					pass_desc->name ? pass_desc->name : "<unnamed>");
 			SDL_assert (!"FrameGraph pass depth attachment must be declared in writes mask");
+			return false;
+		}
+		if ((pass_desc->reads & resource_bit) != 0u
+			&& pass_desc->depth_attachment->load_op == R_BACKEND_LOAD_OP_DONT_CARE)
+		{
+			if (emit_warning || r_framegraph_debug.value > 0.f)
+				Con_Warning ("FrameGraph: pass '%s' depth attachment reads and writes '%s' but load_op is DONT_CARE\n",
+					pass_desc->name ? pass_desc->name : "<unnamed>",
+					FG_GetResourceBitName (resource_bit));
+			SDL_assert (!"FrameGraph read/write depth attachment cannot use DONT_CARE load_op");
 			return false;
 		}
 	}
@@ -1106,6 +1222,13 @@ void R_FrameGraph_RenderView (void)
 	active_pass_mask = FG_BuildActivePassMask (&pass_ctx, i, pass_count);
 	FG_DebugPrintPrunedPasses (active_pass_mask, i, pass_count);
 	s_pass_registration_locked = true;
+	{
+		RenderBackendCommandEncoderDesc encoder_desc;
+		encoder_desc.name = "framegraph-main";
+		encoder_desc.frame_index = (unsigned)r_framecount;
+		encoder_desc.flags = R_BACKEND_COMMAND_ENCODER_DEBUG_LABEL;
+		R_Backend_BeginCommandEncoder (&encoder_desc);
+	}
 
 	for (; i < pass_count; ++i)
 	{
@@ -1115,6 +1238,8 @@ void R_FrameGraph_RenderView (void)
 			continue;
 		FG_RunPass (entry->profile_slot, entry->desc, &pass_ctx);
 	}
+	R_Backend_EndCommandEncoder ();
+	R_Backend_SubmitCommandEncoder ();
 
 	FG_MaybePrintStats ();
 }

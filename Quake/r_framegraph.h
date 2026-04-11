@@ -127,6 +127,9 @@ void R_Backend_ResourceBarrier (const RenderGraphResourceHandle *resources, cons
 void R_Backend_BindPipeline (const RenderBackendPipelineDesc *pipeline);
 void R_Backend_SetDynamicState (const RenderBackendDynamicState *dynamic_state);
 void R_Backend_BindDescriptors (const RenderBackendDescriptorBinding *bindings, unsigned count);
+void R_Backend_BeginCommandEncoder (const RenderBackendCommandEncoderDesc *desc);
+void R_Backend_EndCommandEncoder (void);
+void R_Backend_SubmitCommandEncoder (void);
 const render_backend_resource_ref_t *R_FrameGraph_GetResourceRef (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
 unsigned R_FrameGraph_ResolveResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot);
 unsigned R_FrameGraph_ResolveRequiredResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot, const char *usage_tag);
@@ -138,11 +141,15 @@ void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count)
 void R_Backend_DrawIndexed (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes);
 void R_Backend_DrawInstanced (render_backend_primitive_t primitive, int first, int count, int instance_count);
 void R_Backend_DrawIndexedInstanced (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes, int instance_count);
+void R_Backend_DrawPacket (const RenderBackendDrawPacket *packet);
 void R_Backend_DrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes);
 void R_Backend_MultiDrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes, int draw_count, int stride_bytes);
 void R_Backend_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z);
 void R_Backend_MemoryBarrier (unsigned barrier_bits);
 void R_Backend_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst);
+void R_Backend_SetDepthFunc (render_backend_depth_func_t depth_func);
+unsigned R_Backend_CreatePostFXLUTTexture (void);
+void R_Backend_ConfigurePostFXLUTTexture (unsigned texture_id);
 void R_Backend_Finish (void);
 void R_Backend_PopulateFrameGraphResources (RenderGraphResourceHandle *out_handles);
 int R_Backend_GetSceneSampleCount (void);

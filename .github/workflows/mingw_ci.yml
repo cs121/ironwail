@@ -18,6 +18,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Enforce No Raw GL Calls In Non-Backend Files
+        run: python3 python/check_no_raw_gl_calls.py
+      - name: Check Renderer Plugin ABI Contract
+        run: python3 python/check_renderer_plugin_abi.py
+      - name: Check FrameGraph Pass Contracts
+        run: python3 python/check_framegraph_pass_contracts.py
+
       - name: Install Dependencies
         run: sudo apt update && sudo apt install gcc-mingw-w64-${{ matrix.config.package }}
 

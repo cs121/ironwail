@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "glquake.h"
+#include "r_framegraph.h"
 #include "r_postfx.h"
 #include "cl_postfx.h"
 #include "gl_texmgr.h"
@@ -201,12 +202,13 @@ static void R_PostFX_ReloadLUTs (void)
 	}
 	R_PostFX_GenerateIdentityLUT (lut_storage, size);
 
-	glGenTextures (1, &r_postfx_lut_tex);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D_ARRAY, r_postfx_lut_tex);
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	r_postfx_lut_tex = (GLuint)R_Backend_CreatePostFXLUTTexture ();
+	if (!r_postfx_lut_tex)
+	{
+		q_free (lut_storage);
+		return;
+	}
+	R_Backend_ConfigurePostFXLUTTexture (r_postfx_lut_tex);
 	GL_TexImage3DFunc (GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, size * size, size, PFX_LUT_COUNT, 0, GL_RGBA, GL_UNSIGNED_BYTE, lut_storage);
 	GL_ObjectLabelFunc (GL_TEXTURE, r_postfx_lut_tex, -1, "postfx lut");
 

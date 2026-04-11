@@ -10,6 +10,12 @@ jobs:
         platform: [x64, Win32]
     steps:
     - uses: actions/checkout@v4
+    - name: Enforce No Raw GL Calls In Non-Backend Files
+      run: python python/check_no_raw_gl_calls.py
+    - name: Check Renderer Plugin ABI Contract
+      run: python python/check_renderer_plugin_abi.py
+    - name: Check FrameGraph Pass Contracts
+      run: python python/check_framegraph_pass_contracts.py
     - name: Set environment variables
       run: |
         $gitrev = $(git describe --always)

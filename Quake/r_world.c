@@ -1061,25 +1061,25 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 	++num_bmodel_calls;
 }
 
-static GLenum R_MapDepthFunc (mat_depthfunc_t depth_func)
+static render_backend_depth_func_t R_MapDepthFunc (mat_depthfunc_t depth_func)
 {
 	switch (depth_func)
 	{
 	case MAT_DEPTHFUNC_LESS:
-		return gl_clipcontrol_able ? GL_GREATER : GL_LESS;
+		return gl_clipcontrol_able ? R_BACKEND_DEPTH_FUNC_GREATER : R_BACKEND_DEPTH_FUNC_LESS;
 	case MAT_DEPTHFUNC_EQUAL:
-		return GL_EQUAL;
+		return R_BACKEND_DEPTH_FUNC_EQUAL;
 	case MAT_DEPTHFUNC_GREATER:
-		return gl_clipcontrol_able ? GL_LESS : GL_GREATER;
+		return gl_clipcontrol_able ? R_BACKEND_DEPTH_FUNC_LESS : R_BACKEND_DEPTH_FUNC_GREATER;
 	case MAT_DEPTHFUNC_GEQUAL:
-		return gl_clipcontrol_able ? GL_LEQUAL : GL_GEQUAL;
+		return gl_clipcontrol_able ? R_BACKEND_DEPTH_FUNC_LEQUAL : R_BACKEND_DEPTH_FUNC_GEQUAL;
 	case MAT_DEPTHFUNC_ALWAYS:
-		return GL_ALWAYS;
+		return R_BACKEND_DEPTH_FUNC_ALWAYS;
 	case MAT_DEPTHFUNC_NEVER:
-		return GL_NEVER;
+		return R_BACKEND_DEPTH_FUNC_NEVER;
 	case MAT_DEPTHFUNC_LEQUAL:
 	default:
-		return gl_clipcontrol_able ? GL_GEQUAL : GL_LEQUAL;
+		return gl_clipcontrol_able ? R_BACKEND_DEPTH_FUNC_GEQUAL : R_BACKEND_DEPTH_FUNC_LEQUAL;
 	}
 }
 
@@ -1341,7 +1341,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	int i, j;
 	int totalinst, baseinst;
 	unsigned current_state = ~0u;
-	GLenum current_depth = GL_INVALID_ENUM;
+	render_backend_depth_func_t current_depth = R_BACKEND_DEPTH_FUNC_NEVER;
 	mat_blend_mode_t current_blend_mode = MAT_BLEND_REPLACE;
 	render_blend_factor_t current_blend_src = R_BLEND_FACTOR_ONE;
 	render_blend_factor_t current_blend_dst = R_BLEND_FACTOR_ZERO;
@@ -1468,7 +1468,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 				vec4_t stage_color;
 				unsigned extra_flags = mat_call_flags | R_StageOutputCallFlags (stage);
 				unsigned stage_state;
-				GLenum depth_func;
+				render_backend_depth_func_t depth_func;
 				qboolean blend_changed;
 				qboolean uses_lightmap;
 				qboolean stage_is_base = (stage_index == 0 && R_StageIsOpaqueBase (material));
@@ -1530,7 +1530,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 					R_ResetBModelCalls (program);
 					R_Backend_SetPipelineState (stage_state);
 					current_state = stage_state;
-					glDepthFunc (depth_func);
+					R_Backend_SetDepthFunc (depth_func);
 					current_depth = depth_func;
 
 					if (stage->blend_mode == MAT_BLEND_PREMULT)
@@ -1562,7 +1562,7 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	if (num_bmodel_calls)
 		R_FlushBModelCalls ();
 
-	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
+	R_Backend_SetDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
 }
 
 static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
@@ -1733,7 +1733,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 	if (num_bmodel_calls)
 		R_FlushBModelCalls ();
 
-	glDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
+	R_Backend_SetDepthFunc (R_MapDepthFunc (MAT_DEPTHFUNC_LEQUAL));
 }
 
 /*

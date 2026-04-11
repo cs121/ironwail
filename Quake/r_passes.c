@@ -33,9 +33,12 @@ static qboolean R_FG_PassWhenStorePrevEnabled (const RenderPassContext *ctx)
 static qboolean R_Pass_AllowLegacyFallback (const RenderPassContext *ctx)
 {
 	const RenderBackendCaps *caps = R_Backend_GetCaps ();
+	extern cvar_t r_backend_legacy_fallbacks;
 
 	if (!ctx || !ctx->backend)
 		return true;
+	if (r_backend_legacy_fallbacks.value <= 0.f)
+		return false;
 
 	return caps && caps->supports_legacy_pass_fallbacks;
 }
@@ -140,11 +143,18 @@ static void R_Pass_StorePrevFrame (RenderPassContext *ctx)
 }
 
 static const FGPassAttachmentConfig s_scene_color_attachments[] = {
-	{ RENDER_RES_SCENE_COLOR, R_BACKEND_LOAD_OP_CLEAR, R_BACKEND_STORE_OP_STORE }
+	{ RENDER_RES_SCENE_COLOR, R_BACKEND_LOAD_OP_CLEAR, R_BACKEND_STORE_OP_STORE },
+	{ RENDER_RES_VELOCITY, R_BACKEND_LOAD_OP_CLEAR, R_BACKEND_STORE_OP_STORE }
 };
 
 static const FGPassAttachmentConfig s_scene_depth_attachment = {
 	RENDER_RES_SCENE_DEPTH,
+	R_BACKEND_LOAD_OP_CLEAR,
+	R_BACKEND_STORE_OP_STORE
+};
+
+static const FGPassAttachmentConfig s_shadow_depth_attachment = {
+	RENDER_RES_SHADOW_SUN_DEPTH,
 	R_BACKEND_LOAD_OP_CLEAR,
 	R_BACKEND_STORE_OP_STORE
 };
@@ -187,6 +197,7 @@ static const RenderPassDesc s_shadowmaps_framegraph_pass = {
 	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
 	.enabled = R_FG_PassWhenShadowEnabled,
 	.execute = R_Pass_RenderShadowMaps,
+	.depth_attachment = &s_shadow_depth_attachment,
 	.stage = FG_PASS_STAGE_MAIN,
 	.stats_channel = FG_PASS_STATS_SHADOW
 };
@@ -202,7 +213,7 @@ static const RenderPassDesc s_scene_framegraph_pass = {
 	.enabled = NULL,
 	.execute = R_Pass_RenderScene,
 	.color_attachments = s_scene_color_attachments,
-	.num_color_attachments = 1,
+	.num_color_attachments = 2,
 	.depth_attachment = &s_scene_depth_attachment,
 	.stage = FG_PASS_STAGE_MAIN,
 	.stats_channel = FG_PASS_STATS_SCENE
@@ -256,7 +267,7 @@ static const RenderPassDesc s_postprocess_framegraph_pass = {
 static const RenderPassDesc s_viewmodel_framegraph_pass = {
 	.name = "Draw viewmodel",
 	.reads = RENDER_RES_COMPOSITE_COLOR,
-	.writes = RENDER_RES_COMPOSITE_COLOR,
+	.writes = RENDER_RES_NONE,
 	.side_effects = 1u << 0,
 	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
 	.output_target = FG_PASS_OUTPUT_BACKBUFFER,
@@ -270,7 +281,7 @@ static const RenderPassDesc s_viewmodel_framegraph_pass = {
 static const RenderPassDesc s_polyblend_framegraph_pass = {
 	.name = "Polyblend",
 	.reads = RENDER_RES_COMPOSITE_COLOR,
-	.writes = RENDER_RES_COMPOSITE_COLOR,
+	.writes = RENDER_RES_NONE,
 	.side_effects = 1u << 0,
 	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
 	.output_target = FG_PASS_OUTPUT_BACKBUFFER,
