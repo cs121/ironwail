@@ -7,7 +7,6 @@ static const RenderBackendCaps s_vk_caps = {
 	false, /* supports_draw_indirect */
 	false, /* supports_multi_draw_indirect */
 	false, /* supports_memory_barrier */
-	false, /* supports_legacy_pass_fallbacks */
 	0u,    /* msaa_mode_mask */
 	1u,    /* max_msaa_samples */
 	0u,    /* shader_model */
@@ -44,6 +43,7 @@ static void VK_PassWarpResolve (RenderPassContext *ctx) { (void)ctx; }
 static void VK_PassPostprocess (RenderPassContext *ctx) { (void)ctx; }
 static void VK_PassOverlayViewmodel (RenderPassContext *ctx) { (void)ctx; }
 static void VK_PassOverlayPolyblend (RenderPassContext *ctx) { (void)ctx; }
+static qboolean VK_HasRequiredPassCallbacks (void) { return true; }
 static void VK_BeginPass (const char *name) { (void)name; }
 static void VK_EndPass (void) {}
 static void VK_ValidatePassState (const char *pass_name, qboolean before_pass) { (void)pass_name; (void)before_pass; }
@@ -96,6 +96,7 @@ static const IRenderBackend s_ref_vk_backend = {
 	VK_PassPostprocess,
 	VK_PassOverlayViewmodel,
 	VK_PassOverlayPolyblend,
+	VK_HasRequiredPassCallbacks,
 	VK_BeginPass,
 	VK_EndPass,
 	VK_ValidatePassState,

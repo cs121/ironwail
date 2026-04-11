@@ -30,102 +30,70 @@ static qboolean R_FG_PassWhenStorePrevEnabled (const RenderPassContext *ctx)
 	return ctx && ctx->frame_plan && ctx->frame_plan->run_store_prev;
 }
 
-static qboolean R_Pass_AllowLegacyFallback (const RenderPassContext *ctx)
+static void R_Pass_RunBackendCallback (RenderPassContext *ctx, const char *pass_name, void (*callback)(RenderPassContext *))
 {
-	const RenderBackendCaps *caps = R_Backend_GetCaps ();
-	extern cvar_t r_backend_legacy_fallbacks;
-
 	if (!ctx || !ctx->backend)
-		return true;
-	if (r_backend_legacy_fallbacks.value <= 0.f)
-		return false;
+		Sys_Error ("R_Pass_RunBackendCallback: missing render backend context for pass '%s'.\n",
+			pass_name ? pass_name : "<unnamed>");
 
-	return caps && caps->supports_legacy_pass_fallbacks;
+	if (!ctx->backend->has_required_pass_callbacks
+		|| !ctx->backend->has_required_pass_callbacks ())
+	{
+		Sys_Error ("R_Pass_RunBackendCallback: backend '%s' did not advertise required pass callbacks for '%s'.\n",
+			ctx->backend->name ? ctx->backend->name : "<unnamed>",
+			pass_name ? pass_name : "<unnamed>");
+	}
+
+	if (!callback)
+	{
+		Sys_Error ("R_Pass_RunBackendCallback: backend '%s' is missing required callback for pass '%s'.\n",
+			ctx->backend->name ? ctx->backend->name : "<unnamed>",
+			pass_name ? pass_name : "<unnamed>");
+	}
+
+	callback (ctx);
 }
 
 void R_Pass_SetupView (RenderPassContext *ctx)
 {
-	if (ctx && ctx->backend && ctx->backend->pass_setup_view)
-	{
-		ctx->backend->pass_setup_view (ctx);
-		return;
-	}
-
-	/* Compatibility fallback: backend opt-in via capability contract. */
-	if (R_Pass_AllowLegacyFallback (ctx))
-		R_SetupView ();
+	R_Pass_RunBackendCallback (ctx, "Setup view",
+		ctx && ctx->backend ? ctx->backend->pass_setup_view : NULL);
 }
 
 void R_Pass_RenderShadowMaps (RenderPassContext *ctx)
 {
-	if (ctx && ctx->backend && ctx->backend->pass_shadowmaps)
-	{
-		ctx->backend->pass_shadowmaps (ctx);
-		return;
-	}
-
-	if (R_Pass_AllowLegacyFallback (ctx))
-		R_RenderShadowMaps ();
+	R_Pass_RunBackendCallback (ctx, "Shadow maps",
+		ctx && ctx->backend ? ctx->backend->pass_shadowmaps : NULL);
 }
 
 void R_Pass_RenderScene (RenderPassContext *ctx)
 {
-	if (ctx && ctx->backend && ctx->backend->pass_render_scene)
-	{
-		ctx->backend->pass_render_scene (ctx);
-		return;
-	}
-
-	if (R_Pass_AllowLegacyFallback (ctx))
-		R_RenderScene (ctx ? ctx->resources : NULL);
+	R_Pass_RunBackendCallback (ctx, "Render scene",
+		ctx && ctx->backend ? ctx->backend->pass_render_scene : NULL);
 }
 
 void R_Pass_WarpResolve (RenderPassContext *ctx)
 {
-	if (ctx && ctx->backend && ctx->backend->pass_warp_resolve)
-	{
-		ctx->backend->pass_warp_resolve (ctx);
-		return;
-	}
-
-	if (R_Pass_AllowLegacyFallback (ctx))
-		R_WarpScaleView (ctx ? ctx->resources : NULL);
+	R_Pass_RunBackendCallback (ctx, "Warp/resolve",
+		ctx && ctx->backend ? ctx->backend->pass_warp_resolve : NULL);
 }
 
 void R_Pass_PostProcess (RenderPassContext *ctx)
 {
-	if (ctx && ctx->backend && ctx->backend->pass_postprocess)
-	{
-		ctx->backend->pass_postprocess (ctx);
-		return;
-	}
-
-	if (R_Pass_AllowLegacyFallback (ctx))
-		GL_PostProcess (ctx ? ctx->resources : NULL);
+	R_Pass_RunBackendCallback (ctx, "Postprocess",
+		ctx && ctx->backend ? ctx->backend->pass_postprocess : NULL);
 }
 
 void R_Pass_DrawViewmodel (RenderPassContext *ctx)
 {
-	if (ctx && ctx->backend && ctx->backend->pass_overlay_viewmodel)
-	{
-		ctx->backend->pass_overlay_viewmodel (ctx);
-		return;
-	}
-
-	if (R_Pass_AllowLegacyFallback (ctx))
-		R_DrawViewModel ();
+	R_Pass_RunBackendCallback (ctx, "Overlay viewmodel",
+		ctx && ctx->backend ? ctx->backend->pass_overlay_viewmodel : NULL);
 }
 
 void R_Pass_DrawPolyblend (RenderPassContext *ctx)
 {
-	if (ctx && ctx->backend && ctx->backend->pass_overlay_polyblend)
-	{
-		ctx->backend->pass_overlay_polyblend (ctx);
-		return;
-	}
-
-	if (R_Pass_AllowLegacyFallback (ctx))
-		V_PolyBlend ();
+	R_Pass_RunBackendCallback (ctx, "Overlay polyblend",
+		ctx && ctx->backend ? ctx->backend->pass_overlay_polyblend : NULL);
 }
 
 static void R_Pass_CaptureSSAOFogHandoff (RenderPassContext *ctx)

@@ -87,7 +87,6 @@ typedef struct render_backend_caps_s
 	qboolean supports_draw_indirect;
 	qboolean supports_multi_draw_indirect;
 	qboolean supports_memory_barrier;
-	qboolean supports_legacy_pass_fallbacks;
 	unsigned msaa_mode_mask;
 	unsigned max_msaa_samples;
 	unsigned shader_model;
@@ -265,6 +264,7 @@ typedef struct i_render_backend_s
 	void (*pass_postprocess)(RenderPassContext *ctx);
 	void (*pass_overlay_viewmodel)(RenderPassContext *ctx);
 	void (*pass_overlay_polyblend)(RenderPassContext *ctx);
+	qboolean (*has_required_pass_callbacks)(void);
 	void (*begin_pass)(const char *name);
 	void (*end_pass)(void);
 	void (*validate_pass_state)(const char *pass_name, qboolean before_pass);

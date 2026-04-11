@@ -95,7 +95,6 @@ static const iw_renderer_plugin_pipeline_services_t s_plugin_pipeline_services =
 
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
 cvar_t r_backend_api = { "r_backend_api", "gl", CVAR_ARCHIVE };
-cvar_t r_backend_legacy_fallbacks = { "r_backend_legacy_fallbacks", "1", CVAR_ARCHIVE };
 
 /*
 ================
@@ -148,6 +147,35 @@ static qboolean R_Backend_ValidateContract (const IRenderBackend *backend, qbool
 				backend->name ? backend->name : "<unnamed>");
 		}
 		SDL_assert (!"Renderer backend contract violation");
+		return false;
+	}
+
+	if (!backend->has_required_pass_callbacks
+		|| !backend->has_required_pass_callbacks ())
+	{
+		if (emit_warning)
+		{
+			Con_Warning ("Renderer backend '%s' does not advertise required pass callback support.\n",
+				backend->name ? backend->name : "<unnamed>");
+		}
+		SDL_assert (!"Renderer backend pass callback contract violation");
+		return false;
+	}
+
+	if (!backend->pass_setup_view
+		|| !backend->pass_shadowmaps
+		|| !backend->pass_render_scene
+		|| !backend->pass_warp_resolve
+		|| !backend->pass_postprocess
+		|| !backend->pass_overlay_viewmodel
+		|| !backend->pass_overlay_polyblend)
+	{
+		if (emit_warning)
+		{
+			Con_Warning ("Renderer backend '%s' is missing required render-pass callbacks.\n",
+				backend->name ? backend->name : "<unnamed>");
+		}
+		SDL_assert (!"Renderer backend required pass callback missing");
 		return false;
 	}
 
@@ -933,6 +961,7 @@ static void R_VulkanStub_PassWarpResolve (RenderPassContext *ctx) { (void)ctx; }
 static void R_VulkanStub_PassPostprocess (RenderPassContext *ctx) { (void)ctx; }
 static void R_VulkanStub_PassOverlayViewmodel (RenderPassContext *ctx) { (void)ctx; }
 static void R_VulkanStub_PassOverlayPolyblend (RenderPassContext *ctx) { (void)ctx; }
+static qboolean R_VulkanStub_HasRequiredPassCallbacks (void) { return true; }
 static void R_VulkanStub_BeginPass (const char *name) { (void)name; }
 static void R_VulkanStub_EndPass (void) {}
 static void R_VulkanStub_ValidatePassState (const char *pass_name, qboolean before_pass) { (void)pass_name; (void)before_pass; }
@@ -984,6 +1013,7 @@ static const IRenderBackend s_vulkan_stub_backend = {
 	R_VulkanStub_PassPostprocess,
 	R_VulkanStub_PassOverlayViewmodel,
 	R_VulkanStub_PassOverlayPolyblend,
+	R_VulkanStub_HasRequiredPassCallbacks,
 	R_VulkanStub_BeginPass,
 	R_VulkanStub_EndPass,
 	R_VulkanStub_ValidatePassState,
@@ -1072,6 +1102,7 @@ static const IRenderBackend s_dx12_stub_backend = {
 	R_VulkanStub_PassPostprocess,
 	R_VulkanStub_PassOverlayViewmodel,
 	R_VulkanStub_PassOverlayPolyblend,
+	R_VulkanStub_HasRequiredPassCallbacks,
 	R_VulkanStub_BeginPass,
 	R_VulkanStub_EndPass,
 	R_VulkanStub_ValidatePassState,
@@ -1278,7 +1309,6 @@ void R_Backend_Init (void)
 	memset (s_missing_resource_warn_frame, 0xff, sizeof (s_missing_resource_warn_frame));
 	Cvar_RegisterVariable (&r_backend);
 	Cvar_RegisterVariable (&r_backend_api);
-	Cvar_RegisterVariable (&r_backend_legacy_fallbacks);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
 	Cvar_SetCallback (&r_backend_api, R_Backend_ApiChanged_f);
 	if (!s_backend_audit_cmd_registered)

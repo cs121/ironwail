@@ -51,6 +51,7 @@ static void REFGL_PassWarpResolve (RenderPassContext *ctx) { const IRenderBacken
 static void REFGL_PassPostprocess (RenderPassContext *ctx) { const IRenderBackend *b = REFGL_Source (); if (b && b->pass_postprocess) b->pass_postprocess (ctx); }
 static void REFGL_PassOverlayViewmodel (RenderPassContext *ctx) { const IRenderBackend *b = REFGL_Source (); if (b && b->pass_overlay_viewmodel) b->pass_overlay_viewmodel (ctx); }
 static void REFGL_PassOverlayPolyblend (RenderPassContext *ctx) { const IRenderBackend *b = REFGL_Source (); if (b && b->pass_overlay_polyblend) b->pass_overlay_polyblend (ctx); }
+static qboolean REFGL_HasRequiredPassCallbacks (void) { const IRenderBackend *b = REFGL_Source (); return (b && b->has_required_pass_callbacks) ? b->has_required_pass_callbacks () : false; }
 static void REFGL_BeginPass (const char *name) { const IRenderBackend *b = REFGL_Source (); if (b && b->begin_pass) b->begin_pass (name); }
 static void REFGL_EndPass (void) { const IRenderBackend *b = REFGL_Source (); if (b && b->end_pass) b->end_pass (); }
 static void REFGL_ValidatePassState (const char *pass_name, qboolean before_pass) { const IRenderBackend *b = REFGL_Source (); if (b && b->validate_pass_state) b->validate_pass_state (pass_name, before_pass); }
@@ -103,6 +104,7 @@ static const IRenderBackend s_ref_gl_backend = {
 	REFGL_PassPostprocess,
 	REFGL_PassOverlayViewmodel,
 	REFGL_PassOverlayPolyblend,
+	REFGL_HasRequiredPassCallbacks,
 	REFGL_BeginPass,
 	REFGL_EndPass,
 	REFGL_ValidatePassState,

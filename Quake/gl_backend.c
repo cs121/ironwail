@@ -5,10 +5,6 @@
 #include "r_framegraph.h"
 #include "renderer_plugin.h"
 
-#ifndef IW_DISABLE_LEGACY_PASS_FALLBACKS
-#define IW_DISABLE_LEGACY_PASS_FALLBACKS 0
-#endif
-
 #ifndef GL_CLIP_DEPTH_MODE
 #define GL_CLIP_DEPTH_MODE 0x935D
 #endif
@@ -150,7 +146,6 @@ static void GLBackend_DetectCaps (void)
 	s_gl_backend_caps.supports_draw_indirect = (GL_DrawElementsIndirectFunc != NULL);
 	s_gl_backend_caps.supports_multi_draw_indirect = (GL_MultiDrawElementsIndirectFunc != NULL);
 	s_gl_backend_caps.supports_memory_barrier = (GL_MemoryBarrierFunc != NULL);
-	s_gl_backend_caps.supports_legacy_pass_fallbacks = IW_DISABLE_LEGACY_PASS_FALLBACKS ? false : true;
 	s_gl_backend_caps.supports_bindless = gl_bindless_able;
 	s_gl_backend_caps.shader_model = 50u;
 	s_gl_backend_caps.max_msaa_samples = (framebufs.max_samples > 0) ? (unsigned)framebufs.max_samples : 1u;
@@ -799,6 +794,11 @@ static void GLBackend_PassOverlayPolyblend (RenderPassContext *ctx)
 	V_PolyBlend ();
 }
 
+static qboolean GLBackend_HasRequiredPassCallbacks (void)
+{
+	return true;
+}
+
 static qboolean GLBackend_Init (void)
 {
 	return true;
@@ -868,6 +868,7 @@ static const IRenderBackend s_gl_backend = {
 	GLBackend_PassPostProcess,
 	GLBackend_PassOverlayViewmodel,
 	GLBackend_PassOverlayPolyblend,
+	GLBackend_HasRequiredPassCallbacks,
 	GLBackend_BeginPass,
 	GLBackend_EndPass,
 	GLBackend_ValidatePassState,
