@@ -1,85 +1,78 @@
 #include "renderer_plugin.h"
 
-static const IRenderBackend *s_vk_source = NULL;
+static const RenderBackendCaps s_vk_caps = {
+	false, /* supports_timestamps */
+	false, /* supports_compute */
+	false, /* supports_draw_instanced */
+	false, /* supports_draw_indirect */
+	false, /* supports_multi_draw_indirect */
+	false, /* supports_memory_barrier */
+	false, /* supports_legacy_pass_fallbacks */
+	0u,    /* msaa_mode_mask */
+	1u,    /* max_msaa_samples */
+	0u,    /* shader_model */
+	false, /* supports_bindless */
+	0u,    /* max_textures */
+	0u,    /* max_samplers */
+	0u,    /* max_ubos */
+	0u     /* max_ssbos */
+};
 
-static const IRenderBackend *VK_Source (void)
-{
-	return s_vk_source;
-}
-
-static qboolean VK_Init (void)
-{
-	const IRenderBackend *b = VK_Source ();
-	if (!b || !b->init)
-		return false;
-	return b->init ();
-}
-
-static void VK_Shutdown (void)
-{
-	const IRenderBackend *b = VK_Source ();
-	if (b && b->shutdown)
-		b->shutdown ();
-}
-
-static void VK_OnResize (int width, int height)
-{
-	const IRenderBackend *b = VK_Source ();
-	if (b && b->on_resize)
-		b->on_resize (width, height);
-}
+static qboolean VK_Init (void) { return false; }
+static void VK_Shutdown (void) {}
+static void VK_OnResize (int width, int height) { (void)width; (void)height; }
 
 static qboolean VK_CanActivate (qboolean runtime_switch)
 {
 	(void)runtime_switch;
-	return VK_Source () != NULL;
+	return false;
 }
 
-static void VK_BeginFrame (void) { const IRenderBackend *b = VK_Source (); if (b && b->begin_frame) b->begin_frame (); }
-static void VK_EndFrame (void) { const IRenderBackend *b = VK_Source (); if (b && b->end_frame) b->end_frame (); }
-static void VK_Present (void) { const IRenderBackend *b = VK_Source (); if (b && b->present) b->present (); }
-static void VK_BeginPassEx (const RenderBackendPassDesc *pass_desc) { const IRenderBackend *b = VK_Source (); if (b && b->begin_pass_ex) b->begin_pass_ex (pass_desc); }
-static void VK_EndPassEx (void) { const IRenderBackend *b = VK_Source (); if (b && b->end_pass_ex) b->end_pass_ex (); }
-static void VK_ResourceBarrier (const RenderGraphResourceHandle *resources, const RenderBackendResourceBarrier *barriers, unsigned count) { const IRenderBackend *b = VK_Source (); if (b && b->resource_barrier) b->resource_barrier (resources, barriers, count); }
-static void VK_BindPipeline (const RenderBackendPipelineDesc *pipeline) { const IRenderBackend *b = VK_Source (); if (b && b->bind_pipeline) b->bind_pipeline (pipeline); }
-static void VK_SetDynamicState (const RenderBackendDynamicState *dynamic_state) { const IRenderBackend *b = VK_Source (); if (b && b->set_dynamic_state) b->set_dynamic_state (dynamic_state); }
-static void VK_BindDescriptors (const RenderBackendDescriptorBinding *bindings, unsigned count) { const IRenderBackend *b = VK_Source (); if (b && b->bind_descriptors) b->bind_descriptors (bindings, count); }
-static void VK_PassSetupView (RenderPassContext *ctx) { const IRenderBackend *b = VK_Source (); if (b && b->pass_setup_view) b->pass_setup_view (ctx); }
-static void VK_PassShadowmaps (RenderPassContext *ctx) { const IRenderBackend *b = VK_Source (); if (b && b->pass_shadowmaps) b->pass_shadowmaps (ctx); }
-static void VK_PassRenderScene (RenderPassContext *ctx) { const IRenderBackend *b = VK_Source (); if (b && b->pass_render_scene) b->pass_render_scene (ctx); }
-static void VK_PassWarpResolve (RenderPassContext *ctx) { const IRenderBackend *b = VK_Source (); if (b && b->pass_warp_resolve) b->pass_warp_resolve (ctx); }
-static void VK_PassPostprocess (RenderPassContext *ctx) { const IRenderBackend *b = VK_Source (); if (b && b->pass_postprocess) b->pass_postprocess (ctx); }
-static void VK_PassOverlayViewmodel (RenderPassContext *ctx) { const IRenderBackend *b = VK_Source (); if (b && b->pass_overlay_viewmodel) b->pass_overlay_viewmodel (ctx); }
-static void VK_PassOverlayPolyblend (RenderPassContext *ctx) { const IRenderBackend *b = VK_Source (); if (b && b->pass_overlay_polyblend) b->pass_overlay_polyblend (ctx); }
-static void VK_BeginPass (const char *name) { const IRenderBackend *b = VK_Source (); if (b && b->begin_pass) b->begin_pass (name); }
-static void VK_EndPass (void) { const IRenderBackend *b = VK_Source (); if (b && b->end_pass) b->end_pass (); }
-static void VK_ValidatePassState (const char *pass_name, qboolean before_pass) { const IRenderBackend *b = VK_Source (); if (b && b->validate_pass_state) b->validate_pass_state (pass_name, before_pass); }
-static void VK_BeginTimer (int pass_id) { const IRenderBackend *b = VK_Source (); if (b && b->begin_timer) b->begin_timer (pass_id); }
-static void VK_EndTimer (int pass_id) { const IRenderBackend *b = VK_Source (); if (b && b->end_timer) b->end_timer (pass_id); }
-static void VK_ResolveTimers (void) { const IRenderBackend *b = VK_Source (); if (b && b->resolve_timers) b->resolve_timers (); }
-static qboolean VK_ConsumeTimerSample (int pass_id, double *out_gpu_ms) { const IRenderBackend *b = VK_Source (); return (b && b->consume_timer_sample) ? b->consume_timer_sample (pass_id, out_gpu_ms) : false; }
-static const RenderBackendCaps *VK_GetCaps (void) { const IRenderBackend *b = VK_Source (); return (b && b->get_caps) ? b->get_caps () : NULL; }
-static unsigned VK_ResolveResourceId (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource) { const IRenderBackend *b = VK_Source (); return (b && b->resolve_resource_id) ? b->resolve_resource_id (resources, resource) : 0u; }
-static qboolean VK_IsResourceValid (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource) { const IRenderBackend *b = VK_Source (); return (b && b->is_resource_valid) ? b->is_resource_valid (resources, resource) : false; }
-static void VK_BindRenderTarget (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource, qboolean backbuffer) { const IRenderBackend *b = VK_Source (); if (b && b->bind_render_target) b->bind_render_target (resources, resource, backbuffer); }
-static void VK_SetViewport (int x, int y, int width, int height) { const IRenderBackend *b = VK_Source (); if (b && b->set_viewport) b->set_viewport (x, y, width, height); }
-static void VK_SetScissor (qboolean enabled, int x, int y, int width, int height) { const IRenderBackend *b = VK_Source (); if (b && b->set_scissor) b->set_scissor (enabled, x, y, width, height); }
-static void VK_SetPipelineState (unsigned state_bits) { const IRenderBackend *b = VK_Source (); if (b && b->set_pipeline_state) b->set_pipeline_state (state_bits); }
-static void VK_Draw (render_backend_primitive_t primitive, int first, int count) { const IRenderBackend *b = VK_Source (); if (b && b->draw) b->draw (primitive, first, count); }
-static void VK_DrawIndexed (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes) { const IRenderBackend *b = VK_Source (); if (b && b->draw_indexed) b->draw_indexed (primitive, index_type, count, index_offset_bytes); }
-static void VK_DrawInstanced (render_backend_primitive_t primitive, int first, int count, int instance_count) { const IRenderBackend *b = VK_Source (); if (b && b->draw_instanced) b->draw_instanced (primitive, first, count, instance_count); }
-static void VK_DrawIndexedInstanced (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes, int instance_count) { const IRenderBackend *b = VK_Source (); if (b && b->draw_indexed_instanced) b->draw_indexed_instanced (primitive, index_type, count, index_offset_bytes, instance_count); }
-static void VK_DrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes) { const IRenderBackend *b = VK_Source (); if (b && b->draw_indexed_indirect) b->draw_indexed_indirect (primitive, index_type, indirect_offset_bytes); }
-static void VK_MultiDrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes, int draw_count, int stride_bytes) { const IRenderBackend *b = VK_Source (); if (b && b->multi_draw_indexed_indirect) b->multi_draw_indexed_indirect (primitive, index_type, indirect_offset_bytes, draw_count, stride_bytes); }
-static void VK_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z) { const IRenderBackend *b = VK_Source (); if (b && b->dispatch) b->dispatch (group_x, group_y, group_z); }
-static void VK_MemoryBarrier (unsigned barrier_bits) { const IRenderBackend *b = VK_Source (); if (b && b->memory_barrier) b->memory_barrier (barrier_bits); }
-static void VK_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst) { const IRenderBackend *b = VK_Source (); if (b && b->set_blend_factors) b->set_blend_factors (src, dst); }
-static void VK_SetDepthFunc (render_backend_depth_func_t depth_func) { const IRenderBackend *b = VK_Source (); if (b && b->set_depth_func) b->set_depth_func (depth_func); }
-static unsigned VK_CreatePostFXLUTTexture (void) { const IRenderBackend *b = VK_Source (); return (b && b->create_postfx_lut_texture) ? b->create_postfx_lut_texture () : 0u; }
-static void VK_ConfigurePostFXLUTTexture (unsigned texture_id) { const IRenderBackend *b = VK_Source (); if (b && b->configure_postfx_lut_texture) b->configure_postfx_lut_texture (texture_id); }
-static void VK_Finish (void) { const IRenderBackend *b = VK_Source (); if (b && b->finish) b->finish (); }
-static void VK_PopulateFramegraphResources (RenderGraphResourceHandle *out_handles) { const IRenderBackend *b = VK_Source (); if (b && b->populate_framegraph_resources) b->populate_framegraph_resources (out_handles); }
-static int VK_GetSceneSampleCount (void) { const IRenderBackend *b = VK_Source (); return (b && b->get_scene_sample_count) ? b->get_scene_sample_count () : 1; }
+static void VK_BeginFrame (void) {}
+static void VK_EndFrame (void) {}
+static void VK_Present (void) {}
+static void VK_BeginPassEx (const RenderBackendPassDesc *pass_desc) { (void)pass_desc; }
+static void VK_EndPassEx (void) {}
+static void VK_ResourceBarrier (const RenderGraphResourceHandle *resources, const RenderBackendResourceBarrier *barriers, unsigned count) { (void)resources; (void)barriers; (void)count; }
+static void VK_BindPipeline (const RenderBackendPipelineDesc *pipeline) { (void)pipeline; }
+static void VK_SetDynamicState (const RenderBackendDynamicState *dynamic_state) { (void)dynamic_state; }
+static void VK_BindDescriptors (const RenderBackendDescriptorBinding *bindings, unsigned count) { (void)bindings; (void)count; }
+static void VK_PassSetupView (RenderPassContext *ctx) { (void)ctx; }
+static void VK_PassShadowmaps (RenderPassContext *ctx) { (void)ctx; }
+static void VK_PassRenderScene (RenderPassContext *ctx) { (void)ctx; }
+static void VK_PassWarpResolve (RenderPassContext *ctx) { (void)ctx; }
+static void VK_PassPostprocess (RenderPassContext *ctx) { (void)ctx; }
+static void VK_PassOverlayViewmodel (RenderPassContext *ctx) { (void)ctx; }
+static void VK_PassOverlayPolyblend (RenderPassContext *ctx) { (void)ctx; }
+static void VK_BeginPass (const char *name) { (void)name; }
+static void VK_EndPass (void) {}
+static void VK_ValidatePassState (const char *pass_name, qboolean before_pass) { (void)pass_name; (void)before_pass; }
+static void VK_BeginTimer (int pass_id) { (void)pass_id; }
+static void VK_EndTimer (int pass_id) { (void)pass_id; }
+static void VK_ResolveTimers (void) {}
+static qboolean VK_ConsumeTimerSample (int pass_id, double *out_gpu_ms) { (void)pass_id; (void)out_gpu_ms; return false; }
+static const RenderBackendCaps *VK_GetCaps (void) { return &s_vk_caps; }
+static unsigned VK_ResolveResourceId (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource) { (void)resources; (void)resource; return 0u; }
+static qboolean VK_IsResourceValid (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource) { (void)resources; (void)resource; return false; }
+static void VK_BindRenderTarget (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource, qboolean backbuffer) { (void)resources; (void)resource; (void)backbuffer; }
+static void VK_SetViewport (int x, int y, int width, int height) { (void)x; (void)y; (void)width; (void)height; }
+static void VK_SetScissor (qboolean enabled, int x, int y, int width, int height) { (void)enabled; (void)x; (void)y; (void)width; (void)height; }
+static void VK_SetPipelineState (unsigned state_bits) { (void)state_bits; }
+static void VK_Draw (render_backend_primitive_t primitive, int first, int count) { (void)primitive; (void)first; (void)count; }
+static void VK_DrawIndexed (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes) { (void)primitive; (void)index_type; (void)count; (void)index_offset_bytes; }
+static void VK_DrawInstanced (render_backend_primitive_t primitive, int first, int count, int instance_count) { (void)primitive; (void)first; (void)count; (void)instance_count; }
+static void VK_DrawIndexedInstanced (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes, int instance_count) { (void)primitive; (void)index_type; (void)count; (void)index_offset_bytes; (void)instance_count; }
+static void VK_DrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes) { (void)primitive; (void)index_type; (void)indirect_offset_bytes; }
+static void VK_MultiDrawIndexedIndirect (render_backend_primitive_t primitive, render_backend_index_type_t index_type, intptr_t indirect_offset_bytes, int draw_count, int stride_bytes) { (void)primitive; (void)index_type; (void)indirect_offset_bytes; (void)draw_count; (void)stride_bytes; }
+static void VK_Dispatch (unsigned group_x, unsigned group_y, unsigned group_z) { (void)group_x; (void)group_y; (void)group_z; }
+static void VK_MemoryBarrier (unsigned barrier_bits) { (void)barrier_bits; }
+static void VK_SetBlendFactors (render_blend_factor_t src, render_blend_factor_t dst) { (void)src; (void)dst; }
+static void VK_SetDepthFunc (render_backend_depth_func_t depth_func) { (void)depth_func; }
+static unsigned VK_CreatePostFXLUTTexture (void) { return 0u; }
+static void VK_ConfigurePostFXLUTTexture (unsigned texture_id) { (void)texture_id; }
+static void VK_Finish (void) {}
+static void VK_PopulateFramegraphResources (RenderGraphResourceHandle *out_handles) { if (out_handles) memset (out_handles, 0, sizeof (*out_handles)); }
+static int VK_GetSceneSampleCount (void) { return 1; }
 
 static const IRenderBackend s_ref_vk_backend = {
 	"Vulkan",
@@ -138,10 +131,9 @@ static qboolean IW_RendererRefVK_Register (const iw_renderer_plugin_host_api_t *
 {
 	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V2_SIZE)
 		return false;
-	if (!host_api->register_backend || !host_api->builtin_opengl_backend)
+	if (!host_api->register_backend)
 		return false;
 
-	s_vk_source = host_api->builtin_opengl_backend;
 	return host_api->register_backend (&s_ref_vk_backend);
 }
 
