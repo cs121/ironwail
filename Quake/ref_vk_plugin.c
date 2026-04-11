@@ -71,6 +71,9 @@ static void VK_SetDepthFunc (render_backend_depth_func_t depth_func) { (void)dep
 static unsigned VK_CreatePostFXLUTTexture (void) { return 0u; }
 static void VK_ConfigurePostFXLUTTexture (unsigned texture_id) { (void)texture_id; }
 static void VK_Finish (void) {}
+static qboolean VK_QuerySurfaceMetrics (RenderBackendSurfaceMetrics *out_metrics) { (void)out_metrics; return false; }
+static qboolean VK_NeedsSceneEffects (void) { return false; }
+static qboolean VK_NeedsPostprocess (void) { return false; }
 static void VK_PopulateFramegraphResources (RenderGraphResourceHandle *out_handles) { if (out_handles) memset (out_handles, 0, sizeof (*out_handles)); }
 static int VK_GetSceneSampleCount (void) { return 1; }
 
@@ -124,6 +127,9 @@ static const IRenderBackend s_ref_vk_backend = {
 	VK_CreatePostFXLUTTexture,
 	VK_ConfigurePostFXLUTTexture,
 	VK_Finish,
+	VK_QuerySurfaceMetrics,
+	VK_NeedsSceneEffects,
+	VK_NeedsPostprocess,
 	VK_PopulateFramegraphResources,
 	VK_GetSceneSampleCount
 };

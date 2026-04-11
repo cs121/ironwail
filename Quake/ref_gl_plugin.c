@@ -79,6 +79,9 @@ static void REFGL_SetDepthFunc (render_backend_depth_func_t depth_func) { const 
 static unsigned REFGL_CreatePostFXLUTTexture (void) { const IRenderBackend *b = REFGL_Source (); return (b && b->create_postfx_lut_texture) ? b->create_postfx_lut_texture () : 0u; }
 static void REFGL_ConfigurePostFXLUTTexture (unsigned texture_id) { const IRenderBackend *b = REFGL_Source (); if (b && b->configure_postfx_lut_texture) b->configure_postfx_lut_texture (texture_id); }
 static void REFGL_Finish (void) { const IRenderBackend *b = REFGL_Source (); if (b && b->finish) b->finish (); }
+static qboolean REFGL_QuerySurfaceMetrics (RenderBackendSurfaceMetrics *out_metrics) { const IRenderBackend *b = REFGL_Source (); return (b && b->query_surface_metrics) ? b->query_surface_metrics (out_metrics) : false; }
+static qboolean REFGL_NeedsSceneEffects (void) { const IRenderBackend *b = REFGL_Source (); return (b && b->needs_scene_effects) ? b->needs_scene_effects () : false; }
+static qboolean REFGL_NeedsPostprocess (void) { const IRenderBackend *b = REFGL_Source (); return (b && b->needs_postprocess) ? b->needs_postprocess () : false; }
 static void REFGL_PopulateFramegraphResources (RenderGraphResourceHandle *out_handles) { const IRenderBackend *b = REFGL_Source (); if (b && b->populate_framegraph_resources) b->populate_framegraph_resources (out_handles); }
 static int REFGL_GetSceneSampleCount (void) { const IRenderBackend *b = REFGL_Source (); return (b && b->get_scene_sample_count) ? b->get_scene_sample_count () : 1; }
 
@@ -132,6 +135,9 @@ static const IRenderBackend s_ref_gl_backend = {
 	REFGL_CreatePostFXLUTTexture,
 	REFGL_ConfigurePostFXLUTTexture,
 	REFGL_Finish,
+	REFGL_QuerySurfaceMetrics,
+	REFGL_NeedsSceneEffects,
+	REFGL_NeedsPostprocess,
 	REFGL_PopulateFramegraphResources,
 	REFGL_GetSceneSampleCount
 };

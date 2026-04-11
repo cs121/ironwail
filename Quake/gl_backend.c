@@ -123,6 +123,35 @@ static int GLBackend_GetSceneSampleCount (void)
 	return framebufs.scene.samples;
 }
 
+static qboolean GLBackend_QuerySurfaceMetrics (RenderBackendSurfaceMetrics *out_metrics)
+{
+	if (!out_metrics)
+		return false;
+
+	memset (out_metrics, 0, sizeof (*out_metrics));
+	out_metrics->surface_x = glx;
+	out_metrics->surface_y = gly;
+	out_metrics->surface_width = (glwidth > 0) ? glwidth : q_max (1, vid.width);
+	out_metrics->surface_height = (glheight > 0) ? glheight : q_max (1, vid.height);
+	out_metrics->view_x = out_metrics->surface_x + r_refdef.vrect.x;
+	out_metrics->view_y = out_metrics->surface_y + out_metrics->surface_height - r_refdef.vrect.y - r_refdef.vrect.height;
+	out_metrics->view_width = q_max (1, r_refdef.vrect.width);
+	out_metrics->view_height = q_max (1, r_refdef.vrect.height);
+	out_metrics->scene_width = q_max (1, R_GetSceneRenderWidth ());
+	out_metrics->scene_height = q_max (1, R_GetSceneRenderHeight ());
+	return true;
+}
+
+static qboolean GLBackend_NeedsSceneEffects (void)
+{
+	return GL_NeedsSceneEffects ();
+}
+
+static qboolean GLBackend_NeedsPostprocess (void)
+{
+	return GL_NeedsPostprocess ();
+}
+
 static qboolean GLBackend_HasTimestampQueries (void)
 {
 	return (GL_GenQueriesFunc && GL_DeleteQueriesFunc
@@ -896,6 +925,9 @@ static const IRenderBackend s_gl_backend = {
 	GLBackend_CreatePostFXLUTTexture,
 	GLBackend_ConfigurePostFXLUTTexture,
 	GLBackend_Finish,
+	GLBackend_QuerySurfaceMetrics,
+	GLBackend_NeedsSceneEffects,
+	GLBackend_NeedsPostprocess,
 	GLBackend_PopulateFrameGraphResources,
 	GLBackend_GetSceneSampleCount
 };

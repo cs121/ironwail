@@ -239,6 +239,20 @@ typedef struct render_backend_draw_packet_s
 	unsigned flags;
 } RenderBackendDrawPacket;
 
+typedef struct render_backend_surface_metrics_s
+{
+	int surface_x;
+	int surface_y;
+	int surface_width;
+	int surface_height;
+	int view_x;
+	int view_y;
+	int view_width;
+	int view_height;
+	int scene_width;
+	int scene_height;
+} RenderBackendSurfaceMetrics;
+
 typedef struct render_pass_context_s RenderPassContext;
 
 typedef struct i_render_backend_s
@@ -292,6 +306,9 @@ typedef struct i_render_backend_s
 	unsigned (*create_postfx_lut_texture)(void);
 	void (*configure_postfx_lut_texture)(unsigned texture_id);
 	void (*finish)(void);
+	qboolean (*query_surface_metrics)(RenderBackendSurfaceMetrics *out_metrics);
+	qboolean (*needs_scene_effects)(void);
+	qboolean (*needs_postprocess)(void);
 	void (*populate_framegraph_resources)(RenderGraphResourceHandle *out_handles);
 	int (*get_scene_sample_count)(void);
 } IRenderBackend;
