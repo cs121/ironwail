@@ -19,6 +19,10 @@ set "DST_ID1_ASSET_ROOT=%DST_DIR%\id1"
 REM Release-EXE Pfad relativ
 set "SRC_EXE=Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exe"
 set "DST_EXE=%DST_DIR%\ironwail.exe"
+set "SRC_BUILD_BIN=Windows\VisualStudio\Build-ironwail\bin\x64\Release"
+set "SRC_REF_GL=%SRC_BUILD_BIN%\ref_gl.dll"
+set "SRC_REF_VK=%SRC_BUILD_BIN%\ref_vk.dll"
+set "SRC_REF_DX12=%SRC_BUILD_BIN%\ref_dx12.dll"
 
 REM (optional) DLL-Pfade relativ
 set "SRC_BASE=Windows\VisualStudio"
@@ -136,6 +140,15 @@ if exist "%SRC_SDL2%\SDL2.dll" copy /Y "%SRC_SDL2%\SDL2.dll" "%DST_DIR%" >nul
 if exist "%SRC_CURL%\libcurl.dll" copy /Y "%SRC_CURL%\libcurl.dll" "%DST_DIR%" >nul
 if exist "%SRC_ZLIB%\zlib1.dll" copy /Y "%SRC_ZLIB%\zlib1.dll" "%DST_DIR%" >nul
 
+REM ========== Renderer-Plugins (pflicht) ==========
+call :log "[4a/6] Kopiere Renderer-Plugin-DLLs..."
+call :copy_required_file "%SRC_REF_GL%" "%DST_DIR%\ref_gl.dll" "ref_gl.dll"
+if errorlevel 1 exit /b !errorlevel!
+call :copy_required_file "%SRC_REF_VK%" "%DST_DIR%\ref_vk.dll" "ref_vk.dll"
+if errorlevel 1 exit /b !errorlevel!
+call :copy_required_file "%SRC_REF_DX12%" "%DST_DIR%\ref_dx12.dll" "ref_dx12.dll"
+if errorlevel 1 exit /b !errorlevel!
+
 REM ========== Runtime Assets ==========
 call :log "[5/6] Kopiere id1-Assets..."
 for %%D in (%ID1_ASSET_DIRS%) do (
@@ -175,6 +188,19 @@ exit /b 0
 if not exist "%~1" (
   call :log "[WARN] Asset-Datei fehlt, ueberspringe: %~1"
   exit /b 0
+)
+call :log "[INFO] Kopiere %~3..."
+copy /Y "%~1" "%~2" >nul
+if errorlevel 1 (
+  call :log "[ERROR] Kopieren von %~3 fehlgeschlagen."
+  exit /b 5
+)
+exit /b 0
+
+:copy_required_file
+if not exist "%~1" (
+  call :log "[ERROR] Pflichtdatei fehlt: %~1"
+  exit /b 6
 )
 call :log "[INFO] Kopiere %~3..."
 copy /Y "%~1" "%~2" >nul

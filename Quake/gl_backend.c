@@ -816,7 +816,8 @@ static void GLBackend_OnResize (int width, int height)
 
 static qboolean GLBackend_CanActivate (qboolean runtime_switch)
 {
-	return !runtime_switch;
+	(void)runtime_switch;
+	return true;
 }
 
 static void GLBackend_BeginFrame (void)

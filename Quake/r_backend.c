@@ -9,6 +9,19 @@ enum
 };
 
 static const char *s_renderer_plugin_prefix = "ironwail_renderer_";
+#ifdef _WIN32
+static const char *s_ref_gl_plugin_filename = "ref_gl.dll";
+static const char *s_ref_vk_plugin_filename = "ref_vk.dll";
+static const char *s_ref_dx12_plugin_filename = "ref_dx12.dll";
+#elif defined(__APPLE__)
+static const char *s_ref_gl_plugin_filename = "ref_gl.dylib";
+static const char *s_ref_vk_plugin_filename = "ref_vk.dylib";
+static const char *s_ref_dx12_plugin_filename = "ref_dx12.dylib";
+#else
+static const char *s_ref_gl_plugin_filename = "ref_gl.so";
+static const char *s_ref_vk_plugin_filename = "ref_vk.so";
+static const char *s_ref_dx12_plugin_filename = "ref_dx12.so";
+#endif
 
 static const IRenderBackend *s_registered_backends[R_BACKEND_MAX_REGISTERED];
 static int s_registered_backend_count = 0;
@@ -16,11 +29,13 @@ static const IRenderBackend *s_active_backend = NULL;
 static RenderBackendCaps s_active_backend_caps;
 static qboolean s_backend_initialized = false;
 static qboolean s_applying_backend_cvar = false;
+static qboolean s_applying_backend_api_cvar = false;
 static qboolean s_backend_active = false;
 static qboolean s_backend_audit_cmd_registered = false;
 static qboolean s_backend_vulkan_status_cmd_registered = false;
 static qboolean s_backend_dx12_status_cmd_registered = false;
 static qboolean s_warned_deprecated_builtin_register = false;
+static qboolean s_warned_vulkan_wrapper_runtime = false;
 static int s_missing_resource_warn_frame[R_BACKEND_RESOURCE_SLOT_COUNT];
 static void *s_plugin_libs[R_BACKEND_MAX_PLUGIN_LIBS];
 static int s_plugin_lib_count = 0;
@@ -28,6 +43,7 @@ static qboolean s_command_encoder_recording = false;
 static int s_command_encoder_frame = -1;
 
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
+cvar_t r_backend_api = { "r_backend_api", "gl", CVAR_ARCHIVE };
 cvar_t r_backend_legacy_fallbacks = { "r_backend_legacy_fallbacks", "1", CVAR_ARCHIVE };
 
 /*
@@ -174,17 +190,20 @@ static void R_Backend_ValidateDescriptorBindings (const RenderBackendDescriptorB
 	}
 }
 
+static const char *R_Backend_ApiToCanonicalName (const char *api_name);
+
 static const IRenderBackend *R_Backend_FindByName (const char *backend_name)
 {
 	int i;
+	const char *resolved_name = R_Backend_ApiToCanonicalName (backend_name);
 
-	if (!backend_name || !backend_name[0])
+	if (!resolved_name || !resolved_name[0])
 		return NULL;
 
 	for (i = 0; i < s_registered_backend_count; ++i)
 	{
 		const IRenderBackend *backend = s_registered_backends[i];
-		if (backend && backend->name && !q_strcasecmp (backend->name, backend_name))
+		if (backend && backend->name && !q_strcasecmp (backend->name, resolved_name))
 			return backend;
 	}
 
@@ -194,6 +213,37 @@ static const IRenderBackend *R_Backend_FindByName (const char *backend_name)
 static qboolean R_Backend_HasRegisteredName (const char *backend_name)
 {
 	return R_Backend_FindByName (backend_name) != NULL;
+}
+
+static const char *R_Backend_ApiToCanonicalName (const char *api_name);
+static const char *R_Backend_ApiToCanonicalName (const char *api_name)
+{
+	if (!api_name || !api_name[0])
+		return NULL;
+
+	if (!q_strcasecmp (api_name, "gl") || !q_strcasecmp (api_name, "opengl"))
+		return "OpenGL";
+	if (!q_strcasecmp (api_name, "vk") || !q_strcasecmp (api_name, "vulkan"))
+		return "Vulkan";
+	if (!q_strcasecmp (api_name, "dx12") || !q_strcasecmp (api_name, "d3d12"))
+		return "DX12";
+
+	return api_name;
+}
+
+static const char *R_Backend_CanonicalNameToApi (const char *backend_name)
+{
+	if (!backend_name || !backend_name[0])
+		return "gl";
+
+	if (!q_strcasecmp (backend_name, "OpenGL"))
+		return "gl";
+	if (!q_strcasecmp (backend_name, "Vulkan"))
+		return "vulkan";
+	if (!q_strcasecmp (backend_name, "DX12"))
+		return "dx12";
+
+	return backend_name;
 }
 
 static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend);
@@ -347,7 +397,7 @@ static qboolean R_Backend_LoadPluginFromPath (const char *path)
 		return false;
 	}
 
-	Con_DPrintf ("Renderer plugin loaded: %s (%s)\n", plugin_name, path);
+	Con_Printf ("Renderer plugin loaded: %s (%s)\n", plugin_name, path);
 	R_Backend_RecordPluginLibrary (lib);
 	return true;
 }
@@ -364,6 +414,7 @@ static void R_Backend_LoadRendererPlugins (void)
 		R_Backend_RegisterBuiltinPluginOpenGL
 	};
 	const char *search_dirs[3];
+	int search_dir_count = 0;
 	const char *ext_find;
 	int i;
 
@@ -375,11 +426,15 @@ static void R_Backend_LoadRendererPlugins (void)
 	ext_find = "so";
 #endif
 
-	search_dirs[0] = (host_parms && host_parms->exedir && host_parms->exedir[0]) ? host_parms->exedir : NULL;
-	search_dirs[1] = (host_parms && host_parms->basedir && host_parms->basedir[0]) ? host_parms->basedir : NULL;
-	search_dirs[2] = ".";
+	search_dirs[search_dir_count++] = (host_parms && host_parms->exedir && host_parms->exedir[0]) ? host_parms->exedir : NULL;
+	search_dirs[search_dir_count++] = (host_parms && host_parms->basedir && host_parms->basedir[0]) ? host_parms->basedir : NULL;
+	if ((!search_dirs[0] || !search_dirs[0][0])
+		&& (!search_dirs[1] || !search_dirs[1][0]))
+	{
+		search_dirs[search_dir_count++] = ".";
+	}
 
-	for (i = 0; i < (int)Q_COUNTOF (search_dirs); ++i)
+	for (i = 0; i < search_dir_count; ++i)
 	{
 		const char *dir = search_dirs[i];
 		if (!dir || !dir[0])
@@ -393,7 +448,10 @@ static void R_Backend_LoadRendererPlugins (void)
 
 			if (find->attribs & FA_DIRECTORY)
 				continue;
-			if (q_strncasecmp (find->name, s_renderer_plugin_prefix, strlen (s_renderer_plugin_prefix)) != 0)
+			if (q_strncasecmp (find->name, s_renderer_plugin_prefix, strlen (s_renderer_plugin_prefix)) != 0
+				&& q_strcasecmp (find->name, s_ref_gl_plugin_filename) != 0
+				&& q_strcasecmp (find->name, s_ref_vk_plugin_filename) != 0
+				&& q_strcasecmp (find->name, s_ref_dx12_plugin_filename) != 0)
 				continue;
 			if ((size_t) q_snprintf (plugin_path, sizeof (plugin_path), "%s/%s", dir, find->name) >= sizeof (plugin_path))
 				continue;
@@ -412,12 +470,19 @@ static void R_Backend_LoadRendererPlugins (void)
 
 static void R_Backend_ApplySelectionToCvar (void)
 {
+	const char *api_name;
+
 	if (!s_active_backend || !s_active_backend->name)
 		return;
 
 	s_applying_backend_cvar = true;
 	Cvar_SetQuick (&r_backend, s_active_backend->name);
 	s_applying_backend_cvar = false;
+
+	api_name = R_Backend_CanonicalNameToApi (s_active_backend->name);
+	s_applying_backend_api_cvar = true;
+	Cvar_SetQuick (&r_backend_api, api_name);
+	s_applying_backend_api_cvar = false;
 }
 
 static void R_Backend_Changed_f (cvar_t *var)
@@ -428,6 +493,23 @@ static void R_Backend_Changed_f (cvar_t *var)
 	if (!R_Backend_Select (var->string))
 	{
 		Con_Warning ("Renderer backend change to '%s' rejected; keeping '%s'\n",
+			var->string,
+			(s_active_backend && s_active_backend->name) ? s_active_backend->name : "<none>");
+		R_Backend_ApplySelectionToCvar ();
+	}
+}
+
+static void R_Backend_ApiChanged_f (cvar_t *var)
+{
+	const char *canonical_name;
+
+	if (!var || s_applying_backend_api_cvar)
+		return;
+
+	canonical_name = R_Backend_ApiToCanonicalName (var->string);
+	if (!R_Backend_Select (canonical_name))
+	{
+		Con_Warning ("Renderer backend API change to '%s' rejected; keeping '%s'\n",
 			var->string,
 			(s_active_backend && s_active_backend->name) ? s_active_backend->name : "<none>");
 		R_Backend_ApplySelectionToCvar ();
@@ -553,11 +635,37 @@ static const IRenderBackend s_vulkan_stub_backend = {
 
 static void R_Backend_VulkanStatus_f (void)
 {
+	const IRenderBackend *backend = R_Backend_FindByName ("Vulkan");
+	qboolean is_stub = (backend == &s_vulkan_stub_backend);
+	qboolean can_start = false;
+	qboolean can_runtime = false;
+
+	if (backend && backend->can_activate)
+	{
+		can_start = backend->can_activate (false);
+		can_runtime = backend->can_activate (true);
+	}
+
 	Con_Printf ("Vulkan backend status:\n");
-	Con_Printf ("  registration: present as stub backend ('Vulkan').\n");
-	Con_Printf ("  activation gate: blocked (can_activate=false).\n");
-	Con_Printf ("  implemented callbacks: contract no-op stubs only.\n");
-	Con_Printf ("  remaining work: swapchain + command buffers + pass graph execution + resource lifetime + descriptor/pipeline cache.\n");
+	if (!backend)
+	{
+		Con_Printf ("  registration: missing (no backend named 'Vulkan' registered).\n");
+		return;
+	}
+
+	Con_Printf ("  registration: %s\n", is_stub ? "stub backend registered" : "plugin/backend override registered");
+	Con_Printf ("  activation gate: startup=%s runtime=%s\n", can_start ? "allowed" : "blocked", can_runtime ? "allowed" : "blocked");
+	Con_Printf ("  active backend: %s\n", (s_active_backend && s_active_backend->name) ? s_active_backend->name : "<none>");
+	if (is_stub)
+	{
+		Con_Printf ("  implemented callbacks: contract no-op stubs only.\n");
+		Con_Printf ("  remaining work: swapchain + command buffers + pass graph execution + resource lifetime + descriptor/pipeline cache.\n");
+	}
+	else
+	{
+		Con_Printf ("  source: non-stub backend is currently registered for 'Vulkan' (likely ref_vk plugin).\n");
+		Con_Printf ("  note: current ref_vk is a compatibility wrapper that forwards to OpenGL; native Vulkan rendering is not implemented yet.\n");
+	}
 }
 
 static const IRenderBackend s_dx12_stub_backend = {
@@ -615,11 +723,36 @@ static const IRenderBackend s_dx12_stub_backend = {
 
 static void R_Backend_DX12Status_f (void)
 {
+	const IRenderBackend *backend = R_Backend_FindByName ("DX12");
+	qboolean is_stub = (backend == &s_dx12_stub_backend);
+	qboolean can_start = false;
+	qboolean can_runtime = false;
+
+	if (backend && backend->can_activate)
+	{
+		can_start = backend->can_activate (false);
+		can_runtime = backend->can_activate (true);
+	}
+
 	Con_Printf ("DX12 backend status:\n");
-	Con_Printf ("  registration: present as stub backend ('DX12').\n");
-	Con_Printf ("  activation gate: blocked (can_activate=false).\n");
-	Con_Printf ("  implemented callbacks: contract no-op stubs only.\n");
-	Con_Printf ("  remaining work: device init + swapchain + command lists + descriptor heaps + resource barriers.\n");
+	if (!backend)
+	{
+		Con_Printf ("  registration: missing (no backend named 'DX12' registered).\n");
+		return;
+	}
+
+	Con_Printf ("  registration: %s\n", is_stub ? "stub backend registered" : "plugin/backend override registered");
+	Con_Printf ("  activation gate: startup=%s runtime=%s\n", can_start ? "allowed" : "blocked", can_runtime ? "allowed" : "blocked");
+	Con_Printf ("  active backend: %s\n", (s_active_backend && s_active_backend->name) ? s_active_backend->name : "<none>");
+	if (is_stub)
+	{
+		Con_Printf ("  implemented callbacks: contract no-op stubs only.\n");
+		Con_Printf ("  remaining work: device init + swapchain + command lists + descriptor heaps + resource barriers.\n");
+	}
+	else
+	{
+		Con_Printf ("  source: non-stub backend is currently registered for 'DX12' (likely ref_dx12 plugin).\n");
+	}
 }
 
 static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend)
@@ -633,9 +766,16 @@ static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend)
 
 	for (i = 0; i < s_registered_backend_count; ++i)
 	{
-		if (s_registered_backends[i] == backend
-			|| !q_strcasecmp (s_registered_backends[i]->name, backend->name))
+		if (s_registered_backends[i] == backend)
 			return true;
+
+		if (!q_strcasecmp (s_registered_backends[i]->name, backend->name))
+		{
+			s_registered_backends[i] = backend;
+			if (s_active_backend && !q_strcasecmp (s_active_backend->name, backend->name))
+				s_active_backend = backend;
+			return true;
+		}
 	}
 
 	if (s_registered_backend_count >= R_BACKEND_MAX_REGISTERED)
@@ -739,6 +879,15 @@ qboolean R_Backend_Select (const char *backend_name)
 
 	s_backend_active = true;
 	R_Backend_ApplySelectionToCvar ();
+	if (s_active_backend
+		&& s_active_backend->name
+		&& !q_strcasecmp (s_active_backend->name, "Vulkan")
+		&& s_active_backend != &s_vulkan_stub_backend
+		&& !s_warned_vulkan_wrapper_runtime)
+	{
+		Con_Warning ("'Vulkan' currently routes through ref_vk compatibility wrapper (OpenGL forwarding), not a native Vulkan renderer.\n");
+		s_warned_vulkan_wrapper_runtime = true;
+	}
 	return true;
 }
 
@@ -750,8 +899,10 @@ void R_Backend_Init (void)
 	s_backend_initialized = true;
 	memset (s_missing_resource_warn_frame, 0xff, sizeof (s_missing_resource_warn_frame));
 	Cvar_RegisterVariable (&r_backend);
+	Cvar_RegisterVariable (&r_backend_api);
 	Cvar_RegisterVariable (&r_backend_legacy_fallbacks);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
+	Cvar_SetCallback (&r_backend_api, R_Backend_ApiChanged_f);
 	if (!s_backend_audit_cmd_registered)
 	{
 		Cmd_AddCommand ("r_backend_wrapper_audit", R_Backend_WrapperAudit_f);
@@ -775,7 +926,8 @@ void R_Backend_Init (void)
 	if (!s_active_backend && s_registered_backend_count > 0)
 		s_active_backend = s_registered_backends[0];
 
-	if (!R_Backend_Select (r_backend.string))
+	if (!R_Backend_Select (R_Backend_ApiToCanonicalName (r_backend_api.string)))
+		if (!R_Backend_Select (r_backend.string))
 		R_Backend_ApplySelectionToCvar ();
 }
 
@@ -794,6 +946,7 @@ void R_Backend_Shutdown (void)
 	s_registered_backend_count = 0;
 	s_active_backend = NULL;
 	s_backend_initialized = false;
+	s_warned_vulkan_wrapper_runtime = false;
 	s_command_encoder_recording = false;
 	s_command_encoder_frame = -1;
 }

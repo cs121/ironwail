@@ -1,4 +1,4 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -115,7 +115,10 @@
       <Command>copy "$(SolutionDir)\..\codecs\x86\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)\..\SDL2\lib\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)..\curl\lib\$(PlatformShortName)\*.dll" "$(TargetDir)"
-copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
+copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_gl.dll" "$(SolutionDir)..\..\Quake\ref_gl_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\ref_vk_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\ref_dx12_plugin.c"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -149,7 +152,10 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <Command>copy "$(SolutionDir)\..\codecs\x86\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)\..\SDL2\lib\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)..\curl\lib\$(PlatformShortName)\*.dll" "$(TargetDir)"
-copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
+copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_gl.dll" "$(SolutionDir)..\..\Quake\ref_gl_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\ref_vk_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\ref_dx12_plugin.c"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -183,7 +189,10 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <Command>copy "$(SolutionDir)\..\codecs\x64\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)\..\SDL2\lib64\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)\..\curl\lib\$(PlatformShortName)\*.dll" "$(TargetDir)"
-copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
+copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_gl.dll" "$(SolutionDir)..\..\Quake\ref_gl_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\ref_vk_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\ref_dx12_plugin.c"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -219,7 +228,10 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
       <Command>copy "$(SolutionDir)\..\codecs\x64\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)\..\SDL2\lib64\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)\..\curl\lib\$(PlatformShortName)\*.dll" "$(TargetDir)"
-copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
+copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_gl.dll" "$(SolutionDir)..\..\Quake\ref_gl_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\ref_vk_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\ref_dx12_plugin.c"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -492,3 +504,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"</Command>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>
+
+
+
