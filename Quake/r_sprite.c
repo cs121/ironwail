@@ -154,25 +154,30 @@ static void R_FlushSpriteInstances (void)
 		GL_PolygonOffset (OFFSET_DECAL);
 
 	dither = (softemu == SOFTEMU_COARSE && !showtris);
-	GL_UseProgram (glprogs.sprites[dither]);
 
 	{
 		const unsigned state = showtris
 			? (GLS_BLEND_OPAQUE | GLS_NO_ZWRITE | GLS_CULL_BACK | GLS_ATTRIBS(2))
 			: (GLS_BLEND_OPAQUE | GLS_CULL_BACK | GLS_ATTRIBS(2));
+		RenderBackendDescriptorBinding descriptor;
 		RenderBackendPipelineDesc pipeline_desc;
 		RenderBackendDynamicState dynamic_state;
+		const gltexture_t *draw_texture = showtris ? whitetexture : batchtexture;
 		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
 		memset (&dynamic_state, 0, sizeof (dynamic_state));
+		memset (&descriptor, 0, sizeof (descriptor));
+		pipeline_desc.pipeline_id = glprogs.sprites[dither];
 		pipeline_desc.state_bits = state;
 		dynamic_state.blend_state = state;
 		dynamic_state.depth_state = state;
 		dynamic_state.raster_state = state;
+		descriptor.type = R_BACKEND_DESCRIPTOR_TEXTURE;
+		descriptor.slot = 0u;
+		descriptor.resource_id = draw_texture->texnum;
 		R_Backend_BindPipeline (&pipeline_desc);
 		R_Backend_SetDynamicState (&dynamic_state);
+		R_Backend_BindDescriptors (&descriptor, 1u);
 	}
-
-	GL_Bind (GL_TEXTURE0, showtris ? whitetexture : batchtexture);
 
 	GL_Upload (GL_ARRAY_BUFFER, batchverts, sizeof(batchverts[0]) * 4 * numbatchquads, &buf, &ofs);
 	GL_BindBuffer (GL_ARRAY_BUFFER, buf);

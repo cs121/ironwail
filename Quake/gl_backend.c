@@ -588,14 +588,23 @@ static void GLBackend_BindPipeline (const RenderBackendPipelineDesc *pipeline)
 {
 	if (!pipeline)
 		return;
+	if (pipeline->pipeline_id != 0u)
+		GL_UseProgram ((GLuint)pipeline->pipeline_id);
 	GLBackend_SetPipelineState (pipeline->state_bits);
 }
 
 static void GLBackend_SetDynamicState (const RenderBackendDynamicState *dynamic_state)
 {
-	/* GL backend still uses legacy packed state bits. Keep dynamic-state path
-	 * available for callsite migration while preserving current behavior. */
-	(void)dynamic_state;
+	unsigned state_bits;
+
+	if (!dynamic_state)
+		return;
+
+	state_bits = 0u;
+	state_bits |= dynamic_state->blend_state & GLS_MASK_BLEND;
+	state_bits |= dynamic_state->depth_state & (GLS_NO_ZTEST | GLS_NO_ZWRITE);
+	state_bits |= dynamic_state->raster_state & (GLS_MASK_CULL | GLS_MASK_ATTRIBS | GLS_MASK_INSTANCED_ATTRIBS);
+	GLBackend_SetPipelineState (state_bits);
 }
 
 static void GLBackend_BindDescriptors (const RenderBackendDescriptorBinding *bindings, unsigned count)
@@ -620,7 +629,12 @@ static void GLBackend_BindDescriptors (const RenderBackendDescriptorBinding *bin
 				Con_DWarning ("GL descriptor bind out of range: type=%u slot=%u max_textures=%u\n",
 					(unsigned)binding->type, binding->slot, max_textures);
 				SDL_assert (!"GL descriptor texture/sampler slot out of range");
+				break;
 			}
+			if (binding->type == R_BACKEND_DESCRIPTOR_TEXTURE)
+				GL_BindNative (GL_TEXTURE0 + binding->slot, GL_TEXTURE_2D, (GLuint)binding->resource_id);
+			else if (GL_BindSamplerFunc)
+				GL_BindSamplerFunc (binding->slot, (GLuint)binding->resource_id);
 			break;
 		case R_BACKEND_DESCRIPTOR_UNIFORM_BUFFER:
 			if (max_ubos > 0u && binding->slot >= max_ubos)
@@ -629,6 +643,14 @@ static void GLBackend_BindDescriptors (const RenderBackendDescriptorBinding *bin
 					binding->slot, max_ubos);
 				SDL_assert (!"GL descriptor UBO slot out of range");
 			}
+			if (binding->range == 0u)
+			{
+				Con_DWarning ("GL descriptor UBO binding requires range > 0 (slot=%u resource=%u)\n",
+					binding->slot, binding->resource_id);
+				SDL_assert (!"GL descriptor UBO binding missing range");
+				break;
+			}
+			GL_BindBufferRange (GL_UNIFORM_BUFFER, binding->slot, (GLuint)binding->resource_id, (GLintptr)binding->offset, (GLsizeiptr)binding->range);
 			break;
 		case R_BACKEND_DESCRIPTOR_STORAGE_BUFFER:
 			if (max_ssbos > 0u && binding->slot >= max_ssbos)
@@ -637,6 +659,14 @@ static void GLBackend_BindDescriptors (const RenderBackendDescriptorBinding *bin
 					binding->slot, max_ssbos);
 				SDL_assert (!"GL descriptor SSBO slot out of range");
 			}
+			if (binding->range == 0u)
+			{
+				Con_DWarning ("GL descriptor SSBO binding requires range > 0 (slot=%u resource=%u)\n",
+					binding->slot, binding->resource_id);
+				SDL_assert (!"GL descriptor SSBO binding missing range");
+				break;
+			}
+			GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, binding->slot, (GLuint)binding->resource_id, (GLintptr)binding->offset, (GLsizeiptr)binding->range);
 			break;
 		default:
 			Con_DWarning ("GL descriptor bind has unknown descriptor type=%u (slot=%u)\n",
