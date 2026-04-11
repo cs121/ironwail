@@ -35,7 +35,6 @@ static qboolean s_backend_audit_cmd_registered = false;
 static qboolean s_backend_vulkan_status_cmd_registered = false;
 static qboolean s_backend_dx12_status_cmd_registered = false;
 static qboolean s_warned_deprecated_builtin_register = false;
-static qboolean s_warned_vulkan_wrapper_runtime = false;
 static int s_missing_resource_warn_frame[R_BACKEND_RESOURCE_SLOT_COUNT];
 static void *s_plugin_libs[R_BACKEND_MAX_PLUGIN_LIBS];
 static int s_plugin_lib_count = 0;
@@ -1047,7 +1046,7 @@ static void R_Backend_VulkanStatus_f (void)
 	else
 	{
 		Con_Printf ("  source: non-stub backend is currently registered for 'Vulkan' (likely ref_vk plugin).\n");
-		Con_Printf ("  note: current ref_vk is a compatibility wrapper that forwards to OpenGL; native Vulkan rendering is not implemented yet.\n");
+		Con_Printf ("  note: current ref_vk backend is an independent placeholder with activation blocked until native Vulkan implementation lands.\n");
 	}
 }
 
@@ -1135,6 +1134,7 @@ static void R_Backend_DX12Status_f (void)
 	else
 	{
 		Con_Printf ("  source: non-stub backend is currently registered for 'DX12' (likely ref_dx12 plugin).\n");
+		Con_Printf ("  note: current ref_dx12 backend is an independent placeholder with activation blocked until native DX12 implementation lands.\n");
 	}
 }
 
@@ -1262,15 +1262,6 @@ qboolean R_Backend_Select (const char *backend_name)
 
 	s_backend_active = true;
 	R_Backend_ApplySelectionToCvar ();
-	if (s_active_backend
-		&& s_active_backend->name
-		&& !q_strcasecmp (s_active_backend->name, "Vulkan")
-		&& s_active_backend != &s_vulkan_stub_backend
-		&& !s_warned_vulkan_wrapper_runtime)
-	{
-		Con_Warning ("'Vulkan' currently routes through ref_vk compatibility wrapper (OpenGL forwarding), not a native Vulkan renderer.\n");
-		s_warned_vulkan_wrapper_runtime = true;
-	}
 	return true;
 }
 
@@ -1333,7 +1324,6 @@ void R_Backend_Shutdown (void)
 	s_registered_backend_count = 0;
 	s_active_backend = NULL;
 	s_backend_initialized = false;
-	s_warned_vulkan_wrapper_runtime = false;
 	s_command_encoder_recording = false;
 	s_command_encoder_frame = -1;
 	memset (&s_last_populated_resources, 0, sizeof (s_last_populated_resources));
