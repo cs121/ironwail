@@ -1,0 +1,143 @@
+{
+  "version": "1.0.0",
+  "tokens": {
+    "top_level_keyword": "sound",
+    "layer_keyword": "layer",
+    "block_delimiters": ["{", "}"],
+    "comments": ["// line comment", "/* block comment */"],
+    "boolean_literals": [
+      "true",
+      "false",
+      "yes",
+      "no",
+      "on",
+      "off",
+      "1",
+      "0"
+    ]
+  },
+  "sound_block": {
+    "syntax": "sound <name> { <sound properties and/or layer data> }",
+    "properties": {
+      "priority": {
+        "value_type": "int",
+        "constraints": ["range:0..255"]
+      },
+      "max_instances": {
+        "value_type": "int",
+        "constraints": ["range:0..MAX_CHANNELS"]
+      },
+      "spatialize": {
+        "value_type": "bool"
+      },
+      "doppler": {
+        "value_type": "bool"
+      },
+      "lowpass_by_distance": {
+        "value_type": "bool"
+      },
+      "reverb_send": {
+        "value_type": "float",
+        "constraints": ["range:0..1"]
+      }
+    }
+  },
+  "layer_block": {
+    "syntax": "layer { <layer properties> }",
+    "properties": {
+      "sample": {
+        "value_type": "path",
+        "multiplicity": "repeatable",
+        "constraints": ["1..SOUNDDEF_MAX_SAMPLES_PER_LAYER entries per layer"]
+      },
+      "bus": {
+        "value_type": "enum",
+        "enum_values": ["sfx", "ui", "ambient", "music"]
+      },
+      "volume": {
+        "value_type": "float",
+        "constraints": ["range:0..4"]
+      },
+      "volume_random": {
+        "value_type": "range",
+        "element_type": "float",
+        "arity": 2,
+        "constraints": ["min>=0", "max<=4", "min<=max"]
+      },
+      "pitch": {
+        "value_type": "float",
+        "constraints": ["range:(0..8]"]
+      },
+      "pitch_random": {
+        "value_type": "range",
+        "element_type": "float",
+        "arity": 2,
+        "constraints": ["min>0", "max<=8", "min<=max"]
+      },
+      "loop": {
+        "value_type": "bool"
+      },
+      "chance": {
+        "value_type": "float",
+        "constraints": ["range:0..1"]
+      },
+      "delay_ms": {
+        "value_type": "int",
+        "constraints": ["range:[0..INT_MAX]"]
+      },
+      "start_offset_ms": {
+        "value_type": "int",
+        "constraints": ["range:[0..INT_MAX]"]
+      }
+    }
+  },
+  "value_types": {
+    "int": {
+      "description": "Base-10 integer token parsed via strtol."
+    },
+    "float": {
+      "description": "Finite floating-point token parsed via strtod."
+    },
+    "bool": {
+      "description": "One of the accepted boolean literals listed in tokens.boolean_literals."
+    },
+    "path": {
+      "description": "Unquoted asset-relative path token.",
+      "constraints": ["token length < MAX_QPATH"]
+    },
+    "enum": {
+      "description": "Case-insensitive symbol that must resolve to a known runtime enum."
+    },
+    "range": {
+      "description": "Two scalar tokens (min, max) consumed in order."
+    }
+  },
+  "constraints": {
+    "mixing_rule": "Top-level layer keys (sample/bus/volume/volume_random/pitch/pitch_random/loop/chance/delay_ms/start_offset_ms) are mutually exclusive with explicit layer {} blocks within the same sound block.",
+    "layer_count_limit": "Each sound definition must contain 1..SOUNDDEF_MAX_LAYERS layers after parsing.",
+    "sample_count_limit": "Each layer must contain 1..SOUNDDEF_MAX_SAMPLES_PER_LAYER samples after parsing.",
+    "runtime_validated_ranges": {
+      "priority": "0..255",
+      "max_instances": "0..MAX_CHANNELS",
+      "reverb_send": "0..1",
+      "volume": "0..4",
+      "pitch": ">0 && <=8",
+      "chance": "0..1",
+      "delay_ms": ">=0",
+      "start_offset_ms": ">=0"
+    }
+  },
+  "examples": {
+    "implicit_single_layer": "sound debug/ui_cycle { priority 240 max_instances 4 spatialize false doppler false lowpass_by_distance false reverb_send 0.05 sample misc/menu1.wav sample misc/menu2.wav sample misc/menu3.wav bus ui volume 0.80 volume_random 0.70 1.00 pitch 1.00 pitch_random 0.92 1.10 loop false chance 1.00 delay_ms 0 start_offset_ms 0 }",
+    "explicit_multi_layer": "sound debug/spatial_kitchen_sink { priority 208 max_instances 1 spatialize true doppler true lowpass_by_distance true reverb_send 0.70 layer { sample weapons/rocket1i.wav sample weapons/grenade.wav bus sfx volume 1.00 volume_random 0.85 1.15 pitch 0.95 pitch_random 0.85 1.05 loop false chance 1.00 delay_ms 0 start_offset_ms 0 } layer { sample ambience/thunder1.wav bus ambient volume 0.30 volume_random 1.00 1.00 pitch 0.75 pitch_random 1.00 1.00 loop false chance 0.65 delay_ms 120 start_offset_ms 180 } }"
+  },
+  "valid_examples": {
+    "source": "Quake/sounddefs/demo_debug.sndshd",
+    "definitions": [
+      "debug/ui_cycle",
+      "debug/spatial_kitchen_sink",
+      "debug/ambient_loop",
+      "debug/music_loop"
+    ]
+  }
+}
