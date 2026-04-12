@@ -3068,6 +3068,9 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	float fog_g;
 	float fog_b;
 	float postfx_damage_trauma;
+	float postfx_damage_dir_x;
+	float postfx_damage_dir_y;
+	float postfx_damage_dir_strength;
 	float dv_time;
 	GLuint scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, "Postprocess");
 	GLuint scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, "Postprocess");
@@ -3138,6 +3141,9 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	fog_g = postfx_state.underwater_fog_color[1];
 	fog_b = postfx_state.underwater_fog_color[2];
 	postfx_damage_trauma = CLAMP (0.f, postfx_state.damage_trauma, 1.f);
+	postfx_damage_dir_x = postfx_state.damage_dir[0];
+	postfx_damage_dir_y = postfx_state.damage_dir[1];
+	postfx_damage_dir_strength = CLAMP (0.f, postfx_state.damage_dir_strength, 1.f);
 
 	float bloom_intensity = q_max (0.f, r_bloom.value);
 	float bloom_intensity_effective = GL_ComputeEffectiveBloomIntensity (bloom_intensity, postfx_bloom_boost);
@@ -3401,6 +3407,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		postfx_damage_trauma = 0.f;
 	dv_time = (float)cl.time;
 	GL_Uniform4fFunc (25, postfx_damage_trauma, dv_time, 0.f, 0.f);
+	GL_Uniform4fFunc (26, postfx_damage_dir_x, postfx_damage_dir_y, postfx_damage_dir_strength, 0.f);
 	{
 		GLint godrays_params_loc = GL_GetUniformLocationFunc ? GL_GetUniformLocationFunc (glprogs.postprocess[variant], "GodraysParams") : -1;
 		if (godrays_params_loc >= 0)

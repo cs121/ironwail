@@ -57,13 +57,15 @@ typedef struct postfx_state_s
 	qboolean	underwater_postfx_active;
 	float	emissive_boost;
 	float	damage_trauma;
+	float	damage_dir[2];
+	float	damage_dir_strength;
 } postfx_state_t;
 
 void CL_PostFX_Init (void);
 void CL_PostFX_Reset (void);
 void CL_PostFX_Frame (void);
 void CL_PostFX_PushPickup (void);
-void CL_PostFX_PushDamage (float damage_amount);
+void CL_PostFX_PushDamage (float damage_amount, const vec2_t screen_dir, float dir_strength);
 void CL_PostFX_SetContents (int contents, qboolean underwater_active, qboolean underwater_postfx_active);
 void CL_PostFX_GetState (postfx_state_t *out_state);
 

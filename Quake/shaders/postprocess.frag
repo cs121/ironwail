@@ -134,6 +134,7 @@ layout(location=22) uniform vec4 PostFXParams4; // x: lut strength, y: underwate
 layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: unused, w: unused
 layout(location=24) uniform vec4 PostFXFogColor; // rgb: underwater fog color, w: scene fog density (saved before Fog_DisableGFog)
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: time, z: unused, w: unused
+layout(location=26) uniform vec4 DamageDirParams; // xy: damage dir in view space (screen), z: dir strength, w: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -421,16 +422,31 @@ void main()
                 const float freq = 9.0;
                 if (trauma > 1e-3)
                 {
+                        vec2 viewUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
+                        vec2 viewPos = viewUV * 2.0 - vec2(1.0);
+                        float directional = 1.0;
+                        float dirStrength = clamp(DamageDirParams.z, 0.0, 1.0);
+                        vec2 dir = DamageDirParams.xy;
+                        float dirLen = length(dir);
+                        if (dirStrength > 1e-3 && dirLen > 1e-4)
+                        {
+                                vec2 ndir = dir / dirLen;
+                                float facing = clamp(dot(viewPos, ndir), -1.0, 1.0);
+                                float hemi = facing * 0.5 + 0.5;
+                                float dirFactor = mix(0.5, 1.65, hemi);
+                                directional = mix(1.0, dirFactor, dirStrength);
+                        }
                         float a = clamp(trauma * strength, 0.0, 1.35);
+                        a *= directional;
                         float osc = sin(t * freq) * 0.75 + sin(t * freq * 0.37 + 1.7) * 0.25;
                         float jitter = (InterleavedGradientNoise(vec2(t * 0.123, t * 0.917)) - 0.5) * 0.6;
                         float px = maxPx * (0.3 + 0.7 * a) * (0.7 + 0.3 * abs(osc));
                         vec2 baseDir = vec2(cos(t * 1.7), sin(t * 1.31));
-                        vec2 dir = baseDir + vec2(jitter, -jitter);
-                        float dirLen = length(dir);
-                        dir = (dirLen > 1e-4) ? (dir / dirLen) : vec2(1.0, 0.0);
-                        vec2 offset1 = dir * px * invTexSize;
-                        vec2 offset2 = vec2(-dir.y, dir.x) * (px * 0.75) * invTexSize;
+                        vec2 dvDir = baseDir + vec2(jitter, -jitter);
+                        float dvDirLen = length(dvDir);
+                        dvDir = (dvDirLen > 1e-4) ? (dvDir / dvDirLen) : vec2(1.0, 0.0);
+                        vec2 offset1 = dvDir * px * invTexSize;
+                        vec2 offset2 = vec2(-dvDir.y, dvDir.x) * (px * 0.75) * invTexSize;
                         vec3 base = color.rgb;
                         vec3 ghost1 = texture(GammaTexture, clamp(uv + offset1, viewMin, viewMax)).rgb;
                         vec3 ghost2 = texture(GammaTexture, clamp(uv - offset2, viewMin, viewMax)).rgb;
@@ -752,10 +768,24 @@ void main()
                 float damageTint = clamp(PostFXParams3.w, 0.0, 1.0);
                 if (damageTint > 0.0)
                 {
+                        vec2 viewUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
+                        vec2 viewPos = viewUV * 2.0 - vec2(1.0);
+                        float directional = 1.0;
+                        float dirStrength = clamp(DamageDirParams.z, 0.0, 1.0);
+                        vec2 dir = DamageDirParams.xy;
+                        float dirLen = length(dir);
+                        if (dirStrength > 1e-3 && dirLen > 1e-4)
+                        {
+                                vec2 ndir = dir / dirLen;
+                                float facing = clamp(dot(viewPos, ndir), -1.0, 1.0);
+                                float hemi = facing * 0.5 + 0.5;
+                                float dirFactor = mix(0.45, 1.45, hemi);
+                                directional = mix(1.0, dirFactor, dirStrength);
+                        }
                         vec3 blood = vec3(0.34, 0.02, 0.02);
                         vec3 tinted = mapped * vec3(0.88, 0.54, 0.5);
                         vec3 boosted = clamp(tinted + blood * 0.45, vec3(0.0), vec3(1.0));
-                        mapped = mix(mapped, boosted, damageTint);
+                        mapped = mix(mapped, boosted, clamp(damageTint * directional, 0.0, 1.0));
                 }
         }
         if (outputSrgb > 0.5)

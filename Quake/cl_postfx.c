@@ -48,6 +48,8 @@ static float			postfx_underwater_fog;
 static int				postfx_powerup_lut = PFX_LUT_NONE;
 static float			postfx_powerup_strength;
 static float			postfx_damage_trauma;
+static vec2_t			postfx_damage_dir;
+static float			postfx_damage_dir_strength;
 
 /* Damage response is intentionally fixed-profile to keep user-facing tuning minimal. */
 #define POSTFX_DAMAGE_EVENT_DURATION		0.62f
@@ -217,6 +219,9 @@ void CL_PostFX_Reset (void)
 	postfx_powerup_lut = PFX_LUT_NONE;
 	postfx_powerup_strength = 0.f;
 	postfx_damage_trauma = 0.f;
+	postfx_damage_dir[0] = 0.f;
+	postfx_damage_dir[1] = 0.f;
+	postfx_damage_dir_strength = 0.f;
 }
 
 void CL_PostFX_Frame (void)
@@ -242,6 +247,7 @@ void CL_PostFX_Frame (void)
 		postfx_underwater_fog = 0.f;
 		postfx_powerup_strength = 0.f;
 		postfx_damage_trauma = 0.f;
+		postfx_damage_dir_strength = 0.f;
 		return;
 	}
 
@@ -251,10 +257,12 @@ void CL_PostFX_Frame (void)
 		float decay = CLAMP (0.5f, r_post_damage_trauma_decay.value, 3.4f);
 		float decay_factor = (decay > 0.f) ? expf (-decay * dt) : 1.f;
 		postfx_damage_trauma = PostFX_Saturate (postfx_damage_trauma * decay_factor);
+		postfx_damage_dir_strength = PostFX_Saturate (postfx_damage_dir_strength * decay_factor);
 	}
 	else
 	{
 		postfx_damage_trauma = 0.f;
+		postfx_damage_dir_strength = 0.f;
 	}
 
 	desired_lut = PostFX_DesiredPowerupLUT ();
@@ -307,7 +315,7 @@ void CL_PostFX_PushPickup (void)
 	event->active = true;
 }
 
-void CL_PostFX_PushDamage (float damage_amount)
+void CL_PostFX_PushDamage (float damage_amount, const vec2_t screen_dir, float dir_strength)
 {
 	postfx_event_t *event;
 	double now;
@@ -315,6 +323,7 @@ void CL_PostFX_PushDamage (float damage_amount)
 	float normalized_damage;
 	float intensity;
 	float accum_window;
+	float dir_len;
 	int i;
 
 	if (r_postfx.value > 0.f && r_post_damage_doublevision.value > 0.f)
@@ -333,6 +342,37 @@ void CL_PostFX_PushDamage (float damage_amount)
 	intensity = PostFX_Saturate ((0.15f + normalized_damage * 1.05f) * r_postfx_damage.value);
 	if (intensity <= 0.f)
 		return;
+
+	dir_len = q_max (0.f, dir_strength);
+	if (screen_dir && dir_len > 1e-4f)
+	{
+		float nx = screen_dir[0];
+		float ny = screen_dir[1];
+		float nlen = sqrtf (nx * nx + ny * ny);
+		if (nlen > 1e-4f)
+		{
+			float blend = PostFX_Saturate (0.2f + intensity * 0.8f);
+			nx /= nlen;
+			ny /= nlen;
+			if (postfx_damage_dir_strength <= 1e-4f)
+			{
+				postfx_damage_dir[0] = nx;
+				postfx_damage_dir[1] = ny;
+			}
+			else
+			{
+				float mx = postfx_damage_dir[0] * (1.f - blend) + nx * blend;
+				float my = postfx_damage_dir[1] * (1.f - blend) + ny * blend;
+				float mlen = sqrtf (mx * mx + my * my);
+				if (mlen > 1e-4f)
+				{
+					postfx_damage_dir[0] = mx / mlen;
+					postfx_damage_dir[1] = my / mlen;
+				}
+			}
+			postfx_damage_dir_strength = PostFX_Saturate (postfx_damage_dir_strength + dir_len * intensity * 0.85f);
+		}
+	}
 
 	duration = POSTFX_DAMAGE_EVENT_DURATION;
 	accum_window = POSTFX_DAMAGE_ACCUM_WINDOW;
@@ -513,4 +553,7 @@ void CL_PostFX_GetState (postfx_state_t *out_state)
 	}
 
 	out_state->damage_trauma = PostFX_Saturate (postfx_damage_trauma);
+	out_state->damage_dir[0] = postfx_damage_dir[0];
+	out_state->damage_dir[1] = postfx_damage_dir[1];
+	out_state->damage_dir_strength = PostFX_Saturate (postfx_damage_dir_strength);
 }

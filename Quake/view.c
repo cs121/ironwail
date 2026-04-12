@@ -308,6 +308,8 @@ void V_ParseDamage (void)
 	entity_t	*ent;
 	float	side;
 	float	count;
+	vec2_t	damage_dir;
+	float	damage_dir_strength;
 
 	armor = MSG_ReadByte ();
 	blood = MSG_ReadByte ();
@@ -346,9 +348,6 @@ void V_ParseDamage (void)
 		cl.cshifts[CSHIFT_DAMAGE].destcolor[2] = 0;
 	}
 
-	// TODO(postfx): hook damage events into the postfx stack here.
-	CL_PostFX_PushDamage (count);
-
 //
 // calculate view angle kicks
 //
@@ -364,6 +363,23 @@ void V_ParseDamage (void)
 
 	side = DotProduct (from, forward);
 	v_dmg_pitch = count*side*v_kickpitch.value;
+
+	damage_dir[0] = DotProduct (from, right);
+	damage_dir[1] = -DotProduct (from, up);
+	damage_dir_strength = sqrtf (damage_dir[0] * damage_dir[0] + damage_dir[1] * damage_dir[1]);
+	if (damage_dir_strength > 1e-4f)
+	{
+		damage_dir[0] /= damage_dir_strength;
+		damage_dir[1] /= damage_dir_strength;
+	}
+	else
+	{
+		damage_dir[0] = 0.f;
+		damage_dir[1] = 0.f;
+		damage_dir_strength = 0.f;
+	}
+
+	CL_PostFX_PushDamage (count, damage_dir, q_min (1.f, damage_dir_strength));
 
 	v_dmg_time = v_kicktime.value;
 }
