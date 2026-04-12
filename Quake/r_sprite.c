@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "glquake.h"
+#include "r_framegraph.h"
 
 typedef struct spritevert_t {
 	vec3_t		pos;

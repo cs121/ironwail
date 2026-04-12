@@ -2,6 +2,7 @@
 #include "glquake.h"
 
 #include "r_quality.h"
+#include "cl_postfx.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -174,6 +175,15 @@ static qboolean r_quality_initialized = false;
 static qboolean r_quality_applying = false;
 static r_quality_preset_t r_quality_active = R_QUALITY_INVALID;
 
+static void R_Quality_PostApplySync (void)
+{
+	/* Keep postfx/frame-dependent state deterministic after preset transitions.
+	 * Users observed stale postfx artifacts that disappear after manual
+	 * r_quality toggles; perform the same reset explicitly on apply. */
+	CL_PostFX_Reset ();
+	vid.recalc_refdef = true;
+}
+
 static const char *R_Quality_PresetName (r_quality_preset_t preset)
 {
 	switch (preset)
@@ -242,6 +252,7 @@ static void R_Quality_ApplyPreset (r_quality_preset_t preset)
 	Cvar_SetQuick (&r_quality, R_Quality_PresetName (preset));
 	r_quality_applying = false;
 	r_quality_active = preset;
+	R_Quality_PostApplySync ();
 }
 
 static qboolean R_Quality_HasManualOverrides (r_quality_preset_t preset)
@@ -269,6 +280,7 @@ void R_Quality_Init (void)
 	r_quality_initialized = true;
 	r_quality_active = R_QUALITY_INVALID;
 	R_Quality_Update ();
+	R_Quality_PostApplySync ();
 }
 
 void R_Quality_Update (void)

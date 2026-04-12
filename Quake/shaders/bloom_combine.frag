@@ -6,7 +6,7 @@ layout(location=0) out vec4 outColor;
 
 void main()
 {
-        vec2 uv = (gl_FragCoord.xy + 0.5) / vec2(textureSize(BloomTexture, 0));
+        vec2 uv = gl_FragCoord.xy / vec2(textureSize(BloomTexture, 0));
         float weight = max(CombineParams.x, 0.0);
         vec3 color = texture(BloomTexture, uv).rgb * weight;
         outColor = vec4(color, 1.0);

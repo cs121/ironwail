@@ -8,7 +8,7 @@ void main()
 {
         vec2 texelSize = BlurParams.xy;
         vec2 direction = BlurParams.zw;
-        vec2 uv = (gl_FragCoord.xy + 0.5) * texelSize;
+        vec2 uv = gl_FragCoord.xy * texelSize;
         const float weights[5] = float[](0.227027, 0.1945946, 0.1216216, 0.05405405, 0.016216216);
         vec3 color = texture(BloomTexture, uv).rgb * weights[0];
         for (int i = 1; i < 5; ++i)

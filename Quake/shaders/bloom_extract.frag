@@ -25,7 +25,7 @@ void main()
         float maskEnabled = ThresholdParams.z;
         vec2 sourceSize = DownsampleParams.xy;
         vec2 scale = DownsampleParams.zw;
-        vec2 base = (gl_FragCoord.xy + 0.5) * scale - 0.5;
+        vec2 base = gl_FragCoord.xy * scale - 0.5;
         vec2 maxCoord = max(sourceSize - vec2(1.0), vec2(0.0));
         ivec2 baseCoord = ivec2(floor(base));
         vec3 accum = vec3(0.0);

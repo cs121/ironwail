@@ -1689,9 +1689,13 @@ static void GL_BloomExtractLevel (int level, GLuint source_tex, int source_width
 {
 	int width = framebufs.bloom.width[level];
 	int height = framebufs.bloom.height[level];
+	const float clear_color[4] = { 0.f, 0.f, 0.f, 0.f };
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo[level]);
+	GL_SetScissorEnabled (false);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glViewport (0, 0, width, height);
+	GL_ClearBufferfvFunc (GL_COLOR, 0, clear_color);
 	GL_UseProgram (glprogs.bloom_extract);
 	{
 		const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
@@ -1720,6 +1724,7 @@ static GLuint GL_BloomBlurLevel (int level, int passes, float radius_scale)
 	int width = framebufs.bloom.width[level];
 	int height = framebufs.bloom.height[level];
 	GLuint input_tex = framebufs.bloom.extract_tex[level];
+	const float clear_color[4] = { 0.f, 0.f, 0.f, 0.f };
 
 	for (int pass = 0; pass < passes; ++pass)
 	{
@@ -1728,7 +1733,10 @@ static GLuint GL_BloomBlurLevel (int level, int passes, float radius_scale)
 		float diry = (pass & 1) ? 1.f : 0.f;
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[level][target_index]);
+		GL_SetScissorEnabled (false);
+		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		glViewport (0, 0, width, height);
+		GL_ClearBufferfvFunc (GL_COLOR, 0, clear_color);
 		GL_UseProgram (glprogs.bloom_blur);
 		{
 			const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
@@ -1767,6 +1775,7 @@ static GLuint GL_GenerateBloomTexture (void)
 {
 	GLuint fallback = GL_BloomGetFallbackTexture ();
 	GLuint blurred[BLOOM_MAX_LEVELS] = { 0 };
+	const float clear_color[4] = { 0.f, 0.f, 0.f, 0.f };
 	int levels;
 	int passes;
 	float threshold;
@@ -1811,7 +1820,10 @@ static GLuint GL_GenerateBloomTexture (void)
 	}
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo[0]);
+	GL_SetScissorEnabled (false);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	glViewport (0, 0, framebufs.bloom.width[0], framebufs.bloom.height[0]);
+	GL_ClearBufferfvFunc (GL_COLOR, 0, clear_color);
 	GL_UseProgram (glprogs.bloom_combine);
 	{
 		const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
@@ -3321,6 +3333,8 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		motion_enabled);
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	GL_SetScissorEnabled (false);
+	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_Backend_SetViewport (glx, gly, glwidth, glheight);
 	{
 		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
@@ -4667,7 +4681,6 @@ void R_SetupView (void)
 	}
 	//johnfitz
 }
-
 void R_StorePrevFrameState (void)
 {
 	if (!r_frame_rendered_this_update)
@@ -5791,6 +5804,18 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	effective_godrays_preview = R_PostFX_GodraysPreviewEnabledEffective ();
 	need_depth_resolve = (fbodest == composite_fbo)
 		&& (effective_dof_enabled || effective_ssao_enabled || effective_godrays_preview);
+	if (fbodest == composite_fbo)
+	{
+		const float clear_color[4] = { 0.f, 0.f, 0.f, 1.f };
+		const float clear_depth = 1.f;
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, composite_fbo);
+		glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		GL_SetScissorEnabled (false);
+		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		GL_ClearBufferfvFunc (GL_COLOR, 0, clear_color);
+		GL_ClearBufferfvFunc (GL_DEPTH, 0, &clear_depth);
+	}
 
 	if (msaa)
 	{
@@ -5994,6 +6019,3 @@ void R_RenderView (void)
 
 	//johnfitz
 }
-
-
-	GL_UnregisterFrameGraphResourceSlots ();
