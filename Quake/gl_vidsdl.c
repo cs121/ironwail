@@ -1283,6 +1283,12 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
                                 // fallthrough!
                         case GLS_BLEND_ALPHA:
                                 glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                                /* Non-OIT alpha path still renders with MRT scene targets.
+                                 * Keep attachment 0 alpha-blended, but write attachment 1
+                                 * (velocity/material mask) with replace semantics so
+                                 * postprocess tags are not diluted by alpha blending. */
+                                if (GL_BlendFunciFunc && R_GetEffectiveAlphaMode () != ALPHAMODE_OIT)
+                                        GL_BlendFunciFunc(1, GL_ONE, GL_ZERO);
                                 break;
                         case GLS_BLEND_MULTIPLY:
                                 glBlendFunc(GL_ZERO, GL_SRC_COLOR);

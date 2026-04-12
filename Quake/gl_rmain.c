@@ -519,36 +519,13 @@ cvar_t	r_bloom_quality = { "r_bloom_quality", "1", CVAR_ARCHIVE };
 cvar_t	r_postfx = { "r_postfx", "1", CVAR_ARCHIVE };
 cvar_t	r_polyblend_legacy = { "r_polyblend_legacy", "0", CVAR_ARCHIVE };
 cvar_t	r_postfx_pickup = { "r_postfx_pickup", "1", CVAR_ARCHIVE };
-cvar_t	r_postfx_pickup_exposure = { "r_postfx_pickup_exposure", "0.4", CVAR_ARCHIVE };
-cvar_t	r_postfx_pickup_bloom = { "r_postfx_pickup_bloom", "0.6", CVAR_ARCHIVE };
-cvar_t	r_postfx_pickup_duration = { "r_postfx_pickup_duration", "0.35", CVAR_ARCHIVE };
+cvar_t	r_postfx_pickup_exposure = { "r_postfx_pickup_exposure", "0.95", CVAR_ARCHIVE };
+cvar_t	r_postfx_pickup_bloom = { "r_postfx_pickup_bloom", "1.35", CVAR_ARCHIVE };
+cvar_t	r_postfx_pickup_duration = { "r_postfx_pickup_duration", "0.48", CVAR_ARCHIVE };
 cvar_t	r_postfx_damage = { "r_postfx_damage", "1", CVAR_ARCHIVE };
-cvar_t	r_postfx_damage_vignette = { "r_postfx_damage_vignette", "0.45", CVAR_ARCHIVE };
-cvar_t	r_postfx_damage_vignette_softness = { "r_postfx_damage_vignette_softness", "0.6", CVAR_ARCHIVE };
-cvar_t	r_postfx_damage_desat = { "r_postfx_damage_desat", "0.35", CVAR_ARCHIVE };
-cvar_t	r_postfx_damage_exposure = { "r_postfx_damage_exposure", "-0.35", CVAR_ARCHIVE };
-cvar_t	r_postfx_damage_duration = { "r_postfx_damage_duration", "0.6", CVAR_ARCHIVE };
-cvar_t	r_postfx_damage_accum_window = { "r_postfx_damage_accum_window", "0.1", CVAR_ARCHIVE };
-cvar_t	r_postfx_damage_accum_scale = { "r_postfx_damage_accum_scale", "0.5", CVAR_ARCHIVE };
-/*
-Damage double-vision post effect.
-- r_post_damage_doublevision: master toggle for the effect.
-- r_post_damage_dv_strength: overall intensity (scaled by trauma).
-- r_post_damage_dv_px: max offset in pixels at trauma=1.
-- r_post_damage_dv_freq: oscillation frequency in Hz.
-- r_post_damage_trauma_scale: damage-to-trauma multiplier.
-- r_post_damage_trauma_decay: exponential decay rate per second.
-- r_post_damage_dv_quality: 0=off, 1=two ghosts, 2=three ghosts + mild smear.
-- r_post_damage_dv_debug: show trauma intensity as a grayscale output.
-*/
 cvar_t	r_post_damage_doublevision = { "r_post_damage_doublevision", "1", CVAR_ARCHIVE };
-cvar_t	r_post_damage_dv_strength = { "r_post_damage_dv_strength", "0.9", CVAR_ARCHIVE };
-cvar_t	r_post_damage_dv_px = { "r_post_damage_dv_px", "2.0", CVAR_ARCHIVE };
-cvar_t	r_post_damage_dv_freq = { "r_post_damage_dv_freq", "12.0", CVAR_ARCHIVE };
-cvar_t	r_post_damage_trauma_scale = { "r_post_damage_trauma_scale", "0.02", CVAR_ARCHIVE };
-cvar_t	r_post_damage_trauma_decay = { "r_post_damage_trauma_decay", "6.0", CVAR_ARCHIVE };
-cvar_t	r_post_damage_dv_quality = { "r_post_damage_dv_quality", "1", CVAR_ARCHIVE };
-cvar_t	r_post_damage_dv_debug = { "r_post_damage_dv_debug", "0", CVAR_NONE };
+cvar_t	r_post_damage_trauma_scale = { "r_post_damage_trauma_scale", "0.09", CVAR_ARCHIVE };
+cvar_t	r_post_damage_trauma_decay = { "r_post_damage_trauma_decay", "3.2", CVAR_ARCHIVE };
 cvar_t	r_postfx_powerup = { "r_postfx_powerup", "1", CVAR_ARCHIVE };
 cvar_t	r_postfx_powerup_lut_strength = { "r_postfx_powerup_lut_strength", "0.6", CVAR_ARCHIVE };
 cvar_t	r_postfx_powerup_ramp_in = { "r_postfx_powerup_ramp_in", "0.2", CVAR_ARCHIVE };
@@ -3081,7 +3058,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	float postfx_exposure_add;
 	float postfx_bloom_boost;
 	float postfx_emissive_boost;
-	float postfx_desat;
+	float postfx_damage_tint;
 	float postfx_vignette;
 	float postfx_vignette_softness;
 	float postfx_lut_strength;
@@ -3091,11 +3068,6 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	float fog_g;
 	float fog_b;
 	float postfx_damage_trauma;
-	float dv_strength;
-	float dv_max_px;
-	float dv_freq;
-	float dv_quality;
-	float dv_debug;
 	float dv_time;
 	GLuint scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, "Postprocess");
 	GLuint scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, "Postprocess");
@@ -3156,7 +3128,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	postfx_exposure_add = CLAMP (-2.f, postfx_state.exposure_add_stops, 2.f);
 	postfx_bloom_boost = q_max (0.f, postfx_state.bloom_boost);
 	postfx_emissive_boost = q_max (0.f, postfx_state.emissive_boost);
-	postfx_desat = q_min (1.f, q_max (0.f, postfx_state.desat));
+	postfx_damage_tint = q_min (1.f, q_max (0.f, postfx_state.desat));
 	postfx_vignette = q_min (1.f, q_max (0.f, q_max (r_vignette.value, postfx_state.vignette)));
 	postfx_vignette_softness = q_min (1.f, q_max (0.f, postfx_state.vignette_softness));
 	postfx_lut_strength = q_min (1.f, q_max (0.f, postfx_state.lut_strength));
@@ -3415,7 +3387,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 
 
 
-	GL_Uniform4fFunc (21, postfx_exposure_add, 0.f, postfx_emissive_boost, postfx_desat);
+	GL_Uniform4fFunc (21, postfx_exposure_add, 0.f, postfx_emissive_boost, postfx_damage_tint);
 	GL_Uniform4fFunc (22,
 		postfx_lut_strength,
 		postfx_state.underwater_postfx_active ? postfx_state.underwater_grade_strength : 0.f,
@@ -3425,19 +3397,10 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	/* Postprocess SSAO damping uses the cached global fog density instead of
 	 * the removed analytic GL fog UBO channel. */
 	GL_Uniform4fFunc (24, fog_r, fog_g, fog_b, r_ssao_fog_state.density);
-	{
-		int quality = (int)Q_rint (r_post_damage_dv_quality.value);
-		dv_quality = (float)CLAMP (0, quality, 2);
-		dv_strength = q_max (0.f, r_post_damage_dv_strength.value);
-		dv_max_px = q_max (0.f, r_post_damage_dv_px.value);
-		dv_freq = q_max (0.f, r_post_damage_dv_freq.value);
-		dv_debug = (r_post_damage_dv_debug.value > 0.f) ? 1.f : 0.f;
-		if (r_postfx.value <= 0.f || r_post_damage_doublevision.value <= 0.f || dv_quality <= 0.f)
-			postfx_damage_trauma = 0.f;
-		dv_time = (float)cl.time;
-		GL_Uniform4fFunc (25, postfx_damage_trauma, dv_strength, dv_max_px, dv_freq);
-		GL_Uniform4fFunc (26, dv_time, dv_quality, dv_debug, 0.f);
-	}
+	if (r_postfx.value <= 0.f || r_post_damage_doublevision.value <= 0.f)
+		postfx_damage_trauma = 0.f;
+	dv_time = (float)cl.time;
+	GL_Uniform4fFunc (25, postfx_damage_trauma, dv_time, 0.f, 0.f);
 	{
 		GLint godrays_params_loc = GL_GetUniformLocationFunc ? GL_GetUniformLocationFunc (glprogs.postprocess[variant], "GodraysParams") : -1;
 		if (godrays_params_loc >= 0)

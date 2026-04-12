@@ -12,6 +12,7 @@ layout(binding=0) uniform Sampler TexAccum;
 layout(binding=1) uniform Sampler TexReveal;
 
 layout(location=0) out vec4 out_fragcolor;
+layout(location=1) out vec4 out_velocity;
 
 vec3 LinearToGamma(vec3 v)
 {
@@ -43,4 +44,7 @@ void main()
 
 	vec3 average_color = accumulation.rgb / max(accumulation.a, 1e-5);
 	out_fragcolor = vec4(LinearToGamma(average_color), 1.0 - revealage);
+	// Mark OIT-resolved pixels as translucent for postprocess (SSAO gating, etc.).
+	// Attachment 1 blend state is set to replace in R_EndTranslucency.
+	out_velocity = vec4(0.0, 0.0, 0.0, 2.0);
 }

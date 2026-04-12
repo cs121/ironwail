@@ -133,8 +133,7 @@ layout(location=21) uniform vec4 PostFXParams3; // x: exposure add (stops), y: r
 layout(location=22) uniform vec4 PostFXParams4; // x: lut strength, y: underwater grade strength, z: underwater fog strength, w: vignette softness
 layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: unused, w: unused
 layout(location=24) uniform vec4 PostFXFogColor; // rgb: underwater fog color, w: scene fog density (saved before Fog_DisableGFog)
-layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: strength, z: max offset px, w: frequency
-layout(location=26) uniform vec4 DamageDVParams1; // x: time, y: quality, z: debug, w: unused
+layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: time, z: unused, w: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -416,18 +415,16 @@ void main()
         if (inView)
         {
                 float trauma = clamp(DamageDVParams0.x, 0.0, 1.0);
-                float strength = max(DamageDVParams0.y, 0.0);
-                float maxPx = max(DamageDVParams0.z, 0.0);
-                float freq = max(DamageDVParams0.w, 0.0);
-                float quality = DamageDVParams1.y;
-                float debug = DamageDVParams1.z;
-                if (trauma > 1e-3 && strength > 0.0 && maxPx > 0.0 && quality > 0.5)
+                float t = DamageDVParams0.y;
+                const float strength = 1.9;
+                const float maxPx = 24.0;
+                const float freq = 9.0;
+                if (trauma > 1e-3)
                 {
-                        float t = DamageDVParams1.x;
-                        float a = trauma * strength;
+                        float a = clamp(trauma * strength, 0.0, 1.35);
                         float osc = sin(t * freq) * 0.75 + sin(t * freq * 0.37 + 1.7) * 0.25;
                         float jitter = (InterleavedGradientNoise(vec2(t * 0.123, t * 0.917)) - 0.5) * 0.6;
-                        float px = maxPx * a * (0.65 + 0.35 * abs(osc));
+                        float px = maxPx * (0.3 + 0.7 * a) * (0.7 + 0.3 * abs(osc));
                         vec2 baseDir = vec2(cos(t * 1.7), sin(t * 1.31));
                         vec2 dir = baseDir + vec2(jitter, -jitter);
                         float dirLen = length(dir);
@@ -437,19 +434,43 @@ void main()
                         vec3 base = color.rgb;
                         vec3 ghost1 = texture(GammaTexture, clamp(uv + offset1, viewMin, viewMax)).rgb;
                         vec3 ghost2 = texture(GammaTexture, clamp(uv - offset2, viewMin, viewMax)).rgb;
-                        float w1 = 0.28 * a;
-                        float w2 = 0.22 * a;
-                        vec3 dvColor = base * (1.0 - (w1 + w2)) + ghost1 * w1 + ghost2 * w2;
-                        if (quality > 1.5)
+                        float w1 = 0.42 * a;
+                        float w2 = 0.36 * a;
+                        vec3 dvColor = base * max(0.0, 1.0 - (w1 + w2)) + ghost1 * w1 + ghost2 * w2;
+                        {
+                                vec2 viewUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
+                                vec2 toCenter = viewUV - vec2(0.5);
+                                float centerLen = max(length(toCenter), 1e-4);
+                                vec2 centerDir = toCenter / centerLen;
+                                float wobble = sin((viewUV.y + t * 1.9) * 38.0) * cos((viewUV.x - t * 1.6) * 31.0);
+                                vec2 distortion = (centerDir * (px * 0.95) + vec2(wobble, -wobble) * (px * 0.45)) * invTexSize;
+                                vec3 refracted = texture(GammaTexture, clamp(uv + distortion, viewMin, viewMax)).rgb;
+                                dvColor = mix(dvColor, refracted, 0.58 * a);
+                        }
+                        {
+                                vec2 splitOffset = vec2(px, 0.0) * invTexSize;
+                                vec3 split;
+                                split.r = texture(GammaTexture, clamp(uv + splitOffset, viewMin, viewMax)).r;
+                                split.g = texture(GammaTexture, clamp(uv, viewMin, viewMax)).g;
+                                split.b = texture(GammaTexture, clamp(uv - splitOffset, viewMin, viewMax)).b;
+                                dvColor = mix(dvColor, split, clamp(0.45 + 0.45 * a, 0.0, 1.0));
+                        }
                         {
                                 vec2 offset3 = (offset1 + offset2) * 0.6;
                                 vec3 ghost3 = texture(GammaTexture, clamp(uv + offset3, viewMin, viewMax)).rgb;
-                                float w3 = 0.18 * a;
+                                float w3 = 0.28 * a;
                                 dvColor = dvColor * (1.0 - w3) + ghost3 * w3;
                                 vec3 smear = texture(GammaTexture, clamp(uv + offset1 * 0.5, viewMin, viewMax)).rgb;
-                                dvColor = mix(dvColor, smear, 0.12 * a);
+                                dvColor = mix(dvColor, smear, 0.35 * a);
+                                vec3 blur = vec3(0.0);
+                                blur += texture(GammaTexture, clamp(uv + offset1 * 0.35, viewMin, viewMax)).rgb;
+                                blur += texture(GammaTexture, clamp(uv - offset1 * 0.35, viewMin, viewMax)).rgb;
+                                blur += texture(GammaTexture, clamp(uv + offset2 * 0.35, viewMin, viewMax)).rgb;
+                                blur += texture(GammaTexture, clamp(uv - offset2 * 0.35, viewMin, viewMax)).rgb;
+                                blur *= 0.25;
+                                dvColor = mix(dvColor, blur, 0.72 * a);
                         }
-                        color.rgb = (debug > 0.5) ? vec3(a) : dvColor;
+                        color.rgb = mix(base, dvColor, clamp(0.85 + 0.35 * a, 0.0, 1.0));
                 }
         }
 
@@ -731,8 +752,10 @@ void main()
                 float damageTint = clamp(PostFXParams3.w, 0.0, 1.0);
                 if (damageTint > 0.0)
                 {
-                        vec3 tint = vec3(1.0, 0.15, 0.15);
-                        mapped = mix(mapped, mapped * tint, damageTint);
+                        vec3 blood = vec3(0.34, 0.02, 0.02);
+                        vec3 tinted = mapped * vec3(0.88, 0.54, 0.5);
+                        vec3 boosted = clamp(tinted + blood * 0.45, vec3(0.0), vec3(1.0));
+                        mapped = mix(mapped, boosted, damageTint);
                 }
         }
         if (outputSrgb > 0.5)

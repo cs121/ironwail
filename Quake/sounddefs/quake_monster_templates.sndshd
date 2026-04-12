@@ -1,0 +1,40 @@
+// Template definitions for monster folders that were named in the list
+// but without explicit per-file paths.
+// Fill in real sample paths before use.
+// Valid buses: sfx, ui, ambient, music
+
+// Example pattern:
+// sound quake/monster/<name>/idle
+// {
+// 	priority 128
+// 	max_instances 2
+// 	spatialize true
+// 	doppler false
+// 	lowpass_by_distance true
+// 	reverb_send 0.12
+//
+// 	sample <folder>/<idle-file>.wav
+// 	bus sfx
+// 	volume 0.88
+// 	volume_random 0.98 1.02
+// 	pitch 1.00
+// 	pitch_random 0.99 1.01
+// 	loop false
+// 	chance 1.00
+// 	delay_ms 0
+// 	start_offset_ms 0
+// }
+
+// Mentioned monster folders from the provided list:
+// dog/
+// enforcer/
+// fish/
+// hknight/
+// knight/
+// ogre/
+// shalrath/
+// shambler/
+// soldier/
+// wizard/
+// zombie/
+// boss/

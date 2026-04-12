@@ -49,19 +49,21 @@ static int				postfx_powerup_lut = PFX_LUT_NONE;
 static float			postfx_powerup_strength;
 static float			postfx_damage_trauma;
 
+/* Damage response is intentionally fixed-profile to keep user-facing tuning minimal. */
+#define POSTFX_DAMAGE_EVENT_DURATION		0.62f
+#define POSTFX_DAMAGE_ACCUM_WINDOW			0.12f
+#define POSTFX_DAMAGE_ACCUM_SCALE			0.75f
+#define POSTFX_DAMAGE_VIGNETTE				0.9f
+#define POSTFX_DAMAGE_TINT					0.75f
+#define POSTFX_DAMAGE_EXPOSURE				-0.42f
+#define POSTFX_DAMAGE_VIGNETTE_SOFTNESS		0.82f
+
 extern cvar_t r_postfx;
 extern cvar_t r_postfx_pickup;
 extern cvar_t r_postfx_pickup_exposure;
 extern cvar_t r_postfx_pickup_bloom;
 extern cvar_t r_postfx_pickup_duration;
 extern cvar_t r_postfx_damage;
-extern cvar_t r_postfx_damage_vignette;
-extern cvar_t r_postfx_damage_vignette_softness;
-extern cvar_t r_postfx_damage_desat;
-extern cvar_t r_postfx_damage_exposure;
-extern cvar_t r_postfx_damage_duration;
-extern cvar_t r_postfx_damage_accum_window;
-extern cvar_t r_postfx_damage_accum_scale;
 extern cvar_t r_post_damage_doublevision;
 extern cvar_t r_post_damage_trauma_scale;
 extern cvar_t r_post_damage_trauma_decay;
@@ -245,7 +247,8 @@ void CL_PostFX_Frame (void)
 
 	if (r_post_damage_doublevision.value > 0.f)
 	{
-		float decay = q_max (0.f, r_post_damage_trauma_decay.value);
+		/* Cap aggressive legacy cfg decay so DV remains perceptible after impact. */
+		float decay = CLAMP (0.5f, r_post_damage_trauma_decay.value, 3.4f);
 		float decay_factor = (decay > 0.f) ? expf (-decay * dt) : 1.f;
 		postfx_damage_trauma = PostFX_Saturate (postfx_damage_trauma * decay_factor);
 	}
@@ -309,13 +312,15 @@ void CL_PostFX_PushDamage (float damage_amount)
 	postfx_event_t *event;
 	double now;
 	float duration;
+	float normalized_damage;
 	float intensity;
 	float accum_window;
 	int i;
 
 	if (r_postfx.value > 0.f && r_post_damage_doublevision.value > 0.f)
 	{
-		float trauma_scale = q_max (0.f, r_post_damage_trauma_scale.value);
+		/* Keep DV visible even when old configs persist a weak trauma scale. */
+		float trauma_scale = q_max (0.08f, r_post_damage_trauma_scale.value);
 		float trauma_kick = PostFX_Saturate (damage_amount * trauma_scale);
 		if (trauma_kick > 0.f)
 			postfx_damage_trauma = PostFX_Saturate (postfx_damage_trauma + trauma_kick);
@@ -324,13 +329,13 @@ void CL_PostFX_PushDamage (float damage_amount)
 	if (r_postfx.value <= 0.f || r_postfx_damage.value <= 0.f)
 		return;
 
-	intensity = PostFX_Saturate (damage_amount / 100.f);
-	intensity = PostFX_Saturate (intensity * r_postfx_damage.value);
+	normalized_damage = PostFX_Saturate (damage_amount / 55.f);
+	intensity = PostFX_Saturate ((0.15f + normalized_damage * 1.05f) * r_postfx_damage.value);
 	if (intensity <= 0.f)
 		return;
 
-	duration = q_max (0.05f, r_postfx_damage_duration.value);
-	accum_window = q_max (0.f, r_postfx_damage_accum_window.value);
+	duration = POSTFX_DAMAGE_EVENT_DURATION;
+	accum_window = POSTFX_DAMAGE_ACCUM_WINDOW;
 	now = cl.time;
 
 	for (i = 0; i < POSTFX_MAX_EVENTS; ++i)
@@ -340,7 +345,7 @@ void CL_PostFX_PushDamage (float damage_amount)
 		if ((now - postfx_events[i].last_update) > accum_window)
 			continue;
 
-		postfx_events[i].intensity = PostFX_Saturate (postfx_events[i].intensity + intensity * q_max (0.f, r_postfx_damage_accum_scale.value));
+		postfx_events[i].intensity = PostFX_Saturate (postfx_events[i].intensity + intensity * POSTFX_DAMAGE_ACCUM_SCALE);
 		postfx_events[i].duration = q_max (postfx_events[i].duration, (float)(now - postfx_events[i].start_time) + duration);
 		postfx_events[i].last_update = now;
 		return;
@@ -355,10 +360,10 @@ void CL_PostFX_PushDamage (float damage_amount)
 	event->attack = duration * 0.1f;
 	event->decay = duration * 0.9f;
 	event->intensity = intensity;
-	event->params[0] = r_postfx_damage_vignette.value;
-	event->params[1] = r_postfx_damage_desat.value;
-	event->params[2] = r_postfx_damage_exposure.value;
-	event->params[3] = r_postfx_damage_vignette_softness.value;
+	event->params[0] = POSTFX_DAMAGE_VIGNETTE;
+	event->params[1] = POSTFX_DAMAGE_TINT;
+	event->params[2] = POSTFX_DAMAGE_EXPOSURE;
+	event->params[3] = POSTFX_DAMAGE_VIGNETTE_SOFTNESS;
 	event->active = true;
 }
 

@@ -187,7 +187,8 @@ void main()
 	if (debug_mode == 1)
 	{
 		out_fragcolor = vec4(albedo, 1.0);
-		out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
+		// Keep MRT1 untouched in additive dlight pass; it stores motion/material tags.
+		out_velocity = vec4(0.0);
 		return;
 	}
 
@@ -356,5 +357,6 @@ void main()
 	color = SanitizeColor(color);
 
 	out_fragcolor = vec4(color, alpha); // FIX: war "alpha * 0.0" → Fragment immer transparent
-	out_velocity = vec4(0.0, 0.0, 0.0, 1.0);
+	// Additive dlight must not modify velocity/material-mask attachment.
+	out_velocity = vec4(0.0);
 }

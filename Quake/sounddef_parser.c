@@ -872,14 +872,11 @@ void SoundDef_LoadAll (void)
 	committed = (totals.errors == 0);
 	SoundDef_FinishLoad (committed);
 
-	Con_Printf ("Sound defs: loaded %llu defs from %llu file%s (%llu warning%s, %llu error%s)\n",
+	Con_Printf ("Sound defs: parsed %llu defs (%llu errors, %llu warnings, %llu files)\n",
 		(unsigned long long)parsed_total,
-		(unsigned long long)totals.loaded_files,
-		totals.loaded_files == 1 ? "" : "s",
-		(unsigned long long)totals.warnings,
-		totals.warnings == 1 ? "" : "s",
 		(unsigned long long)totals.errors,
-		totals.errors == 1 ? "" : "s");
+		(unsigned long long)totals.warnings,
+		(unsigned long long)totals.loaded_files);
 
 	if (!committed && previous_count > 0)
 		Con_Warning ("Sound defs: keeping previous registry (%d defs) because reload had errors\n", previous_count);

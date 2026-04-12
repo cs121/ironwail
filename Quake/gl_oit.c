@@ -32,6 +32,11 @@ void R_EndTranslucency (void)
 		GL_BeginGroup ("OIT resolve");
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framesetup.scene_fbo);
+		{
+			GLuint buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
+			GL_DrawBuffersFunc (2, buffers);
+			glReadBuffer (GL_COLOR_ATTACHMENT0);
+		}
 
 		glStencilFunc (GL_EQUAL, 2, 2);
 		glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
@@ -50,6 +55,9 @@ void R_EndTranslucency (void)
 			R_Backend_BindPipeline (&pipeline_desc);
 			R_Backend_SetDynamicState (&dynamic_state);
 		}
+		// Keep color attachment alpha-blended, but overwrite velocity/material mask.
+		if (GL_BlendFunciFunc)
+			GL_BlendFunciFunc (1, GL_ONE, GL_ZERO);
 		GL_BindNative (GL_TEXTURE0, framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D, framebufs.oit.accum_tex);
 		GL_BindNative (GL_TEXTURE1, framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D, framebufs.oit.revealage_tex);
 

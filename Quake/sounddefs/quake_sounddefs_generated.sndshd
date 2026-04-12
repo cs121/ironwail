@@ -1,0 +1,1350 @@
+// Generated Quake sound definitions
+// Based on the provided original sound list and the uploaded syntax manifest.
+// Uses only paths explicitly present in the provided list.
+// Strategy:
+// - group natural variations into one logical sound where multiple samples exist
+// - keep ambient/world loops as looped ambient defs
+// - use mostly implicit single-layer definitions for simplicity and parser safety
+
+// =========================================================
+// Ambient
+// =========================================================
+
+sound quake/ambient/drip
+{
+	priority 72
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance true
+	reverb_send 0.45
+
+	sample ambience/drip1.wav
+	bus ambient
+	volume 0.75
+	volume_random 0.95 1.00
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop true
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/ambient/fire
+{
+	priority 76
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance true
+	reverb_send 0.50
+
+	sample ambience/fire1.wav
+	bus ambient
+	volume 0.90
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.97 1.03
+	loop true
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/ambient/hum_light
+{
+	priority 68
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance true
+	reverb_send 0.35
+
+	sample ambience/hum1.wav
+	sample ambience/hum2.wav
+	bus ambient
+	volume 0.65
+	volume_random 0.95 1.00
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop true
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/ambient/water
+{
+	priority 70
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance true
+	reverb_send 0.55
+
+	sample ambience/water1.wav
+	bus ambient
+	volume 0.82
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop true
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/ambient/wind
+{
+	priority 74
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance true
+	reverb_send 0.40
+
+	sample ambience/wind2.wav
+	bus ambient
+	volume 0.78
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.97 1.03
+	loop true
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+// =========================================================
+// Player
+// =========================================================
+
+sound quake/player/death
+{
+	priority 240
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.20
+
+	sample player/death1.wav
+	sample player/death2.wav
+	sample player/death3.wav
+	sample player/death4.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.97 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/player/drown
+{
+	priority 232
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.25
+
+	sample player/drown1.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/player/gasp
+{
+	priority 210
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.15
+
+	sample player/gasp1.wav
+	sample player/gasp2.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.04
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/player/water_death
+{
+	priority 235
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.30
+
+	sample player/h2odeath.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/player/pain_light
+{
+	priority 225
+	max_instances 3
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.12
+
+	sample player/hit1.wav
+	sample player/hit2.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.04
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/player/in_lava
+{
+	priority 220
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.20
+
+	sample player/inlava.wav
+	bus sfx
+	volume 0.90
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/player/in_water
+{
+	priority 160
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance true
+	reverb_send 0.25
+
+	sample player/inwater.wav
+	bus sfx
+	volume 0.82
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/player/jump
+{
+	priority 170
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.10
+
+	sample player/jump1.wav
+	sample player/plyrjmp8.wav
+	bus sfx
+	volume 0.90
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/player/land
+{
+	priority 168
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.10
+
+	sample player/land.wav
+	bus sfx
+	volume 0.88
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/player/telefrag_death
+{
+	priority 250
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.18
+
+	sample player/teledth1.wav
+	bus sfx
+	volume 1.00
+	volume_random 1.00 1.00
+	pitch 1.00
+	pitch_random 1.00 1.00
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+// =========================================================
+// Weapons
+// =========================================================
+
+sound quake/weapons/axe_swing
+{
+	priority 190
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.12
+
+	sample weapons/ax1.wav
+	bus sfx
+	volume 0.92
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/axe_hit
+{
+	priority 210
+	max_instances 3
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.15
+
+	sample weapons/axhit1.wav
+	sample weapons/axhit2.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.04
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/bounce
+{
+	priority 150
+	max_instances 4
+	spatialize true
+	doppler true
+	lowpass_by_distance false
+	reverb_send 0.10
+
+	sample weapons/bounce.wav
+	bus sfx
+	volume 0.80
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.96 1.04
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/grenade_fire
+{
+	priority 220
+	max_instances 2
+	spatialize true
+	doppler true
+	lowpass_by_distance false
+	reverb_send 0.18
+
+	sample weapons/grenade.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/lightning_hit
+{
+	priority 230
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.08
+
+	sample weapons/lhit.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 1.00 1.00
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/lightning_start
+{
+	priority 228
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.08
+
+	sample weapons/lstart.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 1.00 1.00
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/pickup
+{
+	priority 200
+	max_instances 4
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.05
+
+	sample weapons/pkup.wav
+	bus sfx
+	volume 0.88
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 1.00 1.00
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/ricochet
+{
+	priority 185
+	max_instances 6
+	spatialize true
+	doppler true
+	lowpass_by_distance false
+	reverb_send 0.14
+
+	sample weapons/ric1.wav
+	sample weapons/ric2.wav
+	sample weapons/ric3.wav
+	bus sfx
+	volume 0.90
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.96 1.04
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/rocket_explode
+{
+	priority 250
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.30
+
+	sample weapons/r_exp3.wav
+	bus sfx
+	volume 1.10
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/shotgun_fire
+{
+	priority 220
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.15
+
+	sample weapons/shotgn1.wav
+	sample weapons/shotgn2.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.97 1.03
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/spike_fly
+{
+	priority 185
+	max_instances 4
+	spatialize true
+	doppler true
+	lowpass_by_distance false
+	reverb_send 0.08
+
+	sample weapons/spike2.wav
+	sample weapons/spike3.wav
+	bus sfx
+	volume 0.92
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.04
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/tink
+{
+	priority 165
+	max_instances 6
+	spatialize true
+	doppler true
+	lowpass_by_distance false
+	reverb_send 0.12
+
+	sample weapons/tink1.wav
+	bus sfx
+	volume 0.82
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.97 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/weapons/rocket_fly
+{
+	priority 225
+	max_instances 2
+	spatialize true
+	doppler true
+	lowpass_by_distance true
+	reverb_send 0.18
+
+	sample weapons/rocket1i.wav
+	bus sfx
+	volume 0.96
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop true
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+// =========================================================
+// Items
+// =========================================================
+
+sound quake/items/armor_pickup
+{
+	priority 205
+	max_instances 4
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.06
+
+	sample items/armor1.wav
+	bus sfx
+	volume 0.90
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 1.00 1.00
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/items/quad_pickup
+{
+	priority 220
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.12
+
+	sample items/damage.wav
+	sample items/damage2.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/items/health_pickup
+{
+	priority 205
+	max_instances 4
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.06
+
+	sample items/health1.wav
+	bus sfx
+	volume 0.88
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 1.00 1.00
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/items/invisibility_pickup
+{
+	priority 218
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.12
+
+	sample items/inv1.wav
+	sample items/inv2.wav
+	sample items/inv3.wav
+	bus sfx
+	volume 0.96
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/items/item_respawn
+{
+	priority 180
+	max_instances 3
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.10
+
+	sample items/itembk2.wav
+	sample items/itembk3.wav
+	bus sfx
+	volume 0.90
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/items/pentagram_pickup
+{
+	priority 220
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.15
+
+	sample items/protect.wav
+	sample items/protect2.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/items/rune_pickup
+{
+	priority 210
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.12
+
+	sample items/r_item1.wav
+	sample items/r_item2.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.96 1.04
+	pitch 1.00
+	pitch_random 0.98 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/items/biosuit_pickup
+{
+	priority 215
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.12
+
+	sample items/suit.wav
+	bus sfx
+	volume 0.96
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+// =========================================================
+// Doors, plats, world, UI
+// =========================================================
+
+sound quake/doors/base_security_move
+{
+	priority 150
+	max_instances 2
+	spatialize true
+	doppler true
+	lowpass_by_distance true
+	reverb_send 0.22
+
+	sample doors/basesec1.wav
+	sample doors/basesec2.wav
+	bus sfx
+	volume 0.85
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/doors/move
+{
+	priority 150
+	max_instances 3
+	spatialize true
+	doppler true
+	lowpass_by_distance true
+	reverb_send 0.20
+
+	sample doors/doormv1.wav
+	sample doors/doormv2.wav
+	bus sfx
+	volume 0.88
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/doors/close_heavy
+{
+	priority 165
+	max_instances 2
+	spatialize true
+	doppler true
+	lowpass_by_distance true
+	reverb_send 0.25
+
+	sample doors/drclos4.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/doors/open_heavy
+{
+	priority 165
+	max_instances 2
+	spatialize true
+	doppler true
+	lowpass_by_distance true
+	reverb_send 0.25
+
+	sample doors/dropen4.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/plats/move
+{
+	priority 150
+	max_instances 3
+	spatialize true
+	doppler true
+	lowpass_by_distance true
+	reverb_send 0.22
+
+	sample plats/plat1.wav
+	sample plats/plat2.wav
+	sample plats/plat3.wav
+	sample plats/plat4.wav
+	bus sfx
+	volume 0.85
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/plats/train_move
+{
+	priority 152
+	max_instances 2
+	spatialize true
+	doppler true
+	lowpass_by_distance true
+	reverb_send 0.24
+
+	sample plats/train1.wav
+	sample plats/train2.wav
+	bus sfx
+	volume 0.88
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/misc/base_key
+{
+	priority 185
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.05
+
+	sample misc/basekey.wav
+	bus sfx
+	volume 0.90
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/misc/med_key
+{
+	priority 185
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.05
+
+	sample misc/medkey.wav
+	bus sfx
+	volume 0.90
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/misc/out_of_water
+{
+	priority 160
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance true
+	reverb_send 0.12
+
+	sample misc/outwater.wav
+	bus sfx
+	volume 0.80
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 1.00 1.00
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/misc/water_step
+{
+	priority 150
+	max_instances 4
+	spatialize true
+	doppler false
+	lowpass_by_distance true
+	reverb_send 0.16
+
+	sample misc/water1.wav
+	sample misc/water2.wav
+	sample misc/water3.wav
+	bus sfx
+	volume 0.78
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.97 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/ui/menu_move
+{
+	priority 245
+	max_instances 8
+	spatialize false
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.00
+
+	sample misc/menu1.wav
+	sample misc/menu2.wav
+	sample misc/menu3.wav
+	bus ui
+	volume 0.85
+	volume_random 0.95 1.00
+	pitch 1.00
+	pitch_random 0.96 1.04
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/ui/talk
+{
+	priority 240
+	max_instances 6
+	spatialize false
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.00
+
+	sample misc/talk.wav
+	bus ui
+	volume 0.80
+	volume_random 1.00 1.00
+	pitch 1.00
+	pitch_random 1.00 1.00
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/misc/trigger
+{
+	priority 180
+	max_instances 4
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.08
+
+	sample misc/trigger1.wav
+	sample misc/trigger2.wav
+	sample misc/trigger3.wav
+	bus sfx
+	volume 0.88
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.97 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+// =========================================================
+// Monsters (only explicit paths from the provided list)
+// =========================================================
+
+sound quake/monster/ogre/idle
+{
+	priority 128
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance true
+	reverb_send 0.12
+
+	sample ogre/ogidle.wav
+	bus sfx
+	volume 0.88
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/monster/ogre/pain
+{
+	priority 190
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.14
+
+	sample ogre/ogpain1.wav
+	sample ogre/ogpain2.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.03
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/monster/ogre/death
+{
+	priority 220
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.18
+
+	sample ogre/ogdth.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/monster/ogre/drag_blade
+{
+	priority 150
+	max_instances 1
+	spatialize true
+	doppler true
+	lowpass_by_distance true
+	reverb_send 0.16
+
+	sample ogre/ogdrag.wav
+	bus sfx
+	volume 0.82
+	volume_random 0.95 1.05
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/monster/ogre/saw_attack
+{
+	priority 205
+	max_instances 2
+	spatialize true
+	doppler true
+	lowpass_by_distance false
+	reverb_send 0.16
+
+	sample ogre/ogsawatk.wav
+	bus sfx
+	volume 0.98
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/monster/ogre/sight
+{
+	priority 175
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.12
+
+	sample ogre/ogwake.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/monster/demon/jump
+{
+	priority 195
+	max_instances 1
+	spatialize true
+	doppler true
+	lowpass_by_distance false
+	reverb_send 0.14
+
+	sample demon/djump.wav
+	bus sfx
+	volume 0.96
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/monster/demon/land
+{
+	priority 182
+	max_instances 1
+	spatialize true
+	doppler true
+	lowpass_by_distance false
+	reverb_send 0.16
+
+	sample demon/dland2.wav
+	bus sfx
+	volume 0.92
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/monster/demon/pain
+{
+	priority 190
+	max_instances 2
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.14
+
+	sample demon/dpain1.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/monster/demon/death
+{
+	priority 220
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.18
+
+	sample demon/ddeath.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+sound quake/monster/demon/sight
+{
+	priority 175
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.12
+
+	sample demon/dsight.wav
+	bus sfx
+	volume 0.95
+	volume_random 0.98 1.02
+	pitch 1.00
+	pitch_random 0.99 1.01
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
+
+// =========================================================
+// Boss
+// =========================================================
+
+sound quake/boss/voice
+{
+	priority 230
+	max_instances 1
+	spatialize true
+	doppler false
+	lowpass_by_distance false
+	reverb_send 0.20
+
+	sample boss/boss1.wav
+	sample boss/boss2.wav
+	sample boss/boss3.wav
+	sample boss/boss4.wav
+	bus sfx
+	volume 1.00
+	volume_random 0.96 1.04
+	pitch 1.00
+	pitch_random 0.98 1.02
+	loop false
+	chance 1.00
+	delay_ms 0
+	start_offset_ms 0
+}
