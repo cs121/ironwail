@@ -58,81 +58,60 @@ vec2 hash2(float n)
 	return vec2(hash1(n), hash1(n + 17.371));
 }
 
-mat2 rot2(float a)
-{
-	float c = cos(a);
-	float s = sin(a);
-	return mat2(c, -s, s, c);
-}
-
 void main()
 {
 	vec2 uv = in_uv * 2.0 - 1.0;
-	float r2 = dot(uv, uv);
-	vec2 swirl_uv;
-	vec3 color = vec3(0.0);
-	float alpha;
+	float r = length(uv);
 
-	swirl_uv = rot2(0.12 * sin(Time * 0.45)) * uv;
-	swirl_uv += 0.025 * vec2(
-		sin(uv.y * 8.0 + Time * 0.9),
-		cos(uv.x * 7.0 - Time * 0.8)
-	);
+	/* Keep portal present as a dark disk; only fade at the very rim. */
+	float mask = 1.0 - smoothstep(0.90, 1.06, r);
+	vec3 particle_color = vec3(0.0);
 
-	for (int i = 0; i < 12; ++i)
+	/* Inward moving particles layered over a black background. */
+	for (int i = 0; i < 48; ++i)
 	{
 		float fi = float(i);
-		vec2 seed = hash2(fi * 11.173);
-		float orbit = Time * (0.23 + 0.09 * seed.x) + 6.2831853 * seed.y;
-		float drift = Time * (0.41 + 0.15 * hash1(fi * 5.91));
-		float radius = 0.10 + 0.58 * hash1(fi * 9.17);
-		float depth = 0.55 + 0.45 * hash1(fi * 13.7);
-		float size = mix(0.030, 0.085, hash1(fi * 3.27)) / depth;
-		float streak = mix(0.9, 1.6, hash1(fi * 15.41));
-		vec2 center = vec2(cos(orbit), sin(orbit)) * radius;
-		vec2 drift_dir = normalize(vec2(seed.x - 0.5, seed.y - 0.5) + vec2(0.0001, 0.0));
-		vec2 d;
-		float core;
-		float halo;
-		float flicker;
-		float particle;
-
-		center += drift_dir * sin(drift + fi) * (0.08 / depth);
-		center += vec2(
-			sin(Time * (0.55 + 0.07 * fi) + fi * 1.91),
-			cos(Time * (0.48 + 0.05 * fi) + fi * 2.37)
-		) * (0.035 / depth);
-
-		d = swirl_uv - center;
-		d.x *= streak;
-		core = exp(-dot(d, d) / max(size * size, 1e-4));
-		halo = exp(-dot(d, d) / max((size * 2.8) * (size * 2.8), 1e-4));
-		flicker = 0.70 + 0.30 * sin(Time * (2.2 + seed.x * 2.0) + fi * 4.1);
-		particle = (core + 0.35 * halo) * depth * flicker;
-		color += vec3(particle);
+		vec2 seed = hash2(fi * 13.17);
+		float lane = hash1(fi * 9.73);
+		float speed = mix(0.35, 1.30, hash1(fi * 7.91));
+		float swirl = Time * (0.60 + lane * 0.90);
+		float angle = seed.x * 6.2831853 + swirl;
+		float travel = fract(seed.y + Time * speed);
+		float radius = mix(0.95, 0.06, travel);
+		float pulse = 0.80 + 0.20 * sin(Time * (2.2 + lane * 2.0) + fi * 3.1);
+		float size = mix(0.016, 0.048, lane) * mix(0.60, 1.25, radius);
+		vec2 center = vec2(cos(angle), sin(angle)) * radius;
+		vec2 d = uv - center;
+		float particle = exp(-dot(d, d) / max(size * size, 1e-4)) * pulse;
+		vec3 tint = mix(vec3(0.35, 0.85, 1.00), vec3(1.00, 1.00, 1.00), lane);
+		particle_color += tint * particle;
 	}
 
-	color *= 0.82;
-	color *= 1.0 - smoothstep(0.55, 1.20, r2);
-	color += vec3(0.02) * (1.0 - smoothstep(0.0, 0.75, r2));
-	color = min(color, vec3(1.0));
+	particle_color *= 1.7;
+	particle_color *= mask;
 
 	{
 		float fog = exp2(-abs(Fog.w) * dot(in_pos - EyePos, in_pos - EyePos));
+		float alpha;
+		float emissive_visibility;
+		vec3 base_color;
+		vec3 color;
 		fog = clamp(fog, 0.0, 1.0);
-		alpha = clamp(max(max(color.r, color.g), color.b) * 1.1, 0.0, 1.0);
-		alpha *= in_alpha * fog;
-		color = mix(Fog.rgb, color, fog);
+		alpha = clamp(in_alpha * mask, 0.0, 1.0);
+		base_color = vec3(0.0);
+		color = mix(Fog.rgb, base_color, fog);
+		emissive_visibility = 0.35 + 0.65 * fog;
+		color += particle_color * emissive_visibility;
+		color = min(color, vec3(1.0));
+		OUT_COLOR = vec4(color, alpha);
 	}
-
-	OUT_COLOR = vec4(color, alpha);
 
 #if !OIT
 	{
 		vec2 velocity = ComputeVelocity(in_curr_clip, in_prev_clip);
 		vec2 velocity_out = vec2(0.0);
-		if (alpha >= 0.999)
-			velocity_out = velocity * alpha;
+		if (OUT_COLOR.a >= 0.999)
+			velocity_out = velocity * OUT_COLOR.a;
 		out_velocity = vec4(velocity_out, 0.0, 2.0);
 	}
 #endif

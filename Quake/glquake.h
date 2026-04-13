@@ -539,11 +539,21 @@ typedef struct gpuframedata_s {
         vec4_t          sun_dir_enabled; // xyz: sun dir (scene->sun), w: enabled
         vec4_t          sun_color_intensity; // rgb: sun color, w: intensity
         vec4_t          skyvis_tint;    // Shared ambient-sky contract: rgb tint + w cap (world/alias/fog)
+        vec4_t          caustics_params0; // x: enabled, y: medium (1=water,2=lava), z: intensity, w: scale
+        vec4_t          caustics_params1; // x: speed, y: debug mode, zw: reserved
         unsigned int    numlights;
         unsigned int    prev_frame_valid;
         unsigned int    _padding1;
         unsigned int    _padding2;
 } gpuframedata_t;
+
+typedef enum viewmedium_e
+{
+	VIEWMEDIUM_NONE = 0,
+	VIEWMEDIUM_WATER,
+	VIEWMEDIUM_LAVA,
+	VIEWMEDIUM_SLIME
+} viewmedium_t;
 
 typedef struct {
 	vec3_t dir;
@@ -564,7 +574,7 @@ typedef struct {
 	float ray_density;
 } sun_t;
 
-COMPILE_TIME_ASSERT (gpuframedata_std140_size, sizeof (gpuframedata_t) == 448);
+COMPILE_TIME_ASSERT (gpuframedata_std140_size, sizeof (gpuframedata_t) == 480);
 
 typedef enum
 {
@@ -630,6 +640,7 @@ void R_DrawSpriteModels_ShowTris (entity_t **ents, int count);
 void R_GLStateDump (const char *tag);
 void R_RenderShadowMaps (void);
 void R_SetupView (void);
+viewmedium_t R_GetViewMedium (void);
 void R_RenderScene (const RenderGraphResourceHandle *resources);
 void R_WarpScaleView (const RenderGraphResourceHandle *resources);
 qboolean R_Shadow_GetSunOcclusionData (float out_viewproj[16], float *out_bias, float *out_pcf_uv);

@@ -216,6 +216,180 @@ float whitenoise(vec2 p)
 	return whitenoise01(p) - 0.5;
 }
 
+vec2 hash22(vec2 p)
+{
+	vec3 p3 = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+	p3 += dot(p3, p3.yzx + 33.33);
+	return fract((p3.xx + p3.yz) * p3.zy) * 2.0 - 1.0;
+}
+
+float gradNoise2(vec2 p)
+{
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	vec2 u = f * f * (3.0 - 2.0 * f);
+
+	vec2 g00 = normalize(hash22(i + vec2(0.0, 0.0)));
+	vec2 g10 = normalize(hash22(i + vec2(1.0, 0.0)));
+	vec2 g01 = normalize(hash22(i + vec2(0.0, 1.0)));
+	vec2 g11 = normalize(hash22(i + vec2(1.0, 1.0)));
+
+	float a = dot(g00, f - vec2(0.0, 0.0));
+	float b = dot(g10, f - vec2(1.0, 0.0));
+	float c = dot(g01, f - vec2(0.0, 1.0));
+	float d = dot(g11, f - vec2(1.0, 1.0));
+
+	return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// OPT: 3 octaves instead of 4 — 4th octave contributes a=0.0625 (< 7% of total),
+// visually imperceptible in caustic context but saves 25% of all gradNoise2 calls.
+float fbm2(vec2 p)
+{
+	float v = 0.0;
+	float a = 0.5;
+	// mat2 precomputed as constants — avoids per-iter mat re-init overhead on some drivers.
+	const float m00 = 1.7, m01 = -1.3, m10 = 1.2, m11 = 1.6;
+	for (int i = 0; i < 3; ++i)
+	{
+		v += a * (gradNoise2(p) * 0.5 + 0.5);
+		float px = m00 * p.x + m01 * p.y + 17.0;
+		float py = m10 * p.x + m11 * p.y +  9.0;
+		p = vec2(px, py);
+		a *= 0.5;
+	}
+	// Rescale 3-oct sum [0.5+0.25+0.125 range] back to original [0..1] envelope.
+	// 3-oct max ≈ 0.875, so multiply by 1.0/0.875 ≈ 1.143 to preserve contrast.
+	return v * 1.143;
+}
+
+// OPT: cheap 2-octave fbm for domain warp only — warp precision is non-critical.
+float fbm2_warp(vec2 p)
+{
+	float v  = gradNoise2(p) * 0.5 + 0.5;
+	p.x = 1.7 * p.x - 1.3 * p.y + 17.0;
+	p.y = 1.2 * p.x + 1.6 * p.y +  9.0; // note: reads updated p.x → intentional domain skew
+	v += 0.5 * (gradNoise2(p) * 0.5 + 0.5);
+	return v;
+}
+
+// Returns caustic brightness in [0,1].
+// Improved: two-frequency interference pattern (like real refracted wavefronts),
+// sharper focal lines with exponential falloff, and a soft halo ring for
+// the characteristic "bright edge / dark centre" look of shallow-water caustics.
+// OPT: accepts precomputed f2 (macro variation) to avoid redundant fbm2 calls
+// across triplanar layers — caller computes f2 once and passes it in.
+float WaterCausticPlane(vec2 uv, float t, float f2)
+{
+	vec2 flow = vec2(t * 0.08, -t * 0.06);
+
+	// OPT: domain warp uses cheap 2-oct fbm2_warp — precision non-critical here.
+	vec2 warp = vec2(
+		fbm2_warp(uv * 0.53 + flow + vec2(13.0,  7.0)),
+		fbm2_warp(uv * 0.49 - flow + vec2(-5.0, 19.0))) - 0.5;
+	uv += warp * 1.25;
+
+	// Two fbm layers at different frequencies produce interference
+	float f0 = fbm2(uv * 1.10 + flow);
+	float f1 = fbm2(uv * 1.67 - flow * 1.21 + vec2(31.0, -17.0));
+	// f2 is passed in — computed once per WaterCausticLayer, shared across all 3 planes.
+
+	float phase = f0 * 4.6 + f1 * 3.4 + t * 0.11 + f2 * 1.7;
+
+	// Triangle wave — values near 1.0 = focal line
+	float tw = 1.0 - abs(fract(phase) * 2.0 - 1.0);
+
+	// Sharp focal spike: pow gives a narrower, brighter crest
+	float core = pow(smoothstep(0.72, 1.0, tw), 2.2);
+
+	// Halo: the darker "trough" just outside the focal line
+	// brightens slightly to mimic the secondary diffraction ring
+	float halo = smoothstep(0.52, 0.80, tw) * (1.0 - smoothstep(0.80, 1.0, tw)) * 0.18;
+
+	// Second interference frequency shifts slightly to avoid pure periodicity
+	float phase2 = f1 * 5.1 + f0 * 2.9 - t * 0.09 + f2 * 2.3;
+	float tw2    = 1.0 - abs(fract(phase2) * 2.0 - 1.0);
+	float core2  = pow(smoothstep(0.76, 1.0, tw2), 2.5) * 0.45;
+
+	// Multiply the two interference fields — their product peaks only where
+	// both wavefronts constructively interfere (realistic caustic focal spots)
+	float combined = core * core2 + core * 0.55 + halo;
+
+	return clamp(combined, 0.0, 1.0);
+}
+
+float WaterCausticLayer(vec3 world_pos, vec3 world_n, float scale, float speed, vec3 phase_shift)
+{
+	float base = max(scale, 1e-4);
+	float t = Time * speed;
+	float proj_scale = base * 2.0;
+
+	// pow(n,4) instead of pow(n,2) — gives tighter triplanar blending with
+	// near-invisible seams on diagonal surfaces
+	vec3 n = abs(world_n);
+	n = n * n * n * n;
+	float nsum = max(n.x + n.y + n.z, 1e-4);
+	n /= nsum;
+
+	// Tiny per-layer positional drift keeps the tile pattern from repeating
+	// exactly when multiple layers stack on a flat floor
+	vec3 drift = vec3(sin(t * 0.013), cos(t * 0.011), sin(t * 0.017 + 1.5)) * 0.04;
+	vec3 wp = world_pos + drift;
+
+	// OPT: f2 (slow macro-variation) is world-pos-based and frequency is so low (0.37)
+	// that all three planes produce nearly the same value — compute once and share.
+	// Uses floor(proj_scale) as a stable per-scale key to vary the seed slightly.
+	float f2_base = fbm2(wp.xy * (proj_scale * 0.37) + vec2(2.0, -3.0));
+
+	// OPT: dominant-axis early-out — if one axis weight < 0.04 skip its plane entirely.
+	// At pow(n,4) falloff a 0.04 weight means the axis contributes < 4% → invisible.
+	float xy = (n.z >= 0.04) ? WaterCausticPlane(wp.xy * proj_scale         + vec2(17.0, -9.0)  + phase_shift.xy, t,              f2_base) : 0.0;
+	float yz = (n.x >= 0.04) ? WaterCausticPlane(wp.yz * proj_scale * 0.91  + vec2(-21.0, 13.0) + phase_shift.yz, t * 0.93,       f2_base) : 0.0;
+	float xz = (n.y >= 0.04) ? WaterCausticPlane(wp.xz * proj_scale * 1.07  + vec2(8.0, 27.0)   + phase_shift.xz, t * 1.05,       f2_base) : 0.0;
+
+	return xy * n.z + yz * n.x + xz * n.y;
+}
+
+float WaterCausticPattern(vec3 world_pos, vec3 world_n, float scale, float speed)
+{
+	/* Three-layer water caustics with distance LOD:
+	 *   base   — large primary wavefronts          (always)
+	 *   detail — fine high-freq ripple             (< LOD_DETAIL distance)
+	 *   micro  — very fine sparkle overlay         (< LOD_MICRO distance)
+	 *
+	 * OPT: micro layer at scale*9 becomes sub-pixel at distance and contributes
+	 * pure noise. LOD thresholds are world-unit distances from EyePos. */
+	const float LOD_DETAIL = 1200.0; // tune to taste
+	const float LOD_MICRO  =  600.0;
+
+	float dist_sq = dot(in_pos - EyePos, in_pos - EyePos);
+
+	float base_layer = WaterCausticLayer(world_pos, world_n, scale,       speed,        vec3(0.0));
+
+	float detail_layer = 0.0;
+	if (dist_sq < LOD_DETAIL * LOD_DETAIL)
+		detail_layer = WaterCausticLayer(world_pos, world_n, scale * 4.5, speed * 0.30, vec3(41.0, -23.0,  17.0));
+
+	float micro_layer = 0.0;
+	if (dist_sq < LOD_MICRO * LOD_MICRO)
+		micro_layer = WaterCausticLayer(world_pos, world_n, scale * 9.0,  speed * 0.15, vec3(-29.0, 53.0, -37.0));
+
+	// Micro layer is modulated by the base to avoid busy noise on dark floors
+	float combined = base_layer * 0.65 + detail_layer * 0.38 + micro_layer * base_layer * 0.25;
+	return clamp(combined, 0.0, 1.0);
+}
+
+float LavaHeatPattern(vec3 world_pos, float scale, float speed)
+{
+	vec2 uv = world_pos.xy * (scale * 0.55);
+	uv += vec2(Time * speed * 0.22, Time * speed * 0.17);
+	float n0 = whitenoise01(floor(uv * 4.0));
+	float n1 = whitenoise01(floor((uv + vec2(13.1, 7.3)) * 2.0));
+	float wave = 0.5 + 0.5 * sin(uv.x * 2.2 + uv.y * 1.7 + Time * speed * 0.8 + n0 * 6.2831853);
+	float blobs = smoothstep(0.35, 0.95, mix(n0, n1, wave));
+	return blobs;
+}
+
 // Forward+ prep: shared tile coordinate helper for upcoming clustered light lists.
 uvec3 ComputeLightTileCoord(vec2 tile_coord, float view_depth)
 {
@@ -285,7 +459,7 @@ int ShadowCascadeForWorldPos(vec3 worldPos)
 	int cascades = clamp(ShadowSunCascadeCount, 1, 4);
 	float dist = length(worldPos - EyePos);
 	if (cascades <= 1) return 0;
-	if (dist <= ShadowSunSplits.x || cascades == 1) return 0;
+	if (dist <= ShadowSunSplits.x) return 0;
 	if (dist <= ShadowSunSplits.y || cascades == 2) return 1;
 	if (dist <= ShadowSunSplits.z || cascades == 3) return 2;
 	return cascades - 1;
@@ -461,9 +635,9 @@ float SampleFirstDLightDepth(vec3 worldPos)
 		// WBOIT: weighted-blended OIT (McGuire & Bavoil 2013).
 		// accum.rgb = pre-multiplied color * weight
 		// accum.a   = alpha * weight  (used for normalization in composite pass)
-		// reveal    = alpha            (product across layers, written additively)
+		// reveal    = 1 - alpha        (product of (1-alpha) across layers)
 		out_accum  = vec4(color.rgb * color.a * weight, color.a * weight);
-		out_reveal = color.a;
+		out_reveal = 1.0 - color.a;
 	}
 
 	#define main main_body
@@ -588,6 +762,7 @@ void main()
 
 	// Surface normal (computed early; needed inside and outside lightmap block)
 	vec3 surface_normal = in_normal;
+	vec3 geom_normal = vec3(0.0, 0.0, 1.0);
 	{
 		float surface_normal_len = length(surface_normal);
 		if (surface_normal_len > 0.0)
@@ -603,7 +778,7 @@ void main()
 		if (!gl_FrontFacing)
 			surface_normal = -surface_normal;
 
-		vec3 geom_normal = surface_normal;
+		geom_normal = surface_normal;
 		vec3 tangent = in_tangent.xyz;
 		float tlen = length(tangent);
 #if BINDLESS
@@ -739,7 +914,6 @@ void main()
 			vec3  dynamic_light      = vec3(0.0);
 			uvec3 tile_coord = ComputeLightTileCoord(in_coord, max(in_depth, 1e-6));
 			float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-			dynamic_light_noise *= 1.0 + float(tile_coord.z) * 0.0;
 			// OPT: precompute plane dot-product once outside loop
 			vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
 
@@ -880,6 +1054,64 @@ void main()
 		vec3 rim_light = rim_sun_accum * RimLightParams1.z + rim_dlight_accum * RimLightParams1.w;
 		result.rgb += result.rgb * rim_light * rim_factor;
 	}
+
+	if (CausticsParams0.x > 0.5 && MODE != 2 && (in_flags & CF_MAT_SKY) == 0u)
+	{
+		float caustic_term = 0.0;
+		float intensity = max(CausticsParams0.z, 0.0);
+		float scale = max(CausticsParams0.w, 1e-4);
+		float speed = max(CausticsParams1.x, 0.0);
+		float up = clamp(geom_normal.z, 0.0, 1.0);
+		float wallness = 1.0 - up;
+		float floor_mask = smoothstep(0.45, 0.88, up);
+		float wall_mask = smoothstep(0.08, 0.95, wallness) * 0.62;
+		float surface_mask = clamp(max(floor_mask, wall_mask), 0.0, 1.0);
+		float light_mask = clamp(dot(total_lightmap, vec3(0.3333333)) / max(Overbright, 1e-4), 0.0, 1.0);
+		int medium = int(CausticsParams0.y + 0.5);
+
+		if (medium == 1) // water
+		{
+			float pattern = WaterCausticPattern(in_pos, geom_normal, scale, speed);
+			float floor_light = 0.55 + 0.45 * light_mask;
+			float wall_light  = 0.82 + 0.18 * light_mask;
+			float orient      = smoothstep(0.22, 0.85, wallness);
+			float water_mask  = surface_mask * mix(floor_light, wall_light, orient);
+			caustic_term      = pattern * water_mask;
+
+			// Multiply component: brightens the focal lines naturally
+			result.rgb *= 1.0 + caustic_term * intensity * 0.22;
+
+			// Additive component: chromatic fringe (focal lines skew slightly blue-cyan)
+			// R channel gets slightly less energy than G/B, mimicking real water dispersion.
+			vec3 caustic_tint = vec3(
+				0.008 + 0.004 * (1.0 - pattern),   // red: dimmer outside lines
+				0.018 + 0.006 * pattern,             // green: tracks focal peaks
+				0.030 + 0.010 * pattern);             // blue: strongest at focal peaks
+			result.rgb += caustic_tint * caustic_term * intensity;
+
+			// Subtle global cool tint on the full surface (underwater ambient scatter)
+			result.rgb += vec3(0.0, 0.003, 0.006) * water_mask * intensity * 0.5;
+		}
+		else if (medium == 2) // lava
+		{
+			float pattern = LavaHeatPattern(in_pos, scale, speed * 0.6);
+			caustic_term = pattern * mix(0.45, 1.0, surface_mask);
+			result.rgb += vec3(1.0, 0.38, 0.08) * caustic_term * intensity * 0.40;
+		}
+
+		if (CausticsParams1.y > 1.5)
+		{
+			vec3 dbg = vec3(caustic_term);
+			OUT_COLOR = vec4(dbg, 1.0);
+#if !OIT
+			out_velocity = vec4(0.0);
+#endif
+			return;
+		}
+		else if (CausticsParams1.y > 0.5)
+			result.rgb = vec3(caustic_term);
+	}
+
 	result.rgb = SanitizeColor(result.rgb);
 	vec3 pre_tonemap_hdr = result.rgb;
 

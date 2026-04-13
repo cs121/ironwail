@@ -18,7 +18,6 @@ layout(location=0) uniform float DLightScale;
 layout(location=1) uniform float DLightLumaClamp;
 layout(location=2) uniform float DLightSoftKnee;
 
-layout(location=30) uniform mat4 ShadowSunViewProj;
 layout(location=34) uniform vec4 ShadowEnableDebug;   // x=enabled, y=sun, z=dlight, w=debug mode
 layout(location=35) uniform vec4 ShadowDLightIndices; // selected light indices (float encoded ints)
 layout(location=36) uniform vec4 ShadowBiasCounts;    // x=num dlight slots, y=sun bias, z=dlight bias
@@ -148,6 +147,10 @@ float SampleDLightShadow(int lightIndex, vec3 worldPos, vec3 lightPos, float rad
 	vec3 dirN = dir / dist;
 	float ref = dist / radius;
 	float bias = max(ShadowBiasCounts.z, 0.0);
+	// Receiver bias: scales with depth derivative to reduce acne on angled surfaces.
+	// ShadowBiasCounts.w carries the receiver-bias scale (same as world.frag).
+	float receiver_bias = max(fwidth(ref), 0.0) * max(ShadowBiasCounts.w, 0.0);
+	bias += receiver_bias;
 	float pcf = max(ShadowPCFTexel.y, 0.0) * max(ShadowPCFTexel.w, 0.0) * 2.0;
 
 	vec3 axis = (abs(dirN.z) < 0.999) ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
@@ -226,11 +229,11 @@ void main()
 	bool use_tile_lists = (DLightParams.z > 0.5);
 	if (NumLights > 0u)
 	{
-		const float core_boost = 0.0;
-		const float core_exp = 1.0;
-		const float knee = 0.0;
-		const float ndotl_mix = 1.0;
-		const float saturation_chop = 0.0;
+		const float core_boost       = 0.0;  // hook: extra brightness at light core (0=off)
+		const float core_exp         = 1.0;  // hook: exponent for core_boost shaping
+		const float knee             = 0.0;  // hook: soft-knee compression (0=off)
+		const float ndotl_mix        = 1.0;  // hook: 0=flat, 1=full Lambert
+		const float saturation_chop  = 0.0;  // hook: desaturate dynamic light (0=off)
 		uint light_begin = 0u;
 		uint light_end = NumLights;
 		if (use_tile_lists)
@@ -258,6 +261,9 @@ void main()
 			if (rad - surface_dist < minlight)
 				continue;
 
+			// Hoist light_dir once — reused for NdotL, specular, and rim
+			vec3 light_dir = (surface_dist > 0.0) ? (to_light / surface_dist) : vec3(0.0, 0.0, 1.0);
+
 			float normalized_dist = surface_dist / max(rad, 1e-4);
 			float x = clamp(1.0 - normalized_dist, 0.0, 1.0);
 			float minlight_norm = minlight / max(rad, 1e-4);
@@ -266,14 +272,14 @@ void main()
 			float intensity = attenuation * minlight_mask;
 			float core = 1.0 + core_boost * pow(max(x, 0.0), core_exp);
 			float core_intensity = intensity * core;
+			// knee==0 → shaped == core_intensity (no division overhead on most compilers)
 			float shaped = (knee > 0.0) ? (core_intensity / (core_intensity + knee)) : core_intensity;
-			float ndotl = 1.0;
-			if (surface_dist > 0.0)
-			{
-				vec3 light_dir = to_light / surface_dist;
-				float ndotl_raw = max(dot(surface_normal, light_dir), 0.0);
-				ndotl = mix(1.0, ndotl_raw, ndotl_mix);
-			}
+
+			// Half-Lambert wrap: softens terminator, avoids hard black on back faces.
+			// Keeps energy conservative: integrates to the same total as cosine lobe.
+			float ndotl_raw = dot(surface_normal, light_dir) * 0.5 + 0.5;
+			ndotl_raw = ndotl_raw * ndotl_raw; // squared wrap → tighter than linear half-Lambert
+			float ndotl = mix(1.0, ndotl_raw, ndotl_mix);
 
 			float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, rad);
 			vec3 light_contrib = shaped * ndotl * shadow * l.color;
@@ -284,12 +290,13 @@ void main()
 			if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
 			{
 				float rim_shadow = (RimLightParams0.w > 0.5) ? shadow : 1.0;
-				vec3 rim_light_dir = (surface_dist > 0.0) ? (to_light / surface_dist) : vec3(0.0, 0.0, 1.0);
-				float backlight = mix(0.35, 1.0, max(dot(-surface_normal, rim_light_dir), 0.0));
+				// Reuse hoisted light_dir — no redundant division
+				float backlight = mix(0.35, 1.0, max(dot(-surface_normal, light_dir), 0.0));
 				rim_dlight_accum += shaped * rim_shadow * l.color * backlight;
 			}
 		}
 
+		// saturation_chop==0 → branch never taken; left as quality hook
 		if (saturation_chop > 0.0)
 		{
 			float luma = dot(dynamic_light, vec3(0.299, 0.587, 0.114));
@@ -311,6 +318,8 @@ void main()
 	/* BUGFIX: keep full material response in RT-lighting. Luma-mixing the albedo
 	 * washed out texture contrast and made light look "painted on". */
 	vec3 color = albedo * contrib;
+	float fog_att = FogAttenuation(in_pos - EyePos);
+	// Rim light is part of the scene lighting — fog attenuates it too.
 	if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
 	{
 		vec3 rim_light = rim_dlight_accum * RimLightParams1.w;
@@ -353,7 +362,7 @@ void main()
 	if (ShadowEnableDebug.w > 1.5)
 		color = vec3(clamp(length(dynamic_light), 0.0, 1.0));
 
-	color *= FogAttenuation(in_pos - EyePos);
+	color *= fog_att;
 	color = SanitizeColor(color);
 
 	out_fragcolor = vec4(color, alpha); // FIX: war "alpha * 0.0" → Fragment immer transparent

@@ -423,21 +423,7 @@ void main()
                 if (trauma > 1e-3)
                 {
                         vec2 viewUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
-                        vec2 viewPos = viewUV * 2.0 - vec2(1.0);
-                        float directional = 1.0;
-                        float dirStrength = clamp(DamageDirParams.z, 0.0, 1.0);
-                        vec2 dir = DamageDirParams.xy;
-                        float dirLen = length(dir);
-                        if (dirStrength > 1e-3 && dirLen > 1e-4)
-                        {
-                                vec2 ndir = dir / dirLen;
-                                float facing = clamp(dot(viewPos, ndir), -1.0, 1.0);
-                                float hemi = facing * 0.5 + 0.5;
-                                float dirFactor = mix(0.5, 1.65, hemi);
-                                directional = mix(1.0, dirFactor, dirStrength);
-                        }
                         float a = clamp(trauma * strength, 0.0, 1.35);
-                        a *= directional;
                         float osc = sin(t * freq) * 0.75 + sin(t * freq * 0.37 + 1.7) * 0.25;
                         float jitter = (InterleavedGradientNoise(vec2(t * 0.123, t * 0.917)) - 0.5) * 0.6;
                         float px = maxPx * (0.3 + 0.7 * a) * (0.7 + 0.3 * abs(osc));
@@ -445,47 +431,26 @@ void main()
                         vec2 dvDir = baseDir + vec2(jitter, -jitter);
                         float dvDirLen = length(dvDir);
                         dvDir = (dvDirLen > 1e-4) ? (dvDir / dvDirLen) : vec2(1.0, 0.0);
-                        vec2 offset1 = dvDir * px * invTexSize;
-                        vec2 offset2 = vec2(-dvDir.y, dvDir.x) * (px * 0.75) * invTexSize;
+                        vec2 dvPerp = vec2(-dvDir.y, dvDir.x);
+                        vec2 skewScale = vec2(px * (0.45 + 0.35 * a), px * (0.20 + 0.25 * a)) * invTexSize;
+                        vec2 skewBase = viewUV - vec2(0.5);
+                        vec2 skew1 = vec2(skewBase.y * skewScale.x, skewBase.x * skewScale.y);
+                        vec2 skew2 = vec2(skewBase.y * skewScale.x * 1.5, -skewBase.x * skewScale.y * 0.7);
+                        vec2 skew3 = vec2(skewBase.y * skewScale.x * 2.0, skewBase.x * skewScale.y * 0.35);
+                        vec2 offset1 = (dvDir * (px * 0.95) + dvPerp * (px * 0.30)) * invTexSize + skew1;
+                        vec2 offset2 = (-dvDir * (px * 0.72) + dvPerp * (px * 0.22)) * invTexSize + skew2;
+                        vec2 offset3 = (dvDir * (px * 0.46) - dvPerp * (px * 0.58)) * invTexSize + skew3;
                         vec3 base = color.rgb;
                         vec3 ghost1 = texture(GammaTexture, clamp(uv + offset1, viewMin, viewMax)).rgb;
-                        vec3 ghost2 = texture(GammaTexture, clamp(uv - offset2, viewMin, viewMax)).rgb;
-                        float w1 = 0.42 * a;
-                        float w2 = 0.36 * a;
-                        vec3 dvColor = base * max(0.0, 1.0 - (w1 + w2)) + ghost1 * w1 + ghost2 * w2;
-                        {
-                                vec2 viewUV = clamp((uv - viewMin) / viewSize, vec2(0.0), vec2(1.0));
-                                vec2 toCenter = viewUV - vec2(0.5);
-                                float centerLen = max(length(toCenter), 1e-4);
-                                vec2 centerDir = toCenter / centerLen;
-                                float wobble = sin((viewUV.y + t * 1.9) * 38.0) * cos((viewUV.x - t * 1.6) * 31.0);
-                                vec2 distortion = (centerDir * (px * 0.95) + vec2(wobble, -wobble) * (px * 0.45)) * invTexSize;
-                                vec3 refracted = texture(GammaTexture, clamp(uv + distortion, viewMin, viewMax)).rgb;
-                                dvColor = mix(dvColor, refracted, 0.58 * a);
-                        }
-                        {
-                                vec2 splitOffset = vec2(px, 0.0) * invTexSize;
-                                vec3 split;
-                                split.r = texture(GammaTexture, clamp(uv + splitOffset, viewMin, viewMax)).r;
-                                split.g = texture(GammaTexture, clamp(uv, viewMin, viewMax)).g;
-                                split.b = texture(GammaTexture, clamp(uv - splitOffset, viewMin, viewMax)).b;
-                                dvColor = mix(dvColor, split, clamp(0.45 + 0.45 * a, 0.0, 1.0));
-                        }
-                        {
-                                vec2 offset3 = (offset1 + offset2) * 0.6;
-                                vec3 ghost3 = texture(GammaTexture, clamp(uv + offset3, viewMin, viewMax)).rgb;
-                                float w3 = 0.28 * a;
-                                dvColor = dvColor * (1.0 - w3) + ghost3 * w3;
-                                vec3 smear = texture(GammaTexture, clamp(uv + offset1 * 0.5, viewMin, viewMax)).rgb;
-                                dvColor = mix(dvColor, smear, 0.35 * a);
-                                vec3 blur = vec3(0.0);
-                                blur += texture(GammaTexture, clamp(uv + offset1 * 0.35, viewMin, viewMax)).rgb;
-                                blur += texture(GammaTexture, clamp(uv - offset1 * 0.35, viewMin, viewMax)).rgb;
-                                blur += texture(GammaTexture, clamp(uv + offset2 * 0.35, viewMin, viewMax)).rgb;
-                                blur += texture(GammaTexture, clamp(uv - offset2 * 0.35, viewMin, viewMax)).rgb;
-                                blur *= 0.25;
-                                dvColor = mix(dvColor, blur, 0.72 * a);
-                        }
+                        vec3 ghost2 = texture(GammaTexture, clamp(uv + offset2, viewMin, viewMax)).rgb;
+                        vec3 ghost3 = texture(GammaTexture, clamp(uv + offset3, viewMin, viewMax)).rgb;
+                        vec3 smear = texture(GammaTexture, clamp(uv + (offset1 + offset3) * 0.5, viewMin, viewMax)).rgb;
+                        float w1 = 0.40 * a;
+                        float w2 = 0.32 * a;
+                        float w3 = 0.24 * a;
+                        float w4 = 0.18 * a;
+                        float baseWeight = max(0.0, 1.0 - (w1 + w2 + w3 + w4));
+                        vec3 dvColor = base * baseWeight + ghost1 * w1 + ghost2 * w2 + ghost3 * w3 + smear * w4;
                         color.rgb = mix(base, dvColor, clamp(0.85 + 0.35 * a, 0.0, 1.0));
                 }
         }

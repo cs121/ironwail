@@ -751,7 +751,9 @@ static void R_FlushBModelCalls (void)
 
 	GL_UseProgram (bmodel_batch_program);
 	if (R_IsWorldLightingProgram (bmodel_batch_program))
+	{
 		R_Shadow_ApplyWorldReceiverUniforms (bmodel_batch_program);
+	}
 	else if (R_IsWorldShadowCasterProgram (bmodel_batch_program))
 		R_Shadow_ApplyWorldCasterUniforms (bmodel_batch_program);
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, gl_bmodel_ibo);

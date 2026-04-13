@@ -50,18 +50,20 @@ layout(std140, binding=0) uniform FrameDataUBO
     vec4    SunDirEnabled;  // 384  xyz: scene->sun direction, w: enabled
     vec4    SunColorIntensity; // 400 rgb: sun color, w: intensity
     vec4    SkyVisTint;     // 416 shared ambient-sky contract: rgb tint, w cap
+    vec4    CausticsParams0; // 432 x: enabled, y: medium(1=water,2=lava), z: intensity, w: scale
+    vec4    CausticsParams1; // 448 x: speed, y: debug, z/w: reserved
 
-    //  Global params  offset 432
+    //  Global params  offset 464
     // NOTE: These members must stay layout-compatible with gpuframedata_t
     // their expected offsets.
 
 
-    //  Misc  offset 416
-    uint    NumLights;      // 416
-    uint    PrevFrameValid; // 420
-    uint    _Pad1;          // 424
-    uint    _Pad2;          // 428
-};                          // Total: 432 bytes
+    //  Misc  offset 464
+    uint    NumLights;      // 464
+    uint    PrevFrameValid; // 468
+    uint    _Pad1;          // 472
+    uint    _Pad2;          // 476
+};                          // Total: 480 bytes
 
 float AmbientSkyEnabled()
 {

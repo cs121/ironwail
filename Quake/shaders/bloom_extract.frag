@@ -2,7 +2,7 @@ layout(binding=0) uniform sampler2D SceneTexture;
 layout(binding=1) uniform sampler2D MaskTexture;
 
 layout(location=0) uniform vec4 ThresholdParams; // x: threshold, y: soft knee, z: mask enabled
-layout(location=1) uniform vec4 DownsampleParams; // xy: source size, zw: scale from target to source
+layout(location=1) uniform vec4 DownsampleParams; // xy: source size, zw: scale = sourceSize / targetSize (NOT inverted)
 
 layout(location=0) out vec4 outColor;
 
@@ -24,7 +24,12 @@ void main()
         float softKnee = max(ThresholdParams.y, 0.0);
         float maskEnabled = ThresholdParams.z;
         vec2 sourceSize = DownsampleParams.xy;
+
+        // BUG NOTE: scale must be sourceSize / targetSize (set on CPU side as such).
+        // If this is inverted (targetSize / sourceSize) the base coordinate will be
+        // far out of range, causing clamp-to-edge artefacts on ~3/4 of the screen.
         vec2 scale = DownsampleParams.zw;
+
         vec2 base = gl_FragCoord.xy * scale - 0.5;
         vec2 maxCoord = max(sourceSize - vec2(1.0), vec2(0.0));
         ivec2 baseCoord = ivec2(floor(base));

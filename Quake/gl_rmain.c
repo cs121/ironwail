@@ -55,6 +55,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 extern gltexture_t *lightmap_dir_texture;
 extern cvar_t r_sun_light;
 extern cvar_t r_sun_visibility;
+extern cvar_t r_caustics;
+extern cvar_t r_caustics_water;
+extern cvar_t r_caustics_lava;
+extern cvar_t r_caustics_intensity;
+extern cvar_t r_caustics_scale;
+extern cvar_t r_caustics_speed;
+extern cvar_t r_caustics_debug;
 
 qboolean	r_cache_thrash;		// compatability
 
@@ -103,6 +110,8 @@ static qboolean r_prev_frame_valid = false;
 static float r_motionblur_shutter_scale_filtered = 1.f;
 static qboolean r_motionblur_shutter_scale_valid = false;
 static qboolean r_frame_rendered_this_update;
+static viewmedium_t r_view_medium = VIEWMEDIUM_NONE;
+static int r_caustics_last_debug_print_frame = -9999;
 
 static godrays_stabilization_t r_godrays_stabilization;
 static int r_godrays_generated_frame = -1;
@@ -354,6 +363,70 @@ static qboolean R_IsUnderwaterContents (int contents)
 	return contents == CONTENTS_WATER || contents == CONTENTS_SLIME || contents == CONTENTS_LAVA;
 }
 
+static viewmedium_t R_ViewMediumFromContents (int contents)
+{
+	switch (contents)
+	{
+	case CONTENTS_WATER:
+		return VIEWMEDIUM_WATER;
+	case CONTENTS_LAVA:
+		return VIEWMEDIUM_LAVA;
+	case CONTENTS_SLIME:
+		return VIEWMEDIUM_SLIME;
+	default:
+		break;
+	}
+
+	return VIEWMEDIUM_NONE;
+}
+
+static void R_UpdateCausticsFrameData (void)
+{
+	float enabled = 0.f;
+	float medium = 0.f;
+	float intensity = q_max (0.f, r_caustics_intensity.value);
+	float scale = q_max (1e-4f, r_caustics_scale.value);
+	float speed = q_max (0.f, r_caustics_speed.value);
+	float debug = q_max (0.f, r_caustics_debug.value);
+
+	if (r_caustics.value > 0.f)
+	{
+		if (r_view_medium == VIEWMEDIUM_WATER || r_view_medium == VIEWMEDIUM_SLIME)
+		{
+			medium = 1.f;
+			enabled = (r_caustics_water.value > 0.f) ? 1.f : 0.f;
+		}
+		else if (r_view_medium == VIEWMEDIUM_LAVA)
+		{
+			medium = 2.f;
+			enabled = (r_caustics_lava.value > 0.f) ? 1.f : 0.f;
+		}
+	}
+
+	if (debug > 0.f)
+	{
+		enabled = 1.f;
+		if (medium <= 0.f)
+			medium = 1.f;
+	}
+
+	r_framedata.caustics_params0[0] = enabled;
+	r_framedata.caustics_params0[1] = medium;
+	r_framedata.caustics_params0[2] = intensity;
+	r_framedata.caustics_params0[3] = scale;
+	r_framedata.caustics_params1[0] = speed;
+	r_framedata.caustics_params1[1] = debug;
+	r_framedata.caustics_params1[2] = 0.f;
+	r_framedata.caustics_params1[3] = 0.f;
+
+	if (debug >= 2.f && r_framecount - r_caustics_last_debug_print_frame >= 60)
+	{
+		r_caustics_last_debug_print_frame = r_framecount;
+		Con_Printf ("caustics dbg: view_medium=%d enabled=%.0f medium=%.0f intensity=%.2f scale=%.4f speed=%.2f\n",
+			(int)r_view_medium, enabled, medium, intensity, scale, speed);
+	}
+}
+
 static int R_ResolveUnderwaterContents (int view_contents, qboolean forced, const vec3_t vieworg)
 {
 	vec3_t probe;
@@ -555,6 +628,14 @@ cvar_t	r_postfx_lut_strength_powerup = { "r_postfx_lut_strength_powerup", "0.6",
 cvar_t	r_postfx_lut_strength_underwater = { "r_postfx_lut_strength_underwater", "0.5", CVAR_ARCHIVE };
 cvar_t	r_postfx_lut_debug_id = { "r_postfx_lut_debug_id", "0", CVAR_NONE };
 cvar_t	r_postfx_debug = { "r_postfx_debug", "0", CVAR_NONE };
+cvar_t	r_caustics = { "r_caustics", "1", CVAR_ARCHIVE };
+cvar_t	r_caustics_water = { "r_caustics_water", "1", CVAR_ARCHIVE };
+cvar_t	r_caustics_lava = { "r_caustics_lava", "1", CVAR_ARCHIVE };
+cvar_t	r_caustics_intensity = { "r_caustics_intensity", "0.9", CVAR_ARCHIVE };
+cvar_t	r_caustics_scale = { "r_caustics_scale", "0.06", CVAR_ARCHIVE };
+cvar_t	r_caustics_speed = { "r_caustics_speed", "0.85", CVAR_ARCHIVE };
+cvar_t	r_caustics_alias = { "r_caustics_alias", "0", CVAR_ARCHIVE };
+cvar_t	r_caustics_debug = { "r_caustics_debug", "0", CVAR_NONE };
 
 cvar_t	r_ssao = { "r_ssao", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_radius = { "r_ssao_radius", "24", CVAR_ARCHIVE };
@@ -662,7 +743,7 @@ extern cvar_t	r_softemu_dither_texture;
 
 cvar_t	gl_zfix = { "gl_zfix", "1", CVAR_ARCHIVE }; // QuakeSpasm z-fighting fix
 
-cvar_t	r_telealpha = { "r_telealpha","0",CVAR_NONE };
+cvar_t	r_telealpha = { "r_telealpha","1",CVAR_NONE };
 cvar_t	r_slimealpha = { "r_slimealpha","0",CVAR_NONE };
 
 float	map_wateralpha, map_lavaalpha, map_telealpha, map_slimealpha;
@@ -1817,6 +1898,10 @@ static GLuint GL_GenerateBloomTexture (void)
 	}
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, blurred[0]);
 	GL_Uniform4fFunc (0, GL_BloomGetRecombineWeight (0, levels), 0.f, 0.f, 0.f);
+	GL_Uniform4fFunc (1,
+		1.f / (float)q_max (framebufs.bloom.width[0], 1),
+		1.f / (float)q_max (framebufs.bloom.height[0], 1),
+		0.f, 0.f);
 	R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
 
 	for (int level = 1; level < levels; ++level)
@@ -4468,7 +4553,7 @@ void R_SetupView (void)
 }
 
 	r_framecount++;
-        r_framedata.eye[0] = r_refdef.vieworg[0];
+	r_framedata.eye[0] = r_refdef.vieworg[0];
         r_framedata.eye[1] = r_refdef.vieworg[1];
         r_framedata.eye[2] = r_refdef.vieworg[2];
         r_framedata.eye[3] = cl.time;
@@ -4493,7 +4578,15 @@ void R_SetupView (void)
         /* Keep legacy sun-visibility fill attenuation alive for non-sky surfaces.
          * SkyVis skylight scale is carried separately in shader_params[3]. */
         r_framedata.shader_params[2] = CLAMP (0.f, r_sun_visibility.value, 1.f);
-        r_framedata.shader_params[3] = R_SkyVis_GetResolvedScale ();
+	r_framedata.shader_params[3] = R_SkyVis_GetResolvedScale ();
+	r_framedata.caustics_params0[0] = 0.f;
+	r_framedata.caustics_params0[1] = 0.f;
+	r_framedata.caustics_params0[2] = 0.f;
+	r_framedata.caustics_params0[3] = 1.f;
+	r_framedata.caustics_params1[0] = 0.f;
+	r_framedata.caustics_params1[1] = 0.f;
+	r_framedata.caustics_params1[2] = 0.f;
+	r_framedata.caustics_params1[3] = 0.f;
 
 	{
 		const sun_t *sun = R_GetSun ();
@@ -4618,6 +4711,17 @@ void R_SetupView (void)
 		// Postfx stack consumes deterministic underwater state here.
 		// CL_PostFX_Frame aggregates it and GL_PostProcess applies the resulting uniforms/LUT selection.
 		CL_PostFX_SetContents (contents, underwater_active, underwater_postfx_active);
+		if (underwater_active)
+		{
+			r_view_medium = R_ViewMediumFromContents (contents);
+			if (r_view_medium == VIEWMEDIUM_NONE)
+				r_view_medium = VIEWMEDIUM_WATER;
+		}
+		else
+		{
+			r_view_medium = VIEWMEDIUM_NONE;
+		}
+		R_UpdateCausticsFrameData ();
 	}
 	//johnfitz
 
@@ -4682,6 +4786,11 @@ void R_MarkFrameRenderedThisUpdate (void)
 qboolean R_PrevFrameValid (void)
 {
         return r_prev_frame_valid;
+}
+
+viewmedium_t R_GetViewMedium (void)
+{
+	return r_view_medium;
 }
 
 

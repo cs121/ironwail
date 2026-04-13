@@ -68,9 +68,14 @@ void main()
 #if ANIM
 	float t1 = WindPhase;
 	float t2 = fract(t1) - 0.5;
-	float blend = abs(t1 * 2.0);
+	// BUG FIX: blend must be derived from fract(t1) so it stays in [0,1].
+	// Original abs(t1 * 2.0) grows unbounded → layer alpha goes negative → black sky flicker.
+	float blend = abs(fract(t1) * 2.0 - 1.0);
 	vec3 dir = normalize(in_dir);
-	vec4 base = texture(Skybox, in_dir);
+	// BUG FIX: base was sampled with un-normalized in_dir while layers used normalized dir.
+	// Cubemap hardware normalizes internally, but using the same dir keeps
+	// texel footprints consistent and avoids subtle mip-level divergence.
+	vec4 base = texture(Skybox, dir);
 	vec4 layer1 = texture(Skybox, dir + t1 * WindDir);
 	vec4 layer2 = texture(Skybox, dir + t2 * WindDir);
 	layer1.a *= 1.0 - blend;
@@ -78,6 +83,9 @@ void main()
 	layer1.rgb *= layer1.a;
 	layer2.rgb *= layer2.a;
 	vec4 combined = layer1 + layer2;
+	// BUG FIX: combined.a can exceed 1.0 when both layers are semi-opaque.
+	// Clamp before using as coverage weight to prevent base.rgb going negative.
+	combined.a = clamp(combined.a, 0.0, 1.0);
 	out_fragcolor = vec4(base.rgb * (1.0 - combined.a) + combined.rgb, 1);
 	out_velocity = vec4(0.0, 0.0, 0.0, 3.0);
 #else

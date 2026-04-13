@@ -61,7 +61,9 @@ void main()
 {
 	out_fragcolor = texture(Tex, in_uv);
         out_velocity = vec4(0.0, 0.0, 0.0, 3.0);
-	out_fragcolor.rgb = mix(out_fragcolor.rgb, Fog.rgb, Fog.w);
+	// BUG FIX: use abs(Fog.w) — negative CPU fog density must not invert attenuation.
+	// Consistent with world.frag, sky_cubemap.frag and sky_layers.frag conventions.
+	out_fragcolor.rgb = mix(out_fragcolor.rgb, Fog.rgb, abs(Fog.w));
 #if DITHER
 	out_fragcolor.rgb = sqrt(out_fragcolor.rgb);
 	out_fragcolor.rgb += SCREEN_SPACE_NOISE() * ScreenDither;
