@@ -567,7 +567,7 @@ unsigned short CRC_Block (const void *start, int count)
 
 void SwapPic (qpic_t *pic)
 {
-	g_bridge_fn->swap_pic (pic);
+	g_bridge_fn->swap_pic ((void *)pic);
 }
 
 int Q_strcmp (const char *s1, const char *s2)
@@ -949,12 +949,12 @@ void CL_PostFX_GetState (void *out_state)
 
 qboolean ED_IsRelevantField (edict_t *ed, ddef_t *d)
 {
-	return g_bridge_fn->ed_is_relevant_field (ed, d);
+	return g_bridge_fn->ed_is_relevant_field (ed, (void *)d);
 }
 
 const char *ED_FieldValueString (edict_t *ed, ddef_t *d)
 {
-	return g_bridge_fn->ed_field_value_string (ed, d);
+	return g_bridge_fn->ed_field_value_string (ed, (void *)d);
 }
 
 const char *PR_GetString (int num)
@@ -1180,22 +1180,22 @@ void Material_Canonicalize (const char *name, char *out, size_t out_size)
 
 int Material_ClassifyParticleStage (const material_stage_t *stage, int policy, char *reason, size_t reason_size)
 {
-	return g_bridge_fn->material_classify_particle_stage (stage, policy, reason, reason_size);
+	return g_bridge_fn->material_classify_particle_stage ((const void *)stage, policy, reason, reason_size);
 }
 
 qboolean Material_StageSupportsParticleMVP (const material_stage_t *stage, char *reason, size_t reason_size)
 {
-	return g_bridge_fn->material_stage_supports_particle_mvp (stage, reason, reason_size);
+	return g_bridge_fn->material_stage_supports_particle_mvp ((const void *)stage, reason, reason_size);
 }
 
 const mat_texmatrix_t *MaterialStage_EvalTexMatrix (material_stage_t *stage, float time)
 {
-	return g_bridge_fn->material_stage_eval_tex_matrix (stage, time);
+	return g_bridge_fn->material_stage_eval_tex_matrix ((void *)stage, time);
 }
 
 const char *MaterialStage_GetAnimMapPath (material_stage_t *stage, float time)
 {
-	return g_bridge_fn->material_stage_get_anim_map_path (stage, time);
+	return g_bridge_fn->material_stage_get_anim_map_path ((void *)stage, time);
 }
 
 float Material_EvalWaveValue (const mat_wave_t *wave, float time)

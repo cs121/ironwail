@@ -469,7 +469,7 @@ static int bridge_q_next_pow2 (int val) { return Q_nextPow2 (val); }
 static int bridge_q_log2 (int val) { return Q_log2 (val); }
 static float bridge_get_fraction (float val, float minval, float maxval) { return GetFraction (val, minval, maxval); }
 static unsigned short bridge_crc_block (const void *start, int count) { return CRC_Block (start, count); }
-static void bridge_swap_pic (qpic_t *pic) { SwapPic (pic); }
+static void bridge_swap_pic (void *pic) { SwapPic ((qpic_t *)pic); }
 
 static int bridge_q_strcmp (const char *s1, const char *s2) { return Q_strcmp (s1, s2); }
 static int bridge_q_strncmp (const char *s1, const char *s2, int count) { return Q_strncmp (s1, s2, count); }
@@ -533,8 +533,8 @@ static void bridge_v_update_blend (void) { V_UpdateBlend (); }
 static void bridge_v_set_contents_color (int contents) { V_SetContentsColor (contents); }
 static void bridge_cl_postfx_set_contents (int contents, qboolean ua, qboolean upa) { CL_PostFX_SetContents (contents, ua, upa); }
 static void bridge_cl_postfx_get_state (void *out) { CL_PostFX_GetState ((postfx_state_t *)out); }
-static qboolean bridge_ed_is_relevant_field (edict_t *ed, ddef_t *d) { return ED_IsRelevantField (ed, d); }
-static const char *bridge_ed_field_value_string (edict_t *ed, ddef_t *d) { return ED_FieldValueString (ed, d); }
+static qboolean bridge_ed_is_relevant_field (edict_t *ed, void *d) { return ED_IsRelevantField (ed, (ddef_t *)d); }
+static const char *bridge_ed_field_value_string (edict_t *ed, void *d) { return ED_FieldValueString (ed, (ddef_t *)d); }
 static const char *bridge_pr_get_string (int num) { return PR_GetString (num); }
 static int bridge_num_for_edict (edict_t *e) { return NUM_FOR_EDICT (e); }
 static void bridge_pr_reload_pics (qboolean purge) { PR_ReloadPics (purge); }
@@ -579,10 +579,10 @@ static void bridge_material_apply_to_texture (texture_t *tex, const char *mapnam
 static const material_t *bridge_material_find (const char *name) { return Material_Find (name); }
 static const material_t *bridge_material_find_for_texture_name (const char *tn, const char *mn) { return Material_FindForTextureName (tn, mn); }
 static void bridge_material_canonicalize (const char *name, char *out, size_t sz) { Material_Canonicalize (name, out, sz); }
-static int bridge_material_classify_particle_stage (const material_stage_t *s, int policy, char *reason, size_t rsz) { return (int)Material_ClassifyParticleStage (s, (mat_particle_policy_t)policy, reason, rsz); }
-static qboolean bridge_material_stage_supports_particle_mvp (const material_stage_t *s, char *reason, size_t rsz) { return Material_StageSupportsParticleMVP (s, reason, rsz); }
-static const mat_texmatrix_t *bridge_material_stage_eval_tex_matrix (material_stage_t *s, float time) { return MaterialStage_EvalTexMatrix (s, time); }
-static const char *bridge_material_stage_get_anim_map_path (material_stage_t *s, float time) { return MaterialStage_GetAnimMapPath (s, time); }
+static int bridge_material_classify_particle_stage (const void *s, int policy, char *reason, size_t rsz) { return (int)Material_ClassifyParticleStage ((const material_stage_t *)s, (mat_particle_policy_t)policy, reason, rsz); }
+static qboolean bridge_material_stage_supports_particle_mvp (const void *s, char *reason, size_t rsz) { return Material_StageSupportsParticleMVP ((const material_stage_t *)s, reason, rsz); }
+static const mat_texmatrix_t *bridge_material_stage_eval_tex_matrix (void *s, float time) { return MaterialStage_EvalTexMatrix ((material_stage_t *)s, time); }
+static const char *bridge_material_stage_get_anim_map_path (void *s, float time) { return MaterialStage_GetAnimMapPath ((material_stage_t *)s, time); }
 static float bridge_material_eval_wave_value (const mat_wave_t *w, float time) { return Material_EvalWaveValue (w, time); }
 
 static void bridge_dlight_pool_clear_persistent (void) { DLightPool_ClearPersistent (); }
@@ -966,8 +966,8 @@ void R_Backend_FillHostBridge (iw_renderer_host_bridge_t *out)
 	s_bridge_data.crosshair_char = &crosshair_char;
 	s_bridge_data.con_notifyfade = &con_notifyfade;
 	s_bridge_data.con_notifyfadetime = &con_notifyfadetime;
-	s_bridge_data.dev_stats = &dev_stats;
-	s_bridge_data.dev_peakstats = &dev_peakstats;
+	s_bridge_data.dev_stats = (void *)&dev_stats;
+	s_bridge_data.dev_peakstats = (void *)&dev_peakstats;
 	s_bridge_data.devstats = &devstats;
 	s_bridge_data.host_timescale = &host_timescale;
 	s_bridge_data.isDedicated = &isDedicated;
