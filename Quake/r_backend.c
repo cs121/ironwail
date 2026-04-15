@@ -3,6 +3,7 @@
 #include "renderer_plugin.h"
 #include "renderer_host_bridge.h"
 #include "render_dispatch.h"
+#include "gl_backend.h"
 
 enum
 {
@@ -1375,6 +1376,7 @@ void R_Backend_Init (void)
 
 	R_Backend_Register (&s_vulkan_stub_backend);
 	R_Backend_Register (&s_dx12_stub_backend);
+	GL_Backend_Register ();
 	R_Backend_LoadRendererPlugins ();
 
 	if (!s_active_backend && s_registered_backend_count > 0)
