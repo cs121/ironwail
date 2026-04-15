@@ -712,9 +712,9 @@ static void R_Backend_FillPluginHostApi (iw_renderer_plugin_host_api_t *host_api
 	host_api->upload_services = &s_plugin_upload_services;
 	host_api->pipeline_services = &s_plugin_pipeline_services;
 	{
-		iw_renderer_host_bridge_t bridge;
-		R_Backend_FillHostBridge (&bridge);
-		host_api->bridge = &bridge;
+		static iw_renderer_host_bridge_t s_bridge;
+		R_Backend_FillHostBridge (&s_bridge);
+		host_api->bridge = &s_bridge;
 	}
 	host_api->register_entry_points = R_Backend_RegisterEntryPoints;
 	SDL_assert (R_Backend_ValidatePluginHostApi (host_api, true));
@@ -831,9 +831,9 @@ static qboolean R_Backend_LoadPluginFromPath (const char *path)
 	}
 
 	{
-		iw_renderer_host_bridge_t bridge;
-		R_Backend_FillHostBridge (&bridge);
-		host_api.bridge = &bridge;
+		static iw_renderer_host_bridge_t s_bridge;
+		R_Backend_FillHostBridge (&s_bridge);
+		host_api.bridge = &s_bridge;
 		host_api.register_entry_points = R_Backend_RegisterEntryPoints;
 	}
 

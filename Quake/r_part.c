@@ -1204,7 +1204,9 @@ void CL_RunParticles (void)
 	particle_t		*p;
 	int				i, cur, active;
 	float			time1, time2, time3, dvel, frametime, grav;
+	#ifndef RENDERER_PLUGIN_BUILD
 	extern	cvar_t	sv_gravity;
+	#endif
 
 	frametime = cl.time - cl.oldtime;
 

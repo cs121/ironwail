@@ -6,7 +6,9 @@
 
 extern cvar_t r_particles_max;
 extern cvar_t r_particles_sort;
+#ifndef RENDERER_PLUGIN_BUILD
 extern cvar_t r_particles_material_strict;
+#endif
 extern cvar_t r_particles_cull_dist;
 extern cvar_t r_particles_collision;
 extern cvar_t r_particles_spawn_max;

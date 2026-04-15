@@ -86,8 +86,6 @@ static qboolean IW_RendererRefGL_Register (const iw_renderer_plugin_host_api_t *
 {
 	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V4_SIZE)
 		return false;
-	if (!host_api->register_backend)
-		return false;
 
 	if (IW_RENDERER_PLUGIN_HOST_HAS_FIELD (host_api, bridge) && host_api->bridge)
 	{
@@ -95,12 +93,17 @@ static qboolean IW_RendererRefGL_Register (const iw_renderer_plugin_host_api_t *
 		s_bridge = host_api->bridge;
 	}
 
+#if 0 // Phase 1: skip IRenderBackend registration; engine uses built-in GL backend
+	if (!host_api->register_backend)
+		return false;
+
 	const IRenderBackend *gl_backend = GL_Backend_GetInterface ();
 	if (!gl_backend)
 		return false;
 
 	if (!host_api->register_backend (gl_backend))
 		return false;
+#endif
 
 	REFGL_FillEntryPoints ();
 

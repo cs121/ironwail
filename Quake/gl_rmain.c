@@ -54,7 +54,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 extern gltexture_t *lightmap_dir_texture;
 extern cvar_t r_sun_light;
+#ifndef RENDERER_PLUGIN_BUILD
 extern cvar_t r_sun_visibility;
+#endif
 extern cvar_t r_caustics;
 extern cvar_t r_caustics_water;
 extern cvar_t r_caustics_lava;

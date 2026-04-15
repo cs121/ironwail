@@ -2,8 +2,10 @@
 
 #include "quakedef.h"
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern cvar_t r_skyvis;
 extern cvar_t r_skyvis_debug;
+#endif
 extern cvar_t r_skyvis_scale;
 extern cvar_t r_skyvis_cap;
 extern cvar_t r_skyvis_spacing_xy;

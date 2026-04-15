@@ -1,7 +1,12 @@
 #ifdef RENDERER_PLUGIN_BUILD
 
 #include "quakedef.h"
+#include "mat_material.h"
 #include <stdarg.h>
+
+#undef Cmd_AddCommand
+#undef Sys_Error
+#undef Host_Error
 
 const iw_renderer_host_bridge_t *g_host_bridge = NULL;
 const iw_renderer_host_bridge_functions_t *g_bridge_fn = NULL;
@@ -268,7 +273,7 @@ int Sys_FileType (const char *path)
 	return g_bridge_fn->sys_file_type (path);
 }
 
-long Sys_ftell (FILE *file)
+qfileofs_t Sys_ftell (FILE *file)
 {
 	return g_bridge_fn->sys_ftell (file);
 }
@@ -1038,9 +1043,9 @@ void CFG_ReadCvarOverrides (const char **vars, int num_vars)
 	g_bridge_fn->cfg_read_cvar_overrides (vars, num_vars);
 }
 
-void *Cmd_AddCommand2 (const char *cmd_name, void (*function)(void), int srctype, qboolean qcinterceptable)
+cmd_function_t *Cmd_AddCommand2 (const char *cmd_name, xcommand_t function, cmd_source_t srctype, qboolean qcinterceptable)
 {
-	return g_bridge_fn->cmd_add_command2 (cmd_name, function, srctype, qcinterceptable);
+	return (cmd_function_t *)g_bridge_fn->cmd_add_command2 (cmd_name, (void (*)(void))function, (int)srctype, qcinterceptable);
 }
 
 void PL_SetWindowIcon (void)
@@ -1178,9 +1183,9 @@ void Material_Canonicalize (const char *name, char *out, size_t out_size)
 	g_bridge_fn->material_canonicalize (name, out, out_size);
 }
 
-int Material_ClassifyParticleStage (const material_stage_t *stage, int policy, char *reason, size_t reason_size)
+mat_particle_stage_support_t Material_ClassifyParticleStage (const material_stage_t *stage, mat_particle_policy_t policy, char *reason, size_t reason_size)
 {
-	return g_bridge_fn->material_classify_particle_stage ((const void *)stage, policy, reason, reason_size);
+	return (mat_particle_stage_support_t)g_bridge_fn->material_classify_particle_stage ((const void *)stage, (int)policy, reason, reason_size);
 }
 
 qboolean Material_StageSupportsParticleMVP (const material_stage_t *stage, char *reason, size_t reason_size)

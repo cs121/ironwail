@@ -1593,7 +1593,9 @@ SCR_SetUpToDrawConsole
 void SCR_SetUpToDrawConsole (void)
 {
 	//johnfitz -- let's hack away the problem of slow console when host_timescale is <0
+	#ifndef RENDERER_PLUGIN_BUILD
 	extern cvar_t host_timescale;
+	#endif
 	float timescale, conspeed;
 	//johnfitz
 

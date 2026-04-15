@@ -286,12 +286,14 @@ typedef struct material_s
 
 typedef struct texture_s texture_t;
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern cvar_t r_materials;
 extern cvar_t r_material_debug;
 extern cvar_t r_tcgen_debug;
 extern cvar_t r_sun_visibility;
 extern cvar_t r_material_debug_parse;
 extern cvar_t r_particles_material_strict;
+#endif
 
 #define MAT_PARTICLE_SHADER_PREFIX "particles/"
 
