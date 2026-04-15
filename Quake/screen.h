@@ -41,7 +41,10 @@ int SCR_ModalMessage (const char *text, float timeout); //johnfitz -- added time
 extern	float		scr_con_current;
 extern	float		scr_conlines;		// lines of console to display
 
+#ifndef RENDERER_PLUGIN_BUILD
+
 extern	int			sb_lines;
+#endif
 
 extern	int			clearnotify;	// set to 0 whenever notify text is drawn
 extern	qboolean	scr_disabled_for_loading;
@@ -105,7 +108,10 @@ extern	cvar_t		scr_conwidth;
 extern	cvar_t		scr_conscale;
 extern	cvar_t		scr_conalpha;
 extern	cvar_t		scr_conbrightness;
+
+#ifndef RENDERER_PLUGIN_BUILD
 extern	cvar_t		scr_scale;
+#endif
 extern	cvar_t		scr_crosshairscale;
 //johnfitz
 

@@ -154,7 +154,9 @@ COMPILE_TIME_ASSERT (too_many_keycodes, NUM_KEYCODES <= MAX_KEYS);
 
 #define	MAXCMDLINE	256
 
+#ifndef RENDERER_PLUGIN_BUILD
 typedef enum {key_game, key_console, key_message, key_menu} keydest_t;
+#endif
 typedef enum textmode_t
 {
 	TEXTMODE_OFF,		// no char events
@@ -180,11 +182,14 @@ typedef enum
 	KDM_ANY					= -1,
 } keydevicemask_t;
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern keydest_t	key_dest;
 extern	char	*keybindings[MAX_KEYS];
+#endif
 
 #define		CMDLINES 64
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	char	key_lines[CMDLINES][MAXCMDLINE];
 extern	char	key_tabhint[MAXCMDLINE];
 extern	int		edit_line;
@@ -193,6 +198,7 @@ extern	int		key_insert;
 extern	double		key_blinktime;
 
 extern	qboolean	chat_team;
+#endif
 
 void Key_Init (void);
 void Key_ClearStates (void);

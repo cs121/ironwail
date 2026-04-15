@@ -109,7 +109,9 @@ struct pr_extfuncs_s
 	QCEXTFUNCS_CS
 #undef QCEXTFUNC
 };
+#ifndef RENDERER_PLUGIN_BUILD
 extern	cvar_t	pr_checkextension;	//if 0, extensions are disabled (unless they'd be fatal, but they're still spammy)
+#endif
 	
 struct pr_extglobals_s
 {
@@ -304,8 +306,10 @@ typedef struct savedata_s
 #define	SAVEGAME_VERSION		5
 #define	SAVEGAME_VERSION_KEX	6
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern THREAD_LOCAL globalvars_t	*pr_global_struct;
 extern THREAD_LOCAL qcvm_t			*qcvm;
+#endif
 
 void PR_SwitchQCVM(qcvm_t *nvm);
 void PR_PushQCVM(qcvm_t *newvm, qcvm_t **oldvm);
@@ -376,7 +380,9 @@ int SAVE_NUM_FOR_EDICT (savedata_t *save, edict_t *e);
 #define	E_STRING(e,o)		(PR_GetString(*(string_t *)&((float*)&e->v)[o]))
 
 #define NUM_TYPE_SIZES 8
+#ifndef RENDERER_PLUGIN_BUILD
 extern const int	type_size[NUM_TYPE_SIZES];
+#endif
 
 typedef struct builtindef_s
 {
@@ -387,8 +393,10 @@ typedef struct builtindef_s
 	qcextension_t	ext;
 } builtindef_t;
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern builtindef_t	pr_builtindefs[];
 extern int			pr_numbuiltindefs;
+#endif
 
 FUNC_NORETURN void PR_RunError (const char *error, ...) FUNC_PRINTF(1,2);
 #ifdef __WATCOMC__

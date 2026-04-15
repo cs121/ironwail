@@ -26,7 +26,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // the status bar is only redrawn if something has changed, but if anything
 // does, the entire thing will be redrawn for the next vid.numpages frames.
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	int			sb_lines;			// scan lines to draw
+#endif
 
 void Sbar_Init (void);
 void Sbar_LoadPics (void);

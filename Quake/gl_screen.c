@@ -125,10 +125,12 @@ cvar_t		cl_gun_x = {"cl_gun_x","0",CVAR_ARCHIVE};
 cvar_t		cl_gun_y = {"cl_gun_y","0",CVAR_ARCHIVE};
 cvar_t		cl_gun_z = {"cl_gun_z","0",CVAR_ARCHIVE};
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	char	crosshair_char;
 extern	cvar_t	crosshair;
 extern	cvar_t	con_notifyfade;
 extern	cvar_t	con_notifyfadetime;
+#endif
 
 extern	edict_t	**bbox_linked;
 extern	cvar_t	r_showfields;

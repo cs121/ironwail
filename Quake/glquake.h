@@ -439,7 +439,9 @@ extern int rs_brushpolys, rs_aliaspolys, rs_skypolys;
 extern int rs_dynamiclightmaps, rs_brushpasses, rs_aliaspasses, rs_skypasses;
 
 //johnfitz -- track developer statistics that vary every frame
+#ifndef RENDERER_PLUGIN_BUILD
 extern cvar_t devstats;
+#endif
 typedef struct {
 	int		packetsize;
 	int		edicts;
@@ -450,7 +452,9 @@ typedef struct {
 	int		dlights;
 	int		gpu_upload;
 } devstats_t;
+#ifndef RENDERER_PLUGIN_BUILD
 extern devstats_t dev_stats, dev_peakstats;
+#endif
 
 //ohnfitz -- reduce overflow warning spam
 typedef struct {

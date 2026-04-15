@@ -44,7 +44,7 @@ typedef struct vrect_s
 	int	x, y, width, height;
 } vrect_t;
 
-typedef struct
+typedef struct viddef_s
 {
 	pixel_t		*colormap;	// 256 * VID_GRADES size
 	int			fullbright;	// index of first fullbright color

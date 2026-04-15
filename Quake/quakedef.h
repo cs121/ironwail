@@ -228,7 +228,7 @@ typedef enum
 #define	NUM_SPAWN_PARMS		16
 
 
-typedef struct
+typedef struct quakeparms_s
 {
 	const char *basedir;
 	const char *userdir;	// user's directory on UNIX platforms.
@@ -308,6 +308,7 @@ extern qboolean noclip_anglehack;
 //
 // host
 //
+#ifndef RENDERER_PLUGIN_BUILD
 extern	quakeparms_t *host_parms;
 
 extern	cvar_t		sys_ticrate;
@@ -323,6 +324,7 @@ extern	byte		*host_colormap;
 extern	int		host_framecount;	// incremented every frame, never reset
 extern	double		realtime;		// not bounded in any way, changed at
 							// start of every frame, never reset
+#endif
 
 typedef struct filelist_item_s
 {
@@ -449,7 +451,9 @@ extern int		current_skill;	// skill level for currently loaded level (in case
 					//  the user changes the cvar while the level is
 					//  running, this reflects the level actually in use)
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern qboolean		isDedicated;
+#endif
 
 extern int		minimum_memory;
 

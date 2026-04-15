@@ -254,7 +254,9 @@ R_ShowbboxesFilter_Completion_f -- tab completion for r_showbboxes_filter
 */
 static void R_ShowbboxesFilter_Completion_f (const char *partial)
 {
+#ifndef RENDERER_PLUGIN_BUILD
 	extern edict_t *sv_player;
+#endif
 	extern edict_t **bbox_linked;
 	qcvm_t	*oldvm;
 	edict_t	*ed;

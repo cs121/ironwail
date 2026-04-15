@@ -1192,7 +1192,9 @@ static float R_GetDynamicDoFFocus (float fallback)
 
 	if (sv.active)
 	{
+#ifndef RENDERER_PLUGIN_BUILD
 		extern edict_t* sv_player;
+#endif
 		qcvm_t* oldvm = qcvm;
 
 		PR_SwitchQCVM (NULL);
@@ -5347,7 +5349,9 @@ draw bounding boxes -- the server-side boxes, not the renderer cullboxes
 */
 static void R_ShowBoundingBoxes (void)
 {
+#ifndef RENDERER_PLUGIN_BUILD
 	extern		edict_t* sv_player;
+#endif
 	byte* pvs;
 	vec3_t		mins, maxs;
 	edict_t* ed, * focused;

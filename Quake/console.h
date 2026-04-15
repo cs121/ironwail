@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 //
 // console
 //
+#ifndef RENDERER_PLUGIN_BUILD
 extern int con_totallines;
 extern int con_backscroll;
 extern	qboolean con_forcedup;	// because no entities to refresh
@@ -33,6 +34,7 @@ extern qboolean con_initialized;
 extern byte *con_chars;
 
 extern char con_lastcenterstring[]; //johnfitz
+#endif
 
 void Con_CheckResize (void);
 void Con_Scroll (int lines);

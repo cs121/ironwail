@@ -40,7 +40,7 @@ typedef struct
 
 typedef enum {ss_loading, ss_active} server_state_t;
 
-typedef struct
+typedef struct server_s
 {
 	qboolean	active;				// false if only a net client
 
@@ -256,6 +256,7 @@ typedef enum
 
 //============================================================================
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	cvar_t	teamplay;
 extern	cvar_t	skill;
 extern	cvar_t	deathmatch;
@@ -270,6 +271,7 @@ extern	server_t		sv;					// local server
 extern	client_t	*host_client;
 
 extern	edict_t		*sv_player;
+#endif
 
 //===========================================================
 

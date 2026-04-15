@@ -37,7 +37,7 @@ typedef struct
 	int		colourkey;
 } lightstyle_t;
 
-typedef struct
+typedef struct scoreboard_s
 {
 	char	name[MAX_SCOREBOARDNAME];
 	float	entertime;
@@ -52,7 +52,9 @@ typedef struct
 	float	percent;		// 0-256
 } cshift_t;
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern cshift_t		cshift_empty;
+#endif
 
 #define	CSHIFT_CONTENTS	0
 #define	CSHIFT_DAMAGE	1
@@ -135,9 +137,7 @@ ca_connected		// valid netcon, talking to a server
 
 //
 // the client_static_t structure is persistant through an arbitrary number
-// of server connections
-//
-typedef struct
+typedef struct client_static_s
 {
 	cactive_t	state;
 
@@ -182,13 +182,15 @@ typedef struct
 
 } client_static_t;
 
-extern client_static_t	cls;
+#ifndef RENDERER_PLUGIN_BUILD
+extern	client_static_t	cls;
+#endif
 
 //
 // the client_state_t structure is wiped completely at every
 // server signon
 //
-typedef struct
+typedef struct client_state_s
 {
 	int			movemessages;	// since connecting to this server
 								// throw out the first couple, so the player
@@ -300,6 +302,7 @@ typedef struct
 //
 // cvars
 //
+#ifndef RENDERER_PLUGIN_BUILD
 extern	cvar_t	cl_name;
 extern	cvar_t	cl_color;
 
@@ -337,12 +340,14 @@ extern	cvar_t	m_side;
 
 extern	cvar_t	cl_startdemos;
 extern	cvar_t	cl_confirmquit;
+#endif
 
 
 #define	MAX_TEMP_ENTITIES	256		//johnfitz -- was 64
 #define	MAX_STATIC_ENTITIES	4096	//ericw -- was 512	//johnfitz -- was 128
 #define	MAX_VISEDICTS		16384	// larger, now we support BSP2
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	client_state_t	cl;
 
 // FIXME, allocate dynamically
@@ -353,6 +358,7 @@ extern	entity_t		cl_temp_entities[MAX_TEMP_ENTITIES];
 extern	beam_t			cl_beams[MAX_BEAMS];
 extern	entity_t		*cl_visedicts[MAX_VISEDICTS];
 extern	int				cl_numvisedicts;
+#endif
 
 static inline qboolean CL_DlightIsActive (const dlight_t *dl)
 {
@@ -395,8 +401,10 @@ static inline qboolean CL_DlightShouldFlickerColor (const dlight_t *dl)
 	return dl && (dl->type == DLIGHT_TORCH || dl->type == DLIGHT_LAVA);
 }
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	entity_t		*cl_entities; //johnfitz -- was a static array, now on hunk
 extern	int				cl_max_edicts; //johnfitz -- only changes when new map loads
+#endif
 
 //=============================================================================
 
@@ -424,10 +432,12 @@ typedef struct
 	int		state;			// low bit is down state
 } kbutton_t;
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	kbutton_t	in_mlook, in_klook;
 extern 	kbutton_t 	in_strafe;
 extern 	kbutton_t 	in_speed;
 extern	kbutton_t	in_attack;
+#endif
 
 void CL_InitInput (void);
 void CL_AccumulateCmd (void);
@@ -487,7 +497,9 @@ void CL_SignonReply (void);
 //
 // chase
 //
+#ifndef RENDERER_PLUGIN_BUILD
 extern	cvar_t	chase_active;
+#endif
 
 void Chase_Init (void);
 void TraceLine (vec3_t start, vec3_t end, vec3_t impact);

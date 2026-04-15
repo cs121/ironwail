@@ -52,7 +52,9 @@ enum m_state_e {
 	m_slist
 };
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern enum m_state_e m_state;
+#endif
 extern enum m_state_e m_return_state;
 
 extern qboolean m_entersound;

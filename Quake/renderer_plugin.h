@@ -2,9 +2,10 @@
 #define RENDERER_PLUGIN_H
 
 #include "render_api.h"
+#include "renderer_host_bridge.h"
 #include <stddef.h>
 
-#define IW_RENDERER_PLUGIN_ABI_MAJOR 3u
+#define IW_RENDERER_PLUGIN_ABI_MAJOR 4u
 #define IW_RENDERER_PLUGIN_ABI_MINOR 0u
 
 #if defined(_WIN32)
@@ -132,6 +133,10 @@ typedef struct iw_renderer_plugin_host_api_s
 	const iw_renderer_plugin_resource_services_t *resource_services;
 	const iw_renderer_plugin_upload_services_t *upload_services;
 	const iw_renderer_plugin_pipeline_services_t *pipeline_services;
+
+	/* ABI v4: host bridge for full engine services (renderer DLL extraction). */
+	const iw_renderer_host_bridge_t *bridge;
+	qboolean (*register_entry_points)(const iw_renderer_entry_points_t *entry_points);
 } iw_renderer_plugin_host_api_t;
 
 typedef struct iw_renderer_plugin_descriptor_s
@@ -148,6 +153,7 @@ typedef const iw_renderer_plugin_descriptor_t *(*iw_renderer_plugin_query_fn)(vo
 
 #define IW_RENDERER_PLUGIN_HOST_API_V2_SIZE ((unsigned int)(offsetof(iw_renderer_plugin_host_api_t, register_builtin_backend) + sizeof (((iw_renderer_plugin_host_api_t *)0)->register_builtin_backend)))
 #define IW_RENDERER_PLUGIN_HOST_API_V3_SIZE ((unsigned int)(offsetof(iw_renderer_plugin_host_api_t, pipeline_services) + sizeof (((iw_renderer_plugin_host_api_t *)0)->pipeline_services)))
+#define IW_RENDERER_PLUGIN_HOST_API_V4_SIZE ((unsigned int)(offsetof(iw_renderer_plugin_host_api_t, register_entry_points) + sizeof (((iw_renderer_plugin_host_api_t *)0)->register_entry_points)))
 #define IW_RENDERER_PLUGIN_DESCRIPTOR_MIN_SIZE ((unsigned int)(offsetof(iw_renderer_plugin_descriptor_t, register_plugin) + sizeof (((iw_renderer_plugin_descriptor_t *)0)->register_plugin)))
 
 #define IW_RENDERER_PLUGIN_HOST_HAS_FIELD(host_api, field_name) \

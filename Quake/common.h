@@ -233,8 +233,10 @@ void MSG_WriteCoord (sizebuf_t *sb, float f, unsigned int flags);
 void MSG_WriteAngle (sizebuf_t *sb, float f, unsigned int flags);
 void MSG_WriteAngle16 (sizebuf_t *sb, float f, unsigned int flags); //johnfitz
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	int			msg_readcount;
 extern	qboolean	msg_badread;		// set if a read goes beyond end of message
+#endif
 
 void MSG_BeginReading (void);
 int MSG_ReadChar (void);
@@ -303,8 +305,10 @@ void q_free (void *ptr);
 
 //============================================================================
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	THREAD_LOCAL char		com_token[1024];
 extern	qboolean	com_eof;
+#endif
 
 typedef enum
 {
@@ -315,7 +319,7 @@ typedef enum
 const char *COM_Parse (const char *data);
 const char *COM_ParseEx (const char *data, cpe_mode mode);
 
-typedef struct
+typedef struct stringview_s
 {
 	const char	*data;
 	size_t		len;
@@ -323,10 +327,12 @@ typedef struct
 
 qboolean COM_ParseLine (const char **str, stringview_t *line);
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	int			com_argc;
 extern	const char	**com_argv;
 
 extern	int		safemode;
+#endif
 /* safe mode: in true, the engine will behave as if one
    of these arguments were actually on the command line:
    -nosound, -nocdaudio, -nomidi, -stdvid, -dibonly,
@@ -417,19 +423,23 @@ typedef struct searchpath_s
 	struct searchpath_s	*next;
 } searchpath_t;
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern searchpath_t *com_searchpaths;
 extern searchpath_t *com_base_searchpaths;
 
 extern THREAD_LOCAL qfileofs_t com_filesize;
+#endif
 struct cache_user_s;
 
 #define MAX_BASEDIRS 64
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	int		com_numbasedirs;
 extern	char	com_basedirs[MAX_BASEDIRS][MAX_OSPATH];
 extern	char	com_gamedir[MAX_OSPATH];
 extern	char	com_nightdivedir[MAX_OSPATH];
 extern	THREAD_LOCAL int	file_from_pak;	// global indicating that file came from a pak
+#endif
 
 void COM_WriteFile (const char *filename, const void *data, int len);
 qboolean COM_WriteFile_OSPath (const char *filename, const void *data, size_t len);
@@ -542,9 +552,11 @@ char *FS_fgets(char *s, int size, fshandle_t *fh);
 long FS_filelength (fshandle_t *fh);
 
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern struct cvar_s	registered;
 extern qboolean		standard_quake, rogue, hipnotic;
 extern qboolean		fitzmode;
 	/* if true, run in fitzquake mode disabling custom quakespasm hacks */
+#endif
 
 #endif	/* _Q_COMMON_H */

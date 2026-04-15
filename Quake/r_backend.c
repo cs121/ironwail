@@ -1,6 +1,8 @@
 #include "quakedef.h"
 #include "r_framegraph.h"
 #include "renderer_plugin.h"
+#include "renderer_host_bridge.h"
+#include "render_dispatch.h"
 
 enum
 {
@@ -467,6 +469,13 @@ static const char *R_Backend_CanonicalNameToApi (const char *backend_name)
 
 static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend);
 static void R_Backend_FillPluginHostApi (iw_renderer_plugin_host_api_t *host_api);
+void R_Backend_FillHostBridge (iw_renderer_host_bridge_t *out);
+
+static qboolean R_Backend_RegisterEntryPoints (const iw_renderer_entry_points_t *entry_points)
+{
+	RenderDispatch_SetEntryPoints (entry_points);
+	return true;
+}
 
 static qboolean R_Backend_RegisterBuiltinByName (const char *backend_name)
 {
@@ -702,6 +711,12 @@ static void R_Backend_FillPluginHostApi (iw_renderer_plugin_host_api_t *host_api
 	host_api->resource_services = &s_plugin_resource_services;
 	host_api->upload_services = &s_plugin_upload_services;
 	host_api->pipeline_services = &s_plugin_pipeline_services;
+	{
+		iw_renderer_host_bridge_t bridge;
+		R_Backend_FillHostBridge (&bridge);
+		host_api->bridge = &bridge;
+	}
+	host_api->register_entry_points = R_Backend_RegisterEntryPoints;
 	SDL_assert (R_Backend_ValidatePluginHostApi (host_api, true));
 }
 
@@ -815,6 +830,13 @@ static qboolean R_Backend_LoadPluginFromPath (const char *path)
 		return false;
 	}
 
+	{
+		iw_renderer_host_bridge_t bridge;
+		R_Backend_FillHostBridge (&bridge);
+		host_api.bridge = &bridge;
+		host_api.register_entry_points = R_Backend_RegisterEntryPoints;
+	}
+
 	if (!descriptor->register_plugin (&host_api))
 	{
 		Con_Warning ("Renderer plugin '%s' registration callback failed.\n", plugin_name);
@@ -888,11 +910,8 @@ static void R_Backend_LoadRendererPlugins (void)
 	/* Keep a deterministic in-process OpenGL plugin fallback for installs without DLL/SO deployment. */
 	if (!R_Backend_HasRegisteredName ("OpenGL"))
 	{
-	R_Backend_FillPluginHostApi (&host_api);
-	if (!R_Backend_ValidatePluginHostApi (&host_api, true))
-		return;
-	(void)builtin_plugin.register_plugin (&host_api);
-}
+		Sys_Error ("No OpenGL renderer plugin found; %s not found or failed to load.\n", s_ref_gl_plugin_filename);
+	}
 }
 
 static void R_Backend_ApplySelectionToCvar (void)
@@ -1328,6 +1347,7 @@ void R_Backend_Init (void)
 		return;
 
 	s_backend_initialized = true;
+	RenderDispatch_Init ();
 	memset (&s_last_populated_resources, 0, sizeof (s_last_populated_resources));
 	s_last_populated_resources_valid = false;
 	s_last_populated_resources_frame = -1;

@@ -219,8 +219,7 @@ typedef struct mclipnode_s
 } mclipnode_t;
 //johnfitz
 
-// !!! if this is changed, it must be changed in asm_i386.h too !!!
-typedef struct
+typedef struct hull_s
 {
 	mclipnode_t	*clipnodes; //johnfitz -- was dclipnode_t
 	mplane_t	*planes;

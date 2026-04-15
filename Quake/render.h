@@ -142,7 +142,7 @@ typedef struct entity_s
 } entity_t;
 
 // !!! if this is changed, it must be changed in asm_draw.h too !!!
-typedef struct
+typedef struct refdef_s
 {
 	vrect_t		vrect;				// subwindow in video for refresh
 									// FIXME: not need vrect next field here?

@@ -55,7 +55,7 @@ typedef struct
 	int			infotableofs;
 } wadinfo_t;
 
-typedef struct
+typedef struct lumpinfo_s
 {
 	int			filepos;
 	int			disksize;
@@ -66,9 +66,11 @@ typedef struct
 	char		name[16];				// must be null terminated
 } lumpinfo_t;
 
+#ifndef RENDERER_PLUGIN_BUILD
 extern	int			wad_numlumps;
 extern	lumpinfo_t	*wad_lumps;
 extern	byte		*wad_base;
+#endif
 
 void	W_LoadWadFile (void); //johnfitz -- filename is now hard-coded for honesty
 void	W_CleanupName (const char *in, char *out);
