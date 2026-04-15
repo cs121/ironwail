@@ -1959,9 +1959,12 @@ static void Mod_LoadLighting (lump_t *l)
                         loadmodel->litfile = true;
 
 			memcpy(loadmodel->lightdata, bspx_rgblighting, bspx_rgb_size);
+                        /* Keep the RGB path populated as well so later code can treat
+                         * BSPX RGBLIGHTING like other colored light sources. */
+                        Mod_LoadRGBLightingBSPX(loadmodel, bspx_rgblighting, bspx_rgb_size);
                         Q1BSPX_MarkUsed("RGBLIGHTING");
 
-					Con_Printf("loaded BSPX lighting (%d samples)\n", samples);
+					Con_Printf("loaded BSPX RGB lighting (%d samples, %d bytes)\n", samples, bspx_rgb_size);
 					lightmap_source_name = "BSPX_RGBLIGHTING";
                         goto loadlightdir;
                 }
@@ -2117,6 +2120,14 @@ loadlightdir:
 			}
 		}
 	}
+
+	Con_DPrintf("Lightmap BSPX state: source=%s lightdata=%d rgb=%s(%d) lightdir=%d hdr=%d\n",
+		lightmap_source_name,
+		loadmodel->lightdatasamples,
+		loadmodel->has_lightdata_rgb ? "yes" : "no",
+		loadmodel->lightdata_rgb_size,
+		loadmodel->lightdirsamples,
+		(loadmodel->flags & MOD_HDRLIGHTING) ? 1 : 0);
 
 	Con_DPrintf("Lightmap: source=%s fmt=%s texels=%d\n",
 		lightmap_source_name,
