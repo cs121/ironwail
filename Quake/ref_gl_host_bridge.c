@@ -956,7 +956,7 @@ void R_Backend_FillHostBridge (iw_renderer_host_bridge_t *out)
 	s_bridge_data.con_initialized = &con_initialized;
 	s_bridge_data.developer = &developer;
 	s_bridge_data.map_checks = &map_checks;
-	s_bridge_data.scr_scale = &scr_scale;
+	s_bridge_data.scr_scale = NULL;
 	s_bridge_data.chase_active = &chase_active;
 	s_bridge_data.sensitivity = &sensitivity;
 	s_bridge_data.wad_base = &wad_base;

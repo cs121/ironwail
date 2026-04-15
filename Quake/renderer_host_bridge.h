@@ -63,6 +63,9 @@ typedef struct glcanvas_s glcanvas_t;
 struct mplane_s;
 struct mnode_s;
 struct texture_s;
+struct material_s;
+struct mat_texmatrix_s;
+struct mat_wave_s;
 struct cmd_function_s;
 struct postfx_state_s;
 struct lightgrid_s;
@@ -74,25 +77,10 @@ struct bc7enc_compress_block_params_s;
 typedef struct mplane_s mplane_t;
 typedef struct mnode_s mnode_t;
 typedef struct texture_s texture_t;
-#ifndef MAT_MATERIAL_H
-struct material_s;
-struct material_stage_s;
-struct mat_texmatrix_s;
-struct mat_wave_s;
 typedef struct material_s material_t;
-typedef struct material_stage_s material_stage_t;
 typedef struct mat_texmatrix_s mat_texmatrix_t;
 typedef struct mat_wave_s mat_wave_t;
-#endif
-#ifndef __PR_COMP_H
-struct ddef_s;
-typedef struct ddef_s ddef_t;
-#endif
 typedef struct cmd_function_s cmd_function_t;
-#ifndef GLQUAKE_H
-struct devstats_s;
-typedef struct devstats_s devstats_t;
-#endif
 typedef struct postfx_state_s postfx_state_t;
 typedef struct lightgrid_s lightgrid_t;
 typedef struct gpulightbuffer_s gpulightbuffer_t;
@@ -100,10 +88,6 @@ typedef struct rl_light_s rl_light_t;
 typedef struct gpuframedata_s gpuframedata_t;
 typedef struct r_ssao_fog_state_s r_ssao_fog_state_t;
 typedef struct bc7enc_compress_block_params_s bc7enc_compress_block_params_t;
-#ifndef _QUAKE_WAD_H
-struct qpic_s;
-typedef struct qpic_s qpic_t;
-#endif
 
 #ifndef _QUAKE_KEYS_H
 typedef enum {key_game, key_console, key_message, key_menu} keydest_t;
@@ -283,7 +267,7 @@ typedef struct iw_renderer_host_bridge_functions_s
 	int (*q_log2)(int val);
 	float (*get_fraction)(float val, float minval, float maxval);
 	unsigned short (*crc_block)(const void *start, int count);
-	void (*swap_pic)(qpic_t *pic);
+	void (*swap_pic)(void *pic);
 
 	int (*q_strcmp)(const char *s1, const char *s2);
 	int (*q_strncmp)(const char *s1, const char *s2, int count);
@@ -347,8 +331,8 @@ typedef struct iw_renderer_host_bridge_functions_s
 	void (*v_set_contents_color)(int contents);
 	void (*cl_postfx_set_contents)(int contents, qboolean underwater_active, qboolean underwater_postfx_active);
 	void (*cl_postfx_get_state)(void *out_state);
-	qboolean (*ed_is_relevant_field)(edict_t *ed, ddef_t *d);
-	const char *(*ed_field_value_string)(edict_t *ed, ddef_t *d);
+	qboolean (*ed_is_relevant_field)(edict_t *ed, void *d);
+	const char *(*ed_field_value_string)(edict_t *ed, void *d);
 	const char *(*pr_get_string)(int num);
 	int (*num_for_edict)(edict_t *);
 	void (*pr_reload_pics)(qboolean purge);
@@ -393,10 +377,10 @@ typedef struct iw_renderer_host_bridge_functions_s
 	const material_t *(*material_find)(const char *name);
 	const material_t *(*material_find_for_texture_name)(const char *texname, const char *mapname);
 	void (*material_canonicalize)(const char *name, char *out, size_t out_size);
-	int (*material_classify_particle_stage)(const material_stage_t *stage, int policy, char *reason, size_t reason_size);
-	qboolean (*material_stage_supports_particle_mvp)(const material_stage_t *stage, char *reason, size_t reason_size);
-	const mat_texmatrix_t *(*material_stage_eval_tex_matrix)(material_stage_t *stage, float time);
-	const char *(*material_stage_get_anim_map_path)(material_stage_t *stage, float time);
+	int (*material_classify_particle_stage)(const void *stage, int policy, char *reason, size_t reason_size);
+	qboolean (*material_stage_supports_particle_mvp)(const void *stage, char *reason, size_t reason_size);
+	const mat_texmatrix_t *(*material_stage_eval_tex_matrix)(void *stage, float time);
+	const char *(*material_stage_get_anim_map_path)(void *stage, float time);
 	float (*material_eval_wave_value)(const mat_wave_t *wave, float time);
 
 	void (*dlight_pool_clear_persistent)(void);
@@ -494,8 +478,8 @@ typedef struct iw_renderer_host_bridge_data_s
 	char *crosshair_char;
 	cvar_t *con_notifyfade;
 	cvar_t *con_notifyfadetime;
-	devstats_t *dev_stats;
-	devstats_t *dev_peakstats;
+	void *dev_stats;
+	void *dev_peakstats;
 	cvar_t *devstats;
 	cvar_t *host_timescale;
 	qboolean *isDedicated;
