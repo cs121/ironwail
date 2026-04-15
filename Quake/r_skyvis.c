@@ -115,8 +115,25 @@ static qboolean R_SkyVis_TraceToSky (qmodel_t *world, const vec3_t start, const 
 	VectorCopy (end, trace.endpos);
 
 	SV_RecursiveHullCheck (&world->hulls[0], world->hulls[0].firstclipnode, 0.f, 1.f, start_copy, end, &trace);
-	if (trace.startsolid || trace.allsolid || trace.fraction < 1.f)
+	if (trace.startsolid || trace.allsolid)
 		return false;
+
+	if (trace.fraction < 1.f)
+	{
+		mleaf_t *leaf = Mod_PointInLeaf (trace.endpos, world);
+		if (leaf && leaf->contents == CONTENTS_SKY)
+			return true;
+		for (step = 1; step < 8; step++)
+		{
+			vec3_t probe;
+			float t = (float)step / 8.f;
+			VectorLerp (start, trace.endpos, t, probe);
+			leaf = Mod_PointInLeaf (probe, world);
+			if (leaf && leaf->contents == CONTENTS_SKY)
+				return true;
+		}
+		return false;
+	}
 
 	for (step = 1; step <= 8; step++)
 	{
