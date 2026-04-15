@@ -208,19 +208,6 @@ void M_SetSkillMenuMap (const char *name);
 void M_Options_SelectMods (void);
 void M_Options_Init (enum m_state_e state);
 
-static void M_StopDemoForMultiplayerMenu (void)
-{
-	// Prevent the attract-loop from restarting demos while navigating MP menus.
-	cls.demonum = -1;
-	cls.demoloop = false;
-
-	if (cls.demoplayback)
-	{
-		CL_StopPlayback ();
-		CL_Disconnect ();
-	}
-}
-
 #define PREVIEW_FADEIN_TIME				0.125
 #define PREVIEW_FADEOUT_TIME			0.125
 #define PREVIEW_HOLD_TIME				1.25
@@ -2251,7 +2238,6 @@ int	m_multiplayer_cursor;
 
 void M_Menu_MultiPlayer_f (void)
 {
-	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_multiplayer;
@@ -2349,7 +2335,6 @@ int		setup_bottom;
 
 void M_Menu_Setup_f (void)
 {
-	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_setup;
@@ -2553,7 +2538,6 @@ const char *net_helpMessage [] =
 
 void M_Menu_Net_f (void)
 {
-	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_net;
@@ -5602,7 +5586,6 @@ char	lanConfig_joinname[22];
 
 void M_Menu_LanConfig_f (void)
 {
-	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_lanconfig;
@@ -5976,7 +5959,6 @@ double m_serverInfoMessageTime;
 
 void M_Menu_GameOptions_f (void)
 {
-	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_gameoptions;
@@ -6356,7 +6338,6 @@ double		searchCompleteTime;
 
 void M_Menu_Search_f (void)
 {
-	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_search;
@@ -6418,7 +6399,6 @@ qboolean slist_sorted;
 
 void M_Menu_ServerList_f (void)
 {
-	M_StopDemoForMultiplayerMenu ();
 	IN_DeactivateForMenu();
 	key_dest = key_menu;
 	m_state = m_slist;
@@ -7646,7 +7626,6 @@ qboolean M_ForcedUnderwater (void)
 void M_ConfigureNetSubsystem(void)
 {
 // enable/disable net systems to match desired config
-	M_StopDemoForMultiplayerMenu ();
 
 	if (IPXConfig || TCPIPConfig)
 		net_hostport = lanConfig_port;
