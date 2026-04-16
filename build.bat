@@ -8,8 +8,8 @@ cd /d "%BASE%"
 set "SLN=Windows\VisualStudio\ironwail.sln"
 set "VCXPROJ=Windows\VisualStudio\ironwail.vcxproj"
 
-set "SRC_ID1_ASSET_ROOT=Quake"
-set "ID1_ASSET_DIRS=game shaders sounddefs materials particles music"
+set "SRC_PAKFILES_ROOT=pakfiles"
+set "ID1_ASSET_DIRS=bots shaders sounddefs materials particles music"
 set "ROOT_ASSET_FILES=ironwail.pak"
 
 REM Deploy-Ziel: FIX nach C:\Quake\rerelease
@@ -152,13 +152,13 @@ if errorlevel 1 exit /b !errorlevel!
 REM ========== Runtime Assets ==========
 call :log "[5/6] Kopiere id1-Assets..."
 for %%D in (%ID1_ASSET_DIRS%) do (
-  call :copy_tree "%SRC_ID1_ASSET_ROOT%\%%D" "%DST_ID1_ASSET_ROOT%\%%D" "id1/%%D"
+  call :copy_tree "%SRC_PAKFILES_ROOT%\%%D" "%DST_ID1_ASSET_ROOT%\%%D" "id1/%%D"
   if errorlevel 1 exit /b !errorlevel!
 )
 
 call :log "[6/6] Kopiere Root-Assets..."
 for %%F in (%ROOT_ASSET_FILES%) do (
-  call :copy_file "Quake\%%F" "%DST_DIR%\%%F" "%%F"
+  call :copy_file "%SRC_PAKFILES_ROOT%\%%F" "%DST_DIR%\%%F" "%%F"
   if errorlevel 1 exit /b !errorlevel!
 )
 

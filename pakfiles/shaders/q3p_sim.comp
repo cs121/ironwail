@@ -1,0 +1,85 @@
+layout(local_size_x=64) in;
+
+struct Q3PParticle
+{
+	vec4 spawn_life_size_sizeramp;   // x spawn_time, y lifetime, z size, w size_ramp
+	vec4 alpha_alpharamp_gravity_drag; // x alpha, y alpha_ramp, z gravity, w drag
+	vec4 org;                        // xyz origin
+	vec4 vel;                        // xyz velocity
+	uvec4 color_flags_material_alive; // x color, y flags, z material_id, w alive
+	vec4 bounce;                     // x restitution, y min_bounce_speed
+};
+
+layout(std430, binding=0) readonly buffer SrcParticles
+{
+	Q3PParticle src_particles[];
+};
+
+layout(std430, binding=1) writeonly buffer DstParticles
+{
+	Q3PParticle dst_particles[];
+};
+
+layout(location=0) uniform vec4 SimParams0; // x time, y dt, z collision enabled, w active count
+layout(location=1) uniform vec4 SimParams1; // x collision plane z
+
+bool Q3P_IsFinite1(float v)
+{
+	return !isnan(v) && !isinf(v);
+}
+
+bool Q3P_IsFinite3(vec3 v)
+{
+	return Q3P_IsFinite1(v.x) && Q3P_IsFinite1(v.y) && Q3P_IsFinite1(v.z);
+}
+
+void main()
+{
+	uint i = gl_GlobalInvocationID.x;
+	uint active_count = uint(max(SimParams0.w, 0.0));
+	if (i >= active_count)
+		return;
+
+	Q3PParticle p = src_particles[i];
+	float sim_time = SimParams0.x;
+	float dt = max(SimParams0.y, 0.0);
+	float age = sim_time - p.spawn_life_size_sizeramp.x;
+	float lifetime = p.spawn_life_size_sizeramp.y;
+	uint flags = p.color_flags_material_alive.y;
+	uint alive = 1u;
+
+	if (lifetime <= 0.0 || age < 0.0 || age >= lifetime)
+		alive = 0u;
+
+	if (!Q3P_IsFinite3(p.org.xyz) || !Q3P_IsFinite3(p.vel.xyz) || !Q3P_IsFinite1(p.alpha_alpharamp_gravity_drag.x) || !Q3P_IsFinite1(p.spawn_life_size_sizeramp.z))
+		alive = 0u;
+
+	if (alive != 0u)
+	{
+		vec3 prev_org = p.org.xyz;
+		vec3 next_org;
+
+		p.spawn_life_size_sizeramp.z += p.spawn_life_size_sizeramp.w * dt;
+		p.alpha_alpharamp_gravity_drag.x = clamp(
+			p.alpha_alpharamp_gravity_drag.x + p.alpha_alpharamp_gravity_drag.y * dt,
+			0.0, 1.0);
+
+		next_org = prev_org + p.vel.xyz * dt;
+		p.vel.z -= p.alpha_alpharamp_gravity_drag.z * dt;
+		p.vel.xyz *= max(0.0, 1.0 - p.alpha_alpharamp_gravity_drag.w * dt);
+
+		// Cheap optional fallback collision plane; exact world collision keeps CPU fallback.
+		if (SimParams0.z > 0.5 && (flags & 1u) != 0u && next_org.z < SimParams1.x)
+		{
+			next_org.z = SimParams1.x;
+			p.vel.z = -p.vel.z * clamp(p.bounce.x, 0.0, 1.0);
+			if (length(p.vel.xyz) < max(0.0, p.bounce.y))
+				alive = 0u;
+		}
+
+		p.org.xyz = next_org;
+	}
+
+	p.color_flags_material_alive.w = alive;
+	dst_particles[i] = p;
+}
