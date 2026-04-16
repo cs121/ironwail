@@ -855,7 +855,16 @@ void Mod_LoadRGBLightingBSPX (qmodel_t *mod, void *buffer, int size)
         }
 
         memptr = (byte *)Hunk_AllocName(size, loadname);
-        memcpy(memptr, buffer, size);
+        {
+                const byte *src = (const byte *)buffer;
+                byte *dst = memptr;
+                for (int i = 0; i < size / 3; i++, src += 3, dst += 3)
+                {
+                        dst[0] = src[2];
+                        dst[1] = src[1];
+                        dst[2] = src[0];
+                }
+        }
 
         mod->lightdata_rgb = memptr;
         mod->lightdata_rgb_size = size;
@@ -1813,9 +1822,7 @@ static void Mod_LoadLighting (lump_t *l)
 		bsp_lightmap_bgr = Mod_ShouldAutoSwapBspLighting(loadmodel);
 
 	/* External .lit files are authored RGB/RGBE in most packs.
-	 * Keep auto BGR detection scoped to embedded BSP/BSPX lighting only. */
-	if (gl_bsp_lightmap_bgr.value > 0.f)
-		litfile_bgr = true;
+	 * Keep BGR auto-detection scoped to embedded BSP/BSPX lighting only. */
 
 	/*
 	 * Lighting source precedence for loadmodel->lightdata:
@@ -2048,12 +2055,18 @@ static void Mod_LoadLighting (lump_t *l)
                 if (bspx_rgblighting && (bspx_rgb_size % 3 == 0))
                 {
                         int samples = bspx_rgb_size / 3;
+                        const byte *src = bspx_rgblighting;
 
 			loadmodel->lightdata = (byte*)Hunk_AllocName(bspx_rgb_size, litfilename);
                         loadmodel->lightdatasamples = samples;
                         loadmodel->litfile = true;
 
-			memcpy(loadmodel->lightdata, bspx_rgblighting, bspx_rgb_size);
+                        for (int i = 0; i < samples; i++, src += 3)
+                        {
+                                loadmodel->lightdata[i * 3 + 0] = src[2];
+                                loadmodel->lightdata[i * 3 + 1] = src[1];
+                                loadmodel->lightdata[i * 3 + 2] = src[0];
+                        }
                         /* Keep the RGB path populated as well so later code can treat
                          * BSPX RGBLIGHTING like other colored light sources. */
                         Mod_LoadRGBLightingBSPX(loadmodel, bspx_rgblighting, bspx_rgb_size);
@@ -3039,13 +3052,13 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 				uint8_t style = *cursor++;
 				uint8_t color[3];
 					/*
-					 * LIGHTGRID_OCTREE stores sample colors in BGR byte order.
+					 * LIGHTGRID_OCTREE stores sample colors in RGB byte order.
 					 * Keep the runtime representation in RGB to match the rest of
 					 * the renderer (alias lighting, debug output).
 					 */
-				color[2] = *cursor++; /* B */
-				color[1] = *cursor++; /* G */
 				color[0] = *cursor++; /* R */
+				color[1] = *cursor++; /* G */
+				color[2] = *cursor++; /* B */
 
 				if (!chosen_set)
 				{

@@ -457,7 +457,10 @@ int ShadowSlotForLight(int lightIndex)
 int ShadowCascadeForWorldPos(vec3 worldPos)
 {
 	int cascades = clamp(ShadowSunCascadeCount, 1, 4);
-	float dist = length(worldPos - EyePos);
+	// Split selection must follow view-space depth, not spherical camera distance.
+	// Using Euclidean distance creates concentric shells around the viewer that show
+	// up as visible rings in shadowed floors/walls.
+	float dist = max(-(View * vec4(worldPos, 1.0)).z, 0.0);
 	if (cascades <= 1) return 0;
 	if (dist <= ShadowSunSplits.x) return 0;
 	if (dist <= ShadowSunSplits.y || cascades == 2) return 1;
@@ -477,9 +480,9 @@ float SampleSunShadow(vec3 worldPos)
 
 	vec3 ndc = clip.xyz / clip.w;
 	vec2 uv = ndc.xy * 0.5 + 0.5;
-	// Sun shadow map is always rendered with a standard (non-reversed) ortho
-	// projection on the CPU side, so depth lives in [0,1] with 0=near, 1=far.
-	float depth = ndc.z * 0.5 + 0.5;
+	// Match the renderer's current depth convention before comparing against
+	// the stored shadow map depth.
+	float depth = DepthToCanonical(ndc.z);
 	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || depth < 0.0 || depth > 1.0)
 		return 1.0;
 

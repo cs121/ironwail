@@ -127,6 +127,15 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 	return (curr_ndc - prev_ndc) * 0.5;
 }
 
+float DepthToCanonical(float depth)
+{
+#if REVERSED_Z
+	return 1.0 - depth;
+#else
+	return depth;
+#endif
+}
+
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
 const int ALIAS_FLAG_VIEWMODEL = 2;
 const int ALIAS_FLAG_LIGHTNING = 4;
@@ -225,7 +234,7 @@ float SampleSunShadow(vec3 worldPos)
 
 	vec3 ndc = clip.xyz / clip.w;
 	vec2 uv = ndc.xy * 0.5 + 0.5;
-	float depth = ndc.z * 0.5 + 0.5;
+	float depth = DepthToCanonical(ndc.z);
 	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || depth < 0.0 || depth > 1.0)
 		return 1.0;
 

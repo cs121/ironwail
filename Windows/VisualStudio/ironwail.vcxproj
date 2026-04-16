@@ -497,7 +497,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <Natvis Include="ironwail.natvis" />
   </ItemGroup>
   <ItemGroup>
-    <CopyFileToFolders Include="..\..\Quake\ironwail.pak">
+    <CopyFileToFolders Include="..\..\Quake\ironwail.pak" Condition="Exists('..\..\Quake\ironwail.pak')">
       <FileType>Document</FileType>
     </CopyFileToFolders>
   </ItemGroup>

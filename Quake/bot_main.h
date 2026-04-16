@@ -123,11 +123,6 @@ typedef struct bot_state_s
 	qboolean	last_decision_has_path;
 	bot_path_t	last_decision_path;
 	int		last_decision_path_index;
-	int		template_index;
-	float		skill;
-	int		preferred_weapon;
-	int		least_preferred_weapon;
-	float		agility;
 } bot_state_t;
 
 extern cvar_t bot_debug;
