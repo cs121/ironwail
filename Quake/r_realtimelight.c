@@ -9,7 +9,7 @@ enum
 {
 	RL_EMISSIVE_BUDGET = 24
 };
-static const qboolean rl_emissive_enabled = false;
+static const qboolean rl_emissive_enabled = true;
 static const qboolean rl_debug_enabled = false;
 
 static rl_light_t rl_frame_lights[RL_FRAME_LIGHTS_MAX];

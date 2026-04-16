@@ -1,6 +1,7 @@
 #lava1
 {
     qer_editorimage enter01
+    emissive true
 
     // 1) Base
     {
