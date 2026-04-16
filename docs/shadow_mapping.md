@@ -1,81 +1,65 @@
-# Shadow Mapping (V1)
+# Shadow Mapping
 
-## Pass-Reihenfolge
+## Pass order
 
-Der Framegraph rendert Schatten vor den Haupt-Scene-Paessen:
+The framegraph renders shadows before the main scene passes:
 
 1. `R_SetupView`
 2. `R_RenderShadowMaps`
-   - `R_RenderSunShadowMap` (1x 2D-Depthmap)
-   - `R_RenderDLightShadowMaps` (Cube-Array, bis zu 4 Lichter x 6 Faces)
-3. Normale Scene-/Lighting-Paesse
+   - `R_RenderSunShadowMap`
+   - `R_RenderDLightShadowMaps`
+3. Scene and lighting passes
 
-Damit sind Shadow-Resultate im selben Frame deterministic in World- und Alias-Receivern verfuegbar.
+## Current resources
 
-## Ressourcen
+- Sun shadows use a `GL_TEXTURE_2D` depth map.
+- DLight shadows use a `GL_TEXTURE_CUBE_MAP_ARRAY` depth map.
+- Resource recreation is tied to the framebuffer lifecycle and `vid_restart`.
 
-- Sun: `GL_TEXTURE_2D` Depth-Map + eigenes FBO
-- DLight: `GL_TEXTURE_CUBE_MAP_ARRAY` Depth-Map + eigenes FBO
-- Lifecycle: Erstellung/Loeschung ueber Framebuffer-Lifecycle (`vid_restart` etc.)
-- Runtime-Reconcile: `r_shadow`/Map-Size-Aenderungen triggern Recreate ohne Neustart
+## Casters and receivers
 
-## Caster / Receiver
+- Opaque world/brush geometry is shadow-casting today.
+- Opaque alias models also cast shadows.
+- Viewmodels, sprites, particles, water, and alpha-tested geometry are excluded.
+- World and alias receivers both consume shadow factors in their lighting paths.
 
-- Caster V1:
-  - World/Brush (opaque)
-  - Alias (MDL + IQM/MD5-Pfad), nur opaque
-- Explizit keine Caster:
-  - Alpha-Test-Geometrie (V1-Limit)
-  - Viewmodel, Sprites, Partikel, Wasser/Transparenz
-- Receiver:
-  - World: Sun + DLight shadow factors im Lighting-Pfad
-  - Alias: Sun + per-light DLight-Beitrag im Fragment-Shader, inkl. Shadow-Modulation
+## DLight selection
 
-## DLight-Selektion
+- `r_shadow_dlight_max` defaults to `4`.
+- Candidate selection is deterministic and scores lights by radius, luminance, and camera distance.
 
-- Budget: `SHADOW_DLIGHT_MAX = 4`
-- Auswahl pro Frame aus sichtbaren GPU-Lights per deterministischem Score:
-  - Radius
-  - Farbluminanz
-  - Distanz zur Kamera
-- Tie-break: kleinerer Light-Index gewinnt (stabil/reproduzierbar)
+## Current CVars
 
-## CVars
+- `r_shadow`
+- `r_shadow_sun`
+- `r_shadow_dlight`
+- `r_shadow_dlight_max`
+- `r_shadow_sun_size`
+- `r_shadow_dlight_size`
+- `r_shadow_sun_distance`
+- `r_shadow_sun_bias`
+- `r_shadow_dlight_bias`
+- `r_shadow_receiver_bias`
+- `r_shadow_sun_pcf`
+- `r_shadow_dlight_pcf`
+- `r_shadow_sun_snap`
+- `r_shadow_sun_cascades`
+- `r_shadow_sun_split1`
+- `r_shadow_sun_split2`
+- `r_shadow_sun_split3`
+- `r_shadow_sun_split_mode`
+- `r_shadow_sun_split_lambda`
+- `r_shadow_mark_mode`
+- `r_shadow_profile`
+- `r_shadow_cull_vis`
+- `r_shadow_cull_backface`
+- `r_shadow_cull_frustum`
+- `r_shadow_cull_sphere`
+- `r_shadow_debug`
+- `r_shadow_log`
 
-Feature-Schalter (Default aktiv):
+## Limits
 
-- `r_shadow` = `1`
-- `r_shadow_sun` = `1`
-- `r_shadow_dlight` = `1`
-- `r_shadow_dlight_max` = `4`
-
-Qualitaet/Tuning:
-
-- `r_shadow_sun_size` (Default `2048`)
-- `r_shadow_dlight_size` (Default `512`)
-- `r_shadow_sun_distance` (Default `1200`)
-- `r_shadow_sun_bias` (Default `0.0015`)
-- `r_shadow_dlight_bias` (Default `0.02`)
-- `r_shadow_sun_pcf` (Default `1.5`)
-- `r_shadow_dlight_pcf` (Default `0.75`)
-
-Debug:
-
-- `r_shadow_debug`:
-  - `0`: aus
-  - `1`: Sun-Receiver-Faktor
-  - `2`: DLight-Receiver-Faktor
-  - `3`: Sun-Depth-Map-Ansicht (projektiert auf Receiver)
-  - `4`: DLight-Cube-Depth-Ansicht (Slot 0, projektiert auf Receiver)
-
-## Fallback / Kompatibilitaet
-
-- Wenn Sun-Shadow-Ressourcen nicht erstellt werden koennen: Sun- und DLight-Shadowing wird deaktiviert.
-- Wenn Cube-Array/DLight-Shadow-Ressourcen nicht verfuegbar sind: Sun-Shadowing bleibt aktiv, DLight-Shadowing wird deaktiviert.
-- Fallback-Status wird mit klarer Ursache ins Log geschrieben.
-
-## Bekannte V1-Limits
-
-- Kein Alpha-Test-Caster-Support
-- Genau eine Sun-Kaskade
-- Maximal 4 shadowed DLights
+- One sun path with cascades.
+- Up to four shadowed DLights.
+- Alpha-tested casters remain unsupported in the current V1 path.

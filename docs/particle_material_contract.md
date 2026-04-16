@@ -1,5 +1,7 @@
 # Particle Shader Contract (MVP)
 
+Reviewed against the current `mat_material.c` / `r_part_q3p.c` implementation.
+
 Diese Spezifikation beschreibt den **MVP-Partikel-Shader-Vertrag** auf Basis von `mat_material.h/.c`.
 
 ## 1) Vertragsumfang pro Stage

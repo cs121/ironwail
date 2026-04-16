@@ -1,5 +1,7 @@
 # SSAO Debugging & Current Conventions
 
+Reviewed against the current `r_ssao.c` / `gl_rmain.c` implementation.
+
 ## View-space conventions
 - Ironwail uses a **+X forward** view-space (camera looks down +X).
 - SSAO depth comparisons operate in view-space via `viewPos.x`.
@@ -13,10 +15,8 @@
   - `2`: invert NDC depth
 
 ## Resolution behavior
-- SSAO can run half-res (`r_ssao_halfres 1`) or full-res.
-- AO texels map to integer screen-depth texels via `texelFetch` to avoid
-  half-res UV drift/banding.
-- `r_ssao_force_fullres 1` forces full-res path while keeping other settings.
+- SSAO runs half-res by default (`r_ssao_halfres 1`) unless `r_ssao_force_fullres 1` is set.
+- AO texels map to integer screen-depth texels via `texelFetch` to avoid half-res UV drift/banding.
 
 ## Debug modes (`r_ssao_debug`)
 - `0`: off
@@ -36,14 +36,10 @@
 - `14`: fog-damped AO
 
 ## Key controls
-- Core: `r_ssao`, `r_ssao_radius`, `r_ssao_intensity`, `r_ssao_bias`,
-  `r_ssao_power`, `r_ssao_min`, `r_ssao_samples`.
-- Blur: `r_ssao_blur`, `r_ssao_blur_radius`, `r_ssao_blur_sigma`,
-  `r_ssao_blur_bilateral`.
-- Quality: `r_ssao_halfres`, `r_ssao_force_fullres`, `r_ssao_format`,
-  `r_ssao_upscale_nearest`.
-- Noise: `r_ssao_noise`, `r_ssao_noise_mode`, `r_ssao_noise_scale`,
-  `r_ssao_freeze_noise`.
+- Core: `r_ssao`, `r_ssao_radius`, `r_ssao_intensity`, `r_ssao_bias`, `r_ssao_power`, `r_ssao_min`, `r_ssao_samples`.
+- Blur: `r_ssao_blur`, `r_ssao_blur_radius`, `r_ssao_blur_sigma`, `r_ssao_blur_bilateral`.
+- Quality: `r_ssao_halfres`, `r_ssao_force_fullres`, `r_ssao_format`, `r_ssao_upscale_nearest`.
+- Noise: `r_ssao_noise`, `r_ssao_noise_mode`, `r_ssao_noise_scale`, `r_ssao_freeze_noise`.
 - Normals: `r_ssao_normalsource` (`0` neighbor reconstruction, `1` derivative).
 - Fog coupling: `r_ssao_fog_strength`, `r_ssao_fog_power`.
 - Safety/validation: `r_ssao_max_distance`, `r_ssao_validate`, `r_ssao_debug_far`.

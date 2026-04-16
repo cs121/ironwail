@@ -1,73 +1,47 @@
-# Working with Material Files in Ironwail
+# Material Workflow
 
-Ironwail loads material definitions from `materials/*.material` through the
-material pipeline. These definitions are used for texture metadata and selected
-render-stage behavior (including particle material integration).
+Ironwail loads `materials/*.material` through the material pipeline. These files
+drive texture metadata, stage behavior, emissive/bloom settings, and particle
+compatibility.
 
 ## Console workflow
 
-1. **List loaded materials**
+1. List loaded materials
 
-   ```
-   materiallist
-   ```
+   `materiallist`
 
-   Optional argument: `materiallist <limit>` to clamp printed rows.
+2. Inspect one material
 
-2. **Inspect one material**
+   `materialprint textures/common/nodraw`
 
-   ```
-   materialprint textures/common/nodraw
-   ```
+3. Reload all materials
 
-   settings, and stage details.
+   `r_reloadmaterials 1`
 
-3. **Reload all materials**
+4. Fuzz the parser
 
-   ```
-   r_reloadmaterials 1
-   ```
+   `materialfuzz`
 
-   Setting this cvar triggers a full reload and then resets the cvar to `0`.
+## Current CVars
 
-4. **Developer-only parser fuzzing**
+- `r_materials` (`1`): master enable.
+- `r_material_debug` (`0`): runtime debug toggle.
+- `r_material_debug_parse` (`0`): parser trace output.
+- `r_material_report` (`0`): emit a markdown support report during load.
+- `r_tcgen_debug` (`0`): tcGen diagnostics.
+- `r_particles_material_strict` (`0`): particle-stage compatibility policy.
 
-   ```
-   materialfuzz
-   ```
+## Public API
 
-   Or set `r_material_fuzz 1` for callback-based fuzz runs.
+Include `mat_material.h` for:
 
-## Relevant CVars
+- `Material_Init()` / `Material_Reload()` / `Material_Shutdown()`
+- `Material_Count()` / `Material_GetByIndex()` / `Material_Find()`
+- `Material_FindForTextureName()` / `Material_ApplyToTexture()`
+- `Material_GetTextureFlags()` / `Material_Print()`
 
-- `r_materials` (`1`): master enable for loading and applying materials.
-- `r_material_debug` (`0`): runtime material debug toggle.
-- `r_material_debug_parse` (`0`): print parser debug information.
-- `r_material_report` (`0`): write markdown parser support report during load.
-- `r_particles_material_strict` (`0`): strict compatibility policy for particle
-  stage support.
+## Supported scope
 
-## C API overview
-
-Include `mat_material.h` for public APIs.
-
-- Lifecycle/load:
-  - `void Material_Init(void);`
-  - `void Material_Reload(void);`
-  - `void Material_Shutdown(void);`
-- Registry/query:
-  - `size_t Material_Count(void);`
-  - `const material_t *Material_GetByIndex(size_t index);`
-  - `const material_t *Material_Find(const char *name);`
-  - `const material_t *Material_FindForTextureName(const char *texname, const char *mapname);`
-- Texture integration:
-  - `void Material_ApplyToTexture(texture_t *tex, const char *mapname);`
-  - `unsigned int Material_GetTextureFlags(const material_t *material);`
-- Debug/introspection:
-  - `void Material_Print(const material_t *material);`
-
-## Current support scope
-
-The parser currently focuses on a practical subset (for engine needs), including
-material-level directives and stage fields used by Ironwail. Unknown tokens are
-tracked and summarized in parser reporting instead of aborting load.
+- Top-level surface flags, emissive/bloom keywords, and the practical stage subset used by Ironwail are supported.
+- Unknown tokens are tracked and reported instead of aborting the load.
+- The current manifest reference lives in `docs/material_shader_manifest.md`.

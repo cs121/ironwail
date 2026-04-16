@@ -1,5 +1,7 @@
 # Particle MVP Debug-Overlay und Referenzvergleich
 
+Current snapshot for the q3p debug overlay and reference comparison workflow.
+
 ## Neue CVars
 
 - `r_particles_debug 0|1|2`

@@ -1,6 +1,6 @@
 # Ironwail docs index
 
-This directory tracks engine-facing implementation notes and feature references.
+This directory tracks engine-facing implementation notes, feature references, and standalone manifest docs.
 
 ## Current runtime feature docs
 - `EMISSIVE_MAPS.md` - emissive/glow map naming and behavior.

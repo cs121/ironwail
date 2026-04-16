@@ -1,28 +1,29 @@
-# Async threading ownership rules
+# Async Threading
 
-- OpenGL uploads and all `gl*` calls stay on the main/render thread.
-- File I/O can run in background workers through `FS_AsyncRead`; completion
-  callbacks are pumped on the main thread via `FS_PumpAsyncCompletions()`.
-- Sound asset preparation can run in worker jobs (`Jobs_Submit`), while cache
-  commit remains on the main thread.
+Current ownership rules:
 
-## CVars
+- `gl*` calls and renderer uploads stay on the main/render thread.
+- `FS_AsyncRead()` runs file reads on worker jobs and finishes on the main thread via `FS_PumpAsyncCompletions()`.
+- Asset staging can run off-thread, but publish/commit remains main-thread owned.
 
-Core toggles:
-- `host_async` (default `0`): master async enable.
-- `host_async_fs` (default `0`): enables async filesystem reads.
-- `host_async_assets` (default `0`): enables async asset staging paths.
+## Core CVars
 
-Worker/pending queue controls:
-- `host_async_workers` (default `1`): worker thread count (clamped to CPU count).
-- `host_async_max_pending` (default `128`): max queued jobs before overflow policy.
-- `host_async_overflow_policy` (default `sync`): overflow strategy.
-- `host_async_overflow_block_ms` (default `2`): block time used by blocking policy.
+- `host_async` (`0`): master async enable.
+- `host_async_fs` (`0`): async filesystem reads.
+- `host_async_assets` (`0`): async asset staging.
+- `host_async_workers` (`1`): worker count, clamped to CPU count.
+- `host_async_max_pending` (`128`): queued job cap.
+- `host_async_overflow_policy` (`sync`): overflow strategy for the async job queue.
+- `host_async_overflow_block_ms` (`2`): block time when overflow policy waits.
 
-## Testing hints
+## Queue watchdog CVars
 
-1. Baseline: keep all async CVars at defaults and verify single-thread behavior.
-2. Enable async path, e.g.:
-   `host_async 1; host_async_fs 1; host_async_assets 1; host_async_workers 2`
-3. Stress map changes and repeated sound triggers.
-4. Watch for regressions and use `developer 1` logging if extra diagnostics are enabled.
+- `host_asyncqueue_overflow_policy` (`block`): behavior when the queue is full.
+- `host_asyncqueue_timeout_ms` (`2`): wait timeout before overflow handling.
+- `host_asyncqueue_warn_ms` (`8`): slow-wait warning threshold.
+- `host_asyncqueue_metrics` (`0`): extra queue timing metrics.
+
+## Notes
+
+- The async path is opt-in and should be validated with the defaults first.
+- Good smoke test: enable `host_async 1; host_async_fs 1; host_async_assets 1; host_async_workers 2` and stress map loads plus repeated sound triggers.

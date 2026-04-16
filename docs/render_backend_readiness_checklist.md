@@ -1,5 +1,7 @@
 # Render Backend Bring-Up Readiness Checklist
 
+Current baseline assumes `ref_gl` remains the only registered backend.
+
 This checklist is the Phase 3 baseline for bringing up a second renderer backend (stubbed or full) without pass-graph orchestration changes.
 
 ## 1) Registration + selection contract

@@ -1,5 +1,7 @@
 # Phase 0: Netzwerk/QC Entry-Points und `TE_*`-Mapping
 
+Current mapping snapshot for the legacy-to-q3p particle bridge.
+
 Dieses Dokument erfasst den **Ist-Zustand** der relevanten Entry-Points und definiert für Phase 0 eine reine Mapping-/Fallback-Spezifikation ohne Laufzeitänderung.
 
 ## 1) Entry-Points aus Netzwerk/QC

@@ -1,10 +1,13 @@
 # Ironwail Renderer Backend Review (OpenGL -> Multi-backend Readiness)
 
+Reviewed against the current framegraph/backend split and the still-GL-heavy execution path.
+
 ## 1. Executive summary
 
 - The backend is **mixed quality**: there is a real backend interface and pass scheduler, but most rendering work still executes through OpenGL-centric global state and direct `gl*` calls in high-level passes.
 - The current architecture is **not yet suitable** for a robust Vulkan/DX12 backend without staged refactoring.
 - The most important observation: the codebase is in an **intermediate migration state** (framegraph + backend interface added, but legacy GL execution path still dominant).
+- There is now a disabled emissive proxy-light collector in `r_realtimelight.c`, but it does not change the main backend conclusion.
 
 ## 2. Renderer architecture map
 
