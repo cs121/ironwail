@@ -58,7 +58,13 @@ static inline void R_Godrays_GetSkyParams (float enabled_value, float threshold,
 	params->threshold = q_max (0.f, threshold);
 	params->intensity = q_max (0.f, intensity);
 	params->softness = q_max (0.f, softness);
-	if (tint_string && sscanf (tint_string, "%f %f %f", &r, &g, &b) == 3)
+	if (tint_string
+#ifdef RENDERER_PLUGIN_BUILD
+		&& sscanf_s (tint_string, "%f %f %f", &r, &g, &b) == 3
+#else
+		&& q_sscanf (tint_string, "%f %f %f", &r, &g, &b) == 3
+#endif
+	)
 	{
 		params->tint[0] = CLAMP (0.f, r, 8.f);
 		params->tint[1] = CLAMP (0.f, g, 8.f);

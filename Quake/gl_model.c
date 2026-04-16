@@ -483,6 +483,9 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 	mod->facenormals = NULL;
 	mod->facenormals_count = 0;
 	mod->has_facenormals = false;
+	mod->normals_table = NULL;
+	mod->normals_table_count = 0;
+	mod->surfedgenormals = NULL;
 
 	mod_type = (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
 	switch (mod_type)
@@ -873,24 +876,108 @@ void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size)
 
         expected_size = mod->numsurfaces * (int)sizeof(vec3_t);
 
-        if (size != expected_size)
+        if (size == expected_size)
         {
-                Con_Warning("BSPX: FACENORMALS size mismatch (%d bytes, expected %d)\n", size, expected_size);
+                memptr = (vec3_t *)Hunk_Alloc(size);
+                memcpy(memptr, buffer, size);
+
+                for (i = 0; i < mod->numsurfaces; i++)
+                        VectorNormalize(memptr[i]);
+
+                mod->facenormals = memptr;
+                mod->facenormals_count = mod->numsurfaces;
+                mod->has_facenormals = true;
+
+                Con_Printf("BSPX: loaded FACENORMALS (%d normals)\n", mod->facenormals_count);
+                Q1BSPX_MarkUsed("FACENORMALS");
                 return;
         }
 
-        memptr = (vec3_t *)Hunk_Alloc(size);
-        memcpy(memptr, buffer, size);
+        {
+                const int *header = (const int *)buffer;
+                int count;
+                const float *normals_in;
+                const int *edge_in;
+                vec3_t *normals_table;
+                surfedgenormals_t *sen_out;
 
-        for (i = 0; i < mod->numsurfaces; i++)
-                VectorNormalize(memptr[i]);
+                if (size < (int)sizeof(int))
+                {
+                        Con_Warning("BSPX: FACENORMALS too small (%d bytes)\n", size);
+                        Q1BSPX_MarkUnsupported("FACENORMALS");
+                        return;
+                }
 
-        mod->facenormals = memptr;
-        mod->facenormals_count = mod->numsurfaces;
-        mod->has_facenormals = true;
+                count = LittleLong(*header);
+                if (count < 1)
+                {
+                        Con_Warning("BSPX: FACENORMALS invalid count (%d)\n", count);
+                        Q1BSPX_MarkUnsupported("FACENORMALS");
+                        return;
+                }
 
-        Con_Printf("BSPX: loaded FACENORMALS (%d normals)\n", mod->facenormals_count);
-        Q1BSPX_MarkUsed("FACENORMALS");
+                {
+                        int ericw_expected = (int)sizeof(int) + count * (int)sizeof(vec3_t) + mod->numsurfedges * 3 * (int)sizeof(int);
+                        if (size != ericw_expected)
+                        {
+                                Con_Warning("BSPX: FACENORMALS size mismatch (%d bytes, expected %d [flat] or %d [ericw-tools])\n",
+                                        size, expected_size, ericw_expected);
+                                Q1BSPX_MarkUnsupported("FACENORMALS");
+                                return;
+                        }
+                }
+
+                normals_in = (const float *)(header + 1);
+                edge_in = (const int *)(normals_in + count * 3);
+
+                normals_table = (vec3_t *)Hunk_Alloc(count * sizeof(vec3_t));
+                for (i = 0; i < count; i++)
+                {
+                        normals_table[i][0] = LittleFloat(normals_in[i * 3 + 0]);
+                        normals_table[i][1] = LittleFloat(normals_in[i * 3 + 1]);
+                        normals_table[i][2] = LittleFloat(normals_in[i * 3 + 2]);
+                        VectorNormalize(normals_table[i]);
+                }
+                mod->normals_table = normals_table;
+                mod->normals_table_count = count;
+
+                sen_out = (surfedgenormals_t *)Hunk_Alloc(mod->numsurfedges * sizeof(surfedgenormals_t));
+                for (i = 0; i < mod->numsurfedges; i++)
+                {
+                        unsigned int t;
+                        t = (unsigned int)LittleLong(edge_in[i * 3 + 0]);
+                        sen_out[i].n = (int)q_max(0u, q_min(t, (unsigned)(count - 1)));
+                        t = (unsigned int)LittleLong(edge_in[i * 3 + 1]);
+                        sen_out[i].s = (int)q_max(0u, q_min(t, (unsigned)(count - 1)));
+                        t = (unsigned int)LittleLong(edge_in[i * 3 + 2]);
+                        sen_out[i].t = (int)q_max(0u, q_min(t, (unsigned)(count - 1)));
+                }
+                mod->surfedgenormals = sen_out;
+
+                memptr = (vec3_t *)Hunk_Alloc(mod->numsurfaces * sizeof(vec3_t));
+                for (i = 0; i < mod->numsurfaces; i++)
+                {
+                        msurface_t *fa = &mod->surfaces[i];
+                        if (fa->numedges > 0 && fa->firstedge >= 0 && fa->firstedge < mod->numsurfedges)
+                        {
+                                int normal_idx = sen_out[fa->firstedge].n;
+                                VectorCopy(normals_table[normal_idx], memptr[i]);
+                        }
+                        else
+                        {
+                                if (fa->flags & SURF_PLANEBACK)
+                                        VectorScale(fa->plane->normal, -1, memptr[i]);
+                                else
+                                        VectorCopy(fa->plane->normal, memptr[i]);
+                        }
+                }
+                mod->facenormals = memptr;
+                mod->facenormals_count = mod->numsurfaces;
+                mod->has_facenormals = true;
+
+                Con_Printf("BSPX: loaded FACENORMALS (ericw-tools format, %d normals, %d edge entries)\n", count, mod->numsurfedges);
+                Q1BSPX_MarkUsed("FACENORMALS");
+        }
 }
 
 static qboolean Mod_ValidateLumpRange(const char *modelname, const char *lumpname, int fileofs, int filelen, size_t filelen_total)

@@ -714,7 +714,7 @@ void R_Backend_MemoryBarrier (unsigned barrier_bits)
 	g_bridge_fn->r_backend_memory_barrier (barrier_bits);
 }
 
-void R_Backend_SetDynamicState (const void *dynamic_state)
+void R_Backend_SetDynamicState (const RenderBackendDynamicState *dynamic_state)
 {
 	g_bridge_fn->r_backend_set_dynamic_state (dynamic_state);
 }
@@ -724,7 +724,7 @@ void R_Backend_DrawIndexed (int primitive, int index_type, int count, intptr_t i
 	g_bridge_fn->r_backend_draw_indexed (primitive, index_type, count, index_offset_bytes);
 }
 
-void R_Backend_BindPipeline (const void *pipeline)
+void R_Backend_BindPipeline (const RenderBackendPipelineDesc *pipeline)
 {
 	g_bridge_fn->r_backend_bind_pipeline (pipeline);
 }
@@ -1063,9 +1063,9 @@ void VID_Menu_Init (void)
 	g_bridge_fn->vid_menu_init ();
 }
 
-byte *Image_LoadImage (const char *name, int *width, int *height, int *fmt)
+byte *Image_LoadImage (const char *name, int *width, int *height, enum srcformat *fmt)
 {
-	return g_bridge_fn->image_load_image (name, width, height, fmt);
+	return g_bridge_fn->image_load_image (name, width, height, (int *)fmt);
 }
 
 qboolean Steam_SaveScreenshot (const void *rgb, int width, int height)

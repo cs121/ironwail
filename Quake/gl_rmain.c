@@ -38,6 +38,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_shadow_runtime.h"
 #include "gl_lightgrid.h"
 #include "gl_backend.h"
+
+#ifdef RENDERER_PLUGIN_BUILD
+#define IW_PARSE_FSCANF fscanf_s
+#else
+#define IW_PARSE_FSCANF q_fscanf
+#endif
 #include "mat_material.h"
 #include <float.h>
 #include <math.h>
@@ -1197,12 +1203,14 @@ static float R_GetDynamicDoFFocus (float fallback)
 #ifndef RENDERER_PLUGIN_BUILD
 		extern edict_t* sv_player;
 #endif
+		vec3_t trace_mins = {0.f, 0.f, 0.f};
+		vec3_t trace_maxs = {0.f, 0.f, 0.f};
 		qcvm_t* oldvm = qcvm;
 
 		PR_SwitchQCVM (NULL);
 		PR_SwitchQCVM (&sv.qcvm);
 
-		trace = SV_Move (r_origin, vec3_origin, vec3_origin, end, MOVE_NORMAL, sv_player);
+		trace = SV_Move (r_origin, trace_mins, trace_maxs, end, MOVE_NORMAL, sv_player);
 		traced = true;
 
 		PR_SwitchQCVM (oldvm);
@@ -1775,9 +1783,7 @@ static void GL_BloomExtractLevel (int level, GLuint source_tex, int source_width
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, source_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, 0);
 	GL_Uniform4fFunc (0, threshold, soft_knee, 0.f, 0.f);
-	GL_Uniform4fFunc (1, (float)source_width, (float)source_height,
-		(float)source_width / (float)width,
-		(float)source_height / (float)height);
+	GL_Uniform4fFunc (1, (float)source_width, (float)source_height, (float)width, (float)height);
 	R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
 }
 
@@ -1791,8 +1797,8 @@ static GLuint GL_BloomBlurLevel (int level, int passes, float radius_scale)
 	for (int pass = 0; pass < passes; ++pass)
 	{
 		int target_index = pass & 1;
-		float dirx = (pass & 1) ? 0.f : 1.f;
-		float diry = (pass & 1) ? 1.f : 0.f;
+		float dirx = (pass & 1) ? 1.f : 0.f;
+		float diry = (pass & 1) ? 0.f : 1.f;
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[level][target_index]);
 		GL_SetScissorEnabled (false);
@@ -1814,7 +1820,7 @@ static GLuint GL_BloomBlurLevel (int level, int passes, float radius_scale)
 			R_Backend_SetDynamicState (&dynamic_state);
 		}
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, input_tex);
-		GL_Uniform4fFunc (0, radius_scale / (float)width, radius_scale / (float)height, dirx, diry);
+		GL_Uniform4fFunc (0, (float)width, (float)height, dirx, diry);
 		R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
 		input_tex = framebufs.bloom.pingpong_tex[level][target_index];
 	}
@@ -1899,13 +1905,10 @@ static GLuint GL_GenerateBloomTexture (void)
 		dynamic_state.raster_state = state;
 		R_Backend_BindPipeline (&pipeline_desc);
 		R_Backend_SetDynamicState (&dynamic_state);
-	}
+}
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, blurred[0]);
 	GL_Uniform4fFunc (0, GL_BloomGetRecombineWeight (0, levels), 0.f, 0.f, 0.f);
-	GL_Uniform4fFunc (1,
-		1.f / (float)q_max (framebufs.bloom.width[0], 1),
-		1.f / (float)q_max (framebufs.bloom.height[0], 1),
-		0.f, 0.f);
+	GL_Uniform4fFunc (1, (float)framebufs.bloom.width[0], (float)framebufs.bloom.height[0], 0.f, 0.f);
 	R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
 
 	for (int level = 1; level < levels; ++level)
@@ -5702,7 +5705,7 @@ void R_ReadPointFile_f (void)
 		Con_Printf ("Reading %s...\n", name);
 	org[0] = org[1] = org[2] = 0; // silence pesky compiler warnings
 
-	for (r = 0; fscanf (f, "%f %f %f\n", &org[0], &org[1], &org[2]) == 3; r++)
+	for (r = 0; IW_PARSE_FSCANF (f, "%f %f %f\n", &org[0], &org[1], &org[2]) == 3; r++)
 	{
 		Vec_Append ((void**)&r_pointfile, sizeof (r_pointfile[0]), &org, 1);
 		n = (int)VEC_SIZE (r_pointfile);

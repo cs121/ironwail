@@ -36,6 +36,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "SDL.h"
 #endif
 
+#ifdef RENDERER_PLUGIN_BUILD
+#define IW_PARSE_SSCANF sscanf_s
+#else
+#define IW_PARSE_SSCANF q_sscanf
+#endif
+
 //ericw -- for putting the driver into multithreaded mode
 #ifdef __APPLE__
 #include <OpenGL/OpenGL.h>
@@ -603,7 +609,7 @@ static void VID_EnsureGLContext (void)
 			SDL_GL_ResetAttributes ();
 			gl_context = SDL_GL_CreateContext (draw_context);
 			version = gl_context ? (const char *) glGetString (GL_VERSION) : NULL;
-			if (!version || sscanf (version, "%d.%d", &major, &minor) != 2)
+			if (!version || IW_PARSE_SSCANF (version, "%d.%d", &major, &minor) != 2)
 				major = minor = 0;
 
 			if (major && MAKE_GL_VERSION (major, minor) < MIN_GL_VERSION)
@@ -846,7 +852,7 @@ void VID_RecalcInterfaceSize (void)
 	if (scr_pixelaspect.string && *scr_pixelaspect.string)
 	{
 		float num, denom;
-		if (sscanf (scr_pixelaspect.string, "%f:%f", &num, &denom) == 2)
+		if (IW_PARSE_SSCANF (scr_pixelaspect.string, "%f:%f", &num, &denom) == 2)
 		{
 			if (num && denom)
 				vid.guipixelaspect = CLAMP (0.5f, num / denom, 2.f);
@@ -1466,7 +1472,7 @@ static void GL_ReadContextInfo (void)
 	Con_SafePrintf ("GL_RENDERER: %s\n", gl_renderer);
 	Con_SafePrintf ("GL_VERSION:  %s\n", gl_version);
 
-	if (gl_version == NULL || sscanf(gl_version, "%d.%d", &gl_version_major, &gl_version_minor) < 2)
+	if (gl_version == NULL || IW_PARSE_SSCANF (gl_version, "%d.%d", &gl_version_major, &gl_version_minor) < 2)
 	{
 		gl_version_major = 0;
 		gl_version_minor = 0;
@@ -1892,7 +1898,7 @@ void	VID_Init (void)
 	Cmd_AddCommand ("vid_describemodes", VID_DescribeModes_f);
 	GL_RegisterShaderCommands ();
 
-	putenv (vid_center);	/* SDL_putenv is problematic in versions <= 1.2.9 */
+	_putenv (vid_center);	/* SDL_putenv is problematic in versions <= 1.2.9 */
 
 	if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0)
 		Sys_Error("Couldn't init SDL video: %s", SDL_GetError());

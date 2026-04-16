@@ -1646,7 +1646,7 @@ static qboolean BotAI_ShouldJumpForward (bot_state_t *bot, bot_ai_trace_context_
 	VectorMA (jump_start, 44.f, move_dir, jump_end);
 	tr_jump = SV_Move (jump_start, self->v.mins, self->v.maxs, jump_end, MOVE_NOMONSTERS, self);
 
-	return !tr_jump.startsolid && tr_jump.fraction >= 0.95f;
+	return !tr_jump.startsolid && tr_jump.fraction >= 0.8f;
 }
 
 static qboolean BotAI_FindLocalEscapeTarget (bot_state_t *bot, edict_t *self, vec3_t out_target)
@@ -1797,6 +1797,26 @@ static qboolean BotAI_AdjustForImmediateObstacle (bot_state_t *bot, bot_ai_trace
 					if (!BotAI_TestMoveBlockedCached (trace_ctx, self, move_dir, probe_dist, NULL, BOT_AI_TRACE_PRIORITY_LOW))
 						adjusted = true;
 				}
+			}
+		}
+	}
+
+	if (!adjusted)
+	{
+		static const float try_angles[] = {15.f, -15.f, 30.f, -30.f, 45.f, -45.f, 60.f, -60.f};
+		int i;
+		for (i = 0; i < (int) countof (try_angles) && !adjusted; ++i)
+		{
+			vec3_t rotated;
+			float yaw = atan2f (move_dir[1], move_dir[0]) + try_angles[i] * (float)M_PI / 180.f;
+			rotated[0] = cosf (yaw);
+			rotated[1] = sinf (yaw);
+			rotated[2] = 0.f;
+			if (VectorNormalize (rotated) > 0.2f)
+			{
+				VectorCopy (rotated, move_dir);
+				if (!BotAI_TestMoveBlockedCached (trace_ctx, self, move_dir, probe_dist, NULL, BOT_AI_TRACE_PRIORITY_LOW))
+					adjusted = true;
 			}
 		}
 	}
@@ -2367,10 +2387,11 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		break;
 
 	case BOT_STATE_STUCK_RECOVERY:
-		move_speed = 180.f;
+		move_speed = 280.f;
 		bot->strafe_dir = (BotAI_Random01 (bot, 23U) > 0.5f ? 1.f : -1.f);
-		outcmd->forwardmove = -120.f;
-		outcmd->sidemove = bot->strafe_dir * 260.f;
+		outcmd->forwardmove = bot->strafe_dir * 200.f;
+		outcmd->sidemove = (BotAI_Random01 (bot, 24U) > 0.5f ? 1.f : -1.f) * 220.f;
+		outcmd->upmove = BotAI_Random01 (bot, 25U) > 0.4f ? 300.f : 0.f;
 		break;
 
 	case BOT_STATE_SEARCH:

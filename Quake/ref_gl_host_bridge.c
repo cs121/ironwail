@@ -944,7 +944,7 @@ void R_Backend_FillHostBridge (iw_renderer_host_bridge_t *out)
 	s_bridge_data.con_chars = NULL;
 	s_bridge_data.key_dest = &key_dest;
 	s_bridge_data.sb_lines = &sb_lines;
-	s_bridge_data.m_state = &m_state;
+	s_bridge_data.m_state = (int *)&m_state;
 	s_bridge_data.cl_static_entities = cl_static_entities;
 	s_bridge_data.cl_lightstyle = cl_lightstyle;
 	s_bridge_data.cl_visedicts = cl_visedicts;

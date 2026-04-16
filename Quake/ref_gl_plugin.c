@@ -38,9 +38,9 @@ extern void R_ReloadDecals (void);
 extern void R_InitDecals (void);
 extern void R_StorePrevFrameState (void);
 extern void R_GetParticleDebugStats (particle_debug_stats_t *stats);
-extern void R_SetAlphaMode (int mode);
-extern int R_GetAlphaMode (void);
-extern int R_GetEffectiveAlphaMode (void);
+extern void R_SetAlphaMode (alphamode_t mode);
+extern alphamode_t R_GetAlphaMode (void);
+extern alphamode_t R_GetEffectiveAlphaMode (void);
 
 extern const IRenderBackend *GL_Backend_GetInterface (void);
 
@@ -73,13 +73,13 @@ static void REFGL_FillEntryPoints (void)
 	s_entry_points.R_InitDecals = R_InitDecals;
 	s_entry_points.R_StorePrevFrameState = R_StorePrevFrameState;
 	s_entry_points.R_GetParticleDebugStats = R_GetParticleDebugStats;
-	s_entry_points.R_SetAlphaMode = R_SetAlphaMode;
-	s_entry_points.R_GetAlphaMode = R_GetAlphaMode;
-	s_entry_points.R_GetEffectiveAlphaMode = R_GetEffectiveAlphaMode;
+	s_entry_points.R_SetAlphaMode = (void (*)(int))R_SetAlphaMode;
+	s_entry_points.R_GetAlphaMode = (int (*)(void))R_GetAlphaMode;
+	s_entry_points.R_GetEffectiveAlphaMode = (int (*)(void))R_GetEffectiveAlphaMode;
 	s_entry_points.R_AddStaticModels = R_AddStaticModels;
 	s_entry_points.R_PushDlights = R_PushDlights;
 	s_entry_points.R_ParseDlightEntities = R_ParseDlightEntities;
-	s_entry_points.R_GetLightgridSample = R_GetLightgridSample;
+	s_entry_points.R_GetLightgridSample = (const void *(*)(const vec3_t))R_GetLightgridSample;
 }
 
 static qboolean IW_RendererRefGL_Register (const iw_renderer_plugin_host_api_t *host_api)

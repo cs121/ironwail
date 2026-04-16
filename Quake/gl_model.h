@@ -53,6 +53,13 @@ typedef struct
 	vec3_t		normal;
 } mvertex_t;
 
+typedef struct surfedgenormals_s
+{
+	int	n;
+	int	s;
+	int	t;
+} surfedgenormals_t;
+
 #define	SIDE_FRONT	0
 #define	SIDE_BACK	1
 #define	SIDE_ON		2
@@ -517,6 +524,9 @@ typedef struct qmodel_s
 	vec3_t		*facenormals;		// array of per-surface normals
 	int			facenormals_count;	// number of normals (must match numsurfaces)
 	qboolean	has_facenormals;
+	vec3_t		*normals_table;		// BSPX FACENORMALS unique normals table
+	int			normals_table_count;
+	surfedgenormals_t	*surfedgenormals;
 
 	int			numsurfedges;
 	int			*surfedges;

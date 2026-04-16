@@ -853,14 +853,6 @@ static qboolean R_Backend_LoadPluginFromPath (const char *path)
 static void R_Backend_LoadRendererPlugins (void)
 {
 	findfile_t *find;
-	iw_renderer_plugin_host_api_t host_api;
-	const iw_renderer_plugin_descriptor_t builtin_plugin = {
-		sizeof (iw_renderer_plugin_descriptor_t),
-		IW_RENDERER_PLUGIN_ABI_MAJOR,
-		IW_RENDERER_PLUGIN_ABI_MINOR,
-		"builtin-opengl",
-		R_Backend_RegisterBuiltinPluginOpenGL
-	};
 	const char *search_dirs[3];
 	int search_dir_count = 0;
 	const char *ext_find;

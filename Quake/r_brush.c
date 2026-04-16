@@ -909,7 +909,13 @@ void GL_BuildBModelVertexBuffer (void)
 
                                 VectorCopy (vec, vert->pos);
                                 VectorCopy (surfnormal, vert->normal);
-                                if ((fa->texinfo->flags & TEX_VERTEXNORMALS) && (m->vertexes[vertindex].normal[0] || m->vertexes[vertindex].normal[1] || m->vertexes[vertindex].normal[2]))
+                                if (m->surfedgenormals && m->normals_table)
+                                {
+                                        int sen_idx = fa->firstedge + k;
+                                        if (sen_idx >= 0 && sen_idx < m->numsurfedges)
+                                                VectorCopy (m->normals_table[m->surfedgenormals[sen_idx].n], vert->normal);
+                                }
+                                else if ((fa->texinfo->flags & TEX_VERTEXNORMALS) && (m->vertexes[vertindex].normal[0] || m->vertexes[vertindex].normal[1] || m->vertexes[vertindex].normal[2]))
                                         VectorCopy (m->vertexes[vertindex].normal, vert->normal);
 				{
 					vec3_t tangent, bitangent, ortho_tangent, cross_nt;

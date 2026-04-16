@@ -35,6 +35,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_realtimelight.h"
 #include "r_skyvis.h"
 
+#ifdef RENDERER_PLUGIN_BUILD
+#define IW_PARSE_SSCANF sscanf_s
+#else
+#define IW_PARSE_SSCANF q_sscanf
+#endif
+
 //johnfitz -- new cvars
 extern cvar_t r_clearcolor;
 extern cvar_t r_flatlightstyles;
@@ -850,7 +856,7 @@ void R_Sun_ApplyMapOverrides (sun_t *s, const char *worldspawn_entity_string)
 		if (!strcmp ("sun_mangle", key))
 		{
 			vec3_t ang;
-			if (sscanf (value, "%f %f %f", &ang[0], &ang[1], &ang[2]) == 3)
+			if (IW_PARSE_SSCANF (value, "%f %f %f", &ang[0], &ang[1], &ang[2]) == 3)
 			{
 				AngleVectors (ang, s->dir, NULL, NULL);
 				r_worldspawn_sun_presence.dir_defined = true;
@@ -874,7 +880,7 @@ void R_Sun_ApplyMapOverrides (sun_t *s, const char *worldspawn_entity_string)
 
 		if (!strcmp ("sunlight_color", key) || !strcmp ("sun_color", key) || !strcmp ("suncolour", key))
 		{
-			if (sscanf (value, "%f %f %f", &s->color[0], &s->color[1], &s->color[2]) == 3)
+			if (IW_PARSE_SSCANF (value, "%f %f %f", &s->color[0], &s->color[1], &s->color[2]) == 3)
 				r_worldspawn_sun_presence.color_defined = true;
 			continue;
 		}
