@@ -1,0 +1,10 @@
+{
+name "Atlas"
+skill 0.68
+preferred_weapon supernailgun
+least_preferred_weapon axe
+agility 0.95
+taunt "You picked the wrong fight."
+taunt "Keep up, if you can."
+taunt "Too easy."
+}

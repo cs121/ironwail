@@ -48,6 +48,23 @@ static void Bot_UpdateCountCvar (void)
 	Cvar_SetValueQuick (&bot_count, (float) Bot_GetActiveCount ());
 }
 
+typedef struct bot_template_s
+{
+	char		filename[MAX_OSPATH];
+	char		name[32];
+	float		skill;
+	int		preferred_weapon;
+	int		least_preferred_weapon;
+	float		agility;
+	char		taunts[8][96];
+	int		taunt_count;
+} bot_template_t;
+
+#define BOT_TEMPLATE_MAX_COUNT 64
+
+static bot_template_t g_bot_templates[BOT_TEMPLATE_MAX_COUNT];
+static int g_bot_template_count;
+
 static bot_state_t *Bot_GetStateForClient (client_t *client)
 {
 	int index = Bot_ClientIndex (client);
@@ -56,31 +73,230 @@ static bot_state_t *Bot_GetStateForClient (client_t *client)
 	return &g_bot_states[index];
 }
 
-static int Bot_GenerateUniqueName (char *out_name, size_t out_size)
+static void Bot_MakeUniqueName (const char *base_name, char *out_name, size_t out_size)
 {
 	int suffix;
+	char candidate[32];
+	const char *base = (base_name && base_name[0]) ? base_name : "bot";
 
 	for (suffix = 1; suffix < 1000; ++suffix)
 	{
 		int i;
 		qboolean used = false;
-		q_snprintf (out_name, out_size, "bot_%d", suffix);
+		if (suffix == 1)
+			q_strlcpy (candidate, base, sizeof (candidate));
+		else
+			q_snprintf (candidate, sizeof (candidate), "%s_%d", base, suffix);
 		for (i = 0; i < svs.maxclients; ++i)
 		{
 			if (!svs.clients[i].active)
 				continue;
-			if (q_strcasecmp (svs.clients[i].name, out_name) == 0)
+			if (q_strcasecmp (svs.clients[i].name, candidate) == 0)
 			{
 				used = true;
 				break;
 			}
 		}
 		if (!used)
-			return suffix;
+		{
+			q_strlcpy (out_name, candidate, out_size);
+			return;
+		}
 	}
 
-	q_strlcpy (out_name, "bot", out_size);
+	q_strlcpy (out_name, base, out_size);
+}
+
+static int Bot_WeaponFromToken (const char *token)
+{
+	if (!token)
+		return 0;
+	if (!q_strcasecmp (token, "axe")) return IT_AXE;
+	if (!q_strcasecmp (token, "shotgun") || !q_strcasecmp (token, "sg")) return IT_SHOTGUN;
+	if (!q_strcasecmp (token, "supershotgun") || !q_strcasecmp (token, "super_shotgun") || !q_strcasecmp (token, "ssg")) return IT_SUPER_SHOTGUN;
+	if (!q_strcasecmp (token, "nailgun")) return IT_NAILGUN;
+	if (!q_strcasecmp (token, "supernailgun") || !q_strcasecmp (token, "super_nailgun")) return IT_SUPER_NAILGUN;
+	if (!q_strcasecmp (token, "grenadelauncher") || !q_strcasecmp (token, "grenade_launcher") || !q_strcasecmp (token, "gl")) return IT_GRENADE_LAUNCHER;
+	if (!q_strcasecmp (token, "rocketlauncher") || !q_strcasecmp (token, "rocket_launcher") || !q_strcasecmp (token, "rl")) return IT_ROCKET_LAUNCHER;
+	if (!q_strcasecmp (token, "lightning") || !q_strcasecmp (token, "lg")) return IT_LIGHTNING;
+	if (!q_strcasecmp (token, "superlightning") || !q_strcasecmp (token, "super_lightning")) return IT_LIGHTNING;
 	return 0;
+}
+
+static void Bot_TemplateDefaults (bot_template_t *template, const char *path)
+{
+	memset (template, 0, sizeof (*template));
+	q_strlcpy (template->filename, path, sizeof (template->filename));
+	COM_StripExtension (COM_SkipPath (path), template->name, sizeof (template->name));
+	if (!template->name[0])
+		q_strlcpy (template->name, "bot", sizeof (template->name));
+	template->skill = bot_skill.value;
+	template->preferred_weapon = 0;
+	template->least_preferred_weapon = 0;
+	template->agility = 1.f;
+	template->taunt_count = 0;
+}
+
+static qboolean Bot_TemplateParseFile (const char *path, const char *data, bot_template_t *template)
+{
+	const char *cursor = data;
+
+	Bot_TemplateDefaults (template, path);
+	while ((cursor = COM_Parse (cursor)))
+	{
+		if (!com_token[0])
+			break;
+		if (!q_strcasecmp (com_token, "{"))
+			continue;
+		if (!q_strcasecmp (com_token, "}"))
+			break;
+
+		if (!q_strcasecmp (com_token, "name"))
+		{
+			if (!(cursor = COM_Parse (cursor)))
+				break;
+			q_strlcpy (template->name, com_token, sizeof (template->name));
+		}
+		else if (!q_strcasecmp (com_token, "skill"))
+		{
+			if (!(cursor = COM_Parse (cursor)))
+				break;
+			template->skill = CLAMP (0.1f, (float) Q_atof (com_token), 1.f);
+		}
+		else if (!q_strcasecmp (com_token, "preferred_weapon"))
+		{
+			if (!(cursor = COM_Parse (cursor)))
+				break;
+			template->preferred_weapon = Bot_WeaponFromToken (com_token);
+		}
+		else if (!q_strcasecmp (com_token, "least_preferred_weapon"))
+		{
+			if (!(cursor = COM_Parse (cursor)))
+				break;
+			template->least_preferred_weapon = Bot_WeaponFromToken (com_token);
+		}
+		else if (!q_strcasecmp (com_token, "agility"))
+		{
+			if (!(cursor = COM_Parse (cursor)))
+				break;
+			template->agility = CLAMP (0.4f, (float) Q_atof (com_token), 1.4f);
+		}
+		else if (!q_strcasecmp (com_token, "taunt"))
+		{
+			if (template->taunt_count >= (int) countof (template->taunts))
+			{
+				if (!(cursor = COM_Parse (cursor)))
+					break;
+				continue;
+			}
+			if (!(cursor = COM_Parse (cursor)))
+				break;
+			q_strlcpy (template->taunts[template->taunt_count], com_token, sizeof (template->taunts[template->taunt_count]));
+			template->taunt_count++;
+		}
+		else if (cursor)
+		{
+			const char *ignored = COM_Parse (cursor);
+			if (!ignored)
+				break;
+			cursor = ignored;
+		}
+	}
+
+	if (!template->name[0])
+		COM_StripExtension (COM_SkipPath (path), template->name, sizeof (template->name));
+
+	return true;
+}
+
+static void Bot_LoadTemplates (void)
+{
+	findfile_t *find;
+	char dir[MAX_OSPATH];
+	int loaded = 0;
+
+	g_bot_template_count = 0;
+	q_strlcpy (dir, com_gamedir, sizeof (dir));
+	q_strlcat (dir, "/bots", sizeof (dir));
+	find = Sys_FindFirst (dir, "bot");
+	if (!find)
+	{
+		Con_DPrintf ("Bot: no template directory at %s\n", dir);
+		return;
+	}
+
+	for (; find; find = Sys_FindNext (find))
+	{
+		char path[MAX_OSPATH];
+		const char *data;
+		int mark;
+		bot_template_t template;
+
+		if (find->attribs & FA_DIRECTORY)
+			continue;
+
+		q_snprintf (path, sizeof (path), "bots/%s", find->name);
+		mark = Hunk_LowMark ();
+		data = (const char *) COM_LoadHunkFile (path, NULL);
+		if (!data)
+		{
+			Hunk_FreeToLowMark (mark);
+			continue;
+		}
+
+		Bot_TemplateParseFile (path, data, &template);
+		Hunk_FreeToLowMark (mark);
+
+		if (g_bot_template_count < BOT_TEMPLATE_MAX_COUNT)
+		{
+			g_bot_templates[g_bot_template_count++] = template;
+			loaded++;
+		}
+	}
+
+	Con_Printf ("Bot: loaded %d template%s\n", PLURAL (loaded));
+}
+
+static int Bot_PickTemplateIndex (void)
+{
+	if (!g_bot_template_count)
+		return -1;
+	return rand () % g_bot_template_count;
+}
+
+static void Bot_ApplyTemplateToClient (client_t *client, bot_state_t *state, int template_index)
+{
+	const bot_template_t *template;
+
+	if (!client || !state)
+		return;
+
+	if (template_index < 0 || template_index >= g_bot_template_count)
+	{
+		client->bot_template_index = -1;
+		client->bot_skill = bot_skill.value;
+		client->bot_preferred_weapon = 0;
+		client->bot_least_preferred_weapon = 0;
+		client->bot_agility = 1.f;
+		state->template_index = -1;
+		state->skill = client->bot_skill;
+		state->preferred_weapon = 0;
+		state->least_preferred_weapon = 0;
+		state->agility = 1.f;
+		return;
+	}
+
+	template = &g_bot_templates[template_index];
+	client->bot_template_index = template_index;
+	client->bot_skill = template->skill;
+	client->bot_preferred_weapon = template->preferred_weapon;
+	client->bot_least_preferred_weapon = template->least_preferred_weapon;
+	client->bot_agility = template->agility;
+	state->template_index = template_index;
+	state->skill = template->skill;
+	state->preferred_weapon = template->preferred_weapon;
+	state->least_preferred_weapon = template->least_preferred_weapon;
+	state->agility = template->agility;
 }
 
 static int Bot_PickTeam (int requested_team)
@@ -246,6 +462,8 @@ static qboolean Bot_AddClient (int requested_team)
 	int i;
 	int clientnum = -1;
 	int team;
+	int template_index;
+	const bot_template_t *template = NULL;
 	client_t *client;
 	bot_state_t *state;
 	char botname[sizeof (client->name)];
@@ -272,7 +490,10 @@ static qboolean Bot_AddClient (int requested_team)
 	}
 
 	team = Bot_PickTeam (requested_team);
-	Bot_GenerateUniqueName (botname, sizeof (botname));
+	template_index = Bot_PickTemplateIndex ();
+	if (template_index >= 0 && template_index < g_bot_template_count)
+		template = &g_bot_templates[template_index];
+	Bot_MakeUniqueName (template ? template->name : NULL, botname, sizeof (botname));
 
 	if ((unsigned int) clientnum >= (unsigned int) countof (g_bot_states))
 	{
@@ -296,6 +517,11 @@ static qboolean Bot_AddClient (int requested_team)
 	client->message.maxsize = sizeof (client->msgbuf);
 	client->message.allowoverflow = true;
 	q_strlcpy (client->name, botname, sizeof (client->name));
+	client->bot_template_index = template_index;
+	client->bot_skill = template ? template->skill : bot_skill.value;
+	client->bot_preferred_weapon = template ? template->preferred_weapon : 0;
+	client->bot_least_preferred_weapon = template ? template->least_preferred_weapon : 0;
+	client->bot_agility = template ? template->agility : 1.f;
 	Bot_AssignColorsForTeam (client, clientnum, team);
 
 	{
@@ -316,6 +542,7 @@ static qboolean Bot_AddClient (int requested_team)
 	state->forced_team = team;
 	q_strlcpy (state->name, client->name, sizeof (state->name));
 	BotAI_ResetState (state);
+	Bot_ApplyTemplateToClient (client, state, template_index);
 
 	if (!Bot_PerformClientSpawn (client, true))
 	{
@@ -385,6 +612,12 @@ static void Bot_KickAll_f (void)
 	Con_Printf ("bot_kickall removed %d bot%s\n", PLURAL (removed));
 }
 
+static void Bot_ReloadTemplates_f (void)
+{
+	Bot_LoadTemplates ();
+	Bot_UpdateCountCvar ();
+}
+
 qboolean Bot_IsClientBot (const client_t *client)
 {
 	return client && client->isbot;
@@ -440,6 +673,11 @@ void Bot_RunFrameForClient (client_t *client)
 		state->clientnum = Bot_ClientIndex (client);
 		q_strlcpy (state->name, client->name, sizeof (state->name));
 		state->forced_team = (client->colors & 15) + 1;
+		state->template_index = client->bot_template_index;
+		state->skill = client->bot_skill;
+		state->preferred_weapon = client->bot_preferred_weapon;
+		state->least_preferred_weapon = client->bot_least_preferred_weapon;
+		state->agility = client->bot_agility;
 		BotAI_ResetState (state);
 	}
 	now = qcvm->time;
@@ -562,10 +800,12 @@ void Bot_Init (void)
 	Cvar_RegisterVariable (&bot_call_clientconnect);
 	Cvar_RegisterVariable (&bot_full_think_ms);
 	Cvar_RegisterVariable (&bot_count);
+	Bot_LoadTemplates ();
 
 	Cmd_AddCommand ("bot_add", Bot_Add_f);
 	Cmd_AddCommand ("bot_addteam", Bot_AddTeam_f);
 	Cmd_AddCommand ("bot_kickall", Bot_KickAll_f);
+	Cmd_AddCommand ("bot_reloadtemplates", Bot_ReloadTemplates_f);
 
 	memset (g_bot_states, 0, sizeof (g_bot_states));
 	g_bot_nav_enabled_cache = (bot_use_nav2.value != 0.f);
@@ -576,6 +816,7 @@ void Bot_Init (void)
 void Bot_Shutdown (void)
 {
 	memset (g_bot_states, 0, sizeof (g_bot_states));
+	g_bot_template_count = 0;
 	BotNav_Shutdown ();
 	Bot_UpdateCountCvar ();
 	g_bot_nav_enabled_cache = false;

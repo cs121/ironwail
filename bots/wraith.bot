@@ -1,0 +1,10 @@
+{
+name "Wraith"
+skill 0.89
+preferred_weapon grenadelauncher
+least_preferred_weapon axe
+agility 1.30
+taunt "You never saw me coming."
+taunt "Gone already."
+taunt "Too late."
+}

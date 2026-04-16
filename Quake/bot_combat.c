@@ -5,9 +5,25 @@
 extern cvar_t bot_skill;
 extern cvar_t bot_aim_debug;
 
-static float BotCombat_ClampedSkill (void)
+static float BotCombat_ClampedSkill (const bot_state_t *bot)
 {
-	return CLAMP (0.1f, bot_skill.value, 1.f);
+	float skill = bot ? bot->skill : 0.f;
+	if (skill <= 0.f)
+		skill = bot_skill.value;
+	return CLAMP (0.1f, skill, 1.f);
+}
+
+static float BotCombat_WeaponBias (const bot_state_t *bot, int weapon)
+{
+	float bias = 0.f;
+
+	if (!bot)
+		return 0.f;
+	if (bot->preferred_weapon == weapon)
+		bias += 45.f;
+	if (bot->least_preferred_weapon == weapon)
+		bias -= 45.f;
+	return bias;
 }
 
 static qboolean BotCombat_HasWeapon (edict_t *self, int weapon)
@@ -139,7 +155,7 @@ static float BotCombat_WeaponTierBonus (int weapon)
 	}
 }
 
-int BotCombat_SelectWeaponAvoid (edict_t *self, float enemy_dist, qboolean line_of_sight, int avoid_weapon)
+int BotCombat_SelectWeaponAvoid (bot_state_t *bot, edict_t *self, float enemy_dist, qboolean line_of_sight, int avoid_weapon)
 {
 	static const int weapons[] = {IT_LIGHTNING, IT_ROCKET_LAUNCHER, IT_SUPER_NAILGUN, IT_GRENADE_LAUNCHER, IT_NAILGUN, IT_SUPER_SHOTGUN, IT_SHOTGUN, IT_AXE};
 	int i;
@@ -159,6 +175,7 @@ int BotCombat_SelectWeaponAvoid (edict_t *self, float enemy_dist, qboolean line_
 		score = BotCombat_WeaponScore (self, weapon, enemy_dist, line_of_sight);
 		if (score <= -9000.f)
 			continue;
+		score += BotCombat_WeaponBias (bot, weapon);
 		score += BotCombat_WeaponTierBonus (weapon);
 		if (score > best_score)
 		{
@@ -170,9 +187,9 @@ int BotCombat_SelectWeaponAvoid (edict_t *self, float enemy_dist, qboolean line_
 	return best_weapon;
 }
 
-int BotCombat_SelectWeapon (edict_t *self, float enemy_dist, qboolean line_of_sight)
+int BotCombat_SelectWeapon (bot_state_t *bot, edict_t *self, float enemy_dist, qboolean line_of_sight)
 {
-	return BotCombat_SelectWeaponAvoid (self, enemy_dist, line_of_sight, 0);
+	return BotCombat_SelectWeaponAvoid (bot, self, enemy_dist, line_of_sight, 0);
 }
 
 int BotCombat_WeaponImpulse (int weapon)
@@ -217,7 +234,7 @@ void BotCombat_ComputeAim (bot_state_t *bot, edict_t *self, edict_t *enemy, vec3
 		return;
 	}
 
-	bot_skill_value = BotCombat_ClampedSkill ();
+	bot_skill_value = BotCombat_ClampedSkill (bot);
 	VectorAdd (enemy->v.origin, enemy->v.view_ofs, target);
 	VectorSubtract (target, self->v.origin, to_target);
 	dist = VectorLength (to_target);

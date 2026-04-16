@@ -35,6 +35,7 @@ extern cvar_t	nomonsters;
 
 // 0 = no, 1 = ask, 2 = when dead, 3 = always
 cvar_t sv_autoload = {"sv_autoload", "2", CVAR_ARCHIVE};
+cvar_t bot_spectate = {"bot_spectate", "0", CVAR_ARCHIVE};
 
 int	current_skill;
 
@@ -3060,6 +3061,22 @@ static void Host_Kill_f (void)
 	PR_ExecuteProgram (pr_global_struct->ClientKill);
 }
 
+static void Host_ForwardClientTextCommand (const char *text)
+{
+	if (cls.state != ca_connected)
+	{
+		Con_Printf ("Can't \"%s\", not connected\n", Cmd_Argv (0));
+		return;
+	}
+
+	if (cls.demoplayback)
+		return;
+
+	MSG_WriteByte (&cls.message, clc_stringcmd);
+	SZ_Print (&cls.message, text);
+	SZ_Print (&cls.message, "\n");
+}
+
 /*
 ==================
 Host_Spectate_f
@@ -3068,23 +3085,45 @@ Host_Spectate_f
 static void Host_Spectate_f (void)
 {
 	qboolean enable = true;
+	const char *arg = NULL;
+	qboolean show_bot_mode = false;
 
 	if (cmd_source == src_command)
 	{
+		if (Cmd_Argc () == 1 && bot_spectate.value != 0.f)
+		{
+			Host_ForwardClientTextCommand ("spectate bot");
+			return;
+		}
+
 		Cmd_ForwardToServer ();
 		return;
 	}
 
 	if (Cmd_Argc () >= 2)
 	{
-		const char *arg = Cmd_Argv (1);
-		if (!q_strcasecmp (arg, "0") || !q_strcasecmp (arg, "off") || !q_strcasecmp (arg, "false"))
+		arg = Cmd_Argv (1);
+		if (!q_strcasecmp (arg, "0") || !q_strcasecmp (arg, "off") || !q_strcasecmp (arg, "false") || !q_strcasecmp (arg, "back") || !q_strcasecmp (arg, "player"))
+		{
+			host_client->spectator_botonly = false;
 			enable = false;
+		}
 		else if (!q_strcasecmp (arg, "1") || !q_strcasecmp (arg, "on") || !q_strcasecmp (arg, "true"))
 			enable = true;
+		else if (!q_strcasecmp (arg, "bot") || !q_strcasecmp (arg, "bots"))
+		{
+			host_client->spectator_botonly = true;
+			show_bot_mode = true;
+		}
+		else if (!q_strcasecmp (arg, "human") || !q_strcasecmp (arg, "humans"))
+			host_client->spectator_botonly = false;
+		else if (!q_strcasecmp (arg, "next"))
+			SV_ClientCycleSpectatorTarget (host_client, 1);
+		else if (!q_strcasecmp (arg, "prev"))
+			SV_ClientCycleSpectatorTarget (host_client, -1);
 		else
 		{
-			SV_ClientPrintf ("usage: spectate [0|1]\n");
+			SV_ClientPrintf ("usage: spectate [0|1|bot|human|next|prev|off]\n");
 			return;
 		}
 	}
@@ -3092,12 +3131,14 @@ static void Host_Spectate_f (void)
 		enable = !host_client->spectator;
 
 	SV_ClientSetSpectatorMode (host_client, enable);
+	if (show_bot_mode)
+		SV_ClientSetSpectatorMode (host_client, true);
 	if (enable)
 	{
 		if (host_client->spectator_target >= 0 && host_client->spectator_target < svs.maxclients)
 			SV_ClientPrintf ("Spectating %s\n", svs.clients[host_client->spectator_target].name);
 		else
-			SV_ClientPrintf ("No valid players to spectate\n");
+			SV_ClientPrintf (host_client->spectator_botonly ? "No bots to spectate\n" : "No valid players to spectate\n");
 	}
 	else
 		SV_ClientPrintf ("Spectator mode off\n");
@@ -3120,7 +3161,7 @@ static void Host_SpecNext_f (void)
 	if (host_client->spectator_target >= 0 && host_client->spectator_target < svs.maxclients)
 		SV_ClientPrintf ("Spectating %s\n", svs.clients[host_client->spectator_target].name);
 	else
-		SV_ClientPrintf ("No valid players to spectate\n");
+		SV_ClientPrintf (host_client->spectator_botonly ? "No bots to spectate\n" : "No valid players to spectate\n");
 }
 
 /*
@@ -3140,7 +3181,7 @@ static void Host_SpecPrev_f (void)
 	if (host_client->spectator_target >= 0 && host_client->spectator_target < svs.maxclients)
 		SV_ClientPrintf ("Spectating %s\n", svs.clients[host_client->spectator_target].name);
 	else
-		SV_ClientPrintf ("No valid players to spectate\n");
+		SV_ClientPrintf (host_client->spectator_botonly ? "No bots to spectate\n" : "No valid players to spectate\n");
 }
 
 /*
@@ -3950,6 +3991,7 @@ Host_InitCommands
 void Host_InitCommands (void)
 {
 	Host_InitSaveThread ();
+	Cvar_RegisterVariable (&bot_spectate);
 
         Cmd_AddCommand ("maps", Host_Maps_f); //johnfitz
         Cmd_AddCommand ("mods", Host_Mods_f); //johnfitz

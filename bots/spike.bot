@@ -1,0 +1,10 @@
+{
+name "Spike"
+skill 0.95
+preferred_weapon rocketlauncher
+least_preferred_weapon axe
+agility 1.20
+taunt "You are too slow."
+taunt "Rock and roll."
+taunt "Try harder."
+}

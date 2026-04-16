@@ -132,7 +132,13 @@ typedef struct client_s
 	qboolean		isbot;				// synthetic local bot client
 	qboolean		spawned;			// false = don't send datagrams
 	qboolean		spectator;			// spectator camera enabled
+	qboolean		spectator_botonly;		// spectator camera follows bots only
 	qboolean		dropasap;			// has been told to go to another level
+	int		bot_template_index;
+	float		bot_skill;
+	int		bot_preferred_weapon;
+	int		bot_least_preferred_weapon;
+	float		bot_agility;
 	enum sendsignon_e	sendsignon;			// only valid before spawned
 	int				signonidx;
 	int				viewentity;			// current view entity sent to the client

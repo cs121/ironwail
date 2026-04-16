@@ -259,6 +259,15 @@ static qboolean BotAI_IsCompanionMode (const bot_state_t *bot)
 	return humans == 1;
 }
 
+static float BotAI_ClampedAgility (const bot_state_t *bot)
+{
+	float agility = bot ? bot->agility : 0.f;
+
+	if (agility <= 0.f)
+		agility = 1.f;
+	return CLAMP (0.4f, agility, 1.4f);
+}
+
 static edict_t *BotAI_FindLeaderPlayer (const bot_state_t *bot, edict_t *self)
 {
 	int i;
@@ -853,6 +862,117 @@ static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, co
 	return score;
 }
 
+static const char *BotAI_DebugItemTypeName (const char *classname)
+{
+	switch (BotAI_ClassifyItem (classname))
+	{
+	case BOT_ITEM_WEAPON:
+		return "weapon";
+	case BOT_ITEM_AMMO:
+		return "ammo";
+	case BOT_ITEM_HEALTH:
+		return "health";
+	case BOT_ITEM_ARMOR:
+		return "armor";
+	case BOT_ITEM_POWERUP:
+		return "powerup";
+	default:
+		return "item";
+	}
+}
+
+static const char *BotAI_DebugDecisionReason (bot_state_t *bot)
+{
+	const char *enemy_name = NULL;
+	const char *item_name = NULL;
+	const char *follow_name = NULL;
+
+	if (!bot)
+		return "thinking";
+
+	if (bot->enemy && !bot->enemy->free)
+	{
+		enemy_name = BotAI_TryGetString ((int) bot->enemy->v.netname);
+		if (!enemy_name || !enemy_name[0])
+			enemy_name = "enemy";
+	}
+
+	if (bot->goal_item && !bot->goal_item->free)
+	{
+		const char *classname = BotAI_TryGetString ((int) bot->goal_item->v.classname);
+		item_name = BotAI_DebugItemTypeName (classname);
+	}
+
+	if (bot->follow_target && !bot->follow_target->free)
+	{
+		follow_name = BotAI_TryGetString ((int) bot->follow_target->v.netname);
+		if (!follow_name || !follow_name[0])
+			follow_name = "leader";
+	}
+
+	switch (bot->state)
+	{
+	case BOT_STATE_ATTACK:
+		return enemy_name ? va ("attacking %s", enemy_name) : "attacking";
+
+	case BOT_STATE_RETREAT:
+		if (enemy_name)
+			return va ("fleeing %s", enemy_name);
+		if (bot->has_goal)
+			return va ("fleeing to %.0f %.0f %.0f", bot->goal_pos[0], bot->goal_pos[1], bot->goal_pos[2]);
+		return "fleeing";
+
+	case BOT_STATE_CHASE_ENEMY:
+		if (enemy_name)
+			return va ("chasing %s", enemy_name);
+		if (bot->has_goal)
+			return va ("chasing to %.0f %.0f %.0f", bot->goal_pos[0], bot->goal_pos[1], bot->goal_pos[2]);
+		return "chasing";
+
+	case BOT_STATE_FOLLOW:
+		if (follow_name)
+			return va ("following %s", follow_name);
+		if (bot->has_goal)
+			return va ("following to %.0f %.0f %.0f", bot->goal_pos[0], bot->goal_pos[1], bot->goal_pos[2]);
+		return "following";
+
+	case BOT_STATE_SEARCH:
+		if (bot->has_goal)
+			return va ("searching %.0f %.0f %.0f", bot->goal_pos[0], bot->goal_pos[1], bot->goal_pos[2]);
+		return "searching";
+
+	case BOT_STATE_SEEK_ITEM:
+		if (item_name)
+		{
+			if (bot->has_goal)
+				return va ("looking for %s at %.0f %.0f %.0f", item_name, bot->goal_pos[0], bot->goal_pos[1], bot->goal_pos[2]);
+			return va ("looking for %s", item_name);
+		}
+		if (bot->has_goal)
+			return va ("looking for item at %.0f %.0f %.0f", bot->goal_pos[0], bot->goal_pos[1], bot->goal_pos[2]);
+		return "looking for item";
+
+	case BOT_STATE_STUCK_RECOVERY:
+		return "recovering from being stuck";
+
+	case BOT_STATE_ROAM:
+		if (bot->has_goal)
+			return va ("roaming to %.0f %.0f %.0f", bot->goal_pos[0], bot->goal_pos[1], bot->goal_pos[2]);
+		return "roaming";
+
+	default:
+		return bot->has_goal ? va ("moving to %.0f %.0f %.0f", bot->goal_pos[0], bot->goal_pos[1], bot->goal_pos[2]) : "thinking";
+	}
+}
+
+static void BotAI_DebugDecisionTransition (bot_state_t *bot, bot_ai_state_t previous_state)
+{
+	if (!bot || previous_state == bot->state || !developer.value)
+		return;
+
+	Con_DPrintf ("BotAI: %s %s -> %s (%s)\n", bot->name, BotAI_StateName (previous_state), BotAI_StateName (bot->state), BotAI_DebugDecisionReason (bot));
+}
+
 static edict_t *BotAI_FindBestItem (bot_state_t *bot, edict_t *self, qboolean enemy_visible, qboolean urgent_override)
 {
 	int i;
@@ -1179,8 +1299,13 @@ void BotAI_ResetState (bot_state_t *bot)
 
 static void BotAI_CaptureDecisionSnapshot (bot_state_t *bot)
 {
+	bot_ai_state_t previous_state;
+
 	if (!bot)
 		return;
+
+	previous_state = bot->last_decision_state;
+	BotAI_DebugDecisionTransition (bot, previous_state);
 	bot->last_decision_state = bot->state;
 	bot->last_decision_enemy = bot->enemy;
 	VectorCopy (bot->goal_pos, bot->last_decision_goal_pos);
@@ -2186,7 +2311,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		VectorSubtract (bot->enemy->v.origin, self->v.origin, enemy_delta);
 		weapon_eval_dist = VectorLength (enemy_delta);
 	}
-	desired_weapon = BotCombat_SelectWeapon (self, weapon_eval_dist, enemy_visible);
+	desired_weapon = BotCombat_SelectWeapon (bot, self, weapon_eval_dist, enemy_visible);
 	current_weapon = (int) self->v.weapon;
 	if (desired_weapon != current_weapon &&
 		(qcvm->time - bot->last_weapon_switch_time > 0.7 || !BotCombat_HasAmmoForWeapon (self, current_weapon)))
@@ -2282,8 +2407,11 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 	VectorCopy (move_dir, nav_move_dir);
 
 	VectorAngles (move_dir, move_angles);
-	out_vangle[YAW] = BotAI_ApproachAngle (self->v.v_angle[YAW], move_angles[YAW], 540.f * host_frametime);
-	out_vangle[PITCH] = BotAI_ApproachAngle (self->v.v_angle[PITCH], 0.f, 360.f * host_frametime);
+	{
+		float agility = BotAI_ClampedAgility (bot);
+		out_vangle[YAW] = BotAI_ApproachAngle (self->v.v_angle[YAW], move_angles[YAW], 540.f * agility * host_frametime);
+		out_vangle[PITCH] = BotAI_ApproachAngle (self->v.v_angle[PITCH], 0.f, 360.f * agility * host_frametime);
+	}
 	out_vangle[ROLL] = 0.f;
 	if (hold_position && leader)
 	{
@@ -2319,7 +2447,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 			strafe[2] = 0.f;
 
 			VectorCopy (nav_move_dir, move_dir);
-			move_speed = 300.f;
+			move_speed = 300.f * BotAI_ClampedAgility (bot);
 			if (dist < 700.f && !BotAI_TestMoveBlockedCached (&trace_ctx, self, enemy_dir, 72.f, NULL, BOT_AI_TRACE_PRIORITY_REQUIRED))
 			{
 				if (dist < 170.f)
@@ -2353,7 +2481,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 					bot->dbg_blocked_shots++;
 					bot->fire_block_streak++;
 					bot->last_fire_block_time = qcvm->time;
-					move_speed = 320.f;
+					move_speed = 320.f * BotAI_ClampedAgility (bot);
 					VectorMA (strafe, 1.0f, enemy_dir, move_dir);
 					VectorNormalize (move_dir);
 					if (BotAI_TestMoveBlockedCached (&trace_ctx, self, move_dir, 72.f, NULL, BOT_AI_TRACE_PRIORITY_LOW))
@@ -2366,7 +2494,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 				if (bot->fire_block_streak >= 3 && qcvm->time - bot->last_weapon_switch_time > 0.25)
 				{
-					int fallback_weapon = BotCombat_SelectWeaponAvoid (self, dist, enemy_visible, fire_weapon);
+					int fallback_weapon = BotCombat_SelectWeaponAvoid (bot, self, dist, enemy_visible, fire_weapon);
 					if (fallback_weapon != fire_weapon && fallback_weapon != current_weapon)
 					{
 						*out_impulse = BotCombat_WeaponImpulse (fallback_weapon);
@@ -2379,15 +2507,15 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 			}
 		}
 		else
-			move_speed = 260.f;
+			move_speed = 260.f * BotAI_ClampedAgility (bot);
 		break;
 
 	case BOT_STATE_RETREAT:
-		move_speed = 320.f;
+		move_speed = 320.f * BotAI_ClampedAgility (bot);
 		break;
 
 	case BOT_STATE_STUCK_RECOVERY:
-		move_speed = 280.f;
+		move_speed = 280.f * BotAI_ClampedAgility (bot);
 		bot->strafe_dir = (BotAI_Random01 (bot, 23U) > 0.5f ? 1.f : -1.f);
 		outcmd->forwardmove = bot->strafe_dir * 200.f;
 		outcmd->sidemove = (BotAI_Random01 (bot, 24U) > 0.5f ? 1.f : -1.f) * 220.f;
@@ -2407,7 +2535,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		break;
 
 	case BOT_STATE_SEEK_ITEM:
-		move_speed = 300.f;
+		move_speed = 300.f * BotAI_ClampedAgility (bot);
 		break;
 
 	case BOT_STATE_ROAM:

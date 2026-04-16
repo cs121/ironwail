@@ -51,6 +51,8 @@ static qboolean SV_IsSpectatorTargetValid (const client_t *viewer, int target_id
 		return false;
 	if (target->edict->free || target->edict->v.health <= 0.f)
 		return false;
+	if (viewer->spectator_botonly ? !target->isbot : target->isbot)
+		return false;
 
 	return true;
 }

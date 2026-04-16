@@ -1,0 +1,10 @@
+{
+name "Marauder"
+skill 0.74
+preferred_weapon supershotgun
+least_preferred_weapon lightning
+agility 0.88
+taunt "Come closer."
+taunt "That all you got?"
+taunt "Next."
+}

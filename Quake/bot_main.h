@@ -42,6 +42,11 @@ typedef struct bot_state_s
 	int		clientnum;
 	char		name[32];
 	int		forced_team;
+	int		template_index;
+	float		skill;
+	int		preferred_weapon;
+	int		least_preferred_weapon;
+	float		agility;
 
 	bot_ai_state_t	state;
 	edict_t		*enemy;
@@ -118,7 +123,12 @@ typedef struct bot_state_s
 	qboolean	last_decision_has_path;
 	bot_path_t	last_decision_path;
 	int		last_decision_path_index;
-	 } bot_state_t;
+	int		template_index;
+	float		skill;
+	int		preferred_weapon;
+	int		least_preferred_weapon;
+	float		agility;
+} bot_state_t;
 
 extern cvar_t bot_debug;
 extern cvar_t bot_nav_debug;

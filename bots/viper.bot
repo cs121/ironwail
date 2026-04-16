@@ -1,0 +1,10 @@
+{
+name "Viper"
+skill 0.82
+preferred_weapon lightning
+least_preferred_weapon shotgun
+agility 1.10
+taunt "Still standing?"
+taunt "I have the high ground."
+taunt "Catch me if you can."
+}
