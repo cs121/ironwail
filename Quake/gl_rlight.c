@@ -30,6 +30,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <float.h>
 #include <math.h>
 
+#ifdef RENDERER_PLUGIN_BUILD
+#define IW_PARSE_SSCANF sscanf_s
+#else
+#define IW_PARSE_SSCANF q_sscanf
+#endif
+
 extern cvar_t r_flatlightstyles; //johnfitz
 extern cvar_t r_lerplightstyles;
 extern cvar_t r_dynamic;
@@ -292,7 +298,7 @@ void R_AccumulateEntityModelDLights (const vec3_t pos, vec3_t out_color, vec3_t 
 static void R_ParseDlightColor (const char *value, vec3_t color)
 {
 	float r = 1.f, g = 1.f, b = 1.f;
-	if (value && sscanf (value, "%f %f %f", &r, &g, &b) == 3)
+	if (value && IW_PARSE_SSCANF (value, "%f %f %f", &r, &g, &b) == 3)
 	{
 		// Accept either 0-1 or 0-255 ranges; normalize to 0-1 for storage.
 		if (r > 2.f || g > 2.f || b > 2.f)
@@ -309,7 +315,7 @@ static void R_ParseDlightColor (const char *value, vec3_t color)
 
 static qboolean R_ParseDlightOrigin (const char *value, vec3_t origin)
 {
-	return value && sscanf (value, "%f %f %f", &origin[0], &origin[1], &origin[2]) == 3;
+	return value && IW_PARSE_SSCANF (value, "%f %f %f", &origin[0], &origin[1], &origin[2]) == 3;
 }
 
 static void R_AddEntityDlight (const vec3_t origin, float radius, const vec3_t color, int style, int key)
@@ -807,12 +813,11 @@ return d_lightstylevalue[0];
 
 static qboolean SampleDeluxemapDir(const qmodel_t *model, const msurface_t *surf, int ds, int dt, vec3_t out_dir)
 {
-const byte *samples;
-int smax, tmax;
-int dsfrac = ds & 15, dtfrac = dt & 15;
-float fsfrac = dsfrac * (1.f / 16.f);
-float ftfrac = dtfrac * (1.f / 16.f);
-const float to_signed = 2.f * (1.f / 255.f);
+	const byte *samples;
+	int smax, tmax, lmshift, lmmask;
+	int dsfrac, dtfrac;
+	float fsfrac, ftfrac;
+	const float to_signed = 2.f * (1.f / 255.f);
 
 if (!model || !model->lightdirdata || !surf || !surf->luxsamples)
 {
@@ -820,12 +825,18 @@ VectorClear(out_dir);
 return false;
 }
 
-samples = surf->luxsamples;
-smax = (surf->extents[0] >> 4) + 1;
-tmax = (surf->extents[1] >> 4) + 1;
+	samples = surf->luxsamples;
+	lmshift = q_min ((int)surf->lmshift, 15);
+	lmmask = (1 << lmshift) - 1;
+	dsfrac = ds & lmmask;
+	dtfrac = dt & lmmask;
+	fsfrac = dsfrac * (1.f / (float)(1 << lmshift));
+	ftfrac = dtfrac * (1.f / (float)(1 << lmshift));
+	smax = (surf->extents[0] >> lmshift) + 1;
+	tmax = (surf->extents[1] >> lmshift) + 1;
 
-const int s0 = ds >> 4;
-const int t0 = dt >> 4;
+	const int s0 = ds >> lmshift;
+	const int t0 = dt >> lmshift;
 const int stride = smax * 3;
 
 const byte *row0 = samples + t0 * stride;
@@ -857,12 +868,11 @@ return true;
 
 static void InterpolateLightmap (qmodel_t *model, vec3_t color, msurface_t *surf, int ds, int dt, qboolean use_rgb)
 {
-const byte *samples;
-int smax, tmax;
-int dsfrac = ds & 15, dtfrac = dt & 15;
-        float fsfrac = dsfrac * (1.f / 16.f);
-        float ftfrac = dtfrac * (1.f / 16.f);
-        int bytes_per_pixel;
+	const byte *samples;
+	int smax, tmax, lmshift, lmmask;
+	int dsfrac, dtfrac;
+	float fsfrac, ftfrac;
+	        int bytes_per_pixel;
 
         if (!surf->samples)
         {
@@ -891,11 +901,17 @@ int dsfrac = ds & 15, dtfrac = dt & 15;
                 }
         }
 
-        smax = (surf->extents[0] >> 4) + 1;
-        tmax = (surf->extents[1] >> 4) + 1;
+	        lmshift = q_min ((int)surf->lmshift, 15);
+	        lmmask = (1 << lmshift) - 1;
+	        dsfrac = ds & lmmask;
+	        dtfrac = dt & lmmask;
+	        fsfrac = dsfrac * (1.f / (float)(1 << lmshift));
+	        ftfrac = dtfrac * (1.f / (float)(1 << lmshift));
+	        smax = (surf->extents[0] >> lmshift) + 1;
+	        tmax = (surf->extents[1] >> lmshift) + 1;
 
-        const int s0 = ds >> 4;
-        const int t0 = dt >> 4;
+	        const int s0 = ds >> lmshift;
+	        const int t0 = dt >> lmshift;
         const int stride = smax * bytes_per_pixel;
         const int facesize = smax * tmax * bytes_per_pixel;
 

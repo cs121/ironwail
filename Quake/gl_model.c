@@ -1693,9 +1693,11 @@ static void Mod_LoadLighting (lump_t *l)
 	const char *lighting_source;
 	unsigned int path_id = 0;
 	int	bspxsize, bspx_lighting_size, bspx_rgb_size, bspx_dlit_size;
+	int	bspx_e5_size;
 	int remastered_lump_samples;
 	qboolean bsp_lightmap_bgr = false;
 	qboolean litfile_bgr = false;
+	qboolean prefer_bspx_lighting = false;
 	const char *lightmap_source_name = "NONE";
 
 	loadmodel->lightdata = NULL;
@@ -1711,6 +1713,12 @@ static void Mod_LoadLighting (lump_t *l)
 	bspx_lighting = Q1BSPX_FindLump("LIGHTING", &bspx_lighting_size);
 	bspx_rgblighting = Q1BSPX_FindLump("RGBLIGHTING", &bspx_rgb_size);
 	bspx_dlit = Q1BSPX_FindLump("DLIT", &bspx_dlit_size);
+	in = Q1BSPX_FindLump("LIGHTING_E5BGR9", &bspx_e5_size);
+	prefer_bspx_lighting =
+		(in && bspx_e5_size > 0 && (bspx_e5_size % 4) == 0) ||
+		(bspx_rgblighting && bspx_rgb_size > 0 && (bspx_rgb_size % 3) == 0) ||
+		(bspx_dlit && bspx_dlit_size > 0 && (bspx_dlit_size % 6) == 0) ||
+		(bspx_lighting && bspx_lighting_size > 0);
 
 	if (gl_bsp_lightmap_bgr.value > 0.f)
 		bsp_lightmap_bgr = true;
@@ -1739,7 +1747,7 @@ static void Mod_LoadLighting (lump_t *l)
 	mark = Hunk_LowMark();
 	data = NULL;
 
-	if (gl_loadlitfiles.value >= 1) // woods #loadlits #litdir
+	if (gl_loadlitfiles.value >= 1 && !prefer_bspx_lighting) // woods #loadlits #litdir
 	{
 		char altlitfilename[MAX_OSPATH];
 		qboolean try_external = false;
@@ -1887,7 +1895,7 @@ static void Mod_LoadLighting (lump_t *l)
 	 * in the LIGHTING lump. Detect and convert to RGB here so uploads stay GL_RGB.
 	 */
 	remastered_lump_samples = (l->filelen > 0 && (l->filelen % 4) == 0) ? (l->filelen / 4) : 0;
-	if (!loadmodel->lightdata && bsp_lightmap_bgr && remastered_lump_samples > 0)
+	if (!loadmodel->lightdata && bsp_lightmap_bgr && remastered_lump_samples > 0 && !prefer_bspx_lighting)
 	{
 		const byte *src = mod_base + l->fileofs;
 
@@ -2119,6 +2127,10 @@ loadlightdir:
 					Q1BSPX_MarkUnsupported("LIGHTINGDIR");
 			}
 		}
+	}
+	else if (gl_loadlitfiles.value >= 1 && prefer_bspx_lighting)
+	{
+		Con_DPrintf2("BSPX lighting present: skipping external .lit lookup\n");
 	}
 
 	Con_DPrintf("Lightmap BSPX state: source=%s lightdata=%d rgb=%s(%d) lightdir=%d hdr=%d\n",
@@ -3138,12 +3150,20 @@ static void Mod_LoadFaces (lump_t *l)
                         out->styles[i] = ((styles_in[i]==INVALID_LIGHTSTYLE_OLD)?INVALID_LIGHTSTYLE:styles_in[i]);
                 lofs = Mod_ReadInt32(face_in, bsp_loader.face_lightofs_offset);
 
-                shift = defaultshift;
-                //bspx overrides (for lmscale)
-                if (lmshift)
-                        shift = lmshift[surfnum];
-                if (lmoffset)
-                        lofs = LittleLong(lmoffset[surfnum]);
+	                shift = defaultshift;
+	                //bspx overrides (for lmscale)
+	                if (lmshift)
+	                        shift = lmshift[surfnum];
+	                if (shift < 0)
+	                        shift = 4;
+	                else if (shift > 15)
+	                {
+	                        Con_DWarning("face %d has out-of-range lmshift %d, clamping to 15\n", surfnum, shift);
+	                        shift = 15;
+	                }
+	                out->lmshift = (byte)shift;
+	                if (lmoffset)
+	                        lofs = LittleLong(lmoffset[surfnum]);
                 if (lmstyle16)
                 {
                         int copystyles = q_min(stylesperface, MAXLIGHTMAPS);
@@ -3191,8 +3211,8 @@ static void Mod_LoadFaces (lump_t *l)
                 }
 			else
 			{
-				int smax = (out->extents[0] >> 4) + 1;
-				int tmax = (out->extents[1] >> 4) + 1;
+					int smax = (out->extents[0] >> out->lmshift) + 1;
+					int tmax = (out->extents[1] >> out->lmshift) + 1;
 				int facesamples = facestyles * smax * tmax;
 
 				// use the same dimensions as R_BuildLightMap to avoid rejecting valid faces
@@ -4303,17 +4323,24 @@ static void Mod_LoadBrushModel (qmodel_t *mod, void *buffer)
 	Mod_LoadEntities (&header.lumps[LUMP_ENTITIES]);	//Spike: moved this earlier, so that we can parse worldspawn keys earlier.
 	Mod_LoadFaces (&header.lumps[LUMP_FACES]);
 	Mod_LoadMarksurfaces (&header.lumps[LUMP_MARKSURFACES], bsp2);
-        if (is_main_model)
-        {
-                void *lump;
-                int lumpsize;
+	        if (is_main_model)
+	        {
+	                void *lump;
+	                int lumpsize;
 
-                lump = Q1BSPX_FindLump("FACENORMALS", &lumpsize);
-                if (lump && lumpsize > 0)
-                        Mod_LoadFaceNormalsBSPX(mod, lump, lumpsize);
-                else
-                        Con_DPrintf("BSPX: no FACENORMALS lump found\n");
-        }
+	                lump = Q1BSPX_FindLump("FACENORMALS", &lumpsize);
+	                if (lump && lumpsize > 0)
+	                        Mod_LoadFaceNormalsBSPX(mod, lump, lumpsize);
+	                else
+	                        Con_DPrintf("BSPX: no FACENORMALS lump found\n");
+
+	                if (lump && lumpsize > 0 && !mod->has_facenormals && mod->lightdirdata)
+	                {
+	                        Con_Warning("BSPX: disabling LIGHTINGDIR because FACENORMALS format is unsupported\n");
+	                        mod->lightdirdata = NULL;
+	                        mod->lightdirsamples = 0;
+	                }
+	        }
 
 	if (mod->bspversion == BSPVERSION && external_vis.value/* && sv.modelname[0] && !q_strcasecmp(loadname, sv.name)*/) // woods allow vis load online
 	{

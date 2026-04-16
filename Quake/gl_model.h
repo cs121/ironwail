@@ -162,6 +162,7 @@ typedef struct msurface_s
 
 	short		lightmaptexturenum;
 	short		extents[2];
+	byte		lmshift;		// lightmap luxel shift (1 << lmshift world units)
 	short		light_s, light_t;	// gl lightmap coordinates
 
 	unsigned short	styles[MAXLIGHTMAPS];
