@@ -588,17 +588,10 @@ static void *BSPX_FindLump(bspx_header_t *bspxheader, void *base, const char *lu
  */
 static qboolean BSPX_LumpNameEquals(const char entry_name[24], const char *name)
 {
-	char expected_name[24];
-	size_t len;
-
-	len = strlen(name);
-	if (len >= sizeof(expected_name))
+	size_t len = strlen(name);
+	if (len >= 24)
 		return false;
-
-	memset(expected_name, 0, sizeof(expected_name));
-	memcpy(expected_name, name, len);
-
-	return !memcmp(entry_name, expected_name, sizeof(expected_name));
+	return !strncmp(entry_name, name, 24);
 }
 
 typedef struct
@@ -926,10 +919,10 @@ void Mod_LoadFaceNormalsBSPX (qmodel_t *mod, void *buffer, int size)
                 }
 
                 {
-                        int ericw_expected = (int)sizeof(int) + count * (int)sizeof(vec3_t) + mod->numsurfedges * 3 * (int)sizeof(int);
-                        if (size != ericw_expected)
+                        size_t ericw_expected = sizeof(int) + (size_t)count * sizeof(vec3_t) + (size_t)mod->numsurfedges * 3 * sizeof(int);
+                        if ((size_t)size != ericw_expected)
                         {
-                                Con_Warning("BSPX: FACENORMALS size mismatch (%d bytes, expected %d [flat] or %d [ericw-tools])\n",
+                                Con_Warning("BSPX: FACENORMALS size mismatch (%d bytes, expected %d [flat] or %zu [ericw-tools])\n",
                                         size, expected_size, ericw_expected);
                                 Q1BSPX_MarkUnsupported("FACENORMALS");
                                 return;
@@ -2070,7 +2063,6 @@ static void Mod_LoadLighting (lump_t *l)
                         /* Keep the RGB path populated as well so later code can treat
                          * BSPX RGBLIGHTING like other colored light sources. */
                         Mod_LoadRGBLightingBSPX(loadmodel, bspx_rgblighting, bspx_rgb_size);
-                        Q1BSPX_MarkUsed("RGBLIGHTING");
 
 					Con_Printf("loaded BSPX RGB lighting (%d samples, %d bytes)\n", samples, bspx_rgb_size);
 					lightmap_source_name = "BSPX_RGBLIGHTING";
@@ -2878,12 +2870,10 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 	cursor = (const byte *)data;
 	end = cursor + size;
 
-	if ((size_t)(end - cursor) < sizeof(float) * 6 + sizeof(uint8_t) + sizeof(uint32_t))
+	if ((size_t)(end - cursor) < 3*sizeof(float) + 3*sizeof(uint32_t) + 3*sizeof(float) + sizeof(uint8_t) + sizeof(uint32_t))
 		return false;
 
 	oct = (lightgrid_octree_t *)Hunk_AllocName (sizeof(*oct), "lgoctree");
-	if (!oct)
-		return false;
 
 	memset (oct, 0, sizeof(*oct));
 
@@ -2921,6 +2911,16 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 	}
 	cursor += sizeof(uint32_t);
 
+	for (int i = 0; i < 3; i++)
+	{
+		if (!_finite(oct->header.grid_dist[i]) || oct->header.grid_dist[i] <= 0.f)
+			return false;
+		if (!_finite(oct->header.grid_mins[i]))
+			return false;
+		if (oct->header.grid_size[i] <= 0)
+			return false;
+	}
+
 	if (cursor > end)
 		return false;
 
@@ -2947,8 +2947,6 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 	}
 
 	oct->nodes = (lightgrid_octree_node_t *)Hunk_AllocName (oct->node_count * sizeof(lightgrid_octree_node_t), "lgoctnodes");
-	if (!oct->nodes)
-		return false;
 
 	for (size_t i = 0; i < oct->node_count; i++)
 	{
@@ -2986,8 +2984,6 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 		return false;
 
 	oct->leaves = (lightgrid_octree_leaf_t *)Hunk_AllocName (oct->leaf_count * sizeof(lightgrid_octree_leaf_t), "lgoctleaf");
-	if (!oct->leaves)
-		return false;
 
 	memset (oct->leaves, 0, oct->leaf_count * sizeof(lightgrid_octree_leaf_t));
 
@@ -3023,8 +3019,6 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 			return false;
 
 		leaf->samples = (lightgrid_octree_sampleset_t *)Hunk_AllocName (sample_count * sizeof(lightgrid_octree_sampleset_t), "lgoctsamp");
-		if (!leaf->samples)
-			return false;
 
 		memset (leaf->samples, 0, sample_count * sizeof(lightgrid_octree_sampleset_t));
 
@@ -3089,11 +3083,7 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 	if (!Lightgrid_ValidateOctree (oct, r_lightgrid_octree_debug.value > 0.f))
 		return false;
 
-	mod->lightgrid_octree = oct;
-
 	lg = (lightgrid_t *)Hunk_AllocName (sizeof(*lg), "lightgrid");
-	if (!lg)
-		return false;
 
 	memset (lg, 0, sizeof(*lg));
 	lg->backend = LIGHTGRID_BACKEND_OCTREE;
@@ -3104,6 +3094,7 @@ static qboolean LightgridOctree_LoadBSPX (qmodel_t *mod, void *data, int size)
 	for (int i = 0; i < 3; i++)
 		lg->maxs[i] = oct->header.grid_mins[i] + oct->header.grid_dist[i] * (oct->header.grid_size[i] - 1);
 
+	mod->lightgrid_octree = oct;
 	Lightgrid_Set (lg);
 
 	Con_Printf ("Loaded LIGHTGRID_OCTREE: dist(%.1f %.1f %.1f) size(%d %d %d) mins(%.1f %.1f %.1f) styles %u (%zu nodes, %zu leaves)\n",
