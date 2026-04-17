@@ -161,8 +161,16 @@ static void R_LightgridChroma (const vec3_t color, vec3_t chroma)
 
 static void R_ScaleAliasLighting (vec3_t light, vec3_t ambient, vec3_t dlight, float scale)
 {
-	if (scale <= 0.f || scale == 1.f)
+	if (scale == 1.f)
 		return;
+
+	if (scale <= 0.f)
+	{
+		VectorClear (light);
+		VectorClear (ambient);
+		VectorClear (dlight);
+		return;
+	}
 
 	for (int i = 0; i < 3; i++)
 	{
@@ -319,7 +327,7 @@ static void R_ApplyLightgridLighting (const entity_t *e, vec3_t ambientcolor)
                 for (int i = 0; i < 3; i++)
                 {
                         const float before = fmaxf (ambientcolor[i], 0.f);
-                        const float headroom = 255.f - before;
+                        const float headroom = fmaxf (255.f - before, 0.f);
 
                         if (gridcolor[i] > 0.f)
                                 grid_scale = fminf (grid_scale, headroom / gridcolor[i]);
@@ -620,27 +628,25 @@ void R_SetupAliasLighting (entity_t     *e)
 
         R_ApplyLightgridLighting (e, ambientcolor);
 
-	// viewmodel lighting is typically darker because world lights aren't placed for a free camera
+	// viewmodel: boost + minlight in a single pass
 	if (e == &cl.viewent)
 	{
 		const float light_sum = lightcolor[0] + lightcolor[1] + lightcolor[2];
 		const float boost = fmaxf (r_viewmodel_light_boost.value, 1.f);
-		const float boosted_sum = fmaxf (light_sum * boost, light_sum + 120.f);
-		const float scale = light_sum > 0.f ? boosted_sum / light_sum : 1.f;
-
-		R_ScaleAliasLighting (lightcolor, ambientcolor, dlightcolor, scale);
-	}
-
-	// minimum light value on gun (24)
-	if (e == &cl.viewent)
-	{
-		const float light_sum = lightcolor[0] + lightcolor[1] + lightcolor[2];
 		const float min_sum = fmaxf (r_viewmodel_minlight.value, 0.f);
 
-		if (light_sum > 0.f && light_sum < min_sum)
+		if (light_sum > 0.f)
 		{
-			const float scale = min_sum / light_sum;
-			R_ScaleAliasLighting (lightcolor, ambientcolor, dlightcolor, scale);
+			const float boosted = fmaxf (light_sum * boost, light_sum + 120.f);
+			const float target = fmaxf (boosted, min_sum);
+			R_ScaleAliasLighting (lightcolor, ambientcolor, dlightcolor, target / light_sum);
+		}
+		else if (min_sum > 0.f)
+		{
+			const float per_ch = min_sum / 3.f;
+			VectorSet (lightcolor, per_ch, per_ch, per_ch);
+			VectorCopy (lightcolor, ambientcolor);
+			VectorClear (dlightcolor);
 		}
 	}
 
@@ -1185,25 +1191,24 @@ static void R_DrawAliasModel_Real (entity_t *e, qboolean showtris)
         // set up lighting
         //
 	rs_aliaspolys += paliashdr->numtris;
-	R_SetupAliasLighting (e);
-	if (r_skyvis.value > 0.f && R_SkyVis_Active ())
-		skyvisibility = CLAMP (0.f, R_SkyVis_Sample (lerpdata.origin), 1.f);
 
-	//
-	// draw it
-	//
-
-        if (r_fullbright_cheatsafe || showtris)
-        {
-                lightcolor[0] = lightcolor[1] = lightcolor[2] = 0.5f;
-                VectorCopy (lightcolor, e->lightcache.ambientcolor);
-                VectorClear (e->lightcache.dlightcolor);
-                VectorClear (e->lightcache.dlightdir);
-                R_DefaultStaticLightDir (e->lightcache.staticlightdir);
-                e->lightcache.lightgrid_has_sample = false;
-                e->lightcache.lightgrid_ao = 0.f;
-                VectorClear (e->lightcache.lightgrid_color);
-        }
+	if (r_fullbright_cheatsafe || showtris)
+	{
+		lightcolor[0] = lightcolor[1] = lightcolor[2] = 0.5f;
+		VectorCopy (lightcolor, e->lightcache.ambientcolor);
+		VectorClear (e->lightcache.dlightcolor);
+		VectorClear (e->lightcache.dlightdir);
+		R_DefaultStaticLightDir (e->lightcache.staticlightdir);
+		e->lightcache.lightgrid_has_sample = false;
+		e->lightcache.lightgrid_ao = 0.f;
+		VectorClear (e->lightcache.lightgrid_color);
+	}
+	else
+	{
+		R_SetupAliasLighting (e);
+		if (r_skyvis.value > 0.f && R_SkyVis_Active ())
+			skyvisibility = CLAMP (0.f, R_SkyVis_Sample (lerpdata.origin), 1.f);
+	}
 
 	if (showtris)
 		entalpha = 1.f;

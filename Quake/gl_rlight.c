@@ -1643,7 +1643,6 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 	entity_static_light_source_t static_source = ENTITY_STATIC_LIGHT_NONE;
 	float intensity;
 
-	R_ModelLightStats_NewFrame ();
 	VectorClear (out_color255);
 
 	if (legacy_compatible)
