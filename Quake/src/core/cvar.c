@@ -65,6 +65,12 @@ static void Cvar_AddToHashMap (cvar_t *var)
 
 void Cvar_Reset (const char *name); //johnfitz
 
+#if !defined(NDEBUG)
+static cvar_t cvar_resetcfg_test_archive = {"_cvar_resetcfg_test_archive", "10", CVAR_ARCHIVE};
+static cvar_t cvar_resetcfg_test_none = {"_cvar_resetcfg_test_none", "20", CVAR_NONE};
+static cvar_t cvar_resetcfg_test_notify = {"_cvar_resetcfg_test_notify", "30", CVAR_NOTIFY};
+#endif
+
 /*
 ============
 Cvar_List_f -- johnfitz
@@ -249,6 +255,11 @@ void Cvar_ResetAll_f (void)
 /*
 ============
 Cvar_ResetCfg_f -- QuakeSpasm
+
+Reset only CVAR_ARCHIVE vars to their defaults.
+Expected behavior:
+- CVAR_ARCHIVE vars are reset.
+- non-archived vars are left untouched.
 ============
 */
 void Cvar_ResetCfg_f (void)
@@ -256,9 +267,43 @@ void Cvar_ResetCfg_f (void)
 	int i;
 
 	for (i = 0; i < cvar_count; i++)
+	{
 		if (cvar_list[i]->flags & CVAR_ARCHIVE)
 			Cvar_Reset (cvar_list[i]->name);
+	}
 }
+
+#if !defined(NDEBUG)
+static void Cvar_ResetCfg_SelfTest_f (void)
+{
+	qboolean ok = true;
+
+	Cvar_SetQuick (&cvar_resetcfg_test_archive, "11");
+	Cvar_SetQuick (&cvar_resetcfg_test_none, "21");
+	Cvar_SetQuick (&cvar_resetcfg_test_notify, "31");
+
+	Cvar_ResetCfg_f ();
+
+	if (strcmp (cvar_resetcfg_test_archive.string, cvar_resetcfg_test_archive.default_string) != 0)
+	{
+		Con_Printf ("resetcfg_selftest: FAIL archived var was not reset\n");
+		ok = false;
+	}
+	if (strcmp (cvar_resetcfg_test_none.string, "21") != 0)
+	{
+		Con_Printf ("resetcfg_selftest: FAIL non-archived var changed\n");
+		ok = false;
+	}
+	if (strcmp (cvar_resetcfg_test_notify.string, "31") != 0)
+	{
+		Con_Printf ("resetcfg_selftest: FAIL notify-only var changed\n");
+		ok = false;
+	}
+
+	if (ok)
+		Con_Printf ("resetcfg_selftest: PASS\n");
+}
+#endif
 
 //==============================================================================
 //
@@ -282,6 +327,12 @@ void Cvar_Init (void)
 	Cmd_AddCommand ("reset", Cvar_Reset_f);
 	Cmd_AddCommand ("resetall", Cvar_ResetAll_f);
 	Cmd_AddCommand ("resetcfg", Cvar_ResetCfg_f);
+#if !defined(NDEBUG)
+	Cvar_RegisterVariable (&cvar_resetcfg_test_archive);
+	Cvar_RegisterVariable (&cvar_resetcfg_test_none);
+	Cvar_RegisterVariable (&cvar_resetcfg_test_notify);
+	Cmd_AddCommand ("resetcfg_selftest", Cvar_ResetCfg_SelfTest_f);
+#endif
 }
 
 //==============================================================================
