@@ -9,8 +9,8 @@ Build + Deploy Ironwail (Release x64)
 [INFO] Projektdatei gefunden: Windows\VisualStudio\ironwail.vcxproj
 [INFO] Sammle Diagnosedaten...
 ==== Environment ====
-DATE=17.04.2026
-TIME= 0:18:21,16
+DATE=20.04.2026
+TIME= 0:38:00,01
 CD=C:\Quake\source\ironwail
 PROCESSOR_ARCHITECTURE=AMD64
 VisualStudioVersion=
@@ -109,5 +109,5 @@ MSBuild-Version 18.4.0+6e61e96ac für .NET Framework
 [INFO] Kopiere id1/particles...
 [INFO] Kopiere id1/music...
 [6/6] Kopiere Root-Assets...
-[INFO] Kopiere ironwail.pak...
+[WARN] Asset-Datei fehlt, ueberspringe: pakfiles\ironwail.pak
 [OK] Fertig. Deploy unter: C:\Quake\rerelease

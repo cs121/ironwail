@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -90,7 +90,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\..\Quake;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\Quake\include;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>RENDERER_PLUGIN_BUILD;WIN32;_DEBUG;_WINDOWS;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -115,7 +115,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>..\..\Quake;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\Quake\include;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>RENDERER_PLUGIN_BUILD;WIN32;NDEBUG;_WINDOWS;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -144,7 +144,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\..\Quake;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\Quake\include;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>RENDERER_PLUGIN_BUILD;WIN32;_DEBUG;_WINDOWS;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -172,7 +172,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>..\..\Quake;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\Quake\include;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>RENDERER_PLUGIN_BUILD;WIN32;NDEBUG;_WINDOWS;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -196,37 +196,38 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\Quake\ref_gl_plugin.c" />
-    <ClCompile Include="..\..\Quake\ref_gl_bridge_stubs.c" />
-    <ClCompile Include="..\..\Quake\gl_backend.c" />
-    <ClCompile Include="..\..\Quake\gl_draw.c" />
-    <ClCompile Include="..\..\Quake\gl_rmain.c" />
-    <ClCompile Include="..\..\Quake\gl_rmisc.c" />
-    <ClCompile Include="..\..\Quake\gl_screen.c" />
-    <ClCompile Include="..\..\Quake\gl_vidsdl.c" />
-    <ClCompile Include="..\..\Quake\gl_model.c" />
-    <ClCompile Include="..\..\Quake\gl_mesh.c" />
-    <ClCompile Include="..\..\Quake\gl_sky.c" />
-    <ClCompile Include="..\..\Quake\gl_warp.c" />
-    <ClCompile Include="..\..\Quake\gl_texmgr.c" />
-    <ClCompile Include="..\..\Quake\gl_shaders.c" />
-    <ClCompile Include="..\..\Quake\gl_shadow.c" />
-    <ClCompile Include="..\..\Quake\gl_shadow_runtime.c" />
-    <ClCompile Include="..\..\Quake\gl_oit.c" />
-    <ClCompile Include="..\..\Quake\gl_lightgrid.c" />
-    <ClCompile Include="..\..\Quake\gl_ktx2.c" />
-    <ClCompile Include="..\..\Quake\gl_refrag.c" />
-    <ClCompile Include="..\..\Quake\gl_rlight.c" />
-    <ClCompile Include="..\..\Quake\gl_fog.c" />
-    <ClCompile Include="..\..\Quake\gl_dlight.c" />
-    <ClCompile Include="..\..\Quake\r_world.c" />
-    <ClCompile Include="..\..\Quake\r_alias.c" />
-    <ClCompile Include="..\..\Quake\r_part.c" />
-    <ClCompile Include="..\..\Quake\r_part_q3p.c" />
-    <ClCompile Include="..\..\Quake\r_decals.c" />
-    <ClCompile Include="..\..\Quake\r_sprite.c" />
-    <ClCompile Include="..\..\Quake\r_brush.c" />
-    <ClCompile Include="..\..\Quake\r_postfx.c" />
+    <ClCompile Include="..\..\Quake\src\render\ref_gl_plugin.c" />
+    <ClCompile Include="..\..\Quake\src\render\ref_gl_bridge_stubs.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_backend.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_draw.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_rmain.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_rmisc.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_screen.c" />
+    <ClCompile Include="..\..\Quake\src\platform\gl_vidsdl.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_model.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_mesh.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_sky.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_warp.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_texmgr.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_shaders.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_shadow.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_shadow_runtime.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_oit.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_lightgrid.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_ktx2.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_refrag.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_rlight.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_fog.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_dlight.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_world.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_alias.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_entitylight.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_part.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_part_q3p.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_decals.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_sprite.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_brush.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_postfx.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

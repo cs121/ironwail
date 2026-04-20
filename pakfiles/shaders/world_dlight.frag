@@ -229,8 +229,8 @@ void main()
 	bool use_tile_lists = (DLightParams.z > 0.5);
 	if (NumLights > 0u)
 	{
-		const float core_boost       = 0.0;  // hook: extra brightness at light core (0=off)
-		const float core_exp         = 1.0;  // hook: exponent for core_boost shaping
+		const float core_boost       = 0.55;  // extra brightness at light core
+		const float core_exp         = 2.0;   // core shaping exponent, keeps edge falloff intact
 		const float knee             = 0.0;  // hook: soft-knee compression (0=off)
 		const float ndotl_mix        = 1.0;  // hook: 0=flat, 1=full Lambert
 		const float saturation_chop  = 0.0;  // hook: desaturate dynamic light (0=off)
@@ -275,10 +275,9 @@ void main()
 			// knee==0 → shaped == core_intensity (no division overhead on most compilers)
 			float shaped = (knee > 0.0) ? (core_intensity / (core_intensity + knee)) : core_intensity;
 
-			// Half-Lambert wrap: softens terminator, avoids hard black on back faces.
-			// Keeps energy conservative: integrates to the same total as cosine lobe.
-			float ndotl_raw = dot(surface_normal, light_dir) * 0.5 + 0.5;
-			ndotl_raw = ndotl_raw * ndotl_raw; // squared wrap → tighter than linear half-Lambert
+			// Physically closer falloff: standard Lambert term with no wrap.
+			// This keeps the side facing the light as the brightest side.
+			float ndotl_raw = max(dot(surface_normal, light_dir), 0.0);
 			float ndotl = mix(1.0, ndotl_raw, ndotl_mix);
 
 			float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, rad);

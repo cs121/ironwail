@@ -1,5 +1,5 @@
 #include <winresrc.h>
-#include "../Quake/quakedef.h"
+#include "../Quake/include/quakedef.h"
 
 icon ICON "QuakeSpasm.ico"
 

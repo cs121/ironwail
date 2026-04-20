@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -89,7 +89,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;IRONWAIL_ENFORCE_SAFE_CRT=1;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -116,15 +116,15 @@
 copy "$(SolutionDir)\..\SDL2\lib\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)..\curl\lib\$(PlatformShortName)\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
-"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\ref_vk_plugin.c"
-"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\ref_dx12_plugin.c"</Command>
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake\include" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\src\render\ref_vk_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake\include" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\src\render\ref_dx12_plugin.c"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;IRONWAIL_ENFORCE_SAFE_CRT=1;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -152,8 +152,8 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)\..\SDL2\lib\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)..\curl\lib\$(PlatformShortName)\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
-"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\ref_vk_plugin.c"
-"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\ref_dx12_plugin.c"</Command>
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake\include" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\src\render\ref_vk_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake\include" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\src\render\ref_dx12_plugin.c"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -162,7 +162,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USE_WINSOCK2;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;IRONWAIL_ENFORCE_SAFE_CRT=1;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -188,8 +188,8 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)\..\SDL2\lib64\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)..\curl\lib\$(PlatformShortName)\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
-"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\ref_vk_plugin.c"
-"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\ref_dx12_plugin.c"</Command>
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake\include" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\src\render\ref_vk_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MDd /I"$(SolutionDir)..\..\Quake\include" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\src\render\ref_dx12_plugin.c"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -199,7 +199,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USE_WINSOCK2;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;IRONWAIL_ENFORCE_SAFE_CRT=1;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -226,14 +226,14 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)\..\SDL2\lib64\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)\..\curl\lib\$(PlatformShortName)\*.dll" "$(TargetDir)"
 copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
- "$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\ref_vk_plugin.c"
- "$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\ref_dx12_plugin.c"</Command>
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake\include" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_vk.dll" "$(SolutionDir)..\..\Quake\src\render\ref_vk_plugin.c"
+"$(VCToolsInstallDir)bin\HostX86\$(PlatformShortName)\cl.exe" /nologo /LD /TC /std:c11 /MD /I"$(SolutionDir)..\..\Quake\include" /I"$(SolutionDir)\..\SDL2\include" /Fe:"$(TargetDir)ref_dx12.dll" "$(SolutionDir)..\..\Quake\src\render\ref_dx12_plugin.c"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\..\Quake\async.c" />
-    <ClCompile Include="..\..\Quake\bgmusic.c" />
-    <ClCompile Include="..\..\Quake\bc7enc.c">
+    <ClCompile Include="..\..\Quake\src\core\async.c" />
+    <ClCompile Include="..\..\Quake\src\audio\bgmusic.c" />
+    <ClCompile Include="..\..\Quake\src\thirdparty\bc7enc.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
@@ -243,85 +243,85 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">CompileAsCpp</CompileAs>
       <CompileAs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">CompileAsCpp</CompileAs>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\cd_null.c" />
-    <ClCompile Include="..\..\Quake\cfgfile.c" />
-    <ClCompile Include="..\..\Quake\chase.c" />
-    <ClCompile Include="..\..\Quake\cl_demo.c" />
-    <ClCompile Include="..\..\Quake\cl_input.c" />
-    <ClCompile Include="..\..\Quake\cl_iwmusic.c" />
-    <ClCompile Include="..\..\Quake\cl_main.c" />
-    <ClCompile Include="..\..\Quake\cl_parse.c" />
-    <ClCompile Include="..\..\Quake\cl_postfx.c" />
-    <ClCompile Include="..\..\Quake\cl_tent.c" />
-    <ClCompile Include="..\..\Quake\cmd.c" />
-    <ClCompile Include="..\..\Quake\common.c" />
-    <ClCompile Include="..\..\Quake\console.c" />
-    <ClCompile Include="..\..\Quake\crc.c" />
-    <ClCompile Include="..\..\Quake\cvar.c" />
-    <ClCompile Include="..\..\Quake\gl_draw.c" />
-    <ClCompile Include="..\..\Quake\gl_fog.c" />
-    <ClCompile Include="..\..\Quake\gl_lightgrid.c" />
-    <ClCompile Include="..\..\Quake\gl_mesh.c" />
-    <ClCompile Include="..\..\Quake\gl_model.c" />
-    <ClCompile Include="..\..\Quake\gl_refrag.c" />
-    <ClCompile Include="..\..\Quake\gl_rlight.c" />
-    <ClCompile Include="..\..\Quake\gl_dlight.c" />
-    <ClCompile Include="..\..\Quake\gl_oit.c" />
-    <ClCompile Include="..\..\Quake\gl_shadow.c" />
-    <ClCompile Include="..\..\Quake\gl_shadow_runtime.c" />
-    <ClCompile Include="..\..\Quake\gl_backend.c" />
-    <ClCompile Include="..\..\Quake\gl_rmain.c" />
-    <ClCompile Include="..\..\Quake\gl_rmisc.c" />
-    <ClCompile Include="..\..\Quake\r_skyvis.c" />
-    <ClCompile Include="..\..\Quake\r_decals.c" />
-    <ClCompile Include="..\..\Quake\gl_screen.c" />
-    <ClCompile Include="..\..\Quake\gl_shaders.c" />
-    <ClCompile Include="..\..\Quake\gl_sky.c" />
-    <ClCompile Include="..\..\Quake\gl_texmgr.c" />
-    <ClCompile Include="..\..\Quake\gl_ktx2.c" />
-    <ClCompile Include="..\..\Quake\ktx2_write.c" />
-    <ClCompile Include="..\..\Quake\gl_vidsdl.c" />
-    <ClCompile Include="..\..\Quake\gl_warp.c" />
+    <ClCompile Include="..\..\Quake\src\audio\cd_null.c" />
+    <ClCompile Include="..\..\Quake\src\core\cfgfile.c" />
+    <ClCompile Include="..\..\Quake\src\client\chase.c" />
+    <ClCompile Include="..\..\Quake\src\client\cl_demo.c" />
+    <ClCompile Include="..\..\Quake\src\client\cl_input.c" />
+    <ClCompile Include="..\..\Quake\src\client\cl_iwmusic.c" />
+    <ClCompile Include="..\..\Quake\src\client\cl_main.c" />
+    <ClCompile Include="..\..\Quake\src\client\cl_parse.c" />
+    <ClCompile Include="..\..\Quake\src\client\cl_postfx.c" />
+    <ClCompile Include="..\..\Quake\src\client\cl_tent.c" />
+    <ClCompile Include="..\..\Quake\src\core\cmd.c" />
+    <ClCompile Include="..\..\Quake\src\core\common.c" />
+    <ClCompile Include="..\..\Quake\src\core\console.c" />
+    <ClCompile Include="..\..\Quake\src\core\crc.c" />
+    <ClCompile Include="..\..\Quake\src\core\cvar.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_draw.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_fog.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_lightgrid.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_mesh.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_model.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_refrag.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_rlight.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_dlight.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_oit.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_shadow.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_shadow_runtime.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_backend.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_rmain.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_rmisc.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_skyvis.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_decals.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_screen.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_shaders.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_sky.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_texmgr.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_ktx2.c" />
+    <ClCompile Include="..\..\Quake\src\assets\ktx2_write.c" />
+    <ClCompile Include="..\..\Quake\src\platform\gl_vidsdl.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_warp.c" />
     <ClCompile Include="..\..\common\lightgrid.c" />
-    <ClCompile Include="..\..\Quake\host.c" />
-    <ClCompile Include="..\..\Quake\host_cmd.c" />
-    <ClCompile Include="..\..\Quake\bot_main.c" />
-    <ClCompile Include="..\..\Quake\bot_ai.c" />
-    <ClCompile Include="..\..\Quake\bot_combat.c" />
-    <ClCompile Include="..\..\Quake\bot_nav2.c" />
-    <ClCompile Include="..\..\Quake\image.c" />
-    <ClCompile Include="..\..\Quake\in_sdl.c" />
-    <ClCompile Include="..\..\Quake\json.c" />
-    <ClCompile Include="..\..\Quake\keys.c" />
-    <ClCompile Include="..\..\Quake\main_sdl.c" />
-    <ClCompile Include="..\..\Quake\mathlib.c" />
-    <ClCompile Include="..\..\Quake\mat_material.c" />
-    <ClCompile Include="..\..\Quake\mat_material_parse.c" />
-    <ClCompile Include="..\..\Quake\menu.c" />
-    <ClCompile Include="..\..\Quake\miniz.c">
+    <ClCompile Include="..\..\Quake\src\core\host.c" />
+    <ClCompile Include="..\..\Quake\src\core\host_cmd.c" />
+    <ClCompile Include="..\..\Quake\src\bot\bot_main.c" />
+    <ClCompile Include="..\..\Quake\src\bot\bot_ai.c" />
+    <ClCompile Include="..\..\Quake\src\bot\bot_combat.c" />
+    <ClCompile Include="..\..\Quake\src\bot\bot_nav2.c" />
+    <ClCompile Include="..\..\Quake\src\assets\image.c" />
+    <ClCompile Include="..\..\Quake\src\platform\in_sdl.c" />
+    <ClCompile Include="..\..\Quake\src\assets\json.c" />
+    <ClCompile Include="..\..\Quake\src\ui\keys.c" />
+    <ClCompile Include="..\..\Quake\src\platform\main_sdl.c" />
+    <ClCompile Include="..\..\Quake\src\core\mathlib.c" />
+    <ClCompile Include="..\..\Quake\src\render\mat_material.c" />
+    <ClCompile Include="..\..\Quake\src\render\mat_material_parse.c" />
+    <ClCompile Include="..\..\Quake\src\ui\menu.c" />
+    <ClCompile Include="..\..\Quake\src\thirdparty\miniz.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\net_dgrm.c" />
-    <ClCompile Include="..\..\Quake\net_loop.c" />
-    <ClCompile Include="..\..\Quake\net_main.c" />
-    <ClCompile Include="..\..\Quake\net_win.c" />
-    <ClCompile Include="..\..\Quake\net_wins.c" />
-    <ClCompile Include="..\..\Quake\net_wipx.c" />
-    <ClCompile Include="..\..\Quake\pl_linux.c">
+    <ClCompile Include="..\..\Quake\src\network\net_dgrm.c" />
+    <ClCompile Include="..\..\Quake\src\network\net_loop.c" />
+    <ClCompile Include="..\..\Quake\src\network\net_main.c" />
+    <ClCompile Include="..\..\Quake\src\network\net_win.c" />
+    <ClCompile Include="..\..\Quake\src\network\net_wins.c" />
+    <ClCompile Include="..\..\Quake\src\network\net_wipx.c" />
+    <ClCompile Include="..\..\Quake\src\platform\pl_linux.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\pl_win.c" />
-    <ClCompile Include="..\..\Quake\pr_cmds.c" />
-    <ClCompile Include="..\..\Quake\pr_edict.c" />
-    <ClCompile Include="..\..\Quake\pr_exec.c" />
-    <ClCompile Include="..\..\Quake\phys_interact.c" />
-    <ClCompile Include="..\..\Quake\quakedef.c">
+    <ClCompile Include="..\..\Quake\src\platform\pl_win.c" />
+    <ClCompile Include="..\..\Quake\src\gamecode\pr_cmds.c" />
+    <ClCompile Include="..\..\Quake\src\gamecode\pr_edict.c" />
+    <ClCompile Include="..\..\Quake\src\gamecode\pr_exec.c" />
+    <ClCompile Include="..\..\Quake\src\physics\phys_interact.c" />
+    <ClCompile Include="..\..\Quake\src\core\quakedef.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">quakedef.h</PrecompiledHeaderFile>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
@@ -331,164 +331,162 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Create</PrecompiledHeader>
       <PrecompiledHeaderFile Condition="'$(Configuration)|$(Platform)'=='Release|x64'">quakedef.h</PrecompiledHeaderFile>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\r_alias.c" />
-    <ClCompile Include="..\..\Quake\r_brush.c" />
-    <ClCompile Include="..\..\Quake\r_dlight_pool.c" />
-    <ClCompile Include="..\..\Quake\r_backend.c" />
-    <ClCompile Include="..\..\Quake\r_framegraph.c" />
-    <ClCompile Include="..\..\Quake\r_passes.c" />
-    <ClCompile Include="..\..\Quake\r_quality.c" />
-    <ClCompile Include="..\..\Quake\r_sanitize.c" />
-    <ClCompile Include="..\..\Quake\r_postfx.c" />
-    <ClCompile Include="..\..\Quake\r_realtimelight.c" />
-    <ClCompile Include="..\..\Quake\r_part.c" />
-    <ClCompile Include="..\..\Quake\r_part_q3p.c" />
-    <ClCompile Include="..\..\Quake\r_ssao.c" />
-    <ClCompile Include="..\..\Quake\r_sprite.c" />
-    <ClCompile Include="..\..\Quake\r_tonemap.c" />
-    <ClCompile Include="..\..\Quake\r_world.c" />
-    <ClCompile Include="..\..\Quake\ref_gl_host_bridge.c" />
-    <ClCompile Include="..\..\Quake\render_dispatch.c" />
-    <ClCompile Include="..\..\Quake\sbar.c" />
-    <ClCompile Include="..\..\Quake\snd_codec.c" />
-    <ClCompile Include="..\..\Quake\snd_dma.c" />
-    <ClCompile Include="..\..\Quake\snd_flac.c" />
-    <ClCompile Include="..\..\Quake\snd_mem.c" />
-    <ClCompile Include="..\..\Quake\snd_mikmod.c" />
-    <ClCompile Include="..\..\Quake\snd_mix.c" />
-    <ClCompile Include="..\..\Quake\snd_modplug.c" />
-    <ClCompile Include="..\..\Quake\sounddef_parser.c" />
-    <ClCompile Include="..\..\Quake\sounddef_registry.c" />
-    <ClCompile Include="..\..\Quake\snd_mp3.c">
+    <ClCompile Include="..\..\Quake\src\render\r_entitylight.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_alias.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_brush.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_dlight_pool.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_backend.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_framegraph.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_passes.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_quality.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_sanitize.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_postfx.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_realtimelight.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_part.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_part_q3p.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_ssao.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_sprite.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_tonemap.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_world.c" />
+    <ClCompile Include="..\..\Quake\src\render\ref_gl_host_bridge.c" />
+    <ClCompile Include="..\..\Quake\src\render\render_dispatch.c" />
+    <ClCompile Include="..\..\Quake\src\ui\sbar.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_codec.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_dma.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_flac.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_mem.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_mikmod.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_mix.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_modplug.c" />
+    <ClCompile Include="..\..\Quake\src\audio\sounddef_parser.c" />
+    <ClCompile Include="..\..\Quake\src\audio\sounddef_registry.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_mp3.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\snd_mp3tag.c" />
-    <ClCompile Include="..\..\Quake\snd_mpg123.c" />
-    <ClCompile Include="..\..\Quake\snd_opus.c" />
-    <ClCompile Include="..\..\Quake\snd_sdl.c" />
-    <ClCompile Include="..\..\Quake\snd_umx.c" />
-    <ClCompile Include="..\..\Quake\snd_vorbis.c" />
-    <ClCompile Include="..\..\Quake\snd_wave.c" />
-    <ClCompile Include="..\..\Quake\snd_xmp.c" />
-    <ClCompile Include="..\..\Quake\steam.c" />
-    <ClCompile Include="..\..\Quake\strlcat.c">
+    <ClCompile Include="..\..\Quake\src\audio\snd_mp3tag.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_mpg123.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_opus.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_sdl.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_umx.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_vorbis.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_wave.c" />
+    <ClCompile Include="..\..\Quake\src\audio\snd_xmp.c" />
+    <ClCompile Include="..\..\Quake\src\core\steam.c" />
+    <ClCompile Include="..\..\Quake\src\core\strlcat.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\strlcpy.c">
+    <ClCompile Include="..\..\Quake\src\core\strlcpy.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\sv_main.c" />
-    <ClCompile Include="..\..\Quake\sv_move.c" />
-    <ClCompile Include="..\..\Quake\sv_phys.c" />
-    <ClCompile Include="..\..\Quake\sv_user.c" />
-    <ClCompile Include="..\..\Quake\sys_sdl_unix.c">
+    <ClCompile Include="..\..\Quake\src\server\sv_main.c" />
+    <ClCompile Include="..\..\Quake\src\server\sv_move.c" />
+    <ClCompile Include="..\..\Quake\src\server\sv_phys.c" />
+    <ClCompile Include="..\..\Quake\src\server\sv_user.c" />
+    <ClCompile Include="..\..\Quake\src\platform\sys_sdl_unix.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\sys_sdl_win.c" />
-    <ClCompile Include="..\..\Quake\view.c" />
-    <ClCompile Include="..\..\Quake\wad.c" />
-    <ClCompile Include="..\..\Quake\world.c" />
-    <ClCompile Include="..\..\Quake\zone.c" />
+    <ClCompile Include="..\..\Quake\src\platform\sys_sdl_win.c" />
+    <ClCompile Include="..\..\Quake\src\client\view.c" />
+    <ClCompile Include="..\..\Quake\src\assets\wad.c" />
+    <ClCompile Include="..\..\Quake\src\server\world.c" />
+    <ClCompile Include="..\..\Quake\src\core\zone.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\Quake\anorms.h" />
-    <ClInclude Include="..\..\Quake\bc7enc.h" />
-    <ClInclude Include="..\..\Quake\anorm_dots.h" />
-    <ClInclude Include="..\..\Quake\arch_def.h" />
-    <ClInclude Include="..\..\Quake\bgmusic.h" />
-    <ClInclude Include="..\..\Quake\bspfile.h" />
-    <ClInclude Include="..\..\Quake\cdaudio.h" />
-    <ClInclude Include="..\..\Quake\cfgfile.h" />
-    <ClInclude Include="..\..\Quake\client.h" />
-    <ClInclude Include="..\..\Quake\cmd.h" />
-    <ClInclude Include="..\..\Quake\common.h" />
-    <ClInclude Include="..\..\Quake\console.h" />
-    <ClInclude Include="..\..\Quake\crc.h" />
-    <ClInclude Include="..\..\Quake\cvar.h" />
-    <ClInclude Include="..\..\Quake\draw.h" />
-    <ClInclude Include="..\..\Quake\gl_lightgrid.h" />
-    <ClInclude Include="..\..\Quake\glquake.h" />
-    <ClInclude Include="..\..\Quake\gl_model.h" />
-    <ClInclude Include="..\..\Quake\gl_shaders.h" />
-    <ClInclude Include="..\..\Quake\gl_texmgr.h" />
-    <ClInclude Include="..\..\Quake\gl_warp_sin.h" />
-    <ClInclude Include="..\..\Quake\renderer_host_bridge.h" />
-    <ClInclude Include="..\..\Quake\render_dispatch.h" />
-    <ClInclude Include="..\..\Quake\ref_gl_bridge.h" />
-    <ClInclude Include="..\..\Quake\image.h" />
-    <ClInclude Include="..\..\Quake\input.h" />
-    <ClInclude Include="..\..\Quake\jsmn.h" />
-    <ClInclude Include="..\..\Quake\json.h" />
-    <ClInclude Include="..\..\Quake\keys.h" />
-    <ClInclude Include="..\..\Quake\mathlib.h" />
-    <ClInclude Include="..\..\Quake\mat_material.h" />
-    <ClInclude Include="..\..\Quake\mat_material_parse.h" />
-    <ClInclude Include="..\..\Quake\menu.h" />
-    <ClInclude Include="..\..\Quake\miniz.h" />
-    <ClInclude Include="..\..\Quake\modelgen.h" />
-    <ClInclude Include="..\..\Quake\net.h" />
-    <ClInclude Include="..\..\Quake\net_defs.h" />
-    <ClInclude Include="..\..\Quake\phys_interact.h" />
-    <ClInclude Include="..\..\Quake\net_dgrm.h" />
-    <ClInclude Include="..\..\Quake\net_loop.h" />
-    <ClInclude Include="..\..\Quake\net_sys.h" />
-    <ClInclude Include="..\..\Quake\net_wins.h" />
-    <ClInclude Include="..\..\Quake\net_wipx.h" />
-    <ClInclude Include="..\..\Quake\platform.h" />
-    <ClInclude Include="..\..\Quake\progdefs.h" />
-    <ClInclude Include="..\..\Quake\progs.h" />
-    <ClInclude Include="..\..\Quake\protocol.h" />
-    <ClInclude Include="..\..\Quake\pr_comp.h" />
-    <ClInclude Include="..\..\Quake\qs_bmp.h" />
-    <ClInclude Include="..\..\Quake\quakedef.h" />
-    <ClInclude Include="..\..\Quake\q_sound.h" />
-    <ClInclude Include="..\..\Quake\q_stdinc.h" />
-    <ClInclude Include="..\..\Quake\render.h" />
-    <ClInclude Include="..\..\Quake\r_realtimelight.h" />
-    <ClInclude Include="..\..\Quake\r_dlight_pool.h" />
-    <ClInclude Include="..\..\Quake\resource.h" />
-    <ClInclude Include="..\..\Quake\sbar.h" />
-    <ClInclude Include="..\..\Quake\screen.h" />
-    <ClInclude Include="..\..\Quake\sidebar.h" />
-    <ClInclude Include="..\..\Quake\server.h" />
-    <ClInclude Include="..\..\Quake\snd_codec.h" />
-    <ClInclude Include="..\..\Quake\snd_codeci.h" />
-    <ClInclude Include="..\..\Quake\snd_flac.h" />
-    <ClInclude Include="..\..\Quake\snd_mikmod.h" />
-    <ClInclude Include="..\..\Quake\snd_modplug.h" />
-    <ClInclude Include="..\..\Quake\snd_mp3.h" />
-    <ClInclude Include="..\..\Quake\snd_opus.h" />
-    <ClInclude Include="..\..\Quake\sounddef.h" />
-    <ClInclude Include="..\..\Quake\snd_umx.h" />
-    <ClInclude Include="..\..\Quake\snd_vorbis.h" />
-    <ClInclude Include="..\..\Quake\snd_wave.h" />
-    <ClInclude Include="..\..\Quake\snd_xmp.h" />
-    <ClInclude Include="..\..\Quake\spritegn.h" />
-    <ClInclude Include="..\..\Quake\steam.h" />
-    <ClInclude Include="..\..\Quake\strl_fn.h" />
-    <ClInclude Include="..\..\Quake\sys.h" />
-    <ClInclude Include="..\..\Quake\vid.h" />
-    <ClInclude Include="..\..\Quake\view.h" />
-    <ClInclude Include="..\..\Quake\wad.h" />
-    <ClInclude Include="..\..\Quake\bot_main.h" />
-    <ClInclude Include="..\..\Quake\bot_ai.h" />
-    <ClInclude Include="..\..\Quake\bot_combat.h" />
-    <ClInclude Include="..\..\Quake\bot_nav2.h" />
-    <ClInclude Include="..\..\Quake\world.h" />
-    <ClInclude Include="..\..\Quake\wsaerror.h" />
-    <ClInclude Include="..\..\Quake\zone.h" />
+    <ClInclude Include="..\..\Quake\include\anorms.h" />
+    <ClInclude Include="..\..\Quake\include\bc7enc.h" />
+    <ClInclude Include="..\..\Quake\include\arch_def.h" />
+    <ClInclude Include="..\..\Quake\include\bgmusic.h" />
+    <ClInclude Include="..\..\Quake\include\bspfile.h" />
+    <ClInclude Include="..\..\Quake\include\cdaudio.h" />
+    <ClInclude Include="..\..\Quake\include\cfgfile.h" />
+    <ClInclude Include="..\..\Quake\include\client.h" />
+    <ClInclude Include="..\..\Quake\include\cmd.h" />
+    <ClInclude Include="..\..\Quake\include\common.h" />
+    <ClInclude Include="..\..\Quake\include\console.h" />
+    <ClInclude Include="..\..\Quake\include\crc.h" />
+    <ClInclude Include="..\..\Quake\include\cvar.h" />
+    <ClInclude Include="..\..\Quake\include\draw.h" />
+    <ClInclude Include="..\..\Quake\include\gl_lightgrid.h" />
+    <ClInclude Include="..\..\Quake\include\glquake.h" />
+    <ClInclude Include="..\..\Quake\include\gl_model.h" />
+    <ClInclude Include="..\..\Quake\include\gl_texmgr.h" />
+    <ClInclude Include="..\..\Quake\include\renderer_host_bridge.h" />
+    <ClInclude Include="..\..\Quake\include\render_dispatch.h" />
+    <ClInclude Include="..\..\Quake\include\ref_gl_bridge.h" />
+    <ClInclude Include="..\..\Quake\include\image.h" />
+    <ClInclude Include="..\..\Quake\include\input.h" />
+    <ClInclude Include="..\..\Quake\include\jsmn.h" />
+    <ClInclude Include="..\..\Quake\include\json.h" />
+    <ClInclude Include="..\..\Quake\include\keys.h" />
+    <ClInclude Include="..\..\Quake\include\mathlib.h" />
+    <ClInclude Include="..\..\Quake\include\mat_material.h" />
+    <ClInclude Include="..\..\Quake\include\mat_material_parse.h" />
+    <ClInclude Include="..\..\Quake\include\menu.h" />
+    <ClInclude Include="..\..\Quake\include\miniz.h" />
+    <ClInclude Include="..\..\Quake\include\modelgen.h" />
+    <ClInclude Include="..\..\Quake\include\net.h" />
+    <ClInclude Include="..\..\Quake\include\net_defs.h" />
+    <ClInclude Include="..\..\Quake\include\phys_interact.h" />
+    <ClInclude Include="..\..\Quake\include\net_dgrm.h" />
+    <ClInclude Include="..\..\Quake\include\net_loop.h" />
+    <ClInclude Include="..\..\Quake\include\net_sys.h" />
+    <ClInclude Include="..\..\Quake\include\net_wins.h" />
+    <ClInclude Include="..\..\Quake\include\net_wipx.h" />
+    <ClInclude Include="..\..\Quake\include\platform.h" />
+    <ClInclude Include="..\..\Quake\include\progdefs.h" />
+    <ClInclude Include="..\..\Quake\include\progs.h" />
+    <ClInclude Include="..\..\Quake\include\protocol.h" />
+    <ClInclude Include="..\..\Quake\include\pr_comp.h" />
+    <ClInclude Include="..\..\Quake\include\qs_bmp.h" />
+    <ClInclude Include="..\..\Quake\include\quakedef.h" />
+    <ClInclude Include="..\..\Quake\include\q_sound.h" />
+    <ClInclude Include="..\..\Quake\include\q_stdinc.h" />
+    <ClInclude Include="..\..\Quake\include\render.h" />
+    <ClInclude Include="..\..\Quake\include\r_realtimelight.h" />
+    <ClInclude Include="..\..\Quake\include\r_dlight_pool.h" />
+    <ClInclude Include="..\..\Quake\include\resource.h" />
+    <ClInclude Include="..\..\Quake\include\sbar.h" />
+    <ClInclude Include="..\..\Quake\include\screen.h" />
+    <ClInclude Include="..\..\Quake\include\sidebar.h" />
+    <ClInclude Include="..\..\Quake\include\server.h" />
+    <ClInclude Include="..\..\Quake\include\snd_codec.h" />
+    <ClInclude Include="..\..\Quake\include\snd_codeci.h" />
+    <ClInclude Include="..\..\Quake\include\snd_flac.h" />
+    <ClInclude Include="..\..\Quake\include\snd_mikmod.h" />
+    <ClInclude Include="..\..\Quake\include\snd_modplug.h" />
+    <ClInclude Include="..\..\Quake\include\snd_mp3.h" />
+    <ClInclude Include="..\..\Quake\include\snd_opus.h" />
+    <ClInclude Include="..\..\Quake\include\sounddef.h" />
+    <ClInclude Include="..\..\Quake\include\snd_umx.h" />
+    <ClInclude Include="..\..\Quake\include\snd_vorbis.h" />
+    <ClInclude Include="..\..\Quake\include\snd_wave.h" />
+    <ClInclude Include="..\..\Quake\include\snd_xmp.h" />
+    <ClInclude Include="..\..\Quake\include\spritegn.h" />
+    <ClInclude Include="..\..\Quake\include\steam.h" />
+    <ClInclude Include="..\..\Quake\include\strl_fn.h" />
+    <ClInclude Include="..\..\Quake\include\sys.h" />
+    <ClInclude Include="..\..\Quake\include\vid.h" />
+    <ClInclude Include="..\..\Quake\include\view.h" />
+    <ClInclude Include="..\..\Quake\include\wad.h" />
+    <ClInclude Include="..\..\Quake\include\bot_main.h" />
+    <ClInclude Include="..\..\Quake\include\bot_ai.h" />
+    <ClInclude Include="..\..\Quake\include\bot_combat.h" />
+    <ClInclude Include="..\..\Quake\include\bot_nav2.h" />
+    <ClInclude Include="..\..\Quake\include\world.h" />
+    <ClInclude Include="..\..\Quake\include\wsaerror.h" />
+    <ClInclude Include="..\..\Quake\include\zone.h" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="..\QuakeSpasm.rc" />

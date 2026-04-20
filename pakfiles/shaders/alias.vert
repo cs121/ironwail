@@ -31,7 +31,9 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	PPDLightModelDebug; // 0=cpu, 1=blend, 2=gpu-prefer
 	vec4	AmbientSkyParams; // x: enabled, y: scale, z: debug mode, w: unused
 	vec4	AmbientSkyTint;   // rgb: tint, w: cap
-	float	_Pad1[3];
+	float	PostExposure;
+	float	TonemapMode;
+	float	_Pad1[1];
 	InstanceData instances[];
 } AliasFrameBuffer;
 
@@ -110,6 +112,7 @@ layout(location=9) out vec3 out_dlight_color;
 layout(location=10) out float out_sky_visibility;
 
 const int ALIAS_FLAG_VIEWMODEL = 2;
+const int ALIAS_FLAG_ROTATE = 8;
 
 void main()
 {
@@ -139,16 +142,17 @@ void main()
 	else
 		world_shade_dir = normalize(vec3(0.0, 0.5, 1.0));
 	vec3 shadevector = normalize(orientation * world_shade_dir);
-	float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
-	float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
-	float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
 
 	vec3 blended_normal = normalize(mix(pose1.nor, pose2.nor, inst.Blend));
 	mat3 normalmatrix = mat3(inst.NormalMatrix[0].xyz, inst.NormalMatrix[1].xyz, inst.NormalMatrix[2].xyz);
 	vec3 world_normal = normalize(normalmatrix * blended_normal);
 
 	vec3 ambient_src = max(inst.LightColor.rgb - inst.DLightColor.rgb, vec3(0.0));
-	vec3 litAmbient = ambient_src * (mix(0.35, 1.0, lighting) * AliasFrameBuffer.Overbright);
+	float dot1 = r_avertexnormal_dot(pose1.nor, shadevector);
+	float dot2 = r_avertexnormal_dot(pose2.nor, shadevector);
+	float lighting = clamp(mix(dot1, dot2, inst.Blend), 0.0, 1.0);
+	float ambient_wrap = ((inst.Flags & ALIAS_FLAG_ROTATE) != 0) ? 0.68 : 0.35;
+	vec3 litAmbient = ambient_src * (mix(ambient_wrap, 1.0, lighting) * AliasFrameBuffer.Overbright);
 	vec3 litDlight = inst.DLightColor.rgb;
 	float dlight_dir_len_sq = dot(inst.DLightDir.xyz, inst.DLightDir.xyz);
 	if (dlight_dir_len_sq > 1e-6)

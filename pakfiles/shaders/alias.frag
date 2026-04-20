@@ -31,7 +31,9 @@ layout(std430, binding=1) restrict readonly buffer AliasFrameBlock
 	float	PPDLightModelDebug; // 0=cpu, 1=blend, 2=gpu-prefer
 	vec4	AmbientSkyParams; // x: enabled, y: scale, z: debug mode, w: unused
 	vec4	AmbientSkyTint;   // rgb: tint, w: cap
-	float	_Pad1[3];
+	float	PostExposure;
+	float	TonemapMode;
+	float	_Pad1[1];
 	InstanceData instances[];
 } AliasFrameBuffer;
 
@@ -136,9 +138,53 @@ float DepthToCanonical(float depth)
 #endif
 }
 
+vec3 UchimuraTonemap(vec3 x)
+{
+	const float P = 1.0;
+	const float a = 1.0;
+	const float m = 0.22;
+	const float l = 0.4;
+	const float c = 1.33;
+	const float b = 0.0;
+
+	float l0 = ((P - m) * l) / a;
+	float S0 = m + l0;
+	float S1 = m + a * l0;
+	float C2 = (a * P) / (P - S1);
+	float CP = -C2 / P;
+
+	vec3 w0 = vec3(1.0 - smoothstep(0.0, m, x));
+	vec3 w2 = vec3(step(m + l0, x));
+	vec3 w1 = vec3(1.0) - w0 - w2;
+
+	vec3 T = vec3(m * pow(x / m, vec3(c)) + b);
+	vec3 S = vec3(P - (P - S1) * exp(CP * (x - S0)));
+	vec3 L = vec3(m + a * (x - m));
+
+	return clamp(T * w0 + L * w1 + S * w2, 0.0, 1.0);
+}
+
+vec3 LottesTonemap(vec3 x)
+{
+	const vec3 a = vec3(1.6);
+	const vec3 d = vec3(0.977);
+	const vec3 hdrMax = vec3(8.0);
+	const vec3 midIn = vec3(0.18);
+	const vec3 midOut = vec3(0.267);
+
+	const vec3 b = (-pow(midIn, a) + pow(hdrMax, a) * midOut)
+		/ ((pow(hdrMax, a * d) - pow(midIn, a * d)) * midOut);
+	const vec3 c = (pow(hdrMax, a * d) * pow(midIn, a)
+		- pow(hdrMax, a) * pow(midIn, a * d) * midOut)
+		/ ((pow(hdrMax, a * d) - pow(midIn, a * d)) * midOut);
+
+	return clamp(pow(x, a) / (pow(x, a * d) * b + c), 0.0, 1.0);
+}
+
 const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
 const int ALIAS_FLAG_VIEWMODEL = 2;
 const int ALIAS_FLAG_LIGHTNING = 4;
+const int ALIAS_FLAG_ROTATE = 8;
 const int SHADOW_DLIGHT_MAX = 4;
 const int SHADOW_LIGHT_MAX = 64;
 
@@ -174,7 +220,8 @@ layout(location=10) in float in_sky_visibility;
 	void main()
 	{
 		main_body();
-		OUT_COLOR = clamp(OUT_COLOR, 0.0, 1.0);
+		// Keep HDR headroom for bloom/tonemap instead of flattening bright dlight cores.
+		OUT_COLOR = clamp(OUT_COLOR, 0.0, 4.0);
 		vec4 color = vec4(GammaToLinear(OUT_COLOR.rgb), OUT_COLOR.a);
 		float z = 1.0 / gl_FragCoord.w;
 		float weight = clamp(color.a * color.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);
@@ -311,8 +358,8 @@ vec3 ComputeAliasDLightContribution(vec3 worldPos, vec3 worldNormal)
 	int numLights = int(clamp(ShadowNumLights, 0.0, float(SHADOW_LIGHT_MAX)));
 	float falloff_mode = ShadowDLightConfig0.z;
 	float falloff_exp = max(ShadowDLightConfig0.w, 0.01);
-	float core_boost = max(ShadowDLightConfig1.x, 0.0);
-	float core_exp = max(ShadowDLightConfig1.y, 0.01);
+	float core_boost = max(ShadowDLightConfig1.x, 0.55);
+	float core_exp = max(ShadowDLightConfig1.y, 2.0);
 	float knee = max(ShadowDLightConfig1.z, 0.0);
 	float ndotl_mix = clamp(AliasFrameBuffer.DLightDirectionalMix, 0.0, 1.0);
 	float dlight_scale = max(ShadowDLightConfig0.x, 0.0);
@@ -536,7 +583,9 @@ void main()
 			{
 				/* Base rim from model lighting so the effect remains visible even
 				 * in scenes without explicit sun/dlight contributions. */
-				vec3 rim_light = max(lit_color.rgb, vec3(0.0)) * 0.28;
+				vec3 rim_light = max(lit_color.rgb + in_dlight_color * 0.35, vec3(0.0)) * 0.28;
+				if ((in_flags & ALIAS_FLAG_ROTATE) != 0)
+					rim_light *= 1.15;
 				float use_rim_shadows = (RimLightParams0.w > 0.5) ? 1.0 : 0.0;
 
 				if (RimLightParams1.z > 0.0 && ShadowSunDirEnabled.w > 0.5 && (in_flags & ALIAS_FLAG_VIEWMODEL) == 0)
@@ -580,7 +629,8 @@ void main()
 		result.rgb += ghost * vec3(0.5, 0.7, 1.3);
 	}
 
-	result.rgb = clamp(result.rgb, 0.0, 1.0);
+	// Preserve enough headroom for bright dlight cores to remain visible on light surfaces.
+	result.rgb = clamp(result.rgb, 0.0, 4.0);
 
 	if (ShadowEnableDebug.w > 0.5)
 	{
@@ -649,7 +699,7 @@ void main()
 	// for the opaque gate; write raw velocity to avoid sub-pixel ghosting.
 	if (viewModelMask < 0.5 && result.a >= 0.999)
 		velocityOut = velocity;
-	out_velocity = vec4(velocityOut, viewModelMask, 1.0);
+	out_velocity = vec4(velocityOut, viewModelMask, ((in_flags & ALIAS_FLAG_LIGHTNING) != 0) ? 8.0 : 0.0);
 #endif
 
 #if MODE == 1 || MODE == 2
@@ -662,4 +712,15 @@ void main()
 #else
 	OUT_COLOR.rgb += SUPPRESS_BANDING() * AliasFrameBuffer.ScreenDither;
 #endif
+
+	if ((in_flags & ALIAS_FLAG_VIEWMODEL) != 0)
+	{
+		float exposure = max(AliasFrameBuffer.PostExposure, 0.0);
+		float tonemapMode = max(AliasFrameBuffer.TonemapMode, 0.0);
+		vec3 hdr = max(OUT_COLOR.rgb * exposure, vec3(0.0));
+		vec3 mapped = (tonemapMode > 0.5)
+			? ((tonemapMode < 1.5) ? UchimuraTonemap(hdr) : LottesTonemap(hdr))
+			: clamp(hdr, 0.0, 1.0);
+		OUT_COLOR.rgb = clamp(mapped, 0.0, 1.0);
+	}
 }

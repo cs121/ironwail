@@ -631,7 +631,8 @@ float SampleFirstDLightDepth(vec3 worldPos)
 	void main()
 	{
 		main_body();
-		OUT_COLOR = clamp(OUT_COLOR, 0.0, 1.0);
+		// Keep HDR headroom for bloom/tonemap instead of flattening bright dlight cores.
+		OUT_COLOR = clamp(OUT_COLOR, 0.0, 4.0);
 		vec4 color = vec4(GammaToLinear(OUT_COLOR.rgb), OUT_COLOR.a);
 		float z = 1.0 / gl_FragCoord.w;
 		float weight = clamp(color.a * color.a * 0.03 / (1e-5 + pow(z/1e7, 1.0)), 1e-2, 3e3);
@@ -948,8 +949,13 @@ void main()
 				// OPT: pow(x,1.5) = x*sqrt(x), avoids generic pow()
 				float nc            = clamp(1.0 - normalized_d, 0.0, 1.0);
 				float falloff       = nc * sqrt(nc);
+				const float core_boost = 0.55;
+				const float core_exp = 2.0;
+				float core          = 1.0 + core_boost * pow(max(nc, 0.0), core_exp);
+				vec3  light_dir     = light_vec * inv_surface_dist;
+				float ndotl         = max(dot(surface_normal, light_dir), 0.0);
 				float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, l.radius);
-				vec3  light_contrib = attenuation * falloff * shadow * l.color * dynamic_light_noise;
+				vec3  light_contrib = attenuation * falloff * core * ndotl * shadow * l.color * dynamic_light_noise;
 
 				// FIX: Shadow-Term fuer dieses DLight berechnen.
 				// War faelschlicherweise entfernt - keine DLight-Schatten in world.frag.
@@ -958,9 +964,8 @@ void main()
 				if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
 				{
 					float rim_shadow = (RimLightParams0.w > 0.5) ? shadow : 1.0;
-					vec3 light_dir = light_vec * inv_surface_dist;
 					float backlight = mix(0.35, 1.0, max(dot(-surface_normal, light_dir), 0.0));
-					rim_dlight_accum += (attenuation * falloff) * rim_shadow * l.color * dynamic_light_noise * backlight;
+					rim_dlight_accum += (attenuation * falloff * core) * rim_shadow * l.color * dynamic_light_noise * backlight;
 				}
 
 				// Specular
@@ -1122,7 +1127,8 @@ void main()
 
 	result.rgb  *= in_stage_color.rgb;
 	result.a     = in_alpha * in_stage_color.a;
-	result       = clamp(result, 0.0, 1.0);
+	// Preserve enough headroom for bright dlight cores to remain visible on light surfaces.
+	result       = clamp(result, 0.0, 4.0);
 	float fog_att = FogAttenuation(in_pos - EyePos);
 
 	if (lighting_debug_view > 0)

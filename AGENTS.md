@@ -1,90 +1,142 @@
-# Agent Notes
+# AGENTS.md
+
+## Mission
+
+Maintain and improve Ironwail with a high-performance engine mindset.
+
+Combine:
+- Original local build/runtime workflows
+- Improved v2 engineering rules
+- Carmack-style coding philosophy
+- AI agent guardrails
+- Practical smoke testing
+
+---
 
 ## Runtime / Smoke Tests
 
-- Always run local smoke tests and manual launches from `C:\Quake\rerelease`.
-- Always use `C:\Quake\rerelease` as the working directory when launching `ironwail.exe`.
-- Preferred executable path: `C:\Quake\rerelease\ironwail.exe`.
-- Preferred quick smoke test:
-  ```powershell
-  Start-Process -FilePath "C:\Quake\rerelease\ironwail.exe" -WorkingDirectory "C:\Quake\rerelease"
-  ```
-- Preferred timed smoke test:
-  ```powershell
-  $p = Start-Process -FilePath "C:\Quake\rerelease\ironwail.exe" -WorkingDirectory "C:\Quake\rerelease" -PassThru
-  Start-Sleep -Seconds 5
-  if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-  ```
-- If Steam integration blocks a local engine-only smoke, it is acceptable to add `-nosteamapi` for debugging-only runs.
-- Use `-condebug` when you need a startup/runtime log.
-- When launched from `C:\Quake\rerelease`, the log file is `C:\Quake\rerelease\qconsole.log`.
+Always run from:
+C:\Quake\rerelease
 
-## Build / Deploy
+Preferred executable:
+C:\Quake\rerelease\ironwail.exe
 
-- Preferred Windows build command:
-  ```bash
-  "/mnt/c/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe" C:/projects/ironwail/Windows/VisualStudio/ironwail.sln /t:Build /p:Configuration=Release\;Platform=x64 /m
-  ```
-- Preferred output binary:
-  `/mnt/c/projects/ironwail/Windows/VisualStudio/Build-ironwail/bin/x64/Release/ironwail.exe`
-- After a successful Windows build, copy the fresh binary to:
-  `C:\Quake\rerelease\ironwail.exe`
-- Runtime shader overrides used for local debugging live under:
-  `C:\Quake\rerelease\id1\shaders`
+Quick smoke:
+```powershell
+Start-Process -FilePath "C:\Quake\rerelease\ironwail.exe" -WorkingDirectory "C:\Quake\rerelease"
+```
 
-## Repo Conventions
+Timed smoke:
+```powershell
+$p = Start-Process -FilePath "C:\Quake\rerelease\ironwail.exe" -WorkingDirectory "C:\Quake\rerelease" -PassThru
+Start-Sleep -Seconds 5
+if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+```
 
-- Match the existing engine style and naming instead of introducing new subsystem-specific conventions.
-- Use `rg` / `rg --files` for search.
-- Use `apply_patch` for manual file edits.
-- Do not revert unrelated user changes in a dirty tree.
-- Keep the tree compiling after each milestone or focused fix.
-- Prefer small, reviewable changes over large rewrites.
+Use:
+- -condebug
+- -nosteamapi
 
-## Audio Work Notes
+---
 
-- SDL is backend-only: device init, format negotiation, callback/queue/output.
-- Keep SDL types out of gameplay-facing and high-level audio APIs.
-- Do not do parsing, file I/O, allocation, or expensive string lookup in the audio callback.
-- Keep raw playback functional as fallback while sound-def migration is incomplete.
-- Internal sound-def/runtime changes should stay incremental and compile-safe.
+## Build
 
-## Known Local Debugging Notes
+```bash
+"/mnt/c/Program Files/Microsoft Visual Studio/18/Community/MSBuild/Current/Bin/MSBuild.exe" C:/projects/ironwail/Windows/VisualStudio/ironwail.sln /t:Build /p:Configuration=Release;Platform=x64 /m
+```
 
-- `ironwail.cfg` in the local test install lives at `C:\Quake\rerelease\id1\ironwail.cfg`.
-- If a smoke test depends on runtime config behavior, verify the installed config and not only the repo defaults.
-- Local Windows Event Viewer entries for hangs/crashes can be useful:
-  `Application` log, providers `Application Error` and `Windows Error Reporting`.
+Copy built binary to:
 
-## Known Repro Commands
+C:\Quake\rerelease\ironwail.exe
 
-- Short startup smoke:
-  ```powershell
-  $p = Start-Process -FilePath "C:\Quake\rerelease\ironwail.exe" -WorkingDirectory "C:\Quake\rerelease" -PassThru
-  Start-Sleep -Seconds 5
-  if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-  ```
-- Startup smoke with console log:
-  ```powershell
-  $p = Start-Process -FilePath "C:\Quake\rerelease\ironwail.exe" -WorkingDirectory "C:\Quake\rerelease" -ArgumentList "-condebug" -PassThru
-  Start-Sleep -Seconds 5
-  if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-  ```
-- Engine-only smoke when Steam integration gets in the way:
-  ```powershell
-  $p = Start-Process -FilePath "C:\Quake\rerelease\ironwail.exe" -WorkingDirectory "C:\Quake\rerelease" -ArgumentList "-nosteamapi","-condebug" -PassThru
-  Start-Sleep -Seconds 5
-  if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-  ```
-- Demo-loop style smoke:
-  ```powershell
-  $p = Start-Process -FilePath "C:\Quake\rerelease\ironwail.exe" -WorkingDirectory "C:\Quake\rerelease" -ArgumentList "-condebug","+developer","1" -PassThru
-  Start-Sleep -Seconds 90
-  if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-  ```
-- Direct map load smoke:
-  ```powershell
-  $p = Start-Process -FilePath "C:\Quake\rerelease\ironwail.exe" -WorkingDirectory "C:\Quake\rerelease" -ArgumentList "-condebug","+map","start" -PassThru
-  Start-Sleep -Seconds 20
-  if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-  ```
+---
+
+## Carmack Style Rules
+
+1. Make it work
+2. Make it fast
+3. Make it clean
+
+Prefer:
+- simple code
+- direct logic
+- measurable performance
+- clear ownership
+- small functions
+
+Avoid:
+- unnecessary abstraction
+- speculative rewrites
+- clever but fragile code
+
+---
+
+## AI Agent Rules
+
+Always:
+1. inspect symbols
+2. inspect call sites
+3. understand ownership
+4. apply smallest safe fix
+
+Never:
+- fake compile success
+- claim tested if not tested
+- rewrite subsystems blindly
+
+---
+
+## Renderer Rules
+
+Respect:
+- Reverse-Z
+- GL state correctness
+- FBO validity
+- existing fallback paths
+
+Retest:
+- shadows
+- postfx
+- dynamic lights
+- UI/HUD
+- resolution changes
+
+---
+
+## Performance Rules
+
+Avoid:
+- per-frame allocations
+- repeated lookups
+- duplicate passes
+- sync stalls
+
+Prefer:
+- cache reuse
+- batching
+- linear memory access
+
+---
+
+## Audio Rules
+
+No allocations / I/O in callback.
+
+SDL backend only.
+
+---
+
+## Dangerous Files
+
+- gl_rmain.c
+- gl_shadow.c
+- r_postfx.c
+- snd_dma.c
+- host_cmd.c
+- sv_phys.c
+
+---
+
+## Final Rule
+
+The best code is fast, stable, understandable code.

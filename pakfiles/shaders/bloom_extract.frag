@@ -39,10 +39,10 @@ void main()
 		float rawMask = texture(MaskTexture, uv).w;
 		int maskBits = int(floor(rawMask + 0.5));
 
-		bool bloomMask = (maskBits & 1) != 0;
-		bool emissiveMask = (maskBits & 4) != 0;
-
-		if (bloomMask) {
+		if ((maskBits & 8) != 0) {
+			color = vec3(0.0);
+		}
+		else {
 			color = calculateBloom(color, threshold, softKnee);
 		}
 	} else {
