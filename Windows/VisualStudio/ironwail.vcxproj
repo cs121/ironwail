@@ -297,7 +297,12 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile Include="..\..\Quake\src\core\mathlib.c" />
     <ClCompile Include="..\..\Quake\src\render\mat_material.c" />
     <ClCompile Include="..\..\Quake\src\render\mat_material_parse.c" />
-    <ClCompile Include="..\..\Quake\src\ui\menu.c" />
+    <ClCompile Include="..\..\Quake\src\ui\menu_common.c" />
+    <ClCompile Include="..\..\Quake\src\ui\menu_main.c" />
+    <ClCompile Include="..\..\Quake\src\ui\menu_options.c" />
+    <ClCompile Include="..\..\Quake\src\ui\menu_multiplayer.c" />
+    <ClCompile Include="..\..\Quake\src\ui\menu_mods.c" />
+    <ClCompile Include="..\..\Quake\src\ui\menu_video.c" />
     <ClCompile Include="..\..\Quake\src\thirdparty\miniz.c">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>

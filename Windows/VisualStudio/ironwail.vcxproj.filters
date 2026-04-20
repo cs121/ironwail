@@ -174,7 +174,22 @@
     <ClCompile Include="..\..\Quake\src\render\mat_material_parse.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\src\ui\menu.c">
+    <ClCompile Include="..\..\Quake\src\ui\menu_common.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Quake\src\ui\menu_main.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Quake\src\ui\menu_options.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Quake\src\ui\menu_multiplayer.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Quake\src\ui\menu_mods.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\Quake\src\ui\menu_video.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\Quake\src\thirdparty\miniz.c">

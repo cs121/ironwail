@@ -52,12 +52,10 @@ enum m_state_e {
 	m_slist
 };
 
-#ifndef RENDERER_PLUGIN_BUILD
-extern enum m_state_e m_state;
-#endif
-extern enum m_state_e m_return_state;
-
-extern qboolean m_entersound;
+enum m_state_e M_MenuState_GetState (void);
+void M_MenuState_SetState (enum m_state_e state);
+enum m_state_e M_MenuState_GetReturnState (void);
+void M_MenuState_SetReturnState (enum m_state_e state);
 
 //
 // menus
