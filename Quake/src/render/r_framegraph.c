@@ -834,7 +834,7 @@ static void FG_ApplyPassBaseline (const RenderPassDesc *pass, const RenderPassCo
 	}
 }
 
-static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderPassContext *ctx)
+static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, RenderPassContext *ctx)
 {
 	const render_backend_resource_ref_t *target_resource = NULL;
 	const IRenderBackend *backend = ctx ? ctx->backend : NULL;
@@ -921,6 +921,8 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, const RenderP
 	{
 		if (backend && backend->bind_render_target)
 			backend->bind_render_target (ctx ? ctx->resources : NULL, target_resource, bind_backbuffer);
+		if (ctx && output_target == FG_PASS_OUTPUT_COMPOSITE_FBO)
+			ctx->composite_written_this_frame = true;
 	}
 
 	memset (&surface_info, 0, sizeof (surface_info));
@@ -1210,6 +1212,7 @@ void R_FrameGraph_RenderView (void)
 	pass_ctx.frame_plan = &frame_plan;
 	pass_ctx.resources = &resources;
 	pass_ctx.backend = R_GetRenderBackend ();
+	pass_ctx.composite_written_this_frame = false;
 	caps = R_Backend_GetCaps ();
 
 	if (caps && caps->supports_timestamps

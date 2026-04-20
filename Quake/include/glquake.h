@@ -947,7 +947,7 @@ void GL_AddGarbageBuffer (GLuint handle);
 
 qboolean GL_NeedsSceneEffects (void);
 qboolean GL_NeedsPostprocess (void);
-void GL_PostProcess (const RenderGraphResourceHandle *resources);
+void GL_PostProcess (const RenderGraphResourceHandle *resources, qboolean composite_written_this_frame);
 
 typedef struct scene_size_info_s
 {
