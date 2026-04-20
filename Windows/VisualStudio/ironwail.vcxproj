@@ -341,6 +341,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile Include="..\..\Quake\src\render\r_dlight_pool.c" />
     <ClCompile Include="..\..\Quake\src\render\r_backend.c" />
     <ClCompile Include="..\..\Quake\src\render\r_framegraph.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_resources_gl.c" />
     <ClCompile Include="..\..\Quake\src\render\r_passes.c" />
     <ClCompile Include="..\..\Quake\src\render\r_quality.c" />
     <ClCompile Include="..\..\Quake\src\render\r_sanitize.c" />
