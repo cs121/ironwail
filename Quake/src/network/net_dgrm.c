@@ -39,9 +39,16 @@ static int net_landriverlevel;
 static int packetsSent = 0;
 static int packetsReSent = 0;
 static int packetsReceived = 0;
+static int bytesSent = 0;
+static int bytesReceived = 0;
 static int receivedDuplicateCount = 0;
 static int shortPacketCount = 0;
 static int droppedDatagrams;
+static int parseErrorCount = 0;
+static int oversizedPacketCount = 0;
+
+static cvar_t net_dgram_debug = {"net_dgram_debug", "0", CVAR_NONE};
+static cvar_t net_dgram_warnings = {"net_dgram_warnings", "1", CVAR_NONE};
 
 static struct
 {
@@ -54,6 +61,8 @@ static int myDriverLevel;
 
 extern qboolean m_return_onerror;
 extern char m_return_reason[32];
+
+#define DGRAM_DEBUG(...) do { if (net_dgram_debug.value) Con_DPrintf(__VA_ARGS__); } while (0)
 
 
 static char *StrAddr (struct qsockaddr *addr)
@@ -172,6 +181,7 @@ int Datagram_SendMessage (qsocket_t *sock, sizebuf_t *data)
 
 	sock->lastSendTime = net_time;
 	packetsSent++;
+	bytesSent += packetLen;
 	return 1;
 }
 
@@ -205,6 +215,7 @@ static int SendMessageNext (qsocket_t *sock)
 
 	sock->lastSendTime = net_time;
 	packetsSent++;
+	bytesSent += packetLen;
 	return 1;
 }
 
@@ -238,6 +249,7 @@ static int ReSendMessage (qsocket_t *sock)
 
 	sock->lastSendTime = net_time;
 	packetsReSent++;
+	bytesSent += packetLen;
 	return 1;
 }
 
@@ -279,6 +291,7 @@ int Datagram_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 		return -1;
 
 	packetsSent++;
+	bytesSent += packetLen;
 	return 1;
 }
 
@@ -309,21 +322,39 @@ int	Datagram_GetMessage (qsocket_t *sock)
 
 		if (length == (unsigned int)-1)
 		{
-			Con_Printf("Read error\n");
+			parseErrorCount++;
+			if (net_dgram_warnings.value)
+				Con_Printf("Datagram_GetMessage: read error\n");
 			return -1;
 		}
 
 		if (sfunc.AddrCompare(&readaddr, &sock->addr) != 0)
 		{
-			Con_Printf("Forged packet received\n");
-			Con_Printf("Expected: %s\n", StrAddr (&sock->addr));
-			Con_Printf("Received: %s\n", StrAddr (&readaddr));
+			parseErrorCount++;
+			if (net_dgram_warnings.value)
+			{
+				Con_Printf("Datagram_GetMessage: forged packet received\n");
+				Con_Printf("Expected: %s\n", StrAddr (&sock->addr));
+				Con_Printf("Received: %s\n", StrAddr (&readaddr));
+			}
 			continue;
 		}
 
 		if (length < NET_HEADERSIZE)
 		{
 			shortPacketCount++;
+			parseErrorCount++;
+			if (net_dgram_warnings.value)
+				DGRAM_DEBUG("Datagram_GetMessage: short packet (%u bytes)\n", length);
+			continue;
+		}
+
+		if (length > NET_DATAGRAMSIZE)
+		{
+			oversizedPacketCount++;
+			parseErrorCount++;
+			if (net_dgram_warnings.value)
+				Con_Printf("Datagram_GetMessage: oversized packet (%u bytes)\n", length);
 			continue;
 		}
 
@@ -336,12 +367,13 @@ int	Datagram_GetMessage (qsocket_t *sock)
 
 		sequence = BigLong(packetBuffer.sequence);
 		packetsReceived++;
+		bytesReceived += length;
 
 		if (flags & NETFLAG_UNRELIABLE)
 		{
 			if (sequence < sock->unreliableReceiveSequence)
 			{
-				Con_DPrintf("Got a stale datagram\n");
+				DGRAM_DEBUG("Got a stale datagram\n");
 				ret = 0;
 				break;
 			}
@@ -349,7 +381,7 @@ int	Datagram_GetMessage (qsocket_t *sock)
 			{
 				count = sequence - sock->unreliableReceiveSequence;
 				droppedDatagrams += count;
-				Con_DPrintf("Dropped %u datagram(s)\n", count);
+				DGRAM_DEBUG("Dropped %u datagram(s)\n", count);
 			}
 			sock->unreliableReceiveSequence = sequence + 1;
 
@@ -366,18 +398,18 @@ int	Datagram_GetMessage (qsocket_t *sock)
 		{
 			if (sequence != (sock->sendSequence - 1))
 			{
-				Con_DPrintf("Stale ACK received\n");
+				DGRAM_DEBUG("Stale ACK received\n");
 				continue;
 			}
 			if (sequence == sock->ackSequence)
 			{
 				sock->ackSequence++;
 				if (sock->ackSequence != sock->sendSequence)
-					Con_DPrintf("ack sequencing error\n");
+					DGRAM_DEBUG("ack sequencing error\n");
 			}
 			else
 			{
-				Con_DPrintf("Duplicate ACK received\n");
+				DGRAM_DEBUG("Duplicate ACK received\n");
 				continue;
 			}
 			sock->sendMessageLength -= MAX_DATAGRAM;
@@ -454,9 +486,13 @@ static void NET_Stats_f (void)
 		Con_Printf("packetsSent                = %i\n", packetsSent);
 		Con_Printf("packetsReSent              = %i\n", packetsReSent);
 		Con_Printf("packetsReceived            = %i\n", packetsReceived);
+		Con_Printf("bytesSent                  = %i\n", bytesSent);
+		Con_Printf("bytesReceived              = %i\n", bytesReceived);
 		Con_Printf("receivedDuplicateCount     = %i\n", receivedDuplicateCount);
 		Con_Printf("shortPacketCount           = %i\n", shortPacketCount);
 		Con_Printf("droppedDatagrams           = %i\n", droppedDatagrams);
+		Con_Printf("parseErrorCount            = %i\n", parseErrorCount);
+		Con_Printf("oversizedPacketCount       = %i\n", oversizedPacketCount);
 	}
 	else if (Q_strcmp(Cmd_Argv(1), "*") == 0)
 	{
@@ -791,6 +827,8 @@ int Datagram_Init (void)
 	myDriverLevel = net_driverlevel;
 
 	Cmd_AddCommand ("net_stats", NET_Stats_f);
+	Cvar_RegisterVariable (&net_dgram_debug);
+	Cvar_RegisterVariable (&net_dgram_warnings);
 
 	if (safemode || COM_CheckParm("-nolan"))
 		return -1;

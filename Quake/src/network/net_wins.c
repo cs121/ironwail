@@ -35,7 +35,7 @@ static in_addr_t	myAddr;
 
 int winsock_initialized = 0;
 WSADATA		winsockdata;
-#define __wsaerr_static			/* not static: used by net_wipx.c too */
+#define __wsaerr_static
 #include "wsaerror.h"
 
 //=============================================================================

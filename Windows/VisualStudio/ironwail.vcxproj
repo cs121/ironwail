@@ -314,7 +314,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile Include="..\..\Quake\src\network\net_main.c" />
     <ClCompile Include="..\..\Quake\src\network\net_win.c" />
     <ClCompile Include="..\..\Quake\src\network\net_wins.c" />
-    <ClCompile Include="..\..\Quake\src\network\net_wipx.c" />
     <ClCompile Include="..\..\Quake\src\platform\pl_linux.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
@@ -448,7 +447,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClInclude Include="..\..\Quake\include\net_loop.h" />
     <ClInclude Include="..\..\Quake\include\net_sys.h" />
     <ClInclude Include="..\..\Quake\include\net_wins.h" />
-    <ClInclude Include="..\..\Quake\include\net_wipx.h" />
     <ClInclude Include="..\..\Quake\include\platform.h" />
     <ClInclude Include="..\..\Quake\include\progdefs.h" />
     <ClInclude Include="..\..\Quake\include\progs.h" />

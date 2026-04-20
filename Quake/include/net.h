@@ -106,9 +106,7 @@ const char *NET_SlistPrintServerName (int n);
 
 /* FIXME: driver related, but public:
  */
-extern	qboolean	ipxAvailable;
 extern	qboolean	tcpipAvailable;
-extern	char		my_ipx_address[NET_NAMELEN];
 extern	char		my_tcpip_address[NET_NAMELEN];
 
 #endif	/* _QUAKE_NET_H */
