@@ -1633,8 +1633,6 @@ static void Host_Status_f (void)
 	print_fn ("version: %4.2f\n", VERSION);
 	if (tcpipAvailable)
 		print_fn ("tcp/ip:  %s\n", my_tcpip_address);
-	if (ipxAvailable)
-		print_fn ("ipx:     %s\n", my_ipx_address);
 	print_fn ("map:     %s\n", sv.name);
 	print_fn ("players: %i active (%i max)\n\n", net_activeconnections, svs.maxclients);
 	for (j = 0, client = svs.clients; j < svs.maxclients; j++, client++)

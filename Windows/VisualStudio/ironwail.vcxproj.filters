@@ -210,9 +210,6 @@
     <ClCompile Include="..\..\Quake\src\network\net_wins.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\Quake\src\network\net_wipx.c">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\Quake\src\platform\pl_win.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -495,9 +492,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\include\net_wins.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\Quake\include\net_wipx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\Quake\include\platform.h">
