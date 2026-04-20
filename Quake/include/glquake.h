@@ -643,11 +643,54 @@ void R_DrawBrushModels_ShowTris (entity_t **ents, int count);
 void R_DrawAliasModels_ShowTris (entity_t **ents, int count);
 void R_DrawSpriteModels_ShowTris (entity_t **ents, int count);
 void R_GLStateDump (const char *tag);
+
+typedef struct r_view_rect_s
+{
+	int x;
+	int y;
+	int width;
+	int height;
+} r_view_rect_t;
+
+typedef struct r_scene_size_s
+{
+	int width;
+	int height;
+	int scale;
+} r_scene_size_t;
+
+typedef struct r_render_scene_input_s
+{
+	const RenderGraphResourceHandle *resources;
+	r_view_rect_t view_rect;
+	r_scene_size_t scene_size;
+	qboolean has_worldmodel;
+} r_render_scene_input_t;
+
+typedef struct r_warp_resolve_input_s
+{
+	const RenderGraphResourceHandle *resources;
+	r_view_rect_t view_rect;
+	r_scene_size_t scene_size;
+	qboolean needs_postprocess;
+	qboolean dof_enabled;
+	qboolean ssao_enabled;
+	qboolean godrays_preview;
+} r_warp_resolve_input_t;
+
+typedef struct r_postprocess_input_s
+{
+	const RenderGraphResourceHandle *resources;
+	r_view_rect_t view_rect;
+	r_scene_size_t scene_size;
+	qboolean composite_written_this_frame;
+} r_postprocess_input_t;
+
 void R_RenderShadowMaps (void);
 void R_SetupView (void);
 viewmedium_t R_GetViewMedium (void);
-void R_RenderScene (const RenderGraphResourceHandle *resources);
-void R_WarpScaleView (const RenderGraphResourceHandle *resources);
+void R_RenderScene (const r_render_scene_input_t *input);
+void R_WarpScaleView (const r_warp_resolve_input_t *input);
 qboolean R_Shadow_GetSunOcclusionData (float out_viewproj[16], float *out_bias, float *out_pcf_uv);
 qboolean R_Shadow_GetSunCascadeData (float out_viewproj[4][16], float out_splits[4], int *out_count, float *out_bias, float *out_pcf_uv);
 void R_Shadow_ApplyWorldReceiverUniforms (GLuint program);
@@ -948,7 +991,7 @@ void GL_AddGarbageBuffer (GLuint handle);
 
 qboolean GL_NeedsSceneEffects (void);
 qboolean GL_NeedsPostprocess (void);
-void GL_PostProcess (const RenderGraphResourceHandle *resources, qboolean composite_written_this_frame);
+void GL_PostProcess (const r_postprocess_input_t *input);
 
 typedef struct scene_size_info_s
 {
