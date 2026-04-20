@@ -103,6 +103,7 @@ typedef struct render_pass_context_s
 	const RenderFramePlan *frame_plan;
 	const RenderGraphResourceHandle *resources;
 	const IRenderBackend *backend;
+	qboolean composite_written_this_frame;
 } RenderPassContext;
 
 void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan);

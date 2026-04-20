@@ -1177,7 +1177,7 @@ static void GLBackend_PassPostProcess (RenderPassContext *ctx)
 {
 	RenderGraphResourceHandle fallback_resources;
 	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesOrFallback (ctx, &fallback_resources, "Postprocess");
-	GL_PostProcess (resources);
+	GL_PostProcess (resources, ctx ? ctx->composite_written_this_frame : false);
 }
 
 static void GLBackend_PassOverlayViewmodel (RenderPassContext *ctx)

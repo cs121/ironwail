@@ -3105,7 +3105,35 @@ static qboolean GL_PostFXBloomBoostActive (void)
 	return state.bloom_boost > 0.f;
 }
 
-void GL_PostProcess (const RenderGraphResourceHandle *resources)
+static GLuint R_ResolveCriticalResourceOrLegacyFallback (const RenderGraphResourceHandle *resources,
+	render_backend_resource_slot_t slot, const char *usage_tag, GLuint legacy_value, const char *legacy_label)
+{
+	GLuint resolved = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, slot, usage_tag);
+	static int s_legacy_slot_fallback_warn_frame[R_BACKEND_RESOURCE_SLOT_COUNT];
+
+	if (resolved != 0u)
+		return resolved;
+
+	if (resources && R_FrameGraph_HasResourceBySlot (resources, slot))
+		return 0u;
+
+	if (legacy_value == 0u)
+		return 0u;
+
+	if (slot > R_BACKEND_RESOURCE_SLOT_NONE && slot < R_BACKEND_RESOURCE_SLOT_COUNT
+		&& s_legacy_slot_fallback_warn_frame[slot] != r_framecount)
+	{
+		Con_DWarning ("FrameGraph legacy fallback: '%s' using %s for missing slot '%s'\n",
+			(usage_tag && usage_tag[0]) ? usage_tag : "unknown",
+			(legacy_label && legacy_label[0]) ? legacy_label : "<legacy>",
+			R_Backend_ResourceSlotName (slot));
+		s_legacy_slot_fallback_warn_frame[slot] = r_framecount;
+	}
+
+	return legacy_value;
+}
+
+void GL_PostProcess (const RenderGraphResourceHandle *resources, qboolean composite_written_this_frame)
 {
 	int palidx, variant;
 	float saturation;
@@ -3165,37 +3193,33 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 	float postfx_damage_dir_y;
 	float postfx_damage_dir_strength;
 	float dv_time;
-	GLuint scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, "Postprocess");
-	GLuint scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, "Postprocess");
+	GLuint scene_fbo = 0;
+	GLuint scene_color_tex = 0;
+	GLuint scene_velocity_tex = 0;
 	GLuint resolved_scene_velocity_tex = 0;
-	GLuint composite_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO, "Postprocess");
-	GLuint composite_color_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR, "Postprocess");
-	GLuint composite_depth_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH, "Postprocess");
+	GLuint composite_fbo = 0;
+	GLuint composite_color_tex = 0;
+	GLuint composite_depth_tex = 0;
 	int scene_samples = R_Backend_GetSceneSampleCount ();
 	if (scene_samples <= 0)
 		scene_samples = framebufs.scene.samples;
 	msaa = scene_samples > 1;
+	scene_fbo = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, "Postprocess", framebufs.scene.fbo, "framebufs.scene.fbo");
+	scene_color_tex = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, "Postprocess", framebufs.scene.color_tex, "framebufs.scene.color_tex");
+	scene_velocity_tex = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, "Postprocess", framebufs.scene.velocity_tex, "framebufs.scene.velocity_tex");
 	if (msaa)
-		resolved_scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY, "Postprocess");
-	if (!scene_fbo)
-		scene_fbo = framebufs.scene.fbo;
-	if (!scene_velocity_tex)
-		scene_velocity_tex = framebufs.scene.velocity_tex;
-	if (!resolved_scene_velocity_tex)
-		resolved_scene_velocity_tex = framebufs.resolved_scene.velocity_tex;
-	if (!composite_fbo)
-		composite_fbo = framebufs.composite.fbo;
-	if (!composite_color_tex)
-		composite_color_tex = framebufs.composite.color_tex;
-	if (!composite_depth_tex)
-		composite_depth_tex = framebufs.composite.depth_stencil_tex;
+		resolved_scene_velocity_tex = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY, "Postprocess", framebufs.resolved_scene.velocity_tex, "framebufs.resolved_scene.velocity_tex");
+	composite_fbo = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO, "Postprocess", framebufs.composite.fbo, "framebufs.composite.fbo");
+	composite_color_tex = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR, "Postprocess", framebufs.composite.color_tex, "framebufs.composite.color_tex");
+	composite_depth_tex = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH, "Postprocess", framebufs.composite.depth_stencil_tex, "framebufs.composite.depth_stencil_tex");
+	(void)scene_color_tex;
 	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
 	R_GetFramePlanDecisions (NULL, &needs_postprocess);
 	if (!needs_postprocess)
 		return;
 	if (composite_fbo == 0 || composite_color_tex == 0)
 		return;
-	if (!framesetup.composite_ready)
+	if (!composite_written_this_frame)
 	{
 		GL_BeginGroup ("Postprocess backbuffer copy");
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, 0);
@@ -3206,7 +3230,6 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 		glDrawBuffer (GL_BACK);
 		glReadBuffer (GL_BACK);
-		framesetup.composite_ready = true;
 		GL_EndGroup ();
 	}
 
@@ -4340,7 +4363,6 @@ void R_SetupGL (void)
 		GL_SetFramebufferSRGB (srgb_output);
 		framesetup.scene_fbo = framebufs.composite.fbo;
 		framesetup.oit_fbo = framebufs.oit.fbo_composite;
-		framesetup.composite_ready = (target == framebufs.composite.fbo);
 		if (target)
 		{
 			glDrawBuffer (GL_COLOR_ATTACHMENT0);
@@ -4359,7 +4381,6 @@ void R_SetupGL (void)
 		GL_SetFramebufferSRGB (false);
 		framesetup.scene_fbo = framebufs.scene.fbo;
 		framesetup.oit_fbo = framebufs.oit.fbo_scene;
-		framesetup.composite_ready = false;
 		if (framebufs.scene.velocity_tex)
 		{
 			GLuint buffers[2] = { GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1 };
@@ -4522,7 +4543,6 @@ void R_SetupView (void)
 	R_Quality_Update ();
 	R_UpdateDynamicResolutionScale ();
 	R_EnsureRenderTargetSampleState ();
-	framesetup.composite_ready = false;
 	memset (r_framedata.fogdata, 0, sizeof (r_framedata.fogdata));
 	memset (r_framedata.skyfogdata, 0, sizeof (r_framedata.skyfogdata));
 
@@ -5839,37 +5859,22 @@ static void R_ResolveWarpScaleResources (const RenderGraphResourceHandle *resour
 {
 	memset (resolved, 0, sizeof (*resolved));
 
-	resolved->scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, "Warp/resolve");
-	resolved->scene_color_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, "Warp/resolve");
-	resolved->scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, "Warp/resolve");
-	resolved->composite_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO, "Warp/resolve");
 	resolved->scene_samples = R_Backend_GetSceneSampleCount ();
 	if (resolved->scene_samples <= 0)
 		resolved->scene_samples = framebufs.scene.samples;
 	resolved->msaa = resolved->scene_samples > 1;
 
-	if (!resolved->scene_fbo)
-		resolved->scene_fbo = framebufs.scene.fbo;
-	if (!resolved->scene_color_tex)
-		resolved->scene_color_tex = framebufs.scene.color_tex;
-	if (!resolved->scene_velocity_tex)
-		resolved->scene_velocity_tex = framebufs.scene.velocity_tex;
-	if (!resolved->composite_fbo)
-		resolved->composite_fbo = framebufs.composite.fbo;
+	resolved->scene_fbo = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, "Warp/resolve", framebufs.scene.fbo, "framebufs.scene.fbo");
+	resolved->scene_color_tex = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, "Warp/resolve", framebufs.scene.color_tex, "framebufs.scene.color_tex");
+	resolved->scene_velocity_tex = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, "Warp/resolve", framebufs.scene.velocity_tex, "framebufs.scene.velocity_tex");
+	resolved->composite_fbo = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO, "Warp/resolve", framebufs.composite.fbo, "framebufs.composite.fbo");
 
 	if (resolved->msaa)
 	{
-		resolved->resolved_scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO, "Warp/resolve");
-		resolved->resolved_scene_color_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR, "Warp/resolve");
-		resolved->resolved_scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY, "Warp/resolve");
+		resolved->resolved_scene_fbo = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO, "Warp/resolve", framebufs.resolved_scene.fbo, "framebufs.resolved_scene.fbo");
+		resolved->resolved_scene_color_tex = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR, "Warp/resolve", framebufs.resolved_scene.color_tex, "framebufs.resolved_scene.color_tex");
+		resolved->resolved_scene_velocity_tex = R_ResolveCriticalResourceOrLegacyFallback (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY, "Warp/resolve", framebufs.resolved_scene.velocity_tex, "framebufs.resolved_scene.velocity_tex");
 	}
-
-	if (!resolved->resolved_scene_fbo)
-		resolved->resolved_scene_fbo = framebufs.resolved_scene.fbo;
-	if (!resolved->resolved_scene_color_tex)
-		resolved->resolved_scene_color_tex = framebufs.resolved_scene.color_tex;
-	if (!resolved->resolved_scene_velocity_tex)
-		resolved->resolved_scene_velocity_tex = framebufs.resolved_scene.velocity_tex;
 }
 
 /*
@@ -6021,8 +6026,6 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	if (!needwarpscale)
 	{
-		if (fbodest == resolved.composite_fbo)
-			framesetup.composite_ready = true;
 		return;
 	}
 
@@ -6063,8 +6066,6 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	GL_EndGroup ();
 
-	if (fbodest == resolved.composite_fbo)
-		framesetup.composite_ready = true;
 }
 
 /*
