@@ -5822,6 +5822,56 @@ void R_RenderScene (const RenderGraphResourceHandle *resources)
 	R_ShowLightgridDebug ();
 }
 
+typedef struct r_warpscale_resources_s
+{
+	GLuint scene_fbo;
+	GLuint scene_color_tex;
+	GLuint scene_velocity_tex;
+	GLuint resolved_scene_fbo;
+	GLuint resolved_scene_color_tex;
+	GLuint resolved_scene_velocity_tex;
+	GLuint composite_fbo;
+	int scene_samples;
+	qboolean msaa;
+} r_warpscale_resources_t;
+
+static void R_ResolveWarpScaleResources (const RenderGraphResourceHandle *resources, r_warpscale_resources_t *resolved)
+{
+	memset (resolved, 0, sizeof (*resolved));
+
+	resolved->scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, "Warp/resolve");
+	resolved->scene_color_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, "Warp/resolve");
+	resolved->scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, "Warp/resolve");
+	resolved->composite_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO, "Warp/resolve");
+	resolved->scene_samples = R_Backend_GetSceneSampleCount ();
+	if (resolved->scene_samples <= 0)
+		resolved->scene_samples = framebufs.scene.samples;
+	resolved->msaa = resolved->scene_samples > 1;
+
+	if (!resolved->scene_fbo)
+		resolved->scene_fbo = framebufs.scene.fbo;
+	if (!resolved->scene_color_tex)
+		resolved->scene_color_tex = framebufs.scene.color_tex;
+	if (!resolved->scene_velocity_tex)
+		resolved->scene_velocity_tex = framebufs.scene.velocity_tex;
+	if (!resolved->composite_fbo)
+		resolved->composite_fbo = framebufs.composite.fbo;
+
+	if (resolved->msaa)
+	{
+		resolved->resolved_scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO, "Warp/resolve");
+		resolved->resolved_scene_color_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR, "Warp/resolve");
+		resolved->resolved_scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY, "Warp/resolve");
+	}
+
+	if (!resolved->resolved_scene_fbo)
+		resolved->resolved_scene_fbo = framebufs.resolved_scene.fbo;
+	if (!resolved->resolved_scene_color_tex)
+		resolved->resolved_scene_color_tex = framebufs.resolved_scene.color_tex;
+	if (!resolved->resolved_scene_velocity_tex)
+		resolved->resolved_scene_velocity_tex = framebufs.resolved_scene.velocity_tex;
+}
+
 /*
 ================
 R_WarpScaleView
@@ -5836,17 +5886,7 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 {
 	int srcx, srcy, srcw, srch;
 	float smax, tmax;
-	GLuint scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_FBO, "Warp/resolve");
-	GLuint scene_color_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, "Warp/resolve");
-	GLuint scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY, "Warp/resolve");
-	GLuint resolved_scene_fbo = 0;
-	GLuint resolved_scene_color_tex = 0;
-	GLuint resolved_scene_velocity_tex = 0;
-	GLuint composite_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO, "Warp/resolve");
-	int scene_samples = R_Backend_GetSceneSampleCount ();
-	if (scene_samples <= 0)
-		scene_samples = framebufs.scene.samples;
-	qboolean msaa = scene_samples > 1;
+	r_warpscale_resources_t resolved;
 	qboolean needwarpscale;
 	qboolean need_depth_resolve;
 	qboolean force_blit_upscale;
@@ -5858,26 +5898,7 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	GLuint fbodest;
 	double t;
 
-	if (!scene_fbo)
-		scene_fbo = framebufs.scene.fbo;
-	if (!scene_color_tex)
-		scene_color_tex = framebufs.scene.color_tex;
-	if (!scene_velocity_tex)
-		scene_velocity_tex = framebufs.scene.velocity_tex;
-	if (msaa)
-	{
-		resolved_scene_fbo = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO, "Warp/resolve");
-		resolved_scene_color_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR, "Warp/resolve");
-		resolved_scene_velocity_tex = (GLuint)R_FrameGraph_ResolveRequiredResourceBySlot (resources, R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY, "Warp/resolve");
-	}
-	if (!resolved_scene_fbo)
-		resolved_scene_fbo = framebufs.resolved_scene.fbo;
-	if (!resolved_scene_color_tex)
-		resolved_scene_color_tex = framebufs.resolved_scene.color_tex;
-	if (!resolved_scene_velocity_tex)
-		resolved_scene_velocity_tex = framebufs.resolved_scene.velocity_tex;
-	if (!composite_fbo)
-		composite_fbo = framebufs.composite.fbo;
+	R_ResolveWarpScaleResources (resources, &resolved);
 
 	R_GetFramePlanDecisions (&needs_scene_effects, &needs_postprocess);
 	if (!needs_scene_effects)
@@ -5890,17 +5911,17 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	force_blit_upscale = (R_GetSceneRenderScale () != 1) || (r_drs.value > 0.f);
 	needwarpscale = water_warp && !force_blit_upscale;
-	fbodest = needs_postprocess ? composite_fbo : 0;
+	fbodest = needs_postprocess ? resolved.composite_fbo : 0;
 	effective_dof_enabled = R_PostFX_DoFEnabledEffective ();
 	effective_ssao_enabled = ((r_ssao.value > 0.f && r_ssao_intensity.value > 0.f) || r_ssao_debug.value > 0.f);
 	effective_godrays_preview = R_PostFX_GodraysPreviewEnabledEffective ();
-	need_depth_resolve = (fbodest == composite_fbo)
+	need_depth_resolve = (fbodest == resolved.composite_fbo)
 		&& (effective_dof_enabled || effective_ssao_enabled || effective_godrays_preview);
-	if (fbodest == composite_fbo)
+	if (fbodest == resolved.composite_fbo)
 	{
 		const float clear_color[4] = { 0.f, 0.f, 0.f, 1.f };
 		const float clear_depth = 1.f;
-		GL_BindFramebufferFunc (GL_FRAMEBUFFER, composite_fbo);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, resolved.composite_fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_SetScissorEnabled (false);
@@ -5909,18 +5930,18 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 		GL_ClearBufferfvFunc (GL_DEPTH, 0, &clear_depth);
 	}
 
-	if (msaa)
+	if (resolved.msaa)
 	{
 		GL_BeginGroup ("MSAA resolve");
 
-		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, scene_fbo);
-		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, resolved_scene_fbo);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved.scene_fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, resolved.resolved_scene_fbo);
 
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch, 0, 0, srcw, srch, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-		if (scene_velocity_tex && resolved_scene_velocity_tex)
+		if (resolved.scene_velocity_tex && resolved.resolved_scene_velocity_tex)
 		{
 			glReadBuffer (GL_COLOR_ATTACHMENT1);
 			glDrawBuffer (GL_COLOR_ATTACHMENT1);
@@ -5933,7 +5954,7 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 		{
 			int dstw = force_blit_upscale ? r_refdef.vrect.width : srcw;
 			int dsth = force_blit_upscale ? r_refdef.vrect.height : srch;
-			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved_scene_fbo);
+			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved.resolved_scene_fbo);
 			glReadBuffer (GL_COLOR_ATTACHMENT0);
 			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
 			if (fbodest)
@@ -5954,18 +5975,18 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 		int dstw = (R_GetSceneRenderScale () != 1) ? r_refdef.vrect.width : srcw;
 		int dsth = (R_GetSceneRenderScale () != 1) ? r_refdef.vrect.height : srch;
 
-		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, scene_fbo);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved.scene_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
-		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, composite_fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, resolved.composite_fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 	}
 
-	if (!msaa && !needwarpscale)
+	if (!resolved.msaa && !needwarpscale)
 	{
 		int dstw = force_blit_upscale ? r_refdef.vrect.width : srcw;
 		int dsth = force_blit_upscale ? r_refdef.vrect.height : srch;
-		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, scene_fbo);
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved.scene_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
 		if (fbodest)
@@ -6000,7 +6021,7 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	if (!needwarpscale)
 	{
-		if (fbodest == composite_fbo)
+		if (fbodest == resolved.composite_fbo)
 			framesetup.composite_ready = true;
 		return;
 	}
@@ -6034,15 +6055,15 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	GL_Uniform4fFunc (0, smax, tmax, water_warp ? 1.f / 256.f : 0.f, (float)t);
 	// View blends are applied after postprocess/UI to avoid AO/tone-map affecting overlays.
 	GL_Uniform4fFunc (1, 0.f, 0.f, 0.f, 0.f);
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, msaa ? resolved_scene_color_tex : scene_color_tex);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
-	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, water_warp && msaa ? GL_LINEAR : GL_NEAREST);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, resolved.msaa ? resolved.resolved_scene_color_tex : resolved.scene_color_tex);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, water_warp && resolved.msaa ? GL_LINEAR : GL_NEAREST);
+	glTexParameteri (GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, water_warp && resolved.msaa ? GL_LINEAR : GL_NEAREST);
 
 	R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
 
 	GL_EndGroup ();
 
-	if (fbodest == composite_fbo)
+	if (fbodest == resolved.composite_fbo)
 		framesetup.composite_ready = true;
 }
 

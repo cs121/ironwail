@@ -469,6 +469,23 @@ float GL_WaterAlphaForTextureType (textype_t type)
 		return map_wateralpha;
 }
 
+typedef struct r_cvar_registration_s
+{
+	cvar_t *var;
+	void (*callback)(cvar_t *);
+} r_cvar_registration_t;
+
+static void R_RegisterCvarTable (const r_cvar_registration_t *table, size_t count)
+{
+	size_t i;
+	for (i = 0; i < count; ++i)
+	{
+		Cvar_RegisterVariable (table[i].var);
+		if (table[i].callback)
+			Cvar_SetCallback (table[i].var, table[i].callback);
+	}
+}
+
 /*
 ===============
 R_Init
@@ -485,25 +502,45 @@ void R_Init (void)
                 cmd->completion = R_ShowbboxesFilter_Completion_f;
         Cmd_AddCommand ("r_showbboxes_filter_clear", R_ShowbboxesFilterClear_f);
 
-        Lightgrid_Init ();
-        R_SkyVis_Init ();
-        Material_Init ();
+	Lightgrid_Init ();
+	R_SkyVis_Init ();
+	Material_Init ();
 	R_Backend_Init ();
 
-Cvar_RegisterVariable (&r_norefresh);
-Cvar_RegisterVariable (&r_lightmap);
-Cvar_RegisterVariable (&r_lightmap_linear);
-Cvar_SetCallback (&r_lightmap_linear, TexMgr_LightmapLinearCompat_f);
-Cvar_RegisterVariable (&r_lightmap_colorspace);
-Cvar_SetCallback (&r_lightmap_colorspace, TexMgr_LightmapColorspace_f);
-Cvar_RegisterVariable (&r_lightmap_colorspace_debug);
-Cvar_RegisterVariable (&r_lightmap_mipmaps);
-Cvar_RegisterVariable (&r_lightmap16f);
-Cvar_RegisterVariable (&r_lightingdir);
-Cvar_RegisterVariable (&r_rgblighting_enable);
-Cvar_RegisterVariable (&r_fullbright);
-Cvar_RegisterVariable (&r_drawentities);
-Cvar_RegisterVariable (&r_drawviewmodel);
+	{
+		static const r_cvar_registration_t base_cvars[] = {
+			{ &r_norefresh, NULL },
+			{ &r_lightmap, NULL },
+			{ &r_lightmap_linear, TexMgr_LightmapLinearCompat_f },
+			{ &r_lightmap_colorspace, TexMgr_LightmapColorspace_f },
+			{ &r_lightmap_colorspace_debug, NULL },
+			{ &r_lightmap_mipmaps, NULL },
+			{ &r_lightmap16f, NULL },
+			{ &r_lightingdir, NULL },
+			{ &r_rgblighting_enable, NULL },
+			{ &r_fullbright, NULL },
+			{ &r_drawentities, NULL },
+			{ &r_drawviewmodel, NULL }
+		};
+		static const r_cvar_registration_t water_cvars[] = {
+			{ &r_wateralpha, R_SetWateralpha_f },
+			{ &r_litwater, NULL }
+		};
+		static const r_cvar_registration_t color_pipeline_cvars[] = {
+			{ &r_srgb_textures, TexMgr_SRGBTextures_f },
+			{ &r_srgb_framebuffer, NULL },
+			{ &r_debug_colorspace, NULL },
+			{ &r_lighting_debug_view, NULL },
+			{ &r_color_midtone, NULL },
+			{ &r_color_contrast, NULL },
+			{ &r_color_saturation, NULL }
+		};
+
+		R_RegisterCvarTable (base_cvars, q_countof (base_cvars));
+		R_RegisterCvarTable (water_cvars, q_countof (water_cvars));
+		R_RegisterCvarTable (color_pipeline_cvars, q_countof (color_pipeline_cvars));
+	}
+
         Cvar_RegisterVariable (&r_debug_itemlight);
         Cvar_RegisterVariable (&r_minlight_models);
         Cvar_RegisterVariable (&r_model_lightgrid);
@@ -514,9 +551,6 @@ Cvar_RegisterVariable (&r_drawviewmodel);
         Cvar_RegisterVariable (&r_bmodel_relight);
         Cvar_RegisterVariable (&r_model_light_stats);
         Cvar_RegisterVariable (&r_model_light_samples_max);
-        Cvar_RegisterVariable (&r_wateralpha);
-        Cvar_SetCallback (&r_wateralpha, R_SetWateralpha_f);
-        Cvar_RegisterVariable (&r_litwater);
 	Cvar_RegisterVariable (&r_dynamic);
 	Cvar_RegisterVariable (&r_quality);
 	Cvar_RegisterVariable (&r_shadow);
@@ -593,14 +627,6 @@ Cvar_RegisterVariable (&r_exposure_lock);
 Cvar_RegisterVariable (&r_exposure_debug);
 Cvar_RegisterVariable (&r_tonemap_black_lift);
 Cvar_RegisterVariable (&r_tonemap_black_lift_strength);
-Cvar_RegisterVariable (&r_srgb_textures);
-Cvar_SetCallback (&r_srgb_textures, TexMgr_SRGBTextures_f);
-	Cvar_RegisterVariable (&r_srgb_framebuffer);
-	Cvar_RegisterVariable (&r_debug_colorspace);
-	Cvar_RegisterVariable (&r_lighting_debug_view);
-	Cvar_RegisterVariable (&r_color_midtone);
-	Cvar_RegisterVariable (&r_color_contrast);
-	Cvar_RegisterVariable (&r_color_saturation);
 	Cvar_RegisterVariable (&r_bloom);
 	Cvar_RegisterVariable (&r_bloom_threshold);
 	Cvar_RegisterVariable (&r_bloom_knee);
