@@ -272,7 +272,7 @@ static maptype_t ExtraMaps_Categorize (const char *name, const searchpath_t *sou
 		len--;
 	is_dm = (len >= 2 && !memcmp (name + len - 2, "dm", 2));
 
-	if (source->path_id != com_searchpaths->path_id)
+	if (source->path_id != COM_GetSearchPaths ()->path_id)
 	{
 		if (is_start)
 			return MAPTYPE_CUSTOM_ID_START;
@@ -450,7 +450,7 @@ void ExtraMaps_Init (void)
 	// because these are not "add-on" levels
 	q_snprintf (ignorepakdir, sizeof(ignorepakdir), "/%s/", GAMENAME);
 
-	for (search = com_searchpaths; search; search = search->next)
+	for (search = COM_GetSearchPaths (); search; search = search->next)
 	{
 		if (*search->filename) //directory
 		{
@@ -1138,7 +1138,7 @@ static void Modlist_Add (const char *name)
 		char *mapdb = (char *) COM_LoadMallocFile ("mapdb.json", &path_id);
 		if (mapdb)
 		{
-			qboolean is_base_mapdb = !com_searchpaths || path_id < com_searchpaths->path_id;
+			qboolean is_base_mapdb = !COM_GetSearchPaths () || path_id < COM_GetSearchPaths ()->path_id;
 			json_t *json = JSON_Parse (mapdb);
 			q_free(mapdb);
 			if (json)
@@ -1361,7 +1361,7 @@ static void SearchPaths_ForEachExtension (const char *extension, searchpath_excl
 
 	ext = extension[0] == '.' ? extension + 1 : extension;
 
-	for (search = com_searchpaths; search; search = search->next)
+	for (search = COM_GetSearchPaths (); search; search = search->next)
 	{
 		pack_t *pak;
 		int i;
@@ -1542,7 +1542,7 @@ void SkyList_Init (void)
 	pack_t			*pak;
 	int				i;
 
-	for (search = com_searchpaths; search; search = search->next)
+	for (search = COM_GetSearchPaths (); search; search = search->next)
 	{
 		if (*search->filename) //directory
 			SkyList_AddDirRec (search->filename, "gfx/env");

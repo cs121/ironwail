@@ -854,7 +854,7 @@ void SoundDef_LoadAll (void)
 	previous_count = SoundDef_Count ();
 	SoundDef_BeginLoad ();
 
-	for (search = com_searchpaths; search; search = search->next)
+	for (search = COM_GetSearchPaths (); search; search = search->next)
 		VEC_PUSH (paths, search);
 
 	count = VEC_SIZE (paths);

@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "q_ctype.h"
 #include "bgmusic.h"
 #include "steam.h"
+#include "fs_internal.h"
 #include <time.h>
 #include <errno.h>
 #include <limits.h>
@@ -48,17 +49,7 @@ static qboolean		com_modified;	// set true if using non-id files
 qboolean		fitzmode;
 
 static void COM_Path_f (void);
-static qboolean		COM_ExtractZipEntry (pack_t *pack, int file_index, void **out_data, size_t *out_size);
-static int COM_Pk3Compare (const void *a, const void *b);
 
-// known pak0.pak metadata for optional integrity reporting
-#define PAK0_COUNT		339	/* id1/pak0.pak - v1.0x */
-#define PAK0_CRC_V100		13900	/* id1/pak0.pak - v1.00 */
-#define PAK0_CRC_V101		62751	/* id1/pak0.pak - v1.01 */
-#define PAK0_CRC_V106		32981	/* id1/pak0.pak - v1.06 */
-#define PAK0_CRC	(PAK0_CRC_V106)
-#define PAK0_COUNT_V091		308	/* id1/pak0.pak - v0.91/0.92, not supported */
-#define PAK0_CRC_V091		28804	/* id1/pak0.pak - v0.91/0.92, not supported */
 
 THREAD_LOCAL char	com_token[1024];
 int			com_argc;
@@ -1575,12 +1566,12 @@ Immediately exits out if an alternate game was attempted to be started without
 being registered.
 ================
 */
-static qboolean COM_IsStandalone (void)
+qboolean COM_IsStandalone (void)
 {
 	return (standalone.value != 0);
 }
 
-static qboolean COM_IsPak0File (const char *packfile)
+qboolean COM_IsPak0File (const char *packfile)
 {
 	const char *slash = strrchr (packfile, '/');
 	const char *backslash = strrchr (packfile, '\\');
@@ -1588,6 +1579,11 @@ static qboolean COM_IsPak0File (const char *packfile)
 	const char *filename = sep ? sep + 1 : packfile;
 
 	return !q_strcasecmp (filename, "pak0.pak");
+}
+
+qboolean *COM_ModifiedFlag (void)
+{
+	return &com_modified;
 }
 
 static void COM_CheckRegistered (void)
@@ -1775,47 +1771,12 @@ QUAKE FILESYSTEM
 
 THREAD_LOCAL qfileofs_t com_filesize;
 
-
-//
-// on-disk pakfile
-//
-typedef struct
-{
-	char	name[56];
-	int		filepos, filelen;
-} dpackfile_t;
-
-typedef struct
-{
-	char	id[4];
-	int		dirofs;
-	int		dirlen;
-} dpackheader_t;
-
-static void COM_ReportPak0Integrity (const char *packfile, const dpackfile_t *info, int dirlen, int numpackfiles)
-{
-	unsigned short crc;
-
-	if (numpackfiles != PAK0_COUNT)
-		Con_Warning ("Integrity report: %s has %i files (expected %i)\n", packfile, numpackfiles, PAK0_COUNT);
-
-	crc = CRC_Block (info, dirlen);
-	if (crc != PAK0_CRC_V106 && crc != PAK0_CRC_V101 && crc != PAK0_CRC_V100)
-		Con_Warning ("Integrity report: %s directory CRC %u does not match known versions\n", packfile, crc);
-}
-
-#define MAX_FILES_IN_PACK	2048
-
 char	com_gamenames[1024];	//eg: "hipnotic;quoth;warp" ... no id1
 char	com_gamedir[MAX_OSPATH];
 char	com_basedirs[MAX_BASEDIRS][MAX_OSPATH];
 int		com_numbasedirs;
 char	com_nightdivedir[MAX_OSPATH];
 char	com_userprefdir[MAX_OSPATH];
-THREAD_LOCAL int	file_from_pak;		// ZOID: global indicating that file came from a pak
-
-searchpath_t	*com_searchpaths;
-searchpath_t	*com_base_searchpaths;
 
 /*
 ============
@@ -1827,7 +1788,7 @@ static void COM_Path_f (void)
 	searchpath_t	*s;
 
 	Con_Printf ("Current search path:\n");
-	for (s = com_searchpaths; s; s = s->next)
+	for (s = COM_GetSearchPaths (); s; s = s->next)
 	{
 		if (s->pack)
 		{
@@ -2017,12 +1978,12 @@ static int COM_FindFile (const char *filename, int *handle, FILE **file,
 	if (file && handle)
 		Sys_Error ("COM_FindFile: both handle and file set");
 
-	file_from_pak = 0;
+	COM_SetFileFromPak (0);
 
 //
 // search through the path, one element at a time
 //
-	for (search = com_searchpaths; search; search = search->next)
+	for (search = COM_GetSearchPaths (); search; search = search->next)
 	{
 		if (search->pack)	/* look through all the pak file elements */
 		{
@@ -2038,7 +1999,7 @@ static int COM_FindFile (const char *filename, int *handle, FILE **file,
 						continue;
 
 					com_filesize = pak->files[i].filelen;
-					file_from_pak = 1;
+					COM_SetFileFromPak (1);
 					if (path_id)
 						*path_id = search->path_id;
 
@@ -2092,7 +2053,7 @@ MZ_FREE (extracted);
 						continue;
 					// found it!
 					com_filesize = pak->files[i].filelen;
-					file_from_pak = 1;
+					COM_SetFileFromPak (1);
 					if (path_id)
 						*path_id = search->path_id;
 					if (handle)
@@ -2223,7 +2184,7 @@ void COM_CloseFile (int h)
 {
 	searchpath_t	*s;
 
-	for (s = com_searchpaths; s; s = s->next)
+	for (s = COM_GetSearchPaths (); s; s = s->next)
 		if (s->pack && s->pack->handle == h)
 			return;
 
@@ -2403,155 +2364,6 @@ const char *COM_ParseStringNewline(const char *buffer)
 	return buffer + i;
 }
 
-/*
-=================
-COM_LoadPackFile -- johnfitz -- modified based on topaz's tutorial
-
-Takes an explicit (not game tree related) path to a pak file.
-
-Loads the header and directory, adding the files at the beginning
-of the list so they override previous pack files.
-=================
-*/
-static pack_t *COM_LoadPackFile (const char *packfile)
-{
-	dpackheader_t	header;
-	int		i;
-	packfile_t	*newfiles;
-	int		numpackfiles;
-	pack_t		*pack;
-	int		packhandle;
-	dpackfile_t	info[MAX_FILES_IN_PACK];
-
-	if (Sys_FileOpenRead (packfile, &packhandle) == -1)
-		return NULL;
-
-	if (Sys_FileRead(packhandle, &header, sizeof(header)) != (int) sizeof(header) ||
-	    header.id[0] != 'P' || header.id[1] != 'A' || header.id[2] != 'C' || header.id[3] != 'K')
-		Sys_Error ("%s is not a packfile", packfile);
-
-	header.dirofs = LittleLong (header.dirofs);
-	header.dirlen = LittleLong (header.dirlen);
-
-	numpackfiles = header.dirlen / sizeof(dpackfile_t);
-
-	if (header.dirlen < 0 || header.dirofs < 0)
-	{
-		Sys_Error ("Invalid packfile %s (dirlen: %i, dirofs: %i)",
-					packfile, header.dirlen, header.dirofs);
-	}
-	if (!numpackfiles)
-	{
-		Sys_Printf ("WARNING: %s has no files, ignored\n", packfile);
-		Sys_FileClose (packhandle);
-		return NULL;
-	}
-	if (numpackfiles > MAX_FILES_IN_PACK)
-		Sys_Error ("%s has %i files", packfile, numpackfiles);
-
-	newfiles = (packfile_t *) Z_Malloc(numpackfiles * sizeof(packfile_t));
-
-	Sys_FileSeek (packhandle, header.dirofs);
-	if (Sys_FileRead(packhandle, info, header.dirlen) != header.dirlen)
-		Sys_Error ("Error reading %s", packfile);
-
-	if (fs_integrity_report.value && COM_IsPak0File (packfile))
-		COM_ReportPak0Integrity (packfile, info, header.dirlen, numpackfiles);
-
-	// parse the directory
-	for (i = 0; i < numpackfiles; i++)
-	{
-		q_strlcpy (newfiles[i].name, info[i].name, sizeof(newfiles[i].name));
-		newfiles[i].filepos = LittleLong(info[i].filepos);
-		newfiles[i].filelen = LittleLong(info[i].filelen);
-	}
-
-        pack = (pack_t *) Z_Malloc (sizeof (pack_t));
-        q_strlcpy (pack->filename, packfile, sizeof(pack->filename));
-        pack->handle = packhandle;
-        pack->numfiles = numpackfiles;
-        pack->files = newfiles;
-        pack->is_pk3 = false;
-        pack->zip = NULL;
-
-        //Sys_Printf ("Added packfile %s (%i files)\n", packfile, numpackfiles);
-        return pack;
-}
-
-static pack_t *COM_LoadZipFile (const char *zipfile)
-{
-        mz_zip_archive *zip;
-        mz_zip_archive_file_stat file_stat;
-        int numfiles, added, i;
-        packfile_t *newfiles;
-        pack_t *pack;
-
-        zip = (mz_zip_archive *) Z_Malloc (sizeof (*zip));
-        memset (zip, 0, sizeof (*zip));
-
-        if (!mz_zip_reader_init_file (zip, zipfile, 0))
-        {
-                Z_Free (zip);
-                return NULL;
-        }
-
-        numfiles = (int) mz_zip_reader_get_num_files (zip);
-        if (numfiles <= 0)
-        {
-                mz_zip_reader_end (zip);
-                Z_Free (zip);
-                return NULL;
-        }
-
-        newfiles = (packfile_t *) Z_Malloc (numfiles * sizeof (packfile_t));
-
-        for (i = 0, added = 0; i < numfiles; i++)
-        {
-                if (!mz_zip_reader_file_stat (zip, i, &file_stat))
-                        continue;
-                if (file_stat.m_is_directory)
-                        continue;
-                if (file_stat.m_uncomp_size > INT_MAX)
-                {
-                        Con_Warning ("Ignoring oversized file %s in %s\n", file_stat.m_filename, zipfile);
-                        continue;
-                }
-
-                q_strlcpy (newfiles[added].name, file_stat.m_filename, sizeof (newfiles[added].name));
-                newfiles[added].filepos = i;
-                newfiles[added].filelen = (int) file_stat.m_uncomp_size;
-                added++;
-        }
-
-        if (!added)
-        {
-                mz_zip_reader_end (zip);
-                Z_Free (newfiles);
-                Z_Free (zip);
-                return NULL;
-        }
-
-        pack = (pack_t *) Z_Malloc (sizeof (pack_t));
-        q_strlcpy (pack->filename, zipfile, sizeof (pack->filename));
-        pack->handle = -1;
-        pack->numfiles = added;
-        pack->files = newfiles;
-        pack->is_pk3 = true;
-        pack->zip = zip;
-
-        return pack;
-}
-
-static qboolean COM_ExtractZipEntry (pack_t *pack, int file_index, void **out_data, size_t *out_size)
-{
-        mz_zip_archive *zip = (mz_zip_archive *) pack->zip;
-
-        if (!zip)
-                return false;
-
-        *out_data = mz_zip_reader_extract_to_heap (zip, file_index, out_size, 0);
-        return *out_data != NULL;
-}
 
 const char *COM_GetGameNames(qboolean full)
 {
@@ -2564,264 +2376,6 @@ const char *COM_GetGameNames(qboolean full)
 	}
 	return com_gamenames;
 //	return COM_SkipPath(com_gamedir);
-}
-
-/*
-=================
-COM_AddEnginePak
-=================
-*/
-static void COM_PushSearchPath (searchpath_t *search, qboolean append)
-{
-	searchpath_t *tail;
-
-	if (!append)
-	{
-		search->next = com_searchpaths;
-		com_searchpaths = search;
-		return;
-	}
-
-	search->next = NULL;
-	if (!com_searchpaths)
-	{
-		com_searchpaths = search;
-		return;
-	}
-
-	tail = com_searchpaths;
-	while (tail->next)
-		tail = tail->next;
-	tail->next = search;
-}
-
-static void COM_AddEnginePak (unsigned int path_id, qboolean append)
-{
-	int			i;
-	char		pakfile[MAX_OSPATH];
-	pack_t		*pak = NULL;
-	qboolean	modified = com_modified;
-
-	if (host_parms->exedir)
-	{
-		q_snprintf (pakfile, sizeof(pakfile), "%s/" ENGINE_PAK, host_parms->exedir);
-		pak = COM_LoadPackFile (pakfile);
-	}
-
-	if (!pak)
-	{
-		q_snprintf (pakfile, sizeof(pakfile), "%s/" ENGINE_PAK, host_parms->basedir);
-		pak = COM_LoadPackFile (pakfile);
-	}
-
-	if (!pak)
-	{
-		for (i = 0; i < com_numbasedirs; i++)
-		{
-			q_snprintf (pakfile, sizeof(pakfile), "%s/" ENGINE_PAK, com_basedirs[i]);
-			pak = COM_LoadPackFile (pakfile);
-			if (pak)
-				break;
-		}
-	}
-
-	if (pak)
-	{
-		searchpath_t *search = (searchpath_t *) Z_Malloc(sizeof(searchpath_t));
-		search->pack = pak;
-		search->path_id = path_id;
-		COM_PushSearchPath (search, append);
-	}
-
-	com_modified = modified;
-}
-
-static int COM_Pk3Compare (const void *a, const void *b)
-{
-        const char *left = *(const char *const *) a;
-        const char *right = *(const char *const *) b;
-
-        return q_strcasecmp (left, right);
-}
-
-static void COM_AddPk3Files (const char *gamedir, unsigned int path_id, qboolean append)
-{
-        char **pk3files = NULL;
-        size_t numpk3 = 0, maxpk3 = 0;
-        findfile_t *find;
-
-        for (find = Sys_FindFirst (gamedir, NULL); find; find = Sys_FindNext (find))
-        {
-                const char *ext;
-
-                if (find->attribs & FA_DIRECTORY)
-                        continue;
-
-                ext = COM_FileGetExtension (find->name);
-                if (!ext || q_strcasecmp (ext, "pk3"))
-                        continue;
-
-                if (numpk3 == maxpk3)
-                {
-                        maxpk3 = maxpk3 ? maxpk3 * 2 : 8;
-                        pk3files = (char **) (pk3files ? Z_Realloc (pk3files, maxpk3 * sizeof (char *)) : Z_Malloc (maxpk3 * sizeof (char *)));
-                }
-
-                pk3files[numpk3] = (char *) Z_Malloc (MAX_OSPATH);
-                q_snprintf (pk3files[numpk3], MAX_OSPATH, "%s/%s", gamedir, find->name);
-                numpk3++;
-        }
-
-        if (numpk3 > 1)
-                qsort (pk3files, numpk3, sizeof (char *), COM_Pk3Compare);
-
-        while (numpk3--)
-        {
-                pack_t *pak = COM_LoadZipFile (pk3files[numpk3]);
-
-                if (pak)
-                {
-                        searchpath_t *search = (searchpath_t *) Z_Malloc(sizeof(searchpath_t));
-                        search->path_id = path_id;
-                        search->pack = pak;
-                        COM_PushSearchPath (search, append);
-                        com_modified = true;
-                }
-
-                Z_Free (pk3files[numpk3]);
-        }
-
-        if (pk3files)
-                Z_Free (pk3files);
-}
-
-/*
-=================
-COM_AddGameDirectory -- johnfitz -- modified based on topaz's tutorial
-=================
-*/
-void COM_AddGameDirectory (const char *dir)
-{
-	const char *base;
-	int i, j;
-	unsigned int path_id;
-	qboolean append_paths;
-	searchpath_t *search;
-	pack_t *pak;
-	char pakfile[MAX_OSPATH];
-
-	if (*com_gamenames)
-		q_strlcat(com_gamenames, ";", sizeof(com_gamenames));
-	q_strlcat(com_gamenames, dir, sizeof(com_gamenames));
-
-	// quakespasm enables mission pack flags automatically,
-	// so e.g. -game rogue works without breaking the hud
-	if (!q_strcasecmp(dir,"rogue")) {
-		rogue = true;
-		standard_quake = false;
-	}
-	if (!q_strcasecmp(dir,"hipnotic") || !q_strcasecmp(dir,"quoth")) {
-		hipnotic = true;
-		standard_quake = false;
-	}
-	if (!q_strcasecmp(dir,"q64")) {
-		quake64 = true;
-	}
-
-	// assign a path_id to this game directory
-	if (com_searchpaths)
-		path_id = com_searchpaths->path_id << 1;
-	else
-		path_id = 1U;
-
-	append_paths = (COM_IsStandalone () && !q_strcasecmp (dir, GAMENAME));
-
-	for (j = 0; j < com_numbasedirs; j++)
-	{
-		base = com_basedirs[j];
-		q_snprintf (com_gamedir, sizeof (com_gamedir), "%s/%s", base, dir);
-
-		// add the directory to the search path
-		search = (searchpath_t *) Z_Malloc(sizeof(searchpath_t));
-		search->path_id = path_id;
-		q_strlcpy (search->filename, com_gamedir, sizeof(search->filename));
-		COM_PushSearchPath (search, append_paths);
-
-                // add any pak files in the format pak0.pak pak1.pak, ...
-                for (i = 0; ; i++)
-                {
-                        q_snprintf (pakfile, sizeof(pakfile), "%s/pak%i.pak", com_gamedir, i);
-                        pak = COM_LoadPackFile (pakfile);
-			if (!pak)
-				break;
-
-			search = (searchpath_t *) Z_Malloc(sizeof(searchpath_t));
-			search->path_id = path_id;
-			search->pack = pak;
-			COM_PushSearchPath (search, append_paths);
-
-                        // add engine pak after pak0.pak
-                        if (i == 0 && j == 0 && path_id == 1u && !fitzmode)
-                                COM_AddEnginePak (path_id, append_paths);
-                }
-
-                COM_AddPk3Files (com_gamedir, path_id, append_paths);
-        }
-}
-
-void COM_ResetGameDirectories(const char *newgamedirs)
-{
-	const char *newpath, *path;
-	searchpath_t *search;
-	//Kill the extra game if it is loaded
-        while (com_searchpaths != com_base_searchpaths)
-        {
-                if (com_searchpaths->pack)
-                {
-                        if (com_searchpaths->pack->is_pk3)
-                        {
-                                if (com_searchpaths->pack->zip)
-                                        mz_zip_reader_end ((mz_zip_archive *) com_searchpaths->pack->zip);
-                                Z_Free (com_searchpaths->pack->zip);
-                        }
-                        else
-                        {
-                                Sys_FileClose (com_searchpaths->pack->handle);
-                        }
-                        Z_Free (com_searchpaths->pack->files);
-                        Z_Free (com_searchpaths->pack);
-                }
-                search = com_searchpaths->next;
-                Z_Free (com_searchpaths);
-		com_searchpaths = search;
-	}
-	hipnotic = false;
-	rogue = false;
-	quake64 = false;
-	standard_quake = true;
-	//wipe the list of mod gamedirs
-	*com_gamenames = 0;
-	//reset this too
-	q_strlcpy (com_gamedir, va("%s/%s", com_basedirs[com_numbasedirs-1], GAMENAME), sizeof(com_gamedir));
-
-	for(newpath = newgamedirs; newpath && *newpath; )
-	{
-		char *e = strchr(newpath, ';');
-		if (e)
-			*e++ = 0;
-
-		if (!q_strcasecmp(GAMENAME, newpath))
-			path = NULL;
-		else for (path = newgamedirs; path < newpath; path += strlen(path)+1)
-		{
-			if (!q_strcasecmp(path, newpath))
-				break;
-		}
-
-		if (path == newpath)	//not already loaded
-			COM_AddGameDirectory(newpath);
-		newpath = e;
-	}
 }
 
 //==============================================================================
@@ -2998,584 +2552,6 @@ static void COM_Game_f (void)
 
 /*
 =================
-COM_SetBaseDir
-=================
-*/
-static qboolean COM_SetBaseDir (const char *path)
-{
-	const char pak0[] = "/" GAMENAME "/pak0.pak";
-	char pakpath[countof (com_basedirs[0])];
-	size_t i;
-
-	i = strlen (path);
-	if (i && (path[i - 1] == '/' || path[i - 1] == '\\'))
-		--i;
-	if (i + countof (pak0) > countof (pakpath))
-		return false;
-
-	memcpy (pakpath, path, i);
-	memcpy (pakpath + i, pak0, sizeof (pak0));
-	if (!Sys_FileExists (pakpath))
-	{
-		if (!COM_IsStandalone ())
-		return false;
-		Con_Warning ("Standalone mode enabled: using basedir without required game data in %s\n", GAMENAME);
-	}
-
-	memcpy (com_basedirs[0], path, i);
-	com_basedirs[0][i] = 0;
-	com_numbasedirs = 1;
-
-	return true;
-}
-
-/*
-=================
-COM_AddBaseDir
-=================
-*/
-static void COM_AddBaseDir (const char *path)
-{
-	if (com_numbasedirs >= countof (com_basedirs))
-		Sys_Error ("Too many basedirs (%d)", com_numbasedirs);
-	if ((size_t) q_strlcpy (com_basedirs[com_numbasedirs++], path, sizeof (com_basedirs[0])) >= sizeof (com_basedirs[0]))
-		Sys_Error ("Basedir too long (%d characters, max %d):\n%s\n", (int)strlen (path), (int)sizeof (com_basedirs[0]), path);
-}
-
-/*
-=================
-COM_MigrateNightdiveUserFiles
-
-Checks the Nightdive dir for subdirs containing
-an ironwail.cfg file and moves known files over
-to the new dir
-=================
-*/
-static void COM_MigrateNightdiveUserFiles (void)
-{
-	const char	*episodes[] = {"id1", "hipnotic", "rogue", "dopa", "mg1"};
-	const char	*filetypes[] = {"cfg", "txt", "sav", "dem", "png", "jpg"};
-	const char	*game, *ext;
-	char		src[MAX_OSPATH];
-	char		dst[MAX_OSPATH];
-	char		*subdirs = NULL;
-	findfile_t	*moditer, *fileiter;
-	size_t		i;
-
-	// move episode dirs if they contain a config file
-	for (i = 0; i < countof (episodes); i++)
-	{
-		const char *episode = episodes[i];
-		if ((size_t) q_snprintf (src, sizeof (src), "%s/%s/%s", com_nightdivedir, episode, CONFIG_NAME) >= sizeof (src))
-			continue;
-		if (!Sys_FileExists (src))
-			continue;
-		q_snprintf (src, sizeof (src), "%s/%s", com_nightdivedir, episode);
-		q_snprintf (dst, sizeof (dst), "%s/%s", com_userprefdir, episode);
-		Sys_rename (src, dst);
-	}
-
-	// iterate through all remaining subdirs
-	for (moditer = Sys_FindFirst (com_nightdivedir, NULL); moditer; moditer = Sys_FindNext (moditer))
-	{
-		char srcmod[MAX_OSPATH];
-		char dstmod[MAX_OSPATH];
-		char *cfg;
-
-		if (!(moditer->attribs & FA_DIRECTORY))
-			continue;
-		if (!strcmp (moditer->name, ".") || !strcmp (moditer->name, ".."))
-			continue;
-
-		for (i = 0; i < countof (episodes); i++)
-			if (!strcmp (moditer->name, episodes[i]))
-				break;
-		if (i != countof (episodes))
-			continue;
-
-		// look for engine config
-		if ((size_t) q_snprintf (src, sizeof (src), "%s/%s/%s", com_nightdivedir, moditer->name, CONFIG_NAME) >= sizeof (src) ||
-			(size_t) q_snprintf (dst, sizeof (dst), "%s/%s/%s", com_userprefdir, moditer->name, CONFIG_NAME) >= sizeof (dst))
-			continue;
-		cfg = (char *) COM_LoadMallocFile_TextMode_OSPath (src, NULL);
-		if (!cfg)
-			continue;
-
-		// write config (and create directory structure as needed)
-		COM_WriteFile_OSPath (dst, cfg, strlen (cfg));
-		free (cfg);
-		Sys_remove (src);
-
-		// move all recognized files
-		q_snprintf (srcmod, sizeof (srcmod), "%s/%s", com_nightdivedir, moditer->name);
-		q_snprintf (dstmod, sizeof (dstmod), "%s/%s", com_userprefdir, moditer->name);
-		for (fileiter = Sys_FindFirst (srcmod, NULL); fileiter; fileiter = Sys_FindNext (fileiter))
-		{
-			if (fileiter->attribs & FA_DIRECTORY)
-				continue;
-
-			ext = COM_FileGetExtension (fileiter->name);
-			for (i = 0; i < countof (filetypes); i++)
-				if (!q_strcasecmp (ext, filetypes[i]))
-					break;
-			if (i == countof (filetypes))
-				continue;
-
-			if ((size_t) q_snprintf (src, sizeof (src), "%s/%s", srcmod, fileiter->name) < sizeof (src) &&
-				(size_t) q_snprintf (dst, sizeof (dst), "%s/%s", dstmod, fileiter->name) < sizeof (dst))
-			{
-				Sys_rename (src, dst);
-			}
-		}
-
-		Vec_Append ((void **)&subdirs, 1, moditer->name, strlen (moditer->name) + 1);
-	}
-
-	VEC_PUSH (subdirs, '\0');
-
-	// remove empty dirs
-	for (game = subdirs; *game; game += strlen (game) + 1)
-	{
-		q_snprintf (src, sizeof (src), "%s/%s", com_nightdivedir, game);
-		Sys_remove (game);
-	}
-
-	VEC_FREE (subdirs);
-}
-
-/*
-=================
-COM_SetBaseDirRec
-
-Looks for a valid basedir in all the ancestors of the supplied path
-Returns the path relative to that basedir if successful, NULL otherwise
-=================
-*/
-static const char *COM_SetBaseDirRec (const char *start)
-{
-	char	buf[MAX_OSPATH];
-	size_t	i, len;
-
-	q_strlcpy (buf, start, sizeof (buf));
-	len = strlen (start);
-
-	for (i = len - 1; i > 1; i--)
-	{
-		if (Sys_IsPathSep (buf[i]))
-		{
-			buf[i] = '\0';
-			if (COM_SetBaseDir (buf))
-				return start + i + 1;
-		}
-	}
-
-	return NULL;
-}
-
-/*
-=================
-COM_MakeRelative
-=================
-*/
-static const char *COM_MakeRelative (const char *basepath, const char *fullpath)
-{
-	for (; *basepath && *fullpath; ++basepath, ++fullpath)
-	{
-		if (Sys_IsPathSep (*basepath) != Sys_IsPathSep (*fullpath))
-			return NULL;
-		if (*basepath != *fullpath)
-			return NULL;
-	}
-
-	while (Sys_IsPathSep (*fullpath))
-		++fullpath;
-
-	return fullpath;
-}
-
-/*
-=================
-COM_PatchCmdLine
-
-Tries to initialize basedir from a single command-line argument
-(either a mod dir or a map/save/demo file)
-
-Returns true if successful, false otherwise
-=================
-*/
-static qboolean COM_PatchCmdLine (const char *fullpath)
-{
-	static char	game[MAX_QPATH];
-	char		qpath[MAX_QPATH];
-	char		printpath[MAX_OSPATH];
-	const char	*relpath;
-	const char	*sep;
-	int			type;
-	int			i;
-
-	// The path (file or directory) must exist
-	type = Sys_FileType (fullpath);
-	if (type == FS_ENT_NONE)
-	{
-		UTF8_ToQuake (printpath, sizeof (printpath), fullpath);
-		Con_SafePrintf ("\"%s\" does not exist\n", printpath);
-		return false;
-	}
-
-	// Look for the corresponding basedir
-	relpath = NULL;
-	for (i = 0; i < com_numbasedirs; i++)
-	{
-		relpath = COM_MakeRelative (com_basedirs[i], fullpath);
-		if (relpath)
-			break;
-	}
-	if (!relpath)
-	{
-		UTF8_ToQuake (printpath, sizeof (printpath), fullpath);
-		Con_SafePrintf ("\"%s\" does not belong to an existing Quake installation\n", printpath);
-		return false;
-	}
-
-	// Game dir is the first component of the relative path
-	sep = COM_FirstPathSep (relpath);
-	if ((uintptr_t)(sep - relpath) >= sizeof (game))
-	{
-		UTF8_ToQuake (printpath, sizeof (printpath), relpath);
-		Con_SafePrintf ("\"%s\" is too long\n", printpath);
-		return false;
-	}
-
-	UTF8_ToQuake (printpath, sizeof (printpath), relpath);
-
-	// Apply game dir
-	if (*sep)
-	{
-		Q_strncpy (game, relpath, (int)(sep - relpath));
-		COM_AddArg ("-game");
-		COM_AddArg (game);
-		relpath = sep + 1;
-	}
-	else if (type == FS_ENT_DIRECTORY)
-	{
-		COM_AddArg ("-game");
-		COM_AddArg (relpath);
-		return true;
-	}
-	else
-	{
-		game[0] = '\0';
-	}
-
-	q_strlcpy (qpath, relpath, sizeof (qpath));
-	COM_NormalizePath (qpath);
-
-	// Check argument type
-	switch (type)
-	{
-	case FS_ENT_DIRECTORY:
-		if (qpath[0])
-		{
-			if (q_strcasecmp (qpath, "maps") == 0)
-			{
-				Cbuf_AddText ("menu_maps\n");
-				return true;
-			}
-			UTF8_ToQuake (printpath, sizeof (printpath), qpath);
-			Con_SafePrintf ("\x02subdir \"%s\" ignored\n", printpath);
-		}
-		return true;
-
-	case FS_ENT_FILE:
-		{
-			const char *ext = COM_FileGetExtension (qpath);
-
-			// Map file
-			if (q_strcasecmp (ext, "bsp") == 0)
-			{
-				if (!game[0])
-				{
-					Con_SafePrintf ("Map \"%s\" not in a mod dir, ignoring.\n", printpath);
-					return false;
-				}
-				if (q_strncasecmp (qpath, "maps/", 5) != 0)
-				{
-					Con_SafePrintf ("Map \"%s\" not in the \"maps\" dir, ignoring.\n", printpath);
-					return false;
-				}
-				memmove (qpath, qpath + 5, strlen (qpath + 5) + 1);
-				Cbuf_AddText (va ("menu_maps \"%s\"\n", qpath));
-				return true;
-			}
-
-			// Save file
-			if (q_strcasecmp (ext, "sav") == 0)
-			{
-				const char *kex = game[0] ? "" : "kex";
-				Cbuf_AddText (va ("load \"%s\" %s\n", qpath, kex));
-				return true;
-			}
-
-			// Demo file
-			if (q_strcasecmp (ext, "dem") == 0)
-			{
-				if (!game[0])
-				{
-					Con_SafePrintf ("Demo \"%s\" not in a mod dir, ignoring.\n", printpath);
-					return false;
-				}
-				Cbuf_AddText (va ("playdemo \"%s\"\n", qpath));
-				return true;
-			}
-
-			break;
-		}
-
-	default:
-		break;
-	}
-
-	if (!game[0])
-		Con_SafePrintf ("File \"%s\" not in a mod dir, ignoring.\n", printpath);
-	else
-		Con_SafePrintf ("Unsupported file type \"%s\", ignoring.\n", printpath);
-
-	return false;
-}
-
-/*
-=================
-COM_InitBaseDir
-=================
-*/
-static void COM_InitBaseDir (void)
-{
-	steamgame_t steamquake = {0};
-	char path[MAX_OSPATH];
-	char original[MAX_OSPATH] = {0};
-	char remastered[MAX_OSPATH] = {0};
-	int i, steam = 0, gog = 0, egs = 0;
-
-	// command-line basedir takes priority over everything else
-	i = COM_CheckParm ("-basedir");
-	if (i)
-	{
-		const char *dir;
-		if (i >= com_argc - 1)
-			Sys_Error (
-				"Please specify a valid Quake directory after -basedir\n"
-				"(one that has an " GAMENAME " subdirectory containing pak0.pak)\n"
-			);
-
-		dir = com_argv[++i];
-		if (!COM_SetBaseDir (dir))
-			Sys_Error (
-				"The specified -basedir is not a valid Quake directory:\n"
-				"%s\n"
-				"doesn't have an " GAMENAME " subdirectory containing pak0.pak.\n",
-				dir
-			);
-
-		for (;;) // add all other -basedirs
-		{
-			i = COM_CheckParmNext (i, "-basedir");
-			if (!i)
-				break;
-			if (i >= com_argc - 1)
-				Sys_Error ("Please specify a directory after -basedir\n");
-			COM_AddBaseDir (com_argv[++i]);
-		}
-
-		return;
-	}
-
-	// skip default basedir if a store version is requested explicitly
-	steam = COM_CheckParm ("-steam");
-	if (steam)
-		goto try_steam;
-	gog = COM_CheckParm ("-gog");
-	if (gog)
-		goto try_gog;
-	egs = COM_CheckParm ("-egs");
-	if (!egs)
-		egs = COM_CheckParm ("-epic");
-	if (egs)
-		goto try_egs;
-
-	// try current working directory, then its ancestors (in case the executable is in its own subdirectory)
-	if (COM_SetBaseDir (host_parms->basedir))
-		return;
-	if (COM_SetBaseDirRec (host_parms->basedir))
-		return;
-
-	// on Linux, game data might actually be in the user dir
-	if (host_parms->userdir && host_parms->userdir != host_parms->basedir && COM_SetBaseDir (host_parms->userdir))
-	{
-		host_parms->basedir = host_parms->userdir;
-		return;
-	}
-
-	if (!COM_CheckParm ("-nosteam"))
-	{
-	try_steam:
-		if (Steam_FindGame (&steamquake, QUAKE_STEAM_APPID) &&
-			Steam_ResolvePath (original, sizeof (original), &steamquake))
-		{
-			if ((size_t) q_snprintf (remastered, sizeof (remastered), "%s/rerelease", original) >= sizeof (remastered))
-				remastered[0] = '\0';
-			else if (!Sys_GetSteamQuakeUserDir (com_nightdivedir, sizeof (com_nightdivedir), steamquake.library))
-				com_nightdivedir[0] = '\0';
-		}
-		else
-		{
-			memset (&steamquake, 0, sizeof (steamquake));
-		}
-		if (steam)
-			goto storesetup;
-	}
-
-	if (!COM_CheckParm ("-nogog"))
-	{
-	try_gog:
-		if (!original[0] && !Sys_GetGOGQuakeDir (original, sizeof (original)))
-			original[0] = '\0';
-		if (!remastered[0])
-		{
-			if (Sys_GetGOGQuakeEnhancedDir (remastered, sizeof (remastered)))
-			{
-				if (!com_nightdivedir[0] && !Sys_GetGOGQuakeEnhancedUserDir (com_nightdivedir, sizeof (com_nightdivedir)))
-					com_nightdivedir[0] = '\0';
-			}
-			else
-				remastered[0] = '\0';
-		}
-		if (gog)
-			goto storesetup;
-	}
-
-	if (!COM_CheckParm ("-noegs") && !COM_CheckParm ("-noepic"))
-	{
-	try_egs:
-		if (!remastered[0])
-		{
-			if (EGS_FindGame (remastered, sizeof (remastered), QUAKE_EGS_NAMESPACE, QUAKE_EGS_ITEM_ID, QUAKE_EGS_APP_NAME))
-			{
-				// same directory as GOG
-				if (!Sys_GetGOGQuakeEnhancedUserDir (com_nightdivedir, sizeof (com_nightdivedir)))
-					com_nightdivedir[0] = '\0';
-			}
-			else
-				remastered[0] = '\0';
-		}
-		if (egs)
-			goto storesetup;
-	}
-
-storesetup:
-	if (original[0] || remastered[0])
-	{
-		quakeflavor_t flavor;
-		if (original[0] && remastered[0])
-		{
-			if (COM_CheckParm ("-prefremaster") || COM_CheckParm ("-remaster") || COM_CheckParm ("-remastered"))
-				flavor = QUAKE_FLAVOR_REMASTERED;
-			else if (COM_CheckParm ("-preforiginal") || COM_CheckParm ("-original"))
-				flavor = QUAKE_FLAVOR_ORIGINAL;
-			else
-				flavor = ChooseQuakeFlavor ();
-		}
-		else
-			flavor = remastered[0] ? QUAKE_FLAVOR_REMASTERED : QUAKE_FLAVOR_ORIGINAL;
-		q_strlcpy (path, flavor == QUAKE_FLAVOR_REMASTERED ? remastered : original, sizeof (path));
-
-		if (steamquake.appid)
-			Steam_Init (&steamquake);
-
-		if (COM_SetBaseDir (path))
-		{
-			if (!Sys_GetAltUserPrefDir (flavor == QUAKE_FLAVOR_REMASTERED, com_userprefdir, sizeof (com_userprefdir)))
-				Sys_Error ("Couldn't set up settings dir");
-
-			if (flavor == QUAKE_FLAVOR_REMASTERED)
-			{
-				if (com_nightdivedir[0])
-				{
-					COM_MigrateNightdiveUserFiles ();
-					COM_AddBaseDir (com_nightdivedir);
-				}
-				else
-					Con_Warning ("Nightdive dir not found\n");
-			}
-			else
-			{
-				com_nightdivedir[0] = '\0';
-			}
-			
-			host_parms->userdir = com_userprefdir;
-
-			return;
-		}
-	}
-
-	if (steam)
-		Sys_Error ("Couldn't find Steam Quake");
-	if (gog)
-		Sys_Error ("Couldn't find GOG Quake");
-	if (egs)
-		Sys_Error ("Couldn't find Epic Games Store Quake");
-
-	Sys_Error (
-		"Couldn't determine where Quake is installed.\n"
-		"Please use the -basedir option to specify a path\n"
-		"(with an " GAMENAME " subdirectory containing pak0.pak)"
-	);
-}
-
-/*
-=================
-COM_ChooseStartArgFlavor
-
-Checks if the supplied path belongs to the user dir
-of a specific Quake flavor (original/remastered)
-and adds the corresponding command-line argument if needed
-=================
-*/
-static void COM_ChooseStartArgFlavor (const char *startarg)
-{
-	steamgame_t steamquake;
-	char steampath[MAX_OSPATH];
-	char userdir[MAX_OSPATH];
-
-	if (Sys_GetAltUserPrefDir (true, userdir, sizeof (userdir)) && COM_MakeRelative (userdir, startarg))
-	{
-		COM_AddArg ("-prefremaster");
-		return;
-	}
-
-	if (Sys_GetAltUserPrefDir (false, userdir, sizeof (userdir)) && COM_MakeRelative (userdir, startarg))
-	{
-		COM_AddArg ("-preforiginal");
-		return;
-	}
-
-	if (Steam_FindGame (&steamquake, QUAKE_STEAM_APPID) &&
-		Steam_ResolvePath (steampath, sizeof (steampath), &steamquake) &&
-		Sys_GetSteamQuakeUserDir (userdir, sizeof (userdir), steamquake.library) &&
-		COM_MakeRelative (userdir, startarg))
-	{
-		COM_AddArg ("-prefremaster");
-		return;
-	}
-
-	if (Sys_GetGOGQuakeEnhancedUserDir (userdir, sizeof (userdir)) && COM_MakeRelative (userdir, startarg))
-	{
-		COM_AddArg ("-prefremaster");
-		return;
-	}
-}
-
-/*
-=================
 COM_InitFilesystem
 =================
 */
@@ -3600,16 +2576,16 @@ void COM_InitFilesystem (void) //johnfitz -- modified based on topaz's tutorial
 
 	startarg = (com_argc == 2 && Sys_FileType (com_argv[1]) != FS_ENT_NONE) ? com_argv[1] : NULL;
 	if (startarg)
-		COM_ChooseStartArgFlavor (startarg);
+		COM_BootstrapChooseStartArgFlavor (startarg);
 
-	if (!startarg || !COM_SetBaseDirRec (startarg))
-		COM_InitBaseDir ();
+	if (!startarg || !COM_BootstrapSetBaseDirRec (startarg))
+		COM_BootstrapInitBaseDir ();
 
 	if (host_parms->userdir != host_parms->basedir)
-		COM_AddBaseDir (host_parms->userdir);
+		COM_BootstrapAddBaseDir (host_parms->userdir);
 
 	if (startarg)
-		COM_PatchCmdLine (startarg);
+		COM_BootstrapPatchCmdLine (startarg);
 
 	i = COM_CheckParm ("-basegame");
 	if (i)
@@ -3640,7 +2616,7 @@ void COM_InitFilesystem (void) //johnfitz -- modified based on topaz's tutorial
 	 * any set gamedirs, such as those from -game command line
 	 * arguments or by the 'game' console command will be freed
 	 * up to here upon a new game command. */
-	com_base_searchpaths = com_searchpaths;
+	COM_SetBaseSearchPaths (COM_GetSearchPaths ());
 	COM_ResetGameDirectories("");
 
 	Modlist_Init ();

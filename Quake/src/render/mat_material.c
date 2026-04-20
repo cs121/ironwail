@@ -1013,7 +1013,7 @@ static void Material_LoadAll (void)
 	if (r_materials.value <= 0.f)
 		return;
 
-	for (search = com_searchpaths; search; search = search->next)
+	for (search = COM_GetSearchPaths (); search; search = search->next)
 	{
 		VEC_PUSH (paths, search);
 	}

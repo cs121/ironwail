@@ -689,7 +689,7 @@ static qboolean GL_GetShaderTimestamp (const char *qpath, time_t *out_timestamp)
 	if (!qpath || !*qpath || !out_timestamp)
 		return false;
 
-	for (search = com_searchpaths; search; search = search->next)
+	for (search = COM_GetSearchPaths (); search; search = search->next)
 	{
 		if (!search->filename[0])
 			continue;

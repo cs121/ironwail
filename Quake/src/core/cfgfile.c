@@ -159,7 +159,7 @@ int CFG_OpenConfig (const char *cfg_name)
 	CFG_CloseConfig ();
 
 	length = (long) COM_FOpenFile (cfg_name, &f, NULL);
-	pak = file_from_pak;
+	pak = COM_GetFileFromPak ();
 	if (length == -1)
 		return -1;
 

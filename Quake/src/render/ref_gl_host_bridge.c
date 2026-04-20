@@ -951,7 +951,7 @@ void R_Backend_FillHostBridge (iw_renderer_host_bridge_t *out)
 	s_bridge_data.cl_numvisedicts = &cl_numvisedicts;
 	s_bridge_data.cl_entities = &cl_entities;
 	s_bridge_data.in_attack = &in_attack;
-	s_bridge_data.com_searchpaths = &com_searchpaths;
+	s_bridge_data.com_searchpaths = COM_GetSearchPathsPointer ();
 	s_bridge_data.com_filesize = &com_filesize;
 	s_bridge_data.con_initialized = &con_initialized;
 	s_bridge_data.developer = &developer;
