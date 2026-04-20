@@ -812,8 +812,7 @@ static void FG_MaybePrintStats (void)
 
 static void FG_ApplyPassBaseline (const RenderPassDesc *pass, const RenderPassContext *ctx)
 {
-	const IRenderBackend *backend = ctx ? ctx->backend : NULL;
-	unsigned baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR;
+	unsigned baseline_bits = 0u;
 
 	if (pass && pass->baseline_bits != 0u)
 		baseline_bits = pass->baseline_bits;
@@ -826,12 +825,8 @@ static void FG_ApplyPassBaseline (const RenderPassDesc *pass, const RenderPassCo
 		s_pass_baseline_autobind_warn_frame = r_framecount;
 	}
 
-	if ((baseline_bits & FG_PASS_BASELINE_RESET_SCISSOR) != 0u
-		&& backend
-		&& backend->set_scissor)
-	{
-		backend->set_scissor (false, 0, 0, 0, 0);
-	}
+	(void)ctx;
+	R_Backend_ApplyFrameGraphBaseline (baseline_bits);
 }
 
 static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, RenderPassContext *ctx)

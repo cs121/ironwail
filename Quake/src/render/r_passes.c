@@ -3,6 +3,13 @@
 #include "glquake.h"
 #include "r_framegraph.h"
 
+#define FG_PASS_BASELINE_DETERMINISTIC_STATE ( \
+	FG_PASS_BASELINE_RESET_SCISSOR | \
+	FG_PASS_BASELINE_RESET_BLEND | \
+	FG_PASS_BASELINE_RESET_DEPTH | \
+	FG_PASS_BASELINE_RESET_CULL | \
+	FG_PASS_BASELINE_RESET_PROGRAM_BINDINGS)
+
 static qboolean R_FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
 {
 	return ctx && ctx->frame_plan
@@ -146,7 +153,7 @@ static const RenderPassDesc s_setup_view_framegraph_pass = {
 	.reads = RENDER_RES_NONE,
 	.writes = RENDER_RES_NONE,
 	.side_effects = 1u << 0,
-	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR,
+	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE,
 	.output_target = FG_PASS_OUTPUT_KEEP,
 	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
 	.enabled = NULL,
@@ -160,7 +167,7 @@ static const RenderPassDesc s_shadowmaps_framegraph_pass = {
 	.reads = RENDER_RES_NONE,
 	.writes = RENDER_RES_SHADOW_SUN_DEPTH,
 	.side_effects = 0,
-	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR,
+	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE,
 	.output_target = FG_PASS_OUTPUT_KEEP,
 	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
 	.enabled = R_FG_PassWhenShadowEnabled,
@@ -175,7 +182,7 @@ static const RenderPassDesc s_scene_framegraph_pass = {
 	.reads = RENDER_RES_DECALS | RENDER_RES_SHADOW_SUN_DEPTH,
 	.writes = RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_VELOCITY,
 	.side_effects = 0,
-	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
+	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
 	.output_target = FG_PASS_OUTPUT_AUTO_SCENE,
 	.viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT_SCALED,
 	.enabled = NULL,
@@ -192,7 +199,7 @@ static const RenderPassDesc s_warp_resolve_framegraph_pass = {
 	.reads = RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH,
 	.writes = RENDER_RES_COMPOSITE_COLOR | RENDER_RES_COMPOSITE_DEPTH,
 	.side_effects = 1u << 0,
-	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
+	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
 	.output_target = FG_PASS_OUTPUT_AUTO_WARP,
 	.viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT,
 	.enabled = NULL,
@@ -209,7 +216,7 @@ static const RenderPassDesc s_ssao_fog_handoff_framegraph_pass = {
 	.reads = RENDER_RES_NONE,
 	.writes = RENDER_RES_SSAO_FOG_STATE,
 	.side_effects = 0,
-	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR,
+	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE,
 	.output_target = FG_PASS_OUTPUT_KEEP,
 	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
 	.enabled = NULL,
@@ -221,7 +228,7 @@ static const RenderPassDesc s_postprocess_framegraph_pass = {
 	.reads = RENDER_RES_COMPOSITE_COLOR | RENDER_RES_COMPOSITE_DEPTH | RENDER_RES_SSAO_FOG_STATE,
 	.writes = RENDER_RES_COMPOSITE_COLOR,
 	.side_effects = 1u << 0,
-	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
+	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
 	.output_target = FG_PASS_OUTPUT_BACKBUFFER,
 	.viewport_mode = FG_PASS_VIEWPORT_FULL_WINDOW,
 	.enabled = R_FG_PassWhenPostprocessEnabled,
@@ -237,7 +244,7 @@ static const RenderPassDesc s_viewmodel_framegraph_pass = {
 	.reads = RENDER_RES_COMPOSITE_COLOR,
 	.writes = RENDER_RES_NONE,
 	.side_effects = 1u << 0,
-	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
+	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
 	.output_target = FG_PASS_OUTPUT_BACKBUFFER,
 	.viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT,
 	.enabled = R_FG_PassWhenViewmodelEnabled,
@@ -251,7 +258,7 @@ static const RenderPassDesc s_polyblend_framegraph_pass = {
 	.reads = RENDER_RES_COMPOSITE_COLOR,
 	.writes = RENDER_RES_NONE,
 	.side_effects = 1u << 0,
-	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
+	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE | FG_PASS_BASELINE_REQUIRE_AUTOBIND,
 	.output_target = FG_PASS_OUTPUT_BACKBUFFER,
 	.viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT,
 	.enabled = R_FG_PassWhenPolyblendEnabled,
@@ -265,7 +272,7 @@ static const RenderPassDesc s_storeprev_framegraph_pass = {
 	.reads = RENDER_RES_COMPOSITE_COLOR | RENDER_RES_SCENE_DEPTH,
 	.writes = RENDER_RES_NONE,
 	.side_effects = 1u << 0,
-	.baseline_bits = FG_PASS_BASELINE_RESET_SCISSOR,
+	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE,
 	.output_target = FG_PASS_OUTPUT_KEEP,
 	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
 	.enabled = R_FG_PassWhenStorePrevEnabled,
