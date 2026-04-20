@@ -536,9 +536,9 @@ void R_Init (void)
 			{ &r_color_saturation, NULL }
 		};
 
-		R_RegisterCvarTable (base_cvars, q_countof (base_cvars));
-		R_RegisterCvarTable (water_cvars, q_countof (water_cvars));
-		R_RegisterCvarTable (color_pipeline_cvars, q_countof (color_pipeline_cvars));
+		R_RegisterCvarTable (base_cvars, Q_COUNTOF (base_cvars));
+		R_RegisterCvarTable (water_cvars, Q_COUNTOF (water_cvars));
+		R_RegisterCvarTable (color_pipeline_cvars, Q_COUNTOF (color_pipeline_cvars));
 	}
 
         Cvar_RegisterVariable (&r_debug_itemlight);

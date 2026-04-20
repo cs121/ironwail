@@ -444,6 +444,8 @@ extern	int		com_numbasedirs;
 extern	char	com_basedirs[MAX_BASEDIRS][MAX_OSPATH];
 extern	char	com_gamedir[MAX_OSPATH];
 extern	char	com_nightdivedir[MAX_OSPATH];
+extern	char	com_userprefdir[MAX_OSPATH];
+extern	char	com_gamenames[1024];
 int COM_GetFileFromPak (void);
 void COM_SetFileFromPak (int value);
 #endif
@@ -513,6 +515,9 @@ byte *COM_LoadMallocFile_TextMode_OSPath (const char *path, long *len_out);
 
 // Replaces CR/CRLF with LF.
 char *COM_NormalizeLineEndings (char *buffer);
+const char *COM_FirstPathSep (const char *path);
+int COM_AddArg (const char *arg);
+void COM_NormalizePath (char *path);
 
 // Attempts to parse an int, followed by a newline.
 // Returns advanced buffer position.
@@ -561,7 +566,7 @@ long FS_filelength (fshandle_t *fh);
 
 #ifndef RENDERER_PLUGIN_BUILD
 extern struct cvar_s	registered;
-extern qboolean		standard_quake, rogue, hipnotic;
+extern qboolean		standard_quake, rogue, hipnotic, quake64;
 extern qboolean		fitzmode;
 	/* if true, run in fitzquake mode disabling custom quakespasm hacks */
 #endif

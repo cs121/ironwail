@@ -537,7 +537,11 @@ static void Q3P_LoadEffectDefs (void)
 
 	memset (q3p_effect_defs, 0, sizeof (q3p_effect_defs));
 
+#ifdef RENDERER_PLUGIN_BUILD
+	for (search = com_searchpaths; search; search = search->next)
+#else
 	for (search = COM_GetSearchPaths (); search; search = search->next)
+#endif
 	{
 		if (search->pack)
 		{

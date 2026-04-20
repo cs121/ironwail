@@ -1146,12 +1146,17 @@ static qboolean R_PostFX_DRSGuardActive (void)
 	return R_GetSceneRenderScale () != 1 || r_drs.value > 0.f;
 }
 
-static qboolean R_PostFX_DoFEnabledEffective (void)
+qboolean R_SSAO_EnabledEffective (void)
+{
+	return (r_ssao.value > 0.f && r_ssao_intensity.value > 0.f) || r_ssao_debug.value > 0.f;
+}
+
+qboolean R_PostFX_DoFEnabledEffective (void)
 {
 	return R_DoFEnabled () && !R_PostFX_DRSGuardActive ();
 }
 
-static qboolean R_PostFX_GodraysPreviewEnabledEffective (void)
+qboolean R_PostFX_GodraysPreviewEnabledEffective (void)
 {
 	if (R_PostFX_DRSGuardActive ())
 		return false;

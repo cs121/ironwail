@@ -203,12 +203,10 @@ void main()
 	}
 	else
 	{
-		vec3 gn = cross(dFdx(in_pos), dFdy(in_pos));
-		float gl = length(gn);
-		surface_normal = (gl > 0.0) ? (gn / gl) : vec3(0.0, 0.0, 1.0);
+		vec3 geom_normal = cross(dFdx(in_pos), dFdy(in_pos));
+		float geom_normal_len = length(geom_normal);
+		surface_normal = (geom_normal_len > 1e-8) ? (geom_normal / geom_normal_len) : vec3(0.0, 0.0, 1.0);
 	}
-	if (!gl_FrontFacing)
-		surface_normal = -surface_normal;
 	vec3 to_eye = EyePos - in_pos;
 	float to_eye_len_sq = dot(to_eye, to_eye);
 	vec3 view_dir = (to_eye_len_sq > 1e-8) ? (to_eye * inversesqrt(to_eye_len_sq)) : vec3(0.0, 0.0, 1.0);
@@ -275,8 +273,7 @@ void main()
 			// knee==0 → shaped == core_intensity (no division overhead on most compilers)
 			float shaped = (knee > 0.0) ? (core_intensity / (core_intensity + knee)) : core_intensity;
 
-			// Physically closer falloff: standard Lambert term with no wrap.
-			// This keeps the side facing the light as the brightest side.
+			// Standard Lambert term: bright only on the light-facing side.
 			float ndotl_raw = max(dot(surface_normal, light_dir), 0.0);
 			float ndotl = mix(1.0, ndotl_raw, ndotl_mix);
 

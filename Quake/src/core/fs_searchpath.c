@@ -7,6 +7,8 @@ Thread-safety assumptions:
 - Readers may traverse without locks after mutation is quiescent.
 */
 
+#include "quakedef.h"
+#include "common.h"
 #include "fs_internal.h"
 
 searchpath_t *com_searchpaths;

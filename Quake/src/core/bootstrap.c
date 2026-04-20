@@ -6,6 +6,9 @@ Thread-safety assumptions:
 - Called only during startup on main thread before FS runtime mutations.
 */
 
+#include "quakedef.h"
+#include "common.h"
+#include "steam.h"
 #include "fs_internal.h"
 
 static qboolean COM_SetBaseDir (const char *path)

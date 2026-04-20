@@ -15,6 +15,7 @@ set "ROOT_ASSET_FILES=ironwail.pak"
 REM Deploy-Ziel: FIX nach C:\Quake\rerelease
 set "DST_DIR=C:\Quake\rerelease"
 set "DST_ID1_ASSET_ROOT=%DST_DIR%\id1"
+set "DST_IW_ASSET_ROOT=%DST_DIR%\ironwail"
 
 REM Release-EXE Pfad relativ
 set "SRC_EXE=Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exe"
@@ -120,6 +121,7 @@ if errorlevel 1 (
 REM ========== Ordner anlegen ==========
 call :log "[2/6] Stelle Deploy-Ordner sicher..."
 if not exist "%DST_ID1_ASSET_ROOT%" mkdir "%DST_ID1_ASSET_ROOT%"
+if not exist "%DST_IW_ASSET_ROOT%" mkdir "%DST_IW_ASSET_ROOT%"
 
 REM ========== EXE ==========
 call :log "[3/6] Kopiere Executable..."
@@ -153,6 +155,12 @@ REM ========== Runtime Assets ==========
 call :log "[5/6] Kopiere id1-Assets..."
 for %%D in (%ID1_ASSET_DIRS%) do (
   call :copy_tree "%SRC_PAKFILES_ROOT%\%%D" "%DST_ID1_ASSET_ROOT%\%%D" "id1/%%D"
+  if errorlevel 1 exit /b !errorlevel!
+)
+
+call :log "[5b/6] Kopiere ironwail-Assets..."
+for %%D in (%ID1_ASSET_DIRS%) do (
+  call :copy_tree "%SRC_PAKFILES_ROOT%\%%D" "%DST_IW_ASSET_ROOT%\%%D" "ironwail/%%D"
   if errorlevel 1 exit /b !errorlevel!
 )
 

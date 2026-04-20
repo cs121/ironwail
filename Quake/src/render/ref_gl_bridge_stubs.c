@@ -1348,6 +1348,32 @@ qboolean R_FrameGraph_AddPass (const void *pass_desc)
 	return g_bridge_fn->r_framegraph_add_pass (pass_desc);
 }
 
+qboolean R_FrameGraph_HasResourceBySlot (const RenderGraphResourceHandle *resources, render_backend_resource_slot_t slot)
+{
+	return resources && slot > R_BACKEND_RESOURCE_SLOT_NONE && slot < R_BACKEND_RESOURCE_SLOT_COUNT
+		&& resources->slot_resource_ids[slot] != 0u;
+}
+
+const char *R_Backend_ResourceSlotName (render_backend_resource_slot_t slot)
+{
+	switch (slot)
+	{
+	case R_BACKEND_RESOURCE_SLOT_SCENE_FBO: return "scene_fbo";
+	case R_BACKEND_RESOURCE_SLOT_SCENE_COLOR: return "scene_color";
+	case R_BACKEND_RESOURCE_SLOT_SCENE_VELOCITY: return "scene_velocity";
+	case R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH: return "scene_depth";
+	case R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_FBO: return "resolved_scene_fbo";
+	case R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_COLOR: return "resolved_scene_color";
+	case R_BACKEND_RESOURCE_SLOT_RESOLVED_SCENE_VELOCITY: return "resolved_scene_velocity";
+	case R_BACKEND_RESOURCE_SLOT_COMPOSITE_FBO: return "composite_fbo";
+	case R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR: return "composite_color";
+	case R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH: return "composite_depth";
+	case R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH: return "shadow_sun_depth";
+	case R_BACKEND_RESOURCE_SLOT_VELOCITY: return "velocity";
+	default: return "unknown";
+	}
+}
+
 float R_Tonemap_TemperedOverbright (float overbright)
 {
 	return g_bridge_fn->r_tonemap_tempered_overbright (overbright);

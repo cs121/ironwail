@@ -7,6 +7,7 @@ Thread-safety assumptions:
 - Read-side access is lock-free after startup; no concurrent mutation supported.
 */
 
+#include "quakedef.h"
 #include "fs_internal.h"
 #include "miniz.h"
 #include <limits.h>

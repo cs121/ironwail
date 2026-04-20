@@ -227,6 +227,7 @@
     <ClCompile Include="..\..\Quake\src\render\r_decals.c" />
     <ClCompile Include="..\..\Quake\src\render\r_sprite.c" />
     <ClCompile Include="..\..\Quake\src\render\r_brush.c" />
+    <ClCompile Include="..\..\Quake\src\render\r_resources_gl.c" />
     <ClCompile Include="..\..\Quake\src\render\r_postfx.c" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

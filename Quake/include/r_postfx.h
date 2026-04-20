@@ -28,5 +28,7 @@ void R_PostFX_RegisterCvars (void);
 void R_PostFX_GetState (postfx_state_t *out_state);
 GLuint R_PostFX_GetLUTTexture (void);
 int R_PostFX_GetLUTSize (void);
+qboolean R_PostFX_DoFEnabledEffective (void);
+qboolean R_PostFX_GodraysPreviewEnabledEffective (void);
 
 #endif

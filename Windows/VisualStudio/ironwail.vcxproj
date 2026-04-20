@@ -245,6 +245,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     </ClCompile>
     <ClCompile Include="..\..\Quake\src\audio\cd_null.c" />
     <ClCompile Include="..\..\Quake\src\core\cfgfile.c" />
+    <ClCompile Include="..\..\Quake\src\core\bootstrap.c" />
     <ClCompile Include="..\..\Quake\src\client\chase.c" />
     <ClCompile Include="..\..\Quake\src\client\cl_demo.c" />
     <ClCompile Include="..\..\Quake\src\client\cl_input.c" />
@@ -258,6 +259,8 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile Include="..\..\Quake\src\core\console.c" />
     <ClCompile Include="..\..\Quake\src\core\crc.c" />
     <ClCompile Include="..\..\Quake\src\core\cvar.c" />
+    <ClCompile Include="..\..\Quake\src\core\fs_pack.c" />
+    <ClCompile Include="..\..\Quake\src\core\fs_searchpath.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_draw.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_fog.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_lightgrid.c" />

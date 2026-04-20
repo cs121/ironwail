@@ -1,4 +1,14 @@
 #include "renderer_plugin.h"
+#include <stdarg.h>
+#include <stdio.h>
+
+static void Con_Printf (const char *fmt, ...)
+{
+	va_list args;
+	va_start (args, fmt);
+	vfprintf (stdout, fmt, args);
+	va_end (args);
+}
 
 static const RenderBackendCaps s_dx12_caps = {
 	false, /* supports_timestamps */

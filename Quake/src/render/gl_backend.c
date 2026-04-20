@@ -1,6 +1,8 @@
 #include "quakedef.h"
 #include "glquake.h"
 #include "gl_backend.h"
+#include "r_ssao.h"
+#include "r_postfx.h"
 
 #include "r_framegraph.h"
 #include "renderer_plugin.h"
@@ -1194,9 +1196,9 @@ static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
 	input.scene_size.width = R_GetSceneRenderWidth ();
 	input.scene_size.height = R_GetSceneRenderHeight ();
 	input.scene_size.scale = R_GetSceneRenderScale ();
-	R_GetFramePlanDecisions (NULL, &input.needs_postprocess);
+	input.needs_postprocess = GL_NeedsPostprocess ();
 	input.dof_enabled = R_PostFX_DoFEnabledEffective ();
-	input.ssao_enabled = ((r_ssao.value > 0.f && r_ssao_intensity.value > 0.f) || r_ssao_debug.value > 0.f);
+	input.ssao_enabled = R_SSAO_EnabledEffective ();
 	input.godrays_preview = R_PostFX_GodraysPreviewEnabledEffective ();
 
 	R_WarpScaleView (&input);

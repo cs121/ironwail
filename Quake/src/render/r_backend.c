@@ -188,7 +188,7 @@ static void R_Backend_ClearActiveCaps (void)
 	memset (&s_active_backend_caps, 0, sizeof (s_active_backend_caps));
 }
 
-static const char *R_Backend_ResourceSlotName (render_backend_resource_slot_t slot)
+const char *R_Backend_ResourceSlotName (render_backend_resource_slot_t slot)
 {
 	switch (slot)
 	{

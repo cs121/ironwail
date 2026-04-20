@@ -765,24 +765,17 @@ void main()
 #endif
 
 	// Surface normal (computed early; needed inside and outside lightmap block)
-	vec3 surface_normal = in_normal;
-	vec3 geom_normal = vec3(0.0, 0.0, 1.0);
+	vec3 geom_normal = cross(dFdx(in_pos), dFdy(in_pos));
+	float geom_normal_len = length(geom_normal);
+	if (geom_normal_len > 1e-8)
+		geom_normal /= geom_normal_len;
+	else
 	{
-		float surface_normal_len = length(surface_normal);
-		if (surface_normal_len > 0.0)
-		{
-			surface_normal /= surface_normal_len;
-		}
-		else
-		{
-			vec3 gn = cross(dFdx(in_pos), dFdy(in_pos));
-			float gl = length(gn);
-			surface_normal = (gl > 0.0) ? (gn / gl) : vec3(0.0, 0.0, 1.0);
-		}
-		if (!gl_FrontFacing)
-			surface_normal = -surface_normal;
-
-		geom_normal = surface_normal;
+		float fallback_len = length(in_normal);
+		geom_normal = (fallback_len > 1e-8) ? (in_normal / fallback_len) : vec3(0.0, 0.0, 1.0);
+	}
+	vec3 surface_normal = geom_normal;
+	{
 		vec3 tangent = in_tangent.xyz;
 		float tlen = length(tangent);
 #if BINDLESS
@@ -918,36 +911,28 @@ void main()
 			vec3  dynamic_light      = vec3(0.0);
 			uvec3 tile_coord = ComputeLightTileCoord(in_coord, max(in_depth, 1e-6));
 			float dynamic_light_noise = 1.0 - whitenoise01(in_pos.xy) * 0.15;
-			// OPT: precompute plane dot-product once outside loop
-			vec4 plane = vec4(surface_normal, dot(in_pos, surface_normal));
 
 			for (uint light_index = 0u; light_index < NumLights; light_index++)
 			{
 				Light l = Lights[light_index];
 
-				float rad  = l.radius;
-				float dist = dot(l.origin, plane.xyz) - plane.w;
-				rad -= abs(dist);
+				vec3 light_vec = l.origin - in_pos;
+				float dist_sq = dot(light_vec, light_vec);
+				float rad = l.radius;
 				float minlight = l.minlight;
 
-				if (rad <= 0.0 || rad < minlight)
+				if (dist_sq < 1e-12 || rad <= 0.0 || rad < minlight)
 					continue;
-
-				vec3  local_pos = l.origin - plane.xyz * dist;
-				minlight = rad - minlight;
-				vec3  light_vec = local_pos - in_pos;
-				float dist_sq = dot(light_vec, light_vec);
-
-				// OPT: keep rsqrt path ready for clustered lists where this loop gets shorter.
-				if (dist_sq < 1e-12)
+				if (dist_sq >= rad * rad)
 					continue;
 				float inv_surface_dist = inversesqrt(dist_sq);
 				float surface_dist = dist_sq * inv_surface_dist;
 
-				float attenuation   = clamp((minlight - surface_dist) * (1.0/16.0), 0.0, 1.0);
-				float normalized_d  = surface_dist / rad;
+				float x = clamp(1.0 - (surface_dist / rad), 0.0, 1.0);
+				float minlight_norm = minlight / max(rad, 1e-4);
+				float attenuation = clamp((x - minlight_norm) / max(1.0 - minlight_norm, 1e-4), 0.0, 1.0);
 				// OPT: pow(x,1.5) = x*sqrt(x), avoids generic pow()
-				float nc            = clamp(1.0 - normalized_d, 0.0, 1.0);
+				float nc            = x;
 				float falloff       = nc * sqrt(nc);
 				const float core_boost = 0.55;
 				const float core_exp = 2.0;
