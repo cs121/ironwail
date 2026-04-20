@@ -18,5 +18,7 @@ jobs:
       run: python3 python/check_framegraph_pass_contracts.py
     - name: Install Dependencies
       run: sudo apt update && sudo apt install libcurl4-openssl-dev libmpg123-dev libsdl2-dev libvorbis-dev
+    - name: Compile Menu Units (syntax-only)
+      run: ./scripts/ci_menu_compile_units.sh
     - name: Build
       run: make --jobs=3 --keep-going --directory=Quake CC=${{ matrix.compiler }}

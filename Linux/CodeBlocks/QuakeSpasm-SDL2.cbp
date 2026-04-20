@@ -185,7 +185,22 @@
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="../../Quake/include/mathlib.h" />
-		<Unit filename="../../Quake/src/ui/menu.c">
+		<Unit filename="../../Quake/src/ui/menu_common.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../../Quake/src/ui/menu_main.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../../Quake/src/ui/menu_options.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../../Quake/src/ui/menu_multiplayer.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../../Quake/src/ui/menu_mods.c">
+			<Option compilerVar="CC" />
+		</Unit>
+		<Unit filename="../../Quake/src/ui/menu_video.c">
 			<Option compilerVar="CC" />
 		</Unit>
 		<Unit filename="../../Quake/include/menu.h" />

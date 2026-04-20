@@ -23,6 +23,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "bgmusic.h"
 #include "q_ctype.h"
+#include "menu_common.h"
+#include "menu_main.h"
+#include "menu_multiplayer.h"
+#include "menu_options.h"
+#include "menu_mods.h"
+#include "menu_video.h"
 
 #include <time.h>
 
@@ -91,14 +97,37 @@ extern char crosshair_char;
 
 extern qboolean quake64;
 
-enum m_state_e m_state;
+static menu_state_t g_menu_state = {
+	.state = m_none,
+	.mousex = 0.f,
+	.mousey = 0.f,
+	.lastkey = -1,
+	.ignoremouseframe = false,
+	.return_state = m_none,
+	.entersound = false,
+	.recursive_draw = false
+};
 extern qboolean	keydown[256];
-float m_mousex, m_mousey;
-int m_lastkey = -1; // last key pressed
-qboolean m_ignoremouseframe;
 static int m_left, m_top, m_width, m_height;
 
 static void M_UpdateBounds (void);
+
+
+#define m_state (g_menu_state.state)
+#define m_mousex (g_menu_state.mousex)
+#define m_mousey (g_menu_state.mousey)
+#define m_lastkey (g_menu_state.lastkey)
+#define m_ignoremouseframe (g_menu_state.ignoremouseframe)
+#define m_return_state (g_menu_state.return_state)
+#define m_entersound (g_menu_state.entersound)
+#define m_recursiveDraw (g_menu_state.recursive_draw)
+
+menu_state_t *M_MenuState (void) { return &g_menu_state; }
+enum m_state_e M_MenuState_GetState (void) { return g_menu_state.state; }
+void M_MenuState_SetState (enum m_state_e state) { g_menu_state.state = state; }
+enum m_state_e M_MenuState_GetReturnState (void) { return g_menu_state.return_state; }
+void M_MenuState_SetReturnState (enum m_state_e state) { g_menu_state.return_state = state; }
+
 
 void M_Menu_Main_f (void);
 	void M_Menu_SinglePlayer_f (void);
@@ -190,11 +219,6 @@ void M_Main_Mousemove (float cx, float cy);
 static double m_lastsoundtime;
 static char m_lastsound[MAX_QPATH];
 
-qboolean	m_entersound;		// play after drawing a frame, so caching
-								// won't disrupt the sound
-qboolean	m_recursiveDraw;
-
-enum m_state_e	m_return_state;
 qboolean	m_return_onerror;
 char		m_return_reason [32];
 
@@ -7206,6 +7230,78 @@ static void M_UpdateBounds (void)
 	m_top = top + (height - m_height) / 2;
 }
 
+
+
+static const menu_screen_dispatch_t g_menu_main_dispatch = { M_Main_Draw, M_Main_Key, M_Main_Mousemove, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_singleplayer_dispatch = { M_SinglePlayer_Draw, M_SinglePlayer_Key, M_SinglePlayer_Mousemove, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_load_dispatch = { M_Load_Draw, M_Load_Key, M_Load_Mousemove, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_save_dispatch = { M_Save_Draw, M_Save_Key, M_Save_Mousemove, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_maps_dispatch = { M_Maps_Draw, M_Maps_Key, M_Maps_Mousemove, M_Maps_Char, M_Maps_TextEntry };
+static const menu_screen_dispatch_t g_menu_skill_dispatch = { M_Skill_Draw, M_Skill_Key, M_Skill_Mousemove, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_multiplayer_dispatch = { M_MultiPlayer_Draw, M_MultiPlayer_Key, M_MultiPlayer_Mousemove, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_setup_dispatch = { M_Setup_Draw, M_Setup_Key, M_Setup_Mousemove, M_Setup_Char, M_Setup_TextEntry };
+static const menu_screen_dispatch_t g_menu_net_dispatch = { M_Net_Draw, M_Net_Key, M_Net_Mousemove, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_calibration_dispatch = { M_Calibration_Draw, M_Calibration_Key, NULL, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_options_dispatch = { M_Options_Draw, M_Options_Key, M_Options_Mousemove, M_Options_Char, M_Options_TextEntry };
+static const menu_screen_dispatch_t g_menu_keys_dispatch = { M_Keys_Draw, M_Keys_Key, M_Keys_Mousemove, M_Keys_Char, M_Keys_TextEntry };
+static const menu_screen_dispatch_t g_menu_mods_dispatch = { M_Mods_Draw, M_Mods_Key, M_Mods_Mousemove, M_Mods_Char, M_Mods_TextEntry };
+static const menu_screen_dispatch_t g_menu_modinfo_dispatch = { M_ModInfo_Draw, M_ModInfo_Key, NULL, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_help_dispatch = { M_Help_Draw, M_Help_Key, NULL, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_quit_dispatch = { M_Quit_Draw, M_Quit_Key, NULL, M_Quit_Char, M_Quit_TextEntry };
+static const menu_screen_dispatch_t g_menu_lanconfig_dispatch = { M_LanConfig_Draw, M_LanConfig_Key, M_LanConfig_Mousemove, M_LanConfig_Char, M_LanConfig_TextEntry };
+static const menu_screen_dispatch_t g_menu_gameoptions_dispatch = { M_GameOptions_Draw, M_GameOptions_Key, M_GameOptions_Mousemove, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_search_dispatch = { M_Search_Draw, M_Search_Key, NULL, NULL, NULL };
+static const menu_screen_dispatch_t g_menu_slist_dispatch = { M_ServerList_Draw, M_ServerList_Key, M_ServerList_Mousemove, NULL, NULL };
+
+const menu_screen_dispatch_t *MenuMain_GetDispatch (void) { return &g_menu_main_dispatch; }
+const menu_screen_dispatch_t *MenuSinglePlayer_GetDispatch (void) { return &g_menu_singleplayer_dispatch; }
+const menu_screen_dispatch_t *MenuLoad_GetDispatch (void) { return &g_menu_load_dispatch; }
+const menu_screen_dispatch_t *MenuSave_GetDispatch (void) { return &g_menu_save_dispatch; }
+const menu_screen_dispatch_t *MenuMaps_GetDispatch (void) { return &g_menu_maps_dispatch; }
+const menu_screen_dispatch_t *MenuSkill_GetDispatch (void) { return &g_menu_skill_dispatch; }
+const menu_screen_dispatch_t *MenuMultiplayer_GetDispatch (void) { return &g_menu_multiplayer_dispatch; }
+const menu_screen_dispatch_t *MenuSetup_GetDispatch (void) { return &g_menu_setup_dispatch; }
+const menu_screen_dispatch_t *MenuNet_GetDispatch (void) { return &g_menu_net_dispatch; }
+const menu_screen_dispatch_t *MenuCalibration_GetDispatch (void) { return &g_menu_calibration_dispatch; }
+const menu_screen_dispatch_t *MenuOptions_GetDispatch (void) { return &g_menu_options_dispatch; }
+const menu_screen_dispatch_t *MenuKeys_GetDispatch (void) { return &g_menu_keys_dispatch; }
+const menu_screen_dispatch_t *MenuMods_GetDispatch (void) { return &g_menu_mods_dispatch; }
+const menu_screen_dispatch_t *MenuModInfo_GetDispatch (void) { return &g_menu_modinfo_dispatch; }
+const menu_screen_dispatch_t *MenuHelp_GetDispatch (void) { return &g_menu_help_dispatch; }
+const menu_screen_dispatch_t *MenuQuit_GetDispatch (void) { return &g_menu_quit_dispatch; }
+const menu_screen_dispatch_t *MenuLanConfig_GetDispatch (void) { return &g_menu_lanconfig_dispatch; }
+const menu_screen_dispatch_t *MenuGameOptions_GetDispatch (void) { return &g_menu_gameoptions_dispatch; }
+const menu_screen_dispatch_t *MenuSearch_GetDispatch (void) { return &g_menu_search_dispatch; }
+const menu_screen_dispatch_t *MenuServerList_GetDispatch (void) { return &g_menu_slist_dispatch; }
+
+static const menu_screen_dispatch_t *M_GetDispatch (enum m_state_e state)
+{
+	switch (M_GetBaseState (state))
+	{
+	case m_main: return MenuMain_GetDispatch ();
+	case m_singleplayer: return MenuSinglePlayer_GetDispatch ();
+	case m_load: return MenuLoad_GetDispatch ();
+	case m_save: return MenuSave_GetDispatch ();
+	case m_maps: return MenuMaps_GetDispatch ();
+	case m_skill: return MenuSkill_GetDispatch ();
+	case m_multiplayer: return MenuMultiplayer_GetDispatch ();
+	case m_setup: return MenuSetup_GetDispatch ();
+	case m_net: return MenuNet_GetDispatch ();
+	case m_calibration: return MenuCalibration_GetDispatch ();
+	case m_options: return MenuOptions_GetDispatch ();
+	case m_keys: return MenuKeys_GetDispatch ();
+	case m_mods: return MenuMods_GetDispatch ();
+	case m_modinfo: return MenuModInfo_GetDispatch ();
+	case m_help: return MenuHelp_GetDispatch ();
+	case m_quit: return MenuQuit_GetDispatch ();
+	case m_lanconfig: return MenuLanConfig_GetDispatch ();
+	case m_gameoptions: return MenuGameOptions_GetDispatch ();
+	case m_search: return MenuSearch_GetDispatch ();
+	case m_slist: return MenuServerList_GetDispatch ();
+	default: return NULL;
+	}
+}
+
 void M_Draw (void)
 {
 	if (m_state == m_none || key_dest != key_menu)
@@ -7228,97 +7324,15 @@ void M_Draw (void)
 
 	GL_SetCanvas (CANVAS_MENU); //johnfitz
 
-	switch (M_GetBaseState (m_state))
-	{
-	default:
-	case m_none:
-		break;
-
-	case m_main:
-		M_Main_Draw ();
-		break;
-
-	case m_singleplayer:
-		M_SinglePlayer_Draw ();
-		break;
-
-	case m_load:
-		M_Load_Draw ();
-		break;
-
-	case m_save:
-		M_Save_Draw ();
-		break;
-
-	case m_maps:
-		M_Maps_Draw ();
-		break;
-
-	case m_skill:
-		M_Skill_Draw ();
-		break;
-
-	case m_multiplayer:
-		M_MultiPlayer_Draw ();
-		break;
-
-	case m_setup:
-		M_Setup_Draw ();
-		break;
-
-	case m_net:
-		M_Net_Draw ();
-		break;
-
-	case m_calibration:
-		M_Calibration_Draw ();
-		break;
-
-	case m_options:
-		M_Options_Draw ();
-		break;
-
-	case m_keys:
-		M_Keys_Draw ();
-		break;
-
-	case m_mods:
-		M_Mods_Draw ();
-		break;
-
-	case m_modinfo:
-		M_ModInfo_Draw ();
-		break;
-
-	case m_help:
-		M_Help_Draw ();
-		break;
-
-	case m_quit:
-		if (!fitzmode && !cl_confirmquit.value)
-		{ /* QuakeSpasm customization: */
-			/* Quit now! S.A. */
+		{
+		const menu_screen_dispatch_t *dispatch = M_GetDispatch (m_state);
+		if (M_GetBaseState (m_state) == m_quit && !fitzmode && !cl_confirmquit.value)
+		{
 			key_dest = key_console;
 			Host_Quit_f ();
 		}
-		M_Quit_Draw ();
-		break;
-
-	case m_lanconfig:
-		M_LanConfig_Draw ();
-		break;
-
-	case m_gameoptions:
-		M_GameOptions_Draw ();
-		break;
-
-	case m_search:
-		M_Search_Draw ();
-		break;
-
-	case m_slist:
-		M_ServerList_Draw ();
-		break;
+		if (dispatch && dispatch->draw)
+			dispatch->draw ();
 	}
 
 	if (m_entersound)
@@ -7350,92 +7364,14 @@ void M_Keydown (int key)
 		}
 	}
 
-	switch (M_GetBaseState (m_state))
-	{
-	default:
-	case m_none:
-		return;
-
-	case m_main:
-		M_Main_Key (key);
-		return;
-
-	case m_singleplayer:
-		M_SinglePlayer_Key (key);
-		return;
-
-	case m_load:
-		M_Load_Key (key);
-		return;
-
-	case m_save:
-		M_Save_Key (key);
-		return;
-
-	case m_maps:
-		M_Maps_Key (key);
-		return;
-
-	case m_skill:
-		M_Skill_Key (key);
-		return;
-
-	case m_multiplayer:
-		M_MultiPlayer_Key (key);
-		return;
-
-	case m_setup:
-		M_Setup_Key (key);
-		return;
-
-	case m_net:
-		M_Net_Key (key);
-		return;
-
-	case m_calibration:
-		M_Calibration_Key (key);
-		break;
-
-	case m_options:
-		M_Options_Key (key);
-		return;
-
-	case m_keys:
-		M_Keys_Key (key);
-		return;
-
-	case m_mods:
-		M_Mods_Key (key);
-		return;
-
-	case m_modinfo:
-		M_ModInfo_Key (key);
-		return;
-
-	case m_help:
-		M_Help_Key (key);
-		return;
-
-	case m_quit:
-		M_Quit_Key (key);
-		return;
-
-	case m_lanconfig:
-		M_LanConfig_Key (key);
-		return;
-
-	case m_gameoptions:
-		M_GameOptions_Key (key);
-		return;
-
-	case m_search:
-		M_Search_Key (key);
-		break;
-
-	case m_slist:
-		M_ServerList_Key (key);
+		{
+		const menu_screen_dispatch_t *dispatch = M_GetDispatch (m_state);
+		if (!dispatch || !dispatch->key)
+			return;
+		dispatch->key (key);
 		return;
 	}
+
 }
 
 
@@ -7462,138 +7398,38 @@ void M_Mousemove (int screenx, int screeny)
 		return;
 	}
 
-	switch (M_GetBaseState (m_state))
-	{
-	default:
-		return;
-
-	case m_main:
-		M_Main_Mousemove (x, y);
-		return;
-
-	case m_singleplayer:
-		M_SinglePlayer_Mousemove (x, y);
-		return;
-
-	case m_load:
-		M_Load_Mousemove (x, y);
-		return;
-
-	case m_save:
-		M_Save_Mousemove (x, y);
-		return;
-
-	case m_maps:
-		M_Maps_Mousemove (x, y);
-		return;
-
-	case m_skill:
-		M_Skill_Mousemove (x, y);
-		return;
-
-	case m_multiplayer:
-		M_MultiPlayer_Mousemove (x, y);
-		return;
-
-	case m_setup:
-		M_Setup_Mousemove (x, y);
-		return;
-
-	case m_net:
-		M_Net_Mousemove (x, y);
-		return;
-
-	case m_options:
-		M_Options_Mousemove (x, y);
-		return;
-
-	case m_keys:
-		M_Keys_Mousemove (x, y);
-		return;
-
-	case m_mods:
-		M_Mods_Mousemove (x, y);
-		return;
-
-	//case m_help:
-	//	M_Help_Mousemove (x, y);
-	//	return;
-
-	//case m_quit:
-	//	M_Quit_Mousemove (x, y);
-	//	return;
-
-	case m_lanconfig:
-		M_LanConfig_Mousemove (x, y);
-		return;
-
-	case m_gameoptions:
-		M_GameOptions_Mousemove (x, y);
-		return;
-
-	//case m_search:
-	//	M_Search_Mousemove (x, y);
-	//	break;
-
-	case m_slist:
-		M_ServerList_Mousemove (x, y);
+		{
+		const menu_screen_dispatch_t *dispatch = M_GetDispatch (m_state);
+		if (!dispatch || !dispatch->mousemove)
+			return;
+		dispatch->mousemove (x, y);
 		return;
 	}
+
 }
 
 
 void M_Charinput (int key)
 {
-	switch (M_GetBaseState (m_state))
-	{
-	case m_setup:
-		M_Setup_Char (key);
-		return;
-	case m_quit:
-		M_Quit_Char (key);
-		return;
-	case m_lanconfig:
-		M_LanConfig_Char (key);
-		return;
-	case m_maps:
-		M_Maps_Char (key);
-		return;
-	case m_mods:
-		M_Mods_Char (key);
-		return;
-	case m_options:
-		M_Options_Char (key);
-		return;
-	case m_keys:
-		M_Keys_Char (key);
-		return;
-	default:
+		{
+		const menu_screen_dispatch_t *dispatch = M_GetDispatch (m_state);
+		if (dispatch && dispatch->charinput)
+			dispatch->charinput (key);
 		return;
 	}
+
 }
 
 
 textmode_t M_TextEntry (void)
 {
-	switch (M_GetBaseState (m_state))
-	{
-	case m_setup:
-		return M_Setup_TextEntry ();
-	case m_quit:
-		return M_Quit_TextEntry ();
-	case m_lanconfig:
-		return M_LanConfig_TextEntry ();
-	case m_maps:
-		return M_Maps_TextEntry ();
-	case m_mods:
-		return M_Mods_TextEntry ();
-	case m_options:
-		return M_Options_TextEntry ();
-	case m_keys:
-		return M_Keys_TextEntry ();
-	default:
+		{
+		const menu_screen_dispatch_t *dispatch = M_GetDispatch (m_state);
+		if (dispatch && dispatch->textentry)
+			return dispatch->textentry ();
 		return TEXTMODE_OFF;
 	}
+
 }
 
 

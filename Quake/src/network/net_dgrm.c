@@ -1405,7 +1405,7 @@ ErrorReturn2:
 	{
 		IN_DeactivateForMenu();
 		key_dest = key_menu;
-		m_state = m_return_state;
+		M_MenuState_SetState (M_MenuState_GetReturnState ());
 		m_return_onerror = false;
 	}
 	return NULL;
