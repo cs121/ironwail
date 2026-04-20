@@ -21,6 +21,24 @@ typedef struct render_backend_surface_info_s
 	qboolean needs_postprocess;
 } RenderBackendSurfaceInfo;
 
+typedef enum render_backend_runtime_status_e
+{
+	R_BACKEND_RUNTIME_IMPLEMENTED = 0,
+	R_BACKEND_RUNTIME_EXPERIMENTAL,
+	R_BACKEND_RUNTIME_STUB
+} render_backend_runtime_status_t;
+
+typedef struct render_backend_milestones_s
+{
+	qboolean init_ready;
+	qboolean pass_callbacks_ready;
+	qboolean present_ready;
+	qboolean resource_translation_ready;
+} RenderBackendMilestones;
+
+render_backend_runtime_status_t R_Backend_GetRuntimeStatusForName (const char *backend_name);
+const char *R_Backend_GetRuntimeStatusLabel (render_backend_runtime_status_t status);
+qboolean R_Backend_GetMilestonesForName (const char *backend_name, RenderBackendMilestones *out_milestones);
 void R_Backend_QuerySurfaceInfo (RenderBackendSurfaceInfo *out_info);
 
 #endif

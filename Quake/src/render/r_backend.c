@@ -29,6 +29,7 @@ static const char *s_ref_dx12_plugin_filename = "ref_dx12.so";
 static const IRenderBackend *s_registered_backends[R_BACKEND_MAX_REGISTERED];
 static int s_registered_backend_count = 0;
 static const IRenderBackend *s_active_backend = NULL;
+static const IRenderBackend *s_gl_backend = NULL;
 static RenderBackendCaps s_active_backend_caps;
 static qboolean s_backend_initialized = false;
 static qboolean s_applying_backend_cvar = false;
@@ -63,6 +64,11 @@ static qboolean R_Backend_Host_IsTransientResourceAlive (unsigned int resource_i
 static qboolean R_Backend_Host_GetShaderMetadata (unsigned int shader_id, iw_renderer_host_shader_metadata_t *out_metadata);
 static qboolean R_Backend_Host_GetPipelineMetadata (unsigned int pipeline_id, iw_renderer_host_pipeline_metadata_t *out_metadata);
 static qboolean R_Backend_ValidatePluginHostApi (const iw_renderer_plugin_host_api_t *host_api, qboolean emit_warning);
+static qboolean R_VulkanStub_Init (void);
+static qboolean R_VulkanStub_HasRequiredPassCallbacks (void);
+static void R_VulkanStub_Present (void);
+static unsigned R_VulkanStub_ResolveResourceId (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource);
+static qboolean R_VulkanStub_IsResourceValid (const RenderGraphResourceHandle *resources, const render_backend_resource_ref_t *resource);
 
 static const iw_renderer_plugin_surface_services_t s_plugin_surface_services = {
 	sizeof (iw_renderer_plugin_surface_services_t),
@@ -466,6 +472,78 @@ static const char *R_Backend_CanonicalNameToApi (const char *backend_name)
 		return "dx12";
 
 	return backend_name;
+}
+
+static render_backend_runtime_status_t R_Backend_GetRuntimeStatusForBackend (const IRenderBackend *backend)
+{
+	if (!backend)
+		return R_BACKEND_RUNTIME_STUB;
+
+	if ((backend->init == R_VulkanStub_Init
+		&& backend->present == R_VulkanStub_Present
+		&& backend->resolve_resource_id == R_VulkanStub_ResolveResourceId
+		&& backend->is_resource_valid == R_VulkanStub_IsResourceValid)
+		&& (backend->name && (!q_strcasecmp (backend->name, "Vulkan") || !q_strcasecmp (backend->name, "DX12"))))
+		return R_BACKEND_RUNTIME_STUB;
+
+	if (backend->name && !q_strcasecmp (backend->name, "OpenGL"))
+		return R_BACKEND_RUNTIME_IMPLEMENTED;
+
+	return R_BACKEND_RUNTIME_EXPERIMENTAL;
+}
+
+const char *R_Backend_GetRuntimeStatusLabel (render_backend_runtime_status_t status)
+{
+	switch (status)
+	{
+	case R_BACKEND_RUNTIME_IMPLEMENTED: return "implemented";
+	case R_BACKEND_RUNTIME_EXPERIMENTAL: return "experimental";
+	case R_BACKEND_RUNTIME_STUB: return "stub";
+	default: return "unknown";
+	}
+}
+
+qboolean R_Backend_GetMilestonesForName (const char *backend_name, RenderBackendMilestones *out_milestones)
+{
+	const IRenderBackend *backend = R_Backend_FindByName (backend_name);
+
+	if (!out_milestones || !backend)
+		return false;
+
+	memset (out_milestones, 0, sizeof (*out_milestones));
+	out_milestones->init_ready = (backend->init != NULL && backend->init != R_VulkanStub_Init);
+	out_milestones->pass_callbacks_ready = (backend->has_required_pass_callbacks != NULL
+		&& backend->has_required_pass_callbacks != R_VulkanStub_HasRequiredPassCallbacks);
+	out_milestones->present_ready = (backend->present != NULL && backend->present != R_VulkanStub_Present);
+	out_milestones->resource_translation_ready = (backend->resolve_resource_id != NULL
+		&& backend->is_resource_valid != NULL
+		&& backend->resolve_resource_id != R_VulkanStub_ResolveResourceId
+		&& backend->is_resource_valid != R_VulkanStub_IsResourceValid);
+
+	if (backend->name && !q_strcasecmp (backend->name, "OpenGL"))
+	{
+		out_milestones->init_ready = true;
+		out_milestones->pass_callbacks_ready = true;
+		out_milestones->present_ready = true;
+		out_milestones->resource_translation_ready = true;
+	}
+
+	return true;
+}
+
+render_backend_runtime_status_t R_Backend_GetRuntimeStatusForName (const char *backend_name)
+{
+	return R_Backend_GetRuntimeStatusForBackend (R_Backend_FindByName (backend_name));
+}
+
+static void R_Backend_PrintApiHelp (void)
+{
+	Con_Printf ("r_backend_api help: gl=%s, vulkan=%s, dx12=%s\n",
+		R_Backend_GetRuntimeStatusLabel (R_Backend_GetRuntimeStatusForName ("OpenGL")),
+		R_Backend_GetRuntimeStatusLabel (R_Backend_GetRuntimeStatusForName ("Vulkan")),
+		R_Backend_GetRuntimeStatusLabel (R_Backend_GetRuntimeStatusForName ("DX12")));
+	Con_Printf ("  gl: production path.\n");
+	Con_Printf ("  vulkan/dx12: bring-up paths; see *_status commands for milestone detail.\n");
 }
 
 static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend);
@@ -941,11 +1019,17 @@ static void R_Backend_Changed_f (cvar_t *var)
 static void R_Backend_ApiChanged_f (cvar_t *var)
 {
 	const char *canonical_name;
+	render_backend_runtime_status_t status;
 
 	if (!var || s_applying_backend_api_cvar)
 		return;
 
 	canonical_name = R_Backend_ApiToCanonicalName (var->string);
+	status = R_Backend_GetRuntimeStatusForName (canonical_name);
+	Con_Printf ("r_backend_api '%s' -> backend '%s' (%s)\n",
+		var->string,
+		canonical_name ? canonical_name : "<unknown>",
+		R_Backend_GetRuntimeStatusLabel (status));
 	if (!R_Backend_Select (canonical_name))
 	{
 		Con_Warning ("Renderer backend API change to '%s' rejected; keeping '%s'\n",
@@ -1103,6 +1187,17 @@ static void R_Backend_VulkanStatus_f (void)
 	Con_Printf ("  registration: %s\n", is_stub ? "stub backend registered" : "plugin/backend override registered");
 	Con_Printf ("  activation gate: startup=%s runtime=%s\n", can_start ? "allowed" : "blocked", can_runtime ? "allowed" : "blocked");
 	Con_Printf ("  active backend: %s\n", (s_active_backend && s_active_backend->name) ? s_active_backend->name : "<none>");
+	{
+		RenderBackendMilestones milestones;
+		if (R_Backend_GetMilestonesForName ("Vulkan", &milestones))
+		{
+			Con_Printf ("  milestones: init=%s pass_callbacks=%s present=%s resource_translation=%s\n",
+				milestones.init_ready ? "yes" : "no",
+				milestones.pass_callbacks_ready ? "yes" : "no",
+				milestones.present_ready ? "yes" : "no",
+				milestones.resource_translation_ready ? "yes" : "no");
+		}
+	}
 	if (is_stub)
 	{
 		Con_Printf ("  implemented callbacks: contract no-op stubs only.\n");
@@ -1195,6 +1290,17 @@ static void R_Backend_DX12Status_f (void)
 	Con_Printf ("  registration: %s\n", is_stub ? "stub backend registered" : "plugin/backend override registered");
 	Con_Printf ("  activation gate: startup=%s runtime=%s\n", can_start ? "allowed" : "blocked", can_runtime ? "allowed" : "blocked");
 	Con_Printf ("  active backend: %s\n", (s_active_backend && s_active_backend->name) ? s_active_backend->name : "<none>");
+	{
+		RenderBackendMilestones milestones;
+		if (R_Backend_GetMilestonesForName ("DX12", &milestones))
+		{
+			Con_Printf ("  milestones: init=%s pass_callbacks=%s present=%s resource_translation=%s\n",
+				milestones.init_ready ? "yes" : "no",
+				milestones.pass_callbacks_ready ? "yes" : "no",
+				milestones.present_ready ? "yes" : "no",
+				milestones.resource_translation_ready ? "yes" : "no");
+		}
+	}
 	if (is_stub)
 	{
 		Con_Printf ("  implemented callbacks: contract no-op stubs only.\n");
@@ -1226,6 +1332,8 @@ static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend)
 			s_registered_backends[i] = backend;
 			if (s_active_backend && !q_strcasecmp (s_active_backend->name, backend->name))
 				s_active_backend = backend;
+			if (!q_strcasecmp (backend->name, "OpenGL"))
+				s_gl_backend = backend;
 			return true;
 		}
 	}
@@ -1241,6 +1349,8 @@ static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend)
 	s_registered_backends[s_registered_backend_count++] = backend;
 	if (!s_active_backend)
 		s_active_backend = backend;
+	if (!q_strcasecmp (backend->name, "OpenGL"))
+		s_gl_backend = backend;
 	return true;
 }
 
@@ -1255,11 +1365,21 @@ qboolean R_Backend_Select (const char *backend_name)
 	const IRenderBackend *previous = s_active_backend;
 	const qboolean runtime_switch = s_backend_active && previous && backend && (previous != backend);
 	qboolean activated = false;
+	const render_backend_runtime_status_t status = R_Backend_GetRuntimeStatusForBackend (backend);
 
 	if (!backend)
 		return false;
 	if (!R_Backend_ValidateContract (backend, true))
 		return false;
+	if (status == R_BACKEND_RUNTIME_STUB)
+	{
+		Con_Warning ("Renderer backend '%s' is a stub backend and cannot be selected.\n",
+			backend->name ? backend->name : "<unnamed>");
+		Con_Warning ("Fallback to OpenGL requested.\n");
+		if (s_gl_backend && backend != s_gl_backend)
+			return R_Backend_Select (s_gl_backend->name);
+		return false;
+	}
 
 	if (runtime_switch && (!backend->can_activate || !backend->can_activate (true)))
 	{
@@ -1271,8 +1391,9 @@ qboolean R_Backend_Select (const char *backend_name)
 
 	if (backend->can_activate && !backend->can_activate (false))
 	{
-		Con_Warning ("Renderer backend '%s' is not ready for activation.\n",
-			backend->name ? backend->name : "<unnamed>");
+		Con_Warning ("Renderer backend '%s' is %s and not ready for activation.\n",
+			backend->name ? backend->name : "<unnamed>",
+			R_Backend_GetRuntimeStatusLabel (status));
 		if (backend->name && !q_strcasecmp (backend->name, "Vulkan"))
 			Con_Warning ("Use command 'r_backend_vulkan_status' for detailed bring-up status.\n");
 		if (backend->name && !q_strcasecmp (backend->name, "DX12"))
@@ -1350,6 +1471,7 @@ void R_Backend_Init (void)
 	Cvar_RegisterVariable (&r_backend_api);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
 	Cvar_SetCallback (&r_backend_api, R_Backend_ApiChanged_f);
+	R_Backend_PrintApiHelp ();
 	if (!s_backend_audit_cmd_registered)
 	{
 		Cmd_AddCommand ("r_backend_wrapper_audit", R_Backend_WrapperAudit_f);
@@ -1393,6 +1515,7 @@ void R_Backend_Shutdown (void)
 	}
 	s_registered_backend_count = 0;
 	s_active_backend = NULL;
+	s_gl_backend = NULL;
 	s_backend_initialized = false;
 	s_command_encoder_recording = false;
 	s_command_encoder_frame = -1;
