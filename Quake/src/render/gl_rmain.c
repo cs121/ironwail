@@ -3110,7 +3110,7 @@ static GLuint R_ResolveCriticalResourceOrLegacyFallback (const RenderGraphResour
 	return legacy_value;
 }
 
-void GL_PostProcess (const RenderGraphResourceHandle *resources, qboolean composite_written_this_frame)
+void GL_PostProcess (const r_postprocess_input_t *input)
 {
 	int palidx, variant;
 	float saturation;
@@ -3177,7 +3177,21 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources, qboolean compos
 	GLuint composite_fbo = 0;
 	GLuint composite_color_tex = 0;
 	GLuint composite_depth_tex = 0;
-	int scene_samples = R_Backend_GetSceneSampleCount ();
+	const RenderGraphResourceHandle *resources;
+	const r_view_rect_t *view_rect;
+	const r_scene_size_t *scene_size;
+	qboolean composite_written_this_frame;
+	int scene_samples;
+
+	if (!input)
+		return;
+
+	resources = input->resources;
+	view_rect = &input->view_rect;
+	scene_size = &input->scene_size;
+	composite_written_this_frame = input->composite_written_this_frame;
+
+	scene_samples = R_Backend_GetSceneSampleCount ();
 	if (scene_samples <= 0)
 		scene_samples = framebufs.scene.samples;
 	msaa = scene_samples > 1;
@@ -3282,8 +3296,8 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources, qboolean compos
 		postfx_lut_strength = 0.f;
 	}
 
-	inv_scale = 1.f / (float)q_max (1, R_GetSceneRenderScale ());
-	scaled_scene = (R_GetSceneRenderScale () != 1);
+	inv_scale = 1.f / (float)q_max (1, scene_size->scale);
+	scaled_scene = (scene_size->scale != 1);
 	{
 		int guard_mode = CLAMP (0, (int)Q_rint (r_drs_guard_mode.value), 1);
 		drs_postfx_guard = scaled_scene || (guard_mode == 1 && r_drs.value > 0.f);
@@ -3318,10 +3332,10 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources, qboolean compos
 		godrays_source = r_godrays_cached_source;
 	}
 
-	view_min_x = (glx + r_refdef.vrect.x) / (float)R_GetNativeRenderWidth ();
-	view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)R_GetNativeRenderHeight ();
-	view_max_x = view_min_x + r_refdef.vrect.width / (float)R_GetNativeRenderWidth ();
-	view_max_y = view_min_y + r_refdef.vrect.height / (float)R_GetNativeRenderHeight ();
+	view_min_x = (glx + view_rect->x) / (float)R_GetNativeRenderWidth ();
+	view_min_y = (gly + glheight - view_rect->y - view_rect->height) / (float)R_GetNativeRenderHeight ();
+	view_max_x = view_min_x + view_rect->width / (float)R_GetNativeRenderWidth ();
+	view_max_y = view_min_y + view_rect->height / (float)R_GetNativeRenderHeight ();
 
 	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
 	/* Keep SSAO intensity aligned with the cvar's intended tuning range.
@@ -5787,9 +5801,9 @@ void R_RenderShadowMaps (void)
 R_RenderScene
 ================
 */
-void R_RenderScene (const RenderGraphResourceHandle *resources)
+void R_RenderScene (const r_render_scene_input_t *input)
 {
-	(void)resources;
+	(void)input;
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_Clear ();
 	
@@ -5864,7 +5878,7 @@ r_refdef.vrect. This is for emulating a low-resolution pixellated look,
 or possibly as a perforance boost on slow graphics cards.
 ================
 */
-void R_WarpScaleView (const RenderGraphResourceHandle *resources)
+void R_WarpScaleView (const r_warp_resolve_input_t *input)
 {
 	int srcx, srcy, srcw, srch;
 	float smax, tmax;
@@ -5879,24 +5893,34 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 	qboolean needs_postprocess = false;
 	GLuint fbodest;
 	double t;
+	const r_view_rect_t *view_rect;
+	const r_scene_size_t *scene_size;
+	const RenderGraphResourceHandle *resources;
+
+	if (!input)
+		return;
+
+	view_rect = &input->view_rect;
+	scene_size = &input->scene_size;
+	resources = input->resources;
 
 	R_ResolveWarpScaleResources (resources, &resolved);
-
-	R_GetFramePlanDecisions (&needs_scene_effects, &needs_postprocess);
+	needs_postprocess = input->needs_postprocess;
+	R_GetFramePlanDecisions (&needs_scene_effects, NULL);
 	if (!needs_scene_effects)
 		return;
 
-	srcx = glx + r_refdef.vrect.x;
-	srcy = gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height;
-	srcw = R_GetSceneRenderWidth ();
-	srch = R_GetSceneRenderHeight ();
+	srcx = glx + view_rect->x;
+	srcy = gly + glheight - view_rect->y - view_rect->height;
+	srcw = scene_size->width;
+	srch = scene_size->height;
 
-	force_blit_upscale = (R_GetSceneRenderScale () != 1) || (r_drs.value > 0.f);
+	force_blit_upscale = (scene_size->scale != 1) || (r_drs.value > 0.f);
 	needwarpscale = water_warp && !force_blit_upscale;
 	fbodest = needs_postprocess ? resolved.composite_fbo : 0;
-	effective_dof_enabled = R_PostFX_DoFEnabledEffective ();
-	effective_ssao_enabled = ((r_ssao.value > 0.f && r_ssao_intensity.value > 0.f) || r_ssao_debug.value > 0.f);
-	effective_godrays_preview = R_PostFX_GodraysPreviewEnabledEffective ();
+	effective_dof_enabled = input->dof_enabled;
+	effective_ssao_enabled = input->ssao_enabled;
+	effective_godrays_preview = input->godrays_preview;
 	need_depth_resolve = (fbodest == resolved.composite_fbo)
 		&& (effective_dof_enabled || effective_ssao_enabled || effective_godrays_preview);
 	if (fbodest == resolved.composite_fbo)
@@ -5934,8 +5958,8 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 		if (!needwarpscale)
 		{
-			int dstw = force_blit_upscale ? r_refdef.vrect.width : srcw;
-			int dsth = force_blit_upscale ? r_refdef.vrect.height : srch;
+			int dstw = force_blit_upscale ? view_rect->width : srcw;
+			int dsth = force_blit_upscale ? view_rect->height : srch;
 			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved.resolved_scene_fbo);
 			glReadBuffer (GL_COLOR_ATTACHMENT0);
 			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
@@ -5954,8 +5978,8 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	if (need_depth_resolve)
 	{
-		int dstw = (R_GetSceneRenderScale () != 1) ? r_refdef.vrect.width : srcw;
-		int dsth = (R_GetSceneRenderScale () != 1) ? r_refdef.vrect.height : srch;
+		int dstw = (scene_size->scale != 1) ? view_rect->width : srcw;
+		int dsth = (scene_size->scale != 1) ? view_rect->height : srch;
 
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved.scene_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
@@ -5966,8 +5990,8 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 
 	if (!resolved.msaa && !needwarpscale)
 	{
-		int dstw = force_blit_upscale ? r_refdef.vrect.width : srcw;
-		int dsth = force_blit_upscale ? r_refdef.vrect.height : srch;
+		int dstw = force_blit_upscale ? view_rect->width : srcw;
+		int dsth = force_blit_upscale ? view_rect->height : srch;
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved.scene_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
@@ -5999,7 +6023,7 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 		glDrawBuffer (GL_BACK);
 		glReadBuffer (GL_BACK);
 	}
-	R_Backend_SetViewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
+	R_Backend_SetViewport (srcx, srcy, view_rect->width, view_rect->height);
 
 	if (!needwarpscale)
 	{

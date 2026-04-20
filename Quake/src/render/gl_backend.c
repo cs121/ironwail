@@ -1145,7 +1145,20 @@ static void GLBackend_PassShadowMaps (RenderPassContext *ctx)
 
 static void GLBackend_PassRenderScene (RenderPassContext *ctx)
 {
-	R_RenderScene (ctx ? ctx->resources : NULL);
+	r_render_scene_input_t input;
+
+	memset (&input, 0, sizeof (input));
+	input.resources = ctx ? ctx->resources : NULL;
+	input.view_rect.x = r_refdef.vrect.x;
+	input.view_rect.y = r_refdef.vrect.y;
+	input.view_rect.width = r_refdef.vrect.width;
+	input.view_rect.height = r_refdef.vrect.height;
+	input.scene_size.width = R_GetSceneRenderWidth ();
+	input.scene_size.height = R_GetSceneRenderHeight ();
+	input.scene_size.scale = R_GetSceneRenderScale ();
+	input.has_worldmodel = (cl.worldmodel != NULL);
+
+	R_RenderScene (&input);
 }
 
 static const RenderGraphResourceHandle *GLBackend_GetPassResourcesOrFallback (const RenderPassContext *ctx, RenderGraphResourceHandle *fallback_resources, const char *pass_name)
@@ -1170,14 +1183,43 @@ static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
 {
 	RenderGraphResourceHandle fallback_resources;
 	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesOrFallback (ctx, &fallback_resources, "Warp/resolve");
-	R_WarpScaleView (resources);
+	r_warp_resolve_input_t input;
+
+	memset (&input, 0, sizeof (input));
+	input.resources = resources;
+	input.view_rect.x = r_refdef.vrect.x;
+	input.view_rect.y = r_refdef.vrect.y;
+	input.view_rect.width = r_refdef.vrect.width;
+	input.view_rect.height = r_refdef.vrect.height;
+	input.scene_size.width = R_GetSceneRenderWidth ();
+	input.scene_size.height = R_GetSceneRenderHeight ();
+	input.scene_size.scale = R_GetSceneRenderScale ();
+	R_GetFramePlanDecisions (NULL, &input.needs_postprocess);
+	input.dof_enabled = R_PostFX_DoFEnabledEffective ();
+	input.ssao_enabled = ((r_ssao.value > 0.f && r_ssao_intensity.value > 0.f) || r_ssao_debug.value > 0.f);
+	input.godrays_preview = R_PostFX_GodraysPreviewEnabledEffective ();
+
+	R_WarpScaleView (&input);
 }
 
 static void GLBackend_PassPostProcess (RenderPassContext *ctx)
 {
 	RenderGraphResourceHandle fallback_resources;
 	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesOrFallback (ctx, &fallback_resources, "Postprocess");
-	GL_PostProcess (resources, ctx ? ctx->composite_written_this_frame : false);
+	r_postprocess_input_t input;
+
+	memset (&input, 0, sizeof (input));
+	input.resources = resources;
+	input.view_rect.x = r_refdef.vrect.x;
+	input.view_rect.y = r_refdef.vrect.y;
+	input.view_rect.width = r_refdef.vrect.width;
+	input.view_rect.height = r_refdef.vrect.height;
+	input.scene_size.width = R_GetSceneRenderWidth ();
+	input.scene_size.height = R_GetSceneRenderHeight ();
+	input.scene_size.scale = R_GetSceneRenderScale ();
+	input.composite_written_this_frame = ctx ? ctx->composite_written_this_frame : false;
+
+	GL_PostProcess (&input);
 }
 
 static void GLBackend_PassOverlayViewmodel (RenderPassContext *ctx)
