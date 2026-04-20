@@ -1764,8 +1764,8 @@ static void GL_BloomExtractLevel (int level, GLuint source_tex, GLuint mask_tex,
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo[level]);
 	GL_SetScissorEnabled (false);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glViewport (0, 0, width, height);
+	GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	R_Backend_SetViewport (0, 0, width, height);
 	GL_ClearBufferfvFunc (GL_COLOR, 0, clear_color);
 	GL_UseProgram (glprogs.bloom_extract);
 	{
@@ -1803,8 +1803,8 @@ static GLuint GL_BloomBlurLevel (int level, int passes, float radius_scale)
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.pingpong_fbo[level][target_index]);
 		GL_SetScissorEnabled (false);
-		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		glViewport (0, 0, width, height);
+		GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		R_Backend_SetViewport (0, 0, width, height);
 		GL_ClearBufferfvFunc (GL_COLOR, 0, clear_color);
 		GL_UseProgram (glprogs.bloom_blur);
 		{
@@ -1890,8 +1890,8 @@ static GLuint GL_GenerateBloomTexture (GLuint mask_tex)
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.bloom.extract_fbo[0]);
 	GL_SetScissorEnabled (false);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glViewport (0, 0, framebufs.bloom.width[0], framebufs.bloom.height[0]);
+	GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	R_Backend_SetViewport (0, 0, framebufs.bloom.width[0], framebufs.bloom.height[0]);
 	GL_ClearBufferfvFunc (GL_COLOR, 0, clear_color);
 	GL_UseProgram (glprogs.bloom_combine);
 	{
@@ -2155,8 +2155,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	}
 	// SSAO FIX: Reset viewport/scissor/color mask per pass to avoid banding from stale state.
 	GL_SetScissorEnabled (false);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	glViewport (0, 0, width, height);
+	GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	R_Backend_SetViewport (0, 0, width, height);
 	{
 		const float clear[4] = { 1.f, 1.f, 1.f, 1.f };
 		GL_ClearBufferfvFunc (GL_COLOR, 0, clear);
@@ -2248,8 +2248,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.blur_fbo[index]);
 		GL_LogErrorIfDeveloper ("SSAO blur bind FBO");
 		GL_SetScissorEnabled (false);
-		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-		glViewport (0, 0, width, height);
+		GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		R_Backend_SetViewport (0, 0, width, height);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.ao_tex[index]);
 		GL_Uniform4fFunc (2, 1.f, 0.f, 0.f, 0.f);
 		R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
@@ -2257,7 +2257,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.ssao.ao_fbo[index]);
 		GL_SetScissorEnabled (false);
-		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.ssao.blur_tex[index]);
 		GL_Uniform4fFunc (2, 0.f, 1.f, 0.f, 0.f);
 		R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
@@ -2374,7 +2374,7 @@ static void GL_GenerateGodraysSource (qboolean draw_sky, qboolean draw_brush)
 
 	GL_BeginGroup ("Godrays source");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.source_fbo);
-	glViewport (0, 0, width, height);
+	R_Backend_SetViewport (0, 0, width, height);
 	{
 		const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
@@ -2523,7 +2523,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 
 	GL_BeginGroup ("Godrays scatter");
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
-	glViewport (0, 0, width, height);
+	R_Backend_SetViewport (0, 0, width, height);
 	{
 		const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
@@ -2540,7 +2540,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 
 			GL_BeginGroup ("Godrays mask (sky)");
 			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
-			glViewport (0, 0, width, height);
+			R_Backend_SetViewport (0, 0, width, height);
 			{
 				const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 				GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
@@ -2569,7 +2569,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 
 			GL_BeginGroup ("Godrays scatter (sky)");
 			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
-			glViewport (0, 0, width, height);
+			R_Backend_SetViewport (0, 0, width, height);
 			GL_UseProgram (glprogs.godrays);
 			{
 				const unsigned state = GLS_BLEND_OPAQUE | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
@@ -2600,7 +2600,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 
 			GL_BeginGroup ("Godrays mask (brush)");
 			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.mask_fbo);
-			glViewport (0, 0, width, height);
+			R_Backend_SetViewport (0, 0, width, height);
 			{
 				const float zero[4] = { 0.f, 0.f, 0.f, 0.f };
 				GL_ClearBufferfvFunc (GL_COLOR, 0, zero);
@@ -2629,7 +2629,7 @@ static GLuint GL_GenerateGodraysTexture (GLuint *out_mask)
 
 			GL_BeginGroup ("Godrays scatter (brush)");
 			GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.godrays.shafts_fbo);
-			glViewport (0, 0, width, height);
+			R_Backend_SetViewport (0, 0, width, height);
 			GL_UseProgram (glprogs.godrays);
 			{
 				const unsigned state = (first_pass ? GLS_BLEND_OPAQUE : GLS_BLEND_ADD) | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS (0);
@@ -3405,7 +3405,7 @@ void GL_PostProcess (const RenderGraphResourceHandle *resources)
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
 	GL_SetScissorEnabled (false);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	R_Backend_SetViewport (glx, gly, glwidth, glheight);
 	{
 		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
@@ -4351,7 +4351,7 @@ void R_SetupGL (void)
 			glDrawBuffer (GL_BACK);
 			glReadBuffer (GL_BACK);
 		}
-		glViewport (glx + r_refdef.vrect.x, gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height, r_refdef.vrect.width, r_refdef.vrect.height);
+		R_Backend_SetViewport (glx + r_refdef.vrect.x, gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height, r_refdef.vrect.width, r_refdef.vrect.height);
 	}
 	else
 	{
@@ -4371,7 +4371,7 @@ void R_SetupGL (void)
 			glDrawBuffer (GL_COLOR_ATTACHMENT0);
 			glReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
-		glViewport (0, 0, scene_width, scene_height);
+		R_Backend_SetViewport (0, 0, scene_width, scene_height);
 	}
 }
 
@@ -4400,7 +4400,7 @@ void R_Clear (void)
 		R_Backend_BindPipeline (&pipeline_desc);
 		R_Backend_SetDynamicState (&dynamic_state);
 	}
-	glStencilMask (~0u);
+	GL_Backend_SetStencilMaskCached (~0u);
 	glClear (clearbits);
 }
 
@@ -4908,25 +4908,25 @@ void R_DrawViewModel (void)
 
 	GL_BeginGroup ("View model");
 	GL_SetScissorEnabled (false);
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 	/* Viewmodel is rendered after postprocess to keep it out of blur/DoF/SSAO/bloom.
 	 * Reinitialize depth so world depth cannot clip the weapon while preserving
 	 * correct self-occlusion inside the model.
 	 * The alias shader applies the final tonemap/overbright finish for the weapon. */
-	glDepthMask (GL_TRUE);
+	GL_Backend_SetDepthMaskCached (GL_TRUE);
 	if (gl_clipcontrol_able)
 		glClearDepth (0.0);
 	else
 		glClearDepth (1.0);
 	glClear (GL_DEPTH_BUFFER_BIT);
-	glDepthFunc (restore_depth_func);
+	GL_Backend_SetDepthFuncCached ((unsigned)restore_depth_func);
 
 	// hack the depth range to prevent view model from poking into walls
 	GL_DepthRange (ZRANGE_VIEWMODEL);
 	R_DrawAliasModels (&e, 1);
 	GL_DepthRange (ZRANGE_FULL);
-	glDepthFunc (restore_depth_func);
+	GL_Backend_SetDepthFuncCached ((unsigned)restore_depth_func);
 
 	GL_EndGroup ();
 }
@@ -5904,7 +5904,7 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_SetScissorEnabled (false);
-		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 		GL_ClearBufferfvFunc (GL_COLOR, 0, clear_color);
 		GL_ClearBufferfvFunc (GL_DEPTH, 0, &clear_depth);
 	}
@@ -5996,7 +5996,7 @@ void R_WarpScaleView (const RenderGraphResourceHandle *resources)
 		glDrawBuffer (GL_BACK);
 		glReadBuffer (GL_BACK);
 	}
-	glViewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
+	R_Backend_SetViewport (srcx, srcy, r_refdef.vrect.width, r_refdef.vrect.height);
 
 	if (!needwarpscale)
 	{

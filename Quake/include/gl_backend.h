@@ -19,6 +19,15 @@ unsigned short GL_Backend_RegisterNamedResource (render_backend_resource_type_t 
 void GL_Backend_UnregisterResourceBySlot (render_backend_resource_slot_t slot);
 void GL_Backend_UnregisterNamedResource (gl_backend_resource_key_t key);
 unsigned GL_Backend_ResolveOpaqueResource (unsigned short opaque_id);
+void GL_Backend_ResetStateCache (void);
+void GL_Backend_SetViewportCached (int x, int y, int width, int height);
+void GL_Backend_SetColorMaskCached (int r, int g, int b, int a);
+void GL_Backend_SetDepthMaskCached (int enabled);
+void GL_Backend_SetDepthFuncCached (unsigned func);
+void GL_Backend_SetStencilTestCached (qboolean enabled);
+void GL_Backend_SetStencilMaskCached (unsigned mask);
+void GL_Backend_SetStencilFuncCached (unsigned func, int ref, unsigned mask);
+void GL_Backend_SetStencilOpCached (unsigned sfail, unsigned dpfail, unsigned dppass);
 const IRenderBackend *GL_Backend_GetInterface (void);
 void GL_Backend_Register (void);
 

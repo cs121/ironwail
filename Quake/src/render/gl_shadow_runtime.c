@@ -1,5 +1,6 @@
 #include "quakedef.h"
 #include "glquake.h"
+#include "gl_backend.h"
 
 #include "gl_backend.h"
 #include "gl_shadow.h"
@@ -1093,7 +1094,7 @@ static void R_RenderSunShadowMap (void)
 		}
 
 		GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.sun_depth_tex, 0, cascade);
-		glViewport (0, 0, framebufs.shadow.sun_size, framebufs.shadow.sun_size);
+		R_Backend_SetViewport (0, 0, framebufs.shadow.sun_size, framebufs.shadow.sun_size);
 		glClear (GL_DEPTH_BUFFER_BIT);
 
 		R_Shadow_SetCasterState (&r_shadow_state, r_shadow_state.sun_viewproj[cascade], false, dummy, 1.f);
@@ -1164,7 +1165,7 @@ static void R_RenderDLightShadowMaps (void)
 			}
 
 			GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.dlight_depth_tex, 0, layer);
-			glViewport (0, 0, framebufs.shadow.dlight_size, framebufs.shadow.dlight_size);
+			R_Backend_SetViewport (0, 0, framebufs.shadow.dlight_size, framebufs.shadow.dlight_size);
 			glClear (GL_DEPTH_BUFFER_BIT);
 
 			R_Shadow_SetCasterState (&r_shadow_state, r_shadow_state.dlight_viewproj[slot][face], true, *light, (*light)[3]);
@@ -1246,10 +1247,10 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 		GL_ClipControlFunc (GL_LOWER_LEFT, GL_NEGATIVE_ONE_TO_ONE);
 		clip_depth_mode_changed = true;
 	}
-	glDepthFunc (GL_LEQUAL);
+	GL_Backend_SetDepthFuncCached (GL_LEQUAL);
 	glClearDepth (1.0);
-	glDepthMask (GL_TRUE);
-	glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+	GL_Backend_SetDepthMaskCached (GL_TRUE);
+	GL_Backend_SetColorMaskCached (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
 	GL_BeginGroup ("Shadow maps");
 	if (profile_enabled && have_query_api && want_sun_shadow)
@@ -1273,7 +1274,7 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 		GL_EndQueryFunc (GL_TIME_ELAPSED);
 	GL_EndGroup ();
 
-	glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+	GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 	{
 		RenderBackendPipelineDesc pipeline_desc;
 		RenderBackendDynamicState dynamic_state;
@@ -1290,12 +1291,12 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 		GL_ClipControlFunc (GL_LOWER_LEFT, GL_ZERO_TO_ONE);
 	if (gl_clipcontrol_able)
 	{
-		glDepthFunc (GL_GEQUAL);
+		GL_Backend_SetDepthFuncCached (GL_GEQUAL);
 		glClearDepth (0.0);
 	}
 	else
 	{
-		glDepthFunc (GL_LEQUAL);
+		GL_Backend_SetDepthFuncCached (GL_LEQUAL);
 		glClearDepth (1.0);
 	}
 	if (marked_for_shadow)
@@ -1364,4 +1365,3 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 
 	r_shadow_state.valid = (want_sun_shadow || want_dlight_shadows);
 }
-
