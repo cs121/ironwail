@@ -141,6 +141,8 @@ static qboolean IW_RendererRefVK_Register (const iw_renderer_plugin_host_api_t *
 	if (!host_api->register_backend)
 		return false;
 
+	Con_Printf ("[ref_vk] capability banner: STUB backend loaded (experimental bring-up only).\n");
+	Con_Printf ("[ref_vk] milestones: init=no pass_callbacks=no present=no resource_translation=no\n");
 	return host_api->register_backend (&s_ref_vk_backend);
 }
 

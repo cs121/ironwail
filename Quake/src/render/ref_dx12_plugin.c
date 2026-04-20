@@ -141,6 +141,8 @@ static qboolean IW_RendererRefDX12_Register (const iw_renderer_plugin_host_api_t
 	if (!host_api->register_backend)
 		return false;
 
+	Con_Printf ("[ref_dx12] capability banner: STUB backend loaded (experimental bring-up only).\n");
+	Con_Printf ("[ref_dx12] milestones: init=no pass_callbacks=no present=no resource_translation=no\n");
 	return host_api->register_backend (&s_ref_dx12_backend);
 }
 

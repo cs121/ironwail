@@ -20,6 +20,7 @@ This directory tracks engine-facing implementation notes, feature references, an
 - `particle_debug_mvp.md`
 - `particle_material_contract.md`
 - `q3p_phase0_particle_mapping.md`
+- `developer_renderer_backends.md` - backend runtime status, stub policy, and milestone criteria for Vulkan/DX12 bring-up.
 
 The design/debug notes are intentionally implementation-oriented snapshots. They
 may describe rollout phases, experiments, or diagnostics rather than user-facing
