@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "glquake.h"
+#include "gl_backend.h"
 
 extern	int	rs_skypolys; //for r_speeds readout
 extern	int rs_skypasses; //for r_speeds readout
@@ -791,21 +792,21 @@ void Sky_DrawSky (void)
 	}
 	else if (skybox)
 	{
-		glEnable (GL_STENCIL_TEST);
-		glStencilMask (1);
-		glStencilFunc (GL_ALWAYS, 1, 1);
-		glStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
-		glColorMask (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+		GL_Backend_SetStencilTestCached (true);
+		GL_Backend_SetStencilMaskCached (1);
+		GL_Backend_SetStencilFuncCached (GL_ALWAYS, 1, 1);
+		GL_Backend_SetStencilOpCached (GL_KEEP, GL_KEEP, GL_REPLACE);
+		GL_Backend_SetColorMaskCached (GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 
 		R_DrawBrushModels_SkyStencil (ents, count);
 
-		glStencilFunc (GL_EQUAL, 1, 1);
-		glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
-		glColorMask (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+		GL_Backend_SetStencilFuncCached (GL_EQUAL, 1, 1);
+		GL_Backend_SetStencilOpCached (GL_KEEP, GL_KEEP, GL_KEEP);
+		GL_Backend_SetColorMaskCached (GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 
 		Sky_DrawSkyBox ();
 
-		glDisable (GL_STENCIL_TEST);
+		GL_Backend_SetStencilTestCached (false);
 	}
 	else
 	{
@@ -849,4 +850,3 @@ void Sky_SetupFrame (void)
         r_framedata.wind[2] = -dist * cp * cy;
         r_framedata.wind[3] = phase;
 }
-

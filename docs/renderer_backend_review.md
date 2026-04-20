@@ -192,6 +192,15 @@ Reviewed against the current framegraph/backend split and the still-GL-heavy exe
 - Replace direct framebuffer/draw/state calls with backend wrapper equivalents.
 - Keep OpenGL behavior identical.
 
+#### Phase-1 migration note (April 20, 2026)
+- Completed wrapper migration for direct state mutations in:
+  - `Quake/src/render/gl_rmain.c`
+  - `Quake/src/render/gl_sky.c`
+  - `Quake/src/render/gl_oit.c`
+  - `Quake/src/render/gl_shadow_runtime.c`
+- Added cached backend wrappers for viewport/color/depth/stencil state in `gl_backend` to reduce redundant driver calls.
+- Remaining intentional exceptions (not migrated yet) are direct framebuffer attachment/read-draw-buffer operations that still depend on legacy FBO plumbing semantics; these are deferred until pass-local render-target contracts are fully explicit.
+
 ### Phase 2: Pass baselines and explicit state objects
 - Targets: `r_framegraph.h/c`, backend interface, `gl_backend.c`
 - Introduce pass baseline descriptors (depth/stencil/blend/raster/viewport/scissor).
@@ -240,4 +249,3 @@ Reviewed against the current framegraph/backend split and the still-GL-heavy exe
 6. Must-fix before serious Vulkan/DX12: state ownership, resource transitions, pass contracts, submission abstraction.
 7. Incremental path viability: **yes**, if GL remains first-class during phased migration.
 8. Confidence: **medium-high** for architecture-level findings; **medium** for runtime-correctness edge cases without exhaustive runtime tracing.
-

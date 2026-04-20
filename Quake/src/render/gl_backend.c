@@ -45,6 +45,29 @@ static gl_backend_timer_pass_t s_timer_passes[R_BACKEND_MAX_PROFILE_SLOTS];
 static RenderBackendCaps s_gl_backend_caps;
 static int s_legacy_pass_resource_fallback_frame = -1;
 static gl_proc_address_loader_t s_gl_proc_loader = NULL;
+static struct gl_backend_state_cache_s
+{
+	qboolean viewport_valid;
+	GLint viewport[4];
+	qboolean color_mask_valid;
+	GLboolean color_mask[4];
+	qboolean depth_mask_valid;
+	GLboolean depth_mask;
+	qboolean depth_func_valid;
+	GLenum depth_func;
+	qboolean stencil_test_valid;
+	qboolean stencil_test_enabled;
+	qboolean stencil_mask_valid;
+	GLuint stencil_mask;
+	qboolean stencil_func_valid;
+	GLenum stencil_func;
+	GLint stencil_ref;
+	GLuint stencil_value_mask;
+	qboolean stencil_op_valid;
+	GLenum stencil_op_sfail;
+	GLenum stencil_op_dpfail;
+	GLenum stencil_op_dppass;
+} s_gl_state_cache;
 static struct gl_backend_resource_table_s
 {
 	struct gl_backend_resource_entry_s
@@ -59,6 +82,125 @@ static struct gl_backend_resource_table_s
 	unsigned short next_opaque_id;
 	unsigned short count;
 } s_gl_resources;
+
+void GL_Backend_ResetStateCache (void)
+{
+	memset (&s_gl_state_cache, 0, sizeof (s_gl_state_cache));
+}
+
+void GL_Backend_SetViewportCached (int x, int y, int width, int height)
+{
+	if (!s_gl_state_cache.viewport_valid
+		|| s_gl_state_cache.viewport[0] != x
+		|| s_gl_state_cache.viewport[1] != y
+		|| s_gl_state_cache.viewport[2] != width
+		|| s_gl_state_cache.viewport[3] != height)
+	{
+		glViewport (x, y, width, height);
+		s_gl_state_cache.viewport[0] = x;
+		s_gl_state_cache.viewport[1] = y;
+		s_gl_state_cache.viewport[2] = width;
+		s_gl_state_cache.viewport[3] = height;
+		s_gl_state_cache.viewport_valid = true;
+	}
+}
+
+void GL_Backend_SetColorMaskCached (int r, int g, int b, int a)
+{
+	const GLboolean nr = r ? GL_TRUE : GL_FALSE;
+	const GLboolean ng = g ? GL_TRUE : GL_FALSE;
+	const GLboolean nb = b ? GL_TRUE : GL_FALSE;
+	const GLboolean na = a ? GL_TRUE : GL_FALSE;
+
+	if (!s_gl_state_cache.color_mask_valid
+		|| s_gl_state_cache.color_mask[0] != nr
+		|| s_gl_state_cache.color_mask[1] != ng
+		|| s_gl_state_cache.color_mask[2] != nb
+		|| s_gl_state_cache.color_mask[3] != na)
+	{
+		glColorMask (nr, ng, nb, na);
+		s_gl_state_cache.color_mask[0] = nr;
+		s_gl_state_cache.color_mask[1] = ng;
+		s_gl_state_cache.color_mask[2] = nb;
+		s_gl_state_cache.color_mask[3] = na;
+		s_gl_state_cache.color_mask_valid = true;
+	}
+}
+
+void GL_Backend_SetDepthMaskCached (int enabled)
+{
+	const GLboolean mask = enabled ? GL_TRUE : GL_FALSE;
+
+	if (!s_gl_state_cache.depth_mask_valid || s_gl_state_cache.depth_mask != mask)
+	{
+		glDepthMask (mask);
+		s_gl_state_cache.depth_mask = mask;
+		s_gl_state_cache.depth_mask_valid = true;
+	}
+}
+
+void GL_Backend_SetDepthFuncCached (unsigned func)
+{
+	if (!s_gl_state_cache.depth_func_valid || s_gl_state_cache.depth_func != (GLenum)func)
+	{
+		glDepthFunc ((GLenum)func);
+		s_gl_state_cache.depth_func = (GLenum)func;
+		s_gl_state_cache.depth_func_valid = true;
+	}
+}
+
+void GL_Backend_SetStencilTestCached (qboolean enabled)
+{
+	if (!s_gl_state_cache.stencil_test_valid || s_gl_state_cache.stencil_test_enabled != enabled)
+	{
+		if (enabled)
+			glEnable (GL_STENCIL_TEST);
+		else
+			glDisable (GL_STENCIL_TEST);
+		s_gl_state_cache.stencil_test_enabled = enabled;
+		s_gl_state_cache.stencil_test_valid = true;
+	}
+}
+
+void GL_Backend_SetStencilMaskCached (unsigned mask)
+{
+	if (!s_gl_state_cache.stencil_mask_valid || s_gl_state_cache.stencil_mask != (GLuint)mask)
+	{
+		glStencilMask ((GLuint)mask);
+		s_gl_state_cache.stencil_mask = (GLuint)mask;
+		s_gl_state_cache.stencil_mask_valid = true;
+	}
+}
+
+void GL_Backend_SetStencilFuncCached (unsigned func, int ref, unsigned mask)
+{
+	if (!s_gl_state_cache.stencil_func_valid
+		|| s_gl_state_cache.stencil_func != (GLenum)func
+		|| s_gl_state_cache.stencil_ref != (GLint)ref
+		|| s_gl_state_cache.stencil_value_mask != (GLuint)mask)
+	{
+		glStencilFunc ((GLenum)func, (GLint)ref, (GLuint)mask);
+		s_gl_state_cache.stencil_func = (GLenum)func;
+		s_gl_state_cache.stencil_ref = (GLint)ref;
+		s_gl_state_cache.stencil_value_mask = (GLuint)mask;
+		s_gl_state_cache.stencil_func_valid = true;
+	}
+}
+
+void GL_Backend_SetStencilOpCached (unsigned sfail, unsigned dpfail, unsigned dppass)
+{
+	if (!s_gl_state_cache.stencil_op_valid
+		|| s_gl_state_cache.stencil_op_sfail != (GLenum)sfail
+		|| s_gl_state_cache.stencil_op_dpfail != (GLenum)dpfail
+		|| s_gl_state_cache.stencil_op_dppass != (GLenum)dppass)
+	{
+		glStencilOp ((GLenum)sfail, (GLenum)dpfail, (GLenum)dppass);
+		s_gl_state_cache.stencil_op_sfail = (GLenum)sfail;
+		s_gl_state_cache.stencil_op_dpfail = (GLenum)dpfail;
+		s_gl_state_cache.stencil_op_dppass = (GLenum)dppass;
+		s_gl_state_cache.stencil_op_valid = true;
+	}
+}
 
 void GL_Backend_SetProcAddressLoader (gl_proc_address_loader_t loader)
 {
@@ -110,6 +252,7 @@ void GL_Backend_ResetResources (void)
 {
 	memset (&s_gl_resources, 0, sizeof (s_gl_resources));
 	s_gl_resources.next_opaque_id = 1u;
+	GL_Backend_ResetStateCache ();
 }
 
 static unsigned short GLBackend_RegisterResourceInternal (render_backend_resource_type_t type, render_backend_resource_slot_t slot, gl_backend_resource_key_t key, render_backend_resource_lifetime_t lifetime, unsigned native_id)
@@ -461,6 +604,31 @@ static void GLBackend_ResourceBarrier (const RenderGraphResourceHandle *resource
 
 static void GLBackend_ValidatePassState (const char *pass_name, qboolean before_pass)
 {
+	typedef struct gl_backend_pass_contract_s
+	{
+		const char *name;
+		qboolean expect_depth_test;
+		qboolean expect_depth_write;
+		qboolean expect_blend;
+		qboolean expect_cull;
+		qboolean expect_stencil_test;
+		qboolean expect_scissor_test;
+	} gl_backend_pass_contract_t;
+	static const gl_backend_pass_contract_t contracts[] = {
+		{"Setup view", true, true, false, true, false, false},
+		{"Shadow maps", true, true, false, true, false, false},
+		{"Render scene", true, true, false, true, false, false},
+		{"Warp/resolve", false, false, false, false, false, false},
+		{"Capture fog handoff", false, false, true, false, false, false},
+		{"Postprocess", false, false, false, false, false, false},
+		{"Draw viewmodel", true, true, false, true, false, false},
+		{"Polyblend", false, false, true, false, false, false},
+		{"Store previous frame", false, false, false, false, false, false},
+		{"Update decals", true, true, true, true, false, false},
+		{NULL, false, false, false, false, false, false}
+	};
+	const gl_backend_pass_contract_t *contract = NULL;
+	unsigned i;
 	GLenum err;
 
 	if (r_gl_state_validate.value <= 0.f)
@@ -473,8 +641,34 @@ static void GLBackend_ValidatePassState (const char *pass_name, qboolean before_
 	{
 		GLint draw_fbo = 0;
 		GLint viewport[4] = {0};
+		GLint scissor_box[4] = {0};
+		GLboolean depth_test = GL_FALSE;
+		GLboolean blend = GL_FALSE;
+		GLboolean cull = GL_FALSE;
+		GLboolean stencil_test = GL_FALSE;
+		GLboolean scissor_test = GL_FALSE;
+		GLboolean depth_write = GL_FALSE;
+		GLboolean color_mask[4] = {GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE};
 		glGetIntegerv (GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
 		glGetIntegerv (GL_VIEWPORT, viewport);
+		glGetIntegerv (GL_SCISSOR_BOX, scissor_box);
+		glGetBooleanv (GL_DEPTH_TEST, &depth_test);
+		glGetBooleanv (GL_BLEND, &blend);
+		glGetBooleanv (GL_CULL_FACE, &cull);
+		glGetBooleanv (GL_STENCIL_TEST, &stencil_test);
+		glGetBooleanv (GL_SCISSOR_TEST, &scissor_test);
+		glGetBooleanv (GL_DEPTH_WRITEMASK, &depth_write);
+		glGetBooleanv (GL_COLOR_WRITEMASK, color_mask);
+
+		for (i = 0; contracts[i].name; ++i)
+		{
+			if (!q_strcasecmp (pass_name ? pass_name : "", contracts[i].name))
+			{
+				contract = &contracts[i];
+				break;
+			}
+		}
+
 		if (viewport[2] <= 0 || viewport[3] <= 0)
 			Con_Warning ("FrameGraph %s(%s): invalid viewport %d %d %d %d\n",
 				before_pass ? "before" : "after",
@@ -487,6 +681,39 @@ static void GLBackend_ValidatePassState (const char *pass_name, qboolean before_
 				Con_Warning ("FrameGraph %s(%s): incomplete FBO %d status=0x%x\n",
 					before_pass ? "before" : "after",
 					pass_name, draw_fbo, (unsigned)status);
+		}
+
+		if (contract)
+		{
+			if ((depth_test != GL_FALSE) != contract->expect_depth_test
+				|| (depth_write != GL_FALSE) != contract->expect_depth_write
+				|| (blend != GL_FALSE) != contract->expect_blend
+				|| (cull != GL_FALSE) != contract->expect_cull
+				|| (stencil_test != GL_FALSE) != contract->expect_stencil_test
+				|| (scissor_test != GL_FALSE) != contract->expect_scissor_test)
+			{
+				Con_Warning ("FrameGraph %s(%s): state contract mismatch exp[d=%d dw=%d b=%d c=%d s=%d sc=%d] got[d=%d dw=%d b=%d c=%d s=%d sc=%d] vp=[%d %d %d %d] scissor=[%d %d %d %d] colormask=[%d %d %d %d]\n",
+					before_pass ? "before" : "after",
+					pass_name,
+					contract->expect_depth_test ? 1 : 0,
+					contract->expect_depth_write ? 1 : 0,
+					contract->expect_blend ? 1 : 0,
+					contract->expect_cull ? 1 : 0,
+					contract->expect_stencil_test ? 1 : 0,
+					contract->expect_scissor_test ? 1 : 0,
+					depth_test != GL_FALSE ? 1 : 0,
+					depth_write != GL_FALSE ? 1 : 0,
+					blend != GL_FALSE ? 1 : 0,
+					cull != GL_FALSE ? 1 : 0,
+					stencil_test != GL_FALSE ? 1 : 0,
+					scissor_test != GL_FALSE ? 1 : 0,
+					viewport[0], viewport[1], viewport[2], viewport[3],
+					scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3],
+					color_mask[0] != GL_FALSE ? 1 : 0,
+					color_mask[1] != GL_FALSE ? 1 : 0,
+					color_mask[2] != GL_FALSE ? 1 : 0,
+					color_mask[3] != GL_FALSE ? 1 : 0);
+			}
 		}
 	}
 
@@ -675,7 +902,7 @@ static void GLBackend_BindRenderTarget (const RenderGraphResourceHandle *resourc
 
 static void GLBackend_SetViewport (int x, int y, int width, int height)
 {
-	glViewport (x, y, width, height);
+	GL_Backend_SetViewportCached (x, y, width, height);
 }
 
 static void GLBackend_SetScissor (qboolean enabled, int x, int y, int width, int height)
@@ -973,6 +1200,7 @@ static qboolean GLBackend_HasRequiredPassCallbacks (void)
 static qboolean GLBackend_Init (void)
 {
 	GL_Backend_ResetResources ();
+	GL_Backend_ResetStateCache ();
 	return true;
 }
 
@@ -1006,6 +1234,7 @@ static void GLBackend_BeginFrame (void)
 		GLBackend_DetectCaps ();
 	}
 
+	GL_Backend_ResetStateCache ();
 	GL_BackendBeginFrame ();
 }
 

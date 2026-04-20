@@ -1,5 +1,6 @@
 #include "quakedef.h"
 #include "glquake.h"
+#include "gl_backend.h"
 
 #include "gl_oit.h"
 
@@ -18,10 +19,10 @@ void R_BeginTranslucency (void)
 		GL_ClearBufferfvFunc (GL_COLOR, 0, zeroes);
 		GL_ClearBufferfvFunc (GL_COLOR, 1, ones);
 
-		glEnable (GL_STENCIL_TEST);
-		glStencilMask (2);
-		glStencilFunc (GL_ALWAYS, 2, 2);
-		glStencilOp (GL_KEEP, GL_KEEP, GL_REPLACE);
+		GL_Backend_SetStencilTestCached (true);
+		GL_Backend_SetStencilMaskCached (2);
+		GL_Backend_SetStencilFuncCached (GL_ALWAYS, 2, 2);
+		GL_Backend_SetStencilOpCached (GL_KEEP, GL_KEEP, GL_REPLACE);
 	}
 }
 
@@ -38,8 +39,8 @@ void R_EndTranslucency (void)
 			glReadBuffer (GL_COLOR_ATTACHMENT0);
 		}
 
-		glStencilFunc (GL_EQUAL, 2, 2);
-		glStencilOp (GL_KEEP, GL_KEEP, GL_KEEP);
+		GL_Backend_SetStencilFuncCached (GL_EQUAL, 2, 2);
+		GL_Backend_SetStencilOpCached (GL_KEEP, GL_KEEP, GL_KEEP);
 
 		GL_UseProgram (glprogs.oit_resolve[framebufs.scene.samples > 1]);
 		{
@@ -63,11 +64,10 @@ void R_EndTranslucency (void)
 
 		R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
 
-		glDisable (GL_STENCIL_TEST);
+		GL_Backend_SetStencilTestCached (false);
 
 		GL_EndGroup ();
 	}
 
 	GL_EndGroup ();
 }
-
