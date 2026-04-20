@@ -201,6 +201,40 @@ static void FG_FormatResourceBits (unsigned bits, char *out, size_t out_size)
 		q_strlcat (out, "none", out_size);
 }
 
+static const char *FG_GetSideEffectBitName (unsigned bit)
+{
+	switch (bit)
+	{
+	case FG_SIDEFX_GLOBAL_STATE: return "global_state";
+	case FG_SIDEFX_TEMPORAL_HISTORY: return "temporal_history";
+	case FG_SIDEFX_CPU_SIM_UPDATE: return "cpu_sim_update";
+	default: return "unknown";
+	}
+}
+
+static void FG_FormatSideEffectBits (unsigned bits, char *out, size_t out_size)
+{
+	unsigned bit;
+	qboolean first = true;
+
+	if (!out || out_size == 0)
+		return;
+	out[0] = '\0';
+
+	for (bit = 1u; bit != 0; bit <<= 1)
+	{
+		if ((bits & bit) == 0u)
+			continue;
+		if (!first)
+			q_strlcat (out, "|", out_size);
+		q_strlcat (out, FG_GetSideEffectBitName (bit), out_size);
+		first = false;
+	}
+
+	if (first)
+		q_strlcat (out, "none", out_size);
+}
+
 static void FG_ResolvePassOutputAndViewport (const RenderPassDesc *pass, const RenderPassContext *ctx,
 	unsigned *out_output_target, unsigned *out_viewport_mode)
 {
@@ -251,6 +285,7 @@ static void FG_DebugPrintPassInfo (const RenderPassDesc *pass, const RenderPassC
 {
 	char reads_buf[128];
 	char writes_buf[128];
+	char sidefx_buf[128];
 	unsigned output_target = FG_PASS_OUTPUT_KEEP;
 	unsigned viewport_mode = FG_PASS_VIEWPORT_KEEP;
 
@@ -259,12 +294,14 @@ static void FG_DebugPrintPassInfo (const RenderPassDesc *pass, const RenderPassC
 
 	FG_FormatResourceBits (pass->reads, reads_buf, sizeof (reads_buf));
 	FG_FormatResourceBits (pass->writes, writes_buf, sizeof (writes_buf));
+	FG_FormatSideEffectBits (pass->side_effects, sidefx_buf, sizeof (sidefx_buf));
 	FG_ResolvePassOutputAndViewport (pass, ctx, &output_target, &viewport_mode);
 
-	Con_DPrintf ("FrameGraph pass: name='%s' reads=%s writes=%s output_target=%s viewport_mode=%s\n",
+	Con_DPrintf ("FrameGraph pass: name='%s' reads=%s writes=%s sidefx=%s output_target=%s viewport_mode=%s\n",
 		pass->name ? pass->name : "<unnamed>",
 		reads_buf,
 		writes_buf,
+		sidefx_buf,
 		FG_GetOutputTargetName (output_target),
 		FG_GetViewportModeName (viewport_mode));
 
@@ -754,11 +791,29 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 				{
 					if (pass_a->side_effects != 0)
 					{
+						if (r_framegraph_debug.value > 0.f)
+						{
+							char sidefx_buf[96];
+							FG_FormatSideEffectBits (pass_a->side_effects, sidefx_buf, sizeof (sidefx_buf));
+							Con_DPrintf ("FrameGraph sort: '%s' delayed after '%s' (read/write cycle, sidefx=%s)\n",
+								pass_a->name ? pass_a->name : "<unnamed>",
+								pass_b->name ? pass_b->name : "<unnamed>",
+								sidefx_buf);
+						}
 						incoming[i] |= (1ull << j);
 						indegree[i]++;
 					}
 					else
 					{
+						if (r_framegraph_debug.value > 0.f)
+						{
+							char sidefx_buf[96];
+							FG_FormatSideEffectBits (pass_b->side_effects, sidefx_buf, sizeof (sidefx_buf));
+							Con_DPrintf ("FrameGraph sort: '%s' delayed after '%s' (read/write cycle, sidefx=%s)\n",
+								pass_b->name ? pass_b->name : "<unnamed>",
+								pass_a->name ? pass_a->name : "<unnamed>",
+								sidefx_buf);
+						}
 						incoming[j] |= (1ull << i);
 						indegree[j]++;
 					}
@@ -809,7 +864,7 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 			if (r_framegraph_debug.value > 0.f
 				&& (!s_cycle_warning_emitted || s_cycle_warning_signature != cycle_signature))
 			{
-				Con_Warning ("FrameGraph: pass dependency cycle detected, keeping registration order (further identical warnings suppressed)\n");
+				Con_Warning ("FrameGraph: pass dependency cycle detected (including sidefx ordering), keeping registration order (further identical warnings suppressed)\n");
 				s_cycle_warning_signature = cycle_signature;
 				s_cycle_warning_emitted = true;
 			}
@@ -889,6 +944,18 @@ static unsigned long long FG_BuildActivePassMask (const RenderPassContext *ctx, 
 
 		if (pass->side_effects)
 		{
+			if ((pass->writes & needed_resources) == 0u
+				&& r_framegraph_debug.value > 0.f)
+			{
+				char sidefx_buf[96];
+				char needed_buf[128];
+				FG_FormatSideEffectBits (pass->side_effects, sidefx_buf, sizeof (sidefx_buf));
+				FG_FormatResourceBits (needed_resources, needed_buf, sizeof (needed_buf));
+				Con_DPrintf ("FrameGraph prune: keeping '%s' for sidefx-only execution (sidefx=%s, needed=%s)\n",
+					pass->name ? pass->name : "<unnamed>",
+					sidefx_buf,
+					needed_buf);
+			}
 			active_mask |= pass_bit;
 			needed_resources = (needed_resources & ~pass->writes) | pass->reads;
 			continue;

@@ -1282,7 +1282,7 @@ static const RenderPassDesc s_decals_framegraph_pass = {
 	.name = "Update decals",
 	.reads = RENDER_RES_NONE,
 	.writes = RENDER_RES_DECALS,
-	.side_effects = 0,
+	.side_effects = FG_SIDEFX_CPU_SIM_UPDATE,
 	.output_target = FG_PASS_OUTPUT_KEEP,
 	.viewport_mode = FG_PASS_VIEWPORT_KEEP,
 	.enabled = NULL,
@@ -1690,4 +1690,3 @@ void R_DrawDecals (void)
 
 	R_DecalsDebugPrintFrameStats ();
 }
-
