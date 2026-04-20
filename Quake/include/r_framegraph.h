@@ -57,7 +57,11 @@ typedef enum fg_pass_stage_e
 typedef enum fg_pass_baseline_bits_e
 {
 	FG_PASS_BASELINE_RESET_SCISSOR = 1u << 0,
-	FG_PASS_BASELINE_REQUIRE_AUTOBIND = 1u << 1
+	FG_PASS_BASELINE_REQUIRE_AUTOBIND = 1u << 1,
+	FG_PASS_BASELINE_RESET_BLEND = 1u << 2,
+	FG_PASS_BASELINE_RESET_DEPTH = 1u << 3,
+	FG_PASS_BASELINE_RESET_CULL = 1u << 4,
+	FG_PASS_BASELINE_RESET_PROGRAM_BINDINGS = 1u << 5
 } fg_pass_baseline_bits_t;
 
 typedef enum fg_pass_stats_channel_e
@@ -141,6 +145,7 @@ void R_Backend_SetViewport (int x, int y, int width, int height);
 void R_Backend_SetScissor (qboolean enabled, int x, int y, int width, int height);
 void R_Backend_ApplyLegacyPipelineState (unsigned state_bits);
 void R_Backend_SetPipelineState (unsigned state_bits);
+void R_Backend_ApplyFrameGraphBaseline (unsigned baseline_bits);
 void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count);
 void R_Backend_DrawIndexed (render_backend_primitive_t primitive, render_backend_index_type_t index_type, int count, intptr_t index_offset_bytes);
 void R_Backend_DrawInstanced (render_backend_primitive_t primitive, int first, int count, int instance_count);

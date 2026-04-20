@@ -1812,6 +1812,42 @@ void R_Backend_SetPipelineState (unsigned state_bits)
 	R_Backend_ApplyLegacyPipelineState (state_bits);
 }
 
+void R_Backend_ApplyFrameGraphBaseline (unsigned baseline_bits)
+{
+	unsigned state_bits = glstate;
+	qboolean apply_pipeline_state = false;
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_BLEND) != 0u)
+	{
+		state_bits = (state_bits & ~GLS_MASK_BLEND) | GLS_BLEND_OPAQUE;
+		apply_pipeline_state = true;
+	}
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_DEPTH) != 0u)
+	{
+		state_bits &= ~(GLS_NO_ZTEST | GLS_NO_ZWRITE);
+		apply_pipeline_state = true;
+	}
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_CULL) != 0u)
+	{
+		state_bits = (state_bits & ~GLS_MASK_CULL) | GLS_CULL_BACK;
+		apply_pipeline_state = true;
+	}
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_PROGRAM_BINDINGS) != 0u)
+	{
+		state_bits &= ~(GLS_MASK_ATTRIBS | GLS_MASK_INSTANCED_ATTRIBS);
+		apply_pipeline_state = true;
+	}
+
+	if (apply_pipeline_state)
+		R_Backend_SetPipelineState (state_bits);
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_SCISSOR) != 0u)
+		R_Backend_SetScissor (false, 0, 0, 0, 0);
+}
+
 void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
