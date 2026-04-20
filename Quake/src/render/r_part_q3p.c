@@ -537,7 +537,7 @@ static void Q3P_LoadEffectDefs (void)
 
 	memset (q3p_effect_defs, 0, sizeof (q3p_effect_defs));
 
-	for (search = com_searchpaths; search; search = search->next)
+	for (search = COM_GetSearchPaths (); search; search = search->next)
 	{
 		if (search->pack)
 		{

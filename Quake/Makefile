@@ -277,6 +277,9 @@ OBJS = strlcat.o \
 	wad.o \
 	cmd.o \
 	common.o \
+	fs_searchpath.o \
+	fs_pack.o \
+	bootstrap.o \
 	../common/lightgrid.o \
 	mat_material.o \
 	mat_material_parse.o \

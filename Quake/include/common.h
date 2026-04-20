@@ -340,6 +340,7 @@ extern	int		safemode;
  */
 
 int COM_CheckParm (const char *parm);
+int COM_CheckParmNext (int last, const char *parm);
 
 void COM_Init (void);
 void COM_InitArgv (int argc, char **argv);
@@ -424,8 +425,13 @@ typedef struct searchpath_s
 } searchpath_t;
 
 #ifndef RENDERER_PLUGIN_BUILD
-extern searchpath_t *com_searchpaths;
-extern searchpath_t *com_base_searchpaths;
+searchpath_t *COM_GetSearchPaths (void);
+searchpath_t *COM_GetBaseSearchPaths (void);
+searchpath_t **COM_GetSearchPathsPointer (void);
+void COM_SetSearchPaths (searchpath_t *search);
+void COM_SetBaseSearchPaths (searchpath_t *search);
+void COM_PushSearchPath (searchpath_t *search, qboolean append);
+void COM_AddEnginePak (unsigned int path_id, qboolean append);
 
 extern THREAD_LOCAL qfileofs_t com_filesize;
 #endif
@@ -438,7 +444,8 @@ extern	int		com_numbasedirs;
 extern	char	com_basedirs[MAX_BASEDIRS][MAX_OSPATH];
 extern	char	com_gamedir[MAX_OSPATH];
 extern	char	com_nightdivedir[MAX_OSPATH];
-extern	THREAD_LOCAL int	file_from_pak;	// global indicating that file came from a pak
+int COM_GetFileFromPak (void);
+void COM_SetFileFromPak (int value);
 #endif
 
 void COM_WriteFile (const char *filename, const void *data, int len);
