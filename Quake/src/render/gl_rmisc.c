@@ -697,6 +697,7 @@ Cvar_RegisterVariable (&r_vignette);
 	Cvar_RegisterVariable (&r_gl_state_validate);
 	Cvar_RegisterVariable (&r_framegraph_autobind);
 	Cvar_RegisterVariable (&r_framegraph_debug);
+	Cvar_RegisterVariable (&r_framegraph_pass_debug);
 	Cvar_RegisterVariable (&r_lerpmodels);
 	Cvar_RegisterVariable (&r_lerpmove);
 	Cvar_RegisterVariable (&r_nolerp_list);
