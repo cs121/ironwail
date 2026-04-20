@@ -520,6 +520,7 @@ cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
 cvar_t  r_gl_state_validate = { "r_gl_state_validate", "0", CVAR_NONE };
 cvar_t  r_framegraph_autobind = { "r_framegraph_autobind", "1", CVAR_NONE };
 cvar_t  r_framegraph_debug = { "r_framegraph_debug", "0", CVAR_NONE };
+cvar_t  r_framegraph_pass_debug = { "r_framegraph_pass_debug", "0", CVAR_NONE };
 cvar_t	r_quality = { "r_quality", "high", CVAR_ARCHIVE };
 cvar_t  r_shadow = { "r_shadow", "1", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };

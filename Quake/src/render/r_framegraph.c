@@ -6,6 +6,7 @@
 extern cvar_t r_gl_state_validate;
 extern cvar_t r_framegraph_autobind;
 extern cvar_t r_framegraph_debug;
+extern cvar_t r_framegraph_pass_debug;
 extern cvar_t r_speeds;
 extern cvar_t r_shadow;
 
@@ -127,6 +128,195 @@ static const char *FG_GetResourceBitName (unsigned bit)
 	case RENDER_RES_DECALS: return "decals";
 	case RENDER_RES_SSAO_FOG_STATE: return "ssao_fog_state";
 	default: return "unknown";
+	}
+}
+
+static const char *FG_GetOutputTargetName (unsigned output_target)
+{
+	switch (output_target)
+	{
+	case FG_PASS_OUTPUT_KEEP: return "keep";
+	case FG_PASS_OUTPUT_BACKBUFFER: return "backbuffer";
+	case FG_PASS_OUTPUT_SCENE_FBO: return "scene_fbo";
+	case FG_PASS_OUTPUT_COMPOSITE_FBO: return "composite_fbo";
+	case FG_PASS_OUTPUT_AUTO_SCENE: return "auto_scene";
+	case FG_PASS_OUTPUT_AUTO_WARP: return "auto_warp";
+	default: return "unknown";
+	}
+}
+
+static const char *FG_GetViewportModeName (unsigned viewport_mode)
+{
+	switch (viewport_mode)
+	{
+	case FG_PASS_VIEWPORT_KEEP: return "keep";
+	case FG_PASS_VIEWPORT_FULL_WINDOW: return "full_window";
+	case FG_PASS_VIEWPORT_VIEW_RECT: return "view_rect";
+	case FG_PASS_VIEWPORT_VIEW_RECT_SCALED: return "view_rect_scaled";
+	default: return "unknown";
+	}
+}
+
+static const char *FG_GetLoadOpName (render_backend_load_op_t load_op)
+{
+	switch (load_op)
+	{
+	case R_BACKEND_LOAD_OP_LOAD: return "load";
+	case R_BACKEND_LOAD_OP_CLEAR: return "clear";
+	case R_BACKEND_LOAD_OP_DONT_CARE: return "dont_care";
+	default: return "unknown";
+	}
+}
+
+static const char *FG_GetStoreOpName (render_backend_store_op_t store_op)
+{
+	switch (store_op)
+	{
+	case R_BACKEND_STORE_OP_STORE: return "store";
+	case R_BACKEND_STORE_OP_DONT_CARE: return "dont_care";
+	default: return "unknown";
+	}
+}
+
+static void FG_FormatResourceBits (unsigned bits, char *out, size_t out_size)
+{
+	unsigned bit;
+	qboolean first = true;
+
+	if (!out || out_size == 0)
+		return;
+	out[0] = '\0';
+
+	for (bit = 1u; bit != 0; bit <<= 1)
+	{
+		if ((bits & bit) == 0u)
+			continue;
+		if (!first)
+			q_strlcat (out, "|", out_size);
+		q_strlcat (out, FG_GetResourceBitName (bit), out_size);
+		first = false;
+	}
+
+	if (first)
+		q_strlcat (out, "none", out_size);
+}
+
+static void FG_ResolvePassOutputAndViewport (const RenderPassDesc *pass, const RenderPassContext *ctx,
+	unsigned *out_output_target, unsigned *out_viewport_mode)
+{
+	unsigned output_target;
+	unsigned viewport_mode;
+
+	if (!pass)
+		return;
+
+	output_target = pass->output_target;
+	viewport_mode = pass->viewport_mode;
+
+	if (output_target == FG_PASS_OUTPUT_AUTO_SCENE)
+	{
+		if (ctx && ctx->frame_plan && ctx->frame_plan->needs_scene_effects)
+		{
+			output_target = FG_PASS_OUTPUT_SCENE_FBO;
+			viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT_SCALED;
+		}
+		else
+		{
+			qboolean needs_post = (ctx && ctx->frame_plan) ? ctx->frame_plan->needs_postprocess : false;
+			output_target = needs_post ? FG_PASS_OUTPUT_COMPOSITE_FBO : FG_PASS_OUTPUT_BACKBUFFER;
+			viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT;
+		}
+	}
+	else if (output_target == FG_PASS_OUTPUT_AUTO_WARP)
+	{
+		if (ctx && ctx->frame_plan && ctx->frame_plan->needs_scene_effects)
+		{
+			output_target = ctx->frame_plan->needs_postprocess ? FG_PASS_OUTPUT_COMPOSITE_FBO : FG_PASS_OUTPUT_BACKBUFFER;
+			viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT;
+		}
+		else
+		{
+			output_target = FG_PASS_OUTPUT_KEEP;
+			viewport_mode = FG_PASS_VIEWPORT_KEEP;
+		}
+	}
+
+	if (out_output_target)
+		*out_output_target = output_target;
+	if (out_viewport_mode)
+		*out_viewport_mode = viewport_mode;
+}
+
+static void FG_DebugPrintPassInfo (const RenderPassDesc *pass, const RenderPassContext *ctx)
+{
+	char reads_buf[128];
+	char writes_buf[128];
+	unsigned output_target = FG_PASS_OUTPUT_KEEP;
+	unsigned viewport_mode = FG_PASS_VIEWPORT_KEEP;
+
+	if (!pass || r_framegraph_pass_debug.value <= 0.f)
+		return;
+
+	FG_FormatResourceBits (pass->reads, reads_buf, sizeof (reads_buf));
+	FG_FormatResourceBits (pass->writes, writes_buf, sizeof (writes_buf));
+	FG_ResolvePassOutputAndViewport (pass, ctx, &output_target, &viewport_mode);
+
+	Con_DPrintf ("FrameGraph pass: name='%s' reads=%s writes=%s output_target=%s viewport_mode=%s\n",
+		pass->name ? pass->name : "<unnamed>",
+		reads_buf,
+		writes_buf,
+		FG_GetOutputTargetName (output_target),
+		FG_GetViewportModeName (viewport_mode));
+
+	if (pass->color_attachments && pass->num_color_attachments > 0)
+	{
+		unsigned i;
+		for (i = 0; i < pass->num_color_attachments; ++i)
+		{
+			Con_DPrintf ("FrameGraph pass: name='%s' color_attachment[%u] resource=%s load=%s store=%s\n",
+				pass->name ? pass->name : "<unnamed>",
+				i,
+				FG_GetResourceBitName (pass->color_attachments[i].resource_bit),
+				FG_GetLoadOpName (pass->color_attachments[i].load_op),
+				FG_GetStoreOpName (pass->color_attachments[i].store_op));
+		}
+	}
+
+	if (pass->depth_attachment)
+	{
+		Con_DPrintf ("FrameGraph pass: name='%s' depth_attachment resource=%s load=%s store=%s\n",
+			pass->name ? pass->name : "<unnamed>",
+			FG_GetResourceBitName (pass->depth_attachment->resource_bit),
+			FG_GetLoadOpName (pass->depth_attachment->load_op),
+			FG_GetStoreOpName (pass->depth_attachment->store_op));
+	}
+}
+
+static void FG_DebugPrintResolvedSlots (const RenderPassDesc *pass, const RenderPassContext *ctx)
+{
+	unsigned bit;
+
+	if (!pass || !ctx || !ctx->resources || r_framegraph_pass_debug.value <= 0.f)
+		return;
+
+	for (bit = 1u; bit != 0; bit <<= 1)
+	{
+		render_backend_resource_slot_t slot;
+		unsigned resolved;
+
+		if (((pass->reads | pass->writes) & bit) == 0u)
+			continue;
+		if (!FG_GetResourceSlotForBit (bit, &slot) || slot == R_BACKEND_RESOURCE_SLOT_NONE)
+			continue;
+
+		resolved = R_FrameGraph_ResolveResourceBySlot (ctx->resources, slot);
+		Con_DPrintf ("FrameGraph pass: name='%s' slot_resolve resource=%s slot=%d resolved=%u access=%s%s\n",
+			pass->name ? pass->name : "<unnamed>",
+			FG_GetResourceBitName (bit),
+			(int)slot,
+			resolved,
+			(pass->reads & bit) ? "r" : "",
+			(pass->writes & bit) ? "w" : "");
 	}
 }
 
@@ -850,34 +1040,7 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, RenderPassCon
 
 	output_target = pass->output_target;
 	viewport_mode = pass->viewport_mode;
-
-	if (output_target == FG_PASS_OUTPUT_AUTO_SCENE)
-	{
-		if (ctx && ctx->frame_plan && ctx->frame_plan->needs_scene_effects)
-		{
-			output_target = FG_PASS_OUTPUT_SCENE_FBO;
-			viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT_SCALED;
-		}
-		else
-		{
-			qboolean needs_post = (ctx && ctx->frame_plan) ? ctx->frame_plan->needs_postprocess : false;
-			output_target = needs_post ? FG_PASS_OUTPUT_COMPOSITE_FBO : FG_PASS_OUTPUT_BACKBUFFER;
-			viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT;
-		}
-	}
-	else if (output_target == FG_PASS_OUTPUT_AUTO_WARP)
-	{
-		if (ctx && ctx->frame_plan && ctx->frame_plan->needs_scene_effects)
-		{
-			output_target = ctx->frame_plan->needs_postprocess ? FG_PASS_OUTPUT_COMPOSITE_FBO : FG_PASS_OUTPUT_BACKBUFFER;
-			viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT;
-		}
-		else
-		{
-			output_target = FG_PASS_OUTPUT_KEEP;
-			viewport_mode = FG_PASS_VIEWPORT_KEEP;
-		}
-	}
+	FG_ResolvePassOutputAndViewport (pass, ctx, &output_target, &viewport_mode);
 
 	switch (output_target)
 	{
@@ -977,6 +1140,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	if (!FG_ValidatePassResourceDecls (pass, false))
 		return;
 	FG_ApplyPassBaseline (pass, ctx);
+	FG_DebugPrintPassInfo (pass, ctx);
 
 	for (bit = 1u; bit != 0; bit <<= 1)
 	{
@@ -1071,6 +1235,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 		backend_pass_desc.depth_attachment = &depth_attachment;
 
 	FG_EmitPassBarriers (pass, ctx);
+	FG_DebugPrintResolvedSlots (pass, ctx);
 
 	has_legacy_validation = (ctx->backend && ctx->backend->validate_pass_state
 		&& !ctx->backend->begin_pass_ex);
