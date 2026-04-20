@@ -240,6 +240,9 @@
     <ClCompile Include="..\..\Quake\src\render\r_framegraph.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\src\render\r_resources_gl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\src\render\r_passes.c">
       <Filter>Source Files</Filter>
     </ClCompile>
