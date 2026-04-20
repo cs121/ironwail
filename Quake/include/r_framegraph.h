@@ -77,6 +77,14 @@ typedef enum fg_pass_stats_channel_e
 	FG_PASS_STATS_COUNT
 } fg_pass_stats_channel_t;
 
+typedef enum fg_pass_side_effect_bits_e
+{
+	FG_SIDEFX_NONE = 0,
+	FG_SIDEFX_GLOBAL_STATE = 1u << 0,
+	FG_SIDEFX_TEMPORAL_HISTORY = 1u << 1,
+	FG_SIDEFX_CPU_SIM_UPDATE = 1u << 2
+} fg_pass_side_effect_bits_t;
+
 typedef struct fg_pass_attachment_config_s
 {
 	unsigned resource_bit;
