@@ -1148,17 +1148,19 @@ static void GLBackend_PassShadowMaps (RenderPassContext *ctx)
 static void GLBackend_PassRenderScene (RenderPassContext *ctx)
 {
 	r_render_scene_input_t input;
+	scene_size_info_t scene_size;
 
 	memset (&input, 0, sizeof (input));
+	R_GetSceneSizeInfo (&scene_size);
 	input.resources = ctx ? ctx->resources : NULL;
 	input.view_rect.x = r_refdef.vrect.x;
 	input.view_rect.y = r_refdef.vrect.y;
 	input.view_rect.width = r_refdef.vrect.width;
 	input.view_rect.height = r_refdef.vrect.height;
-	input.scene_size.width = R_GetSceneRenderWidth ();
-	input.scene_size.height = R_GetSceneRenderHeight ();
-	input.scene_size.scale = R_GetSceneRenderScale ();
-	input.scene_size.resolution_ratio = R_GetSceneResolutionRatio ();
+	input.scene_size.width = scene_size.scene_width;
+	input.scene_size.height = scene_size.scene_height;
+	input.scene_size.scale = scene_size.scene_scale;
+	input.scene_size.resolution_ratio = scene_size.resolution_ratio;
 	input.has_worldmodel = (cl.worldmodel != NULL);
 
 	R_RenderScene (&input);
@@ -1187,17 +1189,19 @@ static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
 	RenderGraphResourceHandle fallback_resources;
 	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesOrFallback (ctx, &fallback_resources, "Warp/resolve");
 	r_warp_resolve_input_t input;
+	scene_size_info_t scene_size;
 
 	memset (&input, 0, sizeof (input));
+	R_GetSceneSizeInfo (&scene_size);
 	input.resources = resources;
 	input.view_rect.x = r_refdef.vrect.x;
 	input.view_rect.y = r_refdef.vrect.y;
 	input.view_rect.width = r_refdef.vrect.width;
 	input.view_rect.height = r_refdef.vrect.height;
-	input.scene_size.width = R_GetSceneRenderWidth ();
-	input.scene_size.height = R_GetSceneRenderHeight ();
-	input.scene_size.scale = R_GetSceneRenderScale ();
-	input.scene_size.resolution_ratio = R_GetSceneResolutionRatio ();
+	input.scene_size.width = scene_size.scene_width;
+	input.scene_size.height = scene_size.scene_height;
+	input.scene_size.scale = scene_size.scene_scale;
+	input.scene_size.resolution_ratio = scene_size.resolution_ratio;
 	input.needs_postprocess = GL_NeedsPostprocess ();
 	input.dof_enabled = R_PostFX_DoFEnabledEffective ();
 	input.ssao_enabled = R_SSAO_EnabledEffective ();
@@ -1211,17 +1215,19 @@ static void GLBackend_PassPostProcess (RenderPassContext *ctx)
 	RenderGraphResourceHandle fallback_resources;
 	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesOrFallback (ctx, &fallback_resources, "Postprocess");
 	r_postprocess_input_t input;
+	scene_size_info_t scene_size;
 
 	memset (&input, 0, sizeof (input));
+	R_GetSceneSizeInfo (&scene_size);
 	input.resources = resources;
 	input.view_rect.x = r_refdef.vrect.x;
 	input.view_rect.y = r_refdef.vrect.y;
 	input.view_rect.width = r_refdef.vrect.width;
 	input.view_rect.height = r_refdef.vrect.height;
-	input.scene_size.width = R_GetSceneRenderWidth ();
-	input.scene_size.height = R_GetSceneRenderHeight ();
-	input.scene_size.scale = R_GetSceneRenderScale ();
-	input.scene_size.resolution_ratio = R_GetSceneResolutionRatio ();
+	input.scene_size.width = scene_size.scene_width;
+	input.scene_size.height = scene_size.scene_height;
+	input.scene_size.scale = scene_size.scene_scale;
+	input.scene_size.resolution_ratio = scene_size.resolution_ratio;
 	input.composite_written_this_frame = ctx ? ctx->composite_written_this_frame : false;
 
 	GL_PostProcess (&input);

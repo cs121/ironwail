@@ -13,7 +13,8 @@ typedef enum bot_ai_state_e
 	BOT_STATE_SEARCH,
 	BOT_STATE_ATTACK,
 	BOT_STATE_RETREAT,
-	BOT_STATE_STUCK_RECOVERY
+	BOT_STATE_STUCK_RECOVERY,
+	BOT_STATE_CAMP
 } bot_ai_state_t;
 
 typedef struct bot_nav_nearest_cache_s
@@ -104,6 +105,10 @@ typedef struct bot_state_s
 	int		stuck_window_count;
 	int		no_move_target_streak;
 	int		obstacle_avoid_streak;
+
+	double		camp_until;
+	vec3_t		camp_pos;
+	float		camp_yaw;
 
 	int		dbg_stuck_events;
 	int		dbg_repaths;

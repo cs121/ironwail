@@ -729,7 +729,6 @@ cvar_t	gl_overbright_models = { "gl_overbright_models", "0", CVAR_ARCHIVE };
 cvar_t	r_viewmodel_light_boost = { "r_viewmodel_light_boost", "1.5", CVAR_ARCHIVE };
 cvar_t	r_viewmodel_minlight = { "r_viewmodel_minlight", "0.28", CVAR_ARCHIVE }; // 0..1 floor; legacy values >1 are treated as 0..255
 cvar_t	r_model_halflambert = { "r_model_halflambert", "0", CVAR_ARCHIVE };
-cvar_t	r_alias_q3lighting = { "r_alias_q3lighting", "0", CVAR_ARCHIVE };
 cvar_t	r_facenormals_enable = { "r_facenormals_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_oldskyleaf = { "r_oldskyleaf", "0", CVAR_NONE };
 cvar_t	r_drawworld = { "r_drawworld", "1", CVAR_NONE };
@@ -766,14 +765,12 @@ cvar_t	r_scale = { "r_scale", "1", CVAR_ARCHIVE };
 cvar_t	r_scene_scale_debug = { "r_scene_scale_debug", "0", CVAR_NONE };
 cvar_t	r_drs = { "r_drs", "0", CVAR_ARCHIVE };
 cvar_t	r_drs_use_gpu = { "r_drs_use_gpu", "1", CVAR_ARCHIVE };
-cvar_t	r_drs_target_fps = { "r_drs_target_fps", "0", CVAR_ARCHIVE };
-cvar_t	r_drs_min_scale = { "r_drs_min_scale", "25", CVAR_ARCHIVE };
-cvar_t	r_drs_max_scale = { "r_drs_max_scale", "100", CVAR_ARCHIVE };
-cvar_t	r_drs_step_up = { "r_drs_step_up", "1", CVAR_ARCHIVE };
-cvar_t	r_drs_step_down = { "r_drs_step_down", "1", CVAR_ARCHIVE };
-cvar_t	r_drs_cooldown_after_down = { "r_drs_cooldown_after_down", "8", CVAR_ARCHIVE };
-cvar_t	r_drs_cooldown_after_up = { "r_drs_cooldown_after_up", "2", CVAR_ARCHIVE };
-cvar_t	r_drs_hysteresis_ms = { "r_drs_hysteresis_ms", "0.5", CVAR_ARCHIVE };
+	cvar_t	r_drs_target_fps = { "r_drs_target_fps", "0", CVAR_ARCHIVE };
+	cvar_t	r_drs_min_scale = { "r_drs_min_scale", "25", CVAR_ARCHIVE };
+	cvar_t	r_drs_max_scale = { "r_drs_max_scale", "100", CVAR_ARCHIVE };
+	cvar_t	r_drs_cooldown_after_down = { "r_drs_cooldown_after_down", "8", CVAR_ARCHIVE };
+	cvar_t	r_drs_cooldown_after_up = { "r_drs_cooldown_after_up", "2", CVAR_ARCHIVE };
+	cvar_t	r_drs_hysteresis_ms = { "r_drs_hysteresis_ms", "0.5", CVAR_ARCHIVE };
 cvar_t	r_drs_filter_alpha = { "r_drs_filter_alpha", "0.25", CVAR_ARCHIVE };
 cvar_t	r_drs_debug = { "r_drs_debug", "0", CVAR_NONE };
 cvar_t	r_drs_step_size = { "r_drs_step_size", "0.02", CVAR_ARCHIVE };
@@ -997,6 +994,7 @@ static void R_UpdateSceneSizeState (void)
 		using_drs = true;
 		float clamped = CLAMP (R_GetDRSMinResolution (), r_drs_state.dynamic_resolution, R_GetDRSMaxResolution ());
 		resolution_ratio = R_QuantizeResolution (clamped);
+		resolution_ratio = CLAMP (R_GetDRSMinResolution (), resolution_ratio, R_GetDRSMaxResolution ());
 		requested_scale = 1;
 	}
 	else
@@ -1575,10 +1573,17 @@ void GL_CreateFrameBuffers (void)
 	framebufs.godrays.mask_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.mask_tex, 0, 0, "godrays mask fbo");
 	framebufs.godrays.shafts_fbo = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.godrays.shafts_tex, 0, 0, "godrays shafts fbo");
 
-	framebufs.ssao.width[0] = scene_w;
-	framebufs.ssao.height[0] = scene_h;
-	framebufs.ssao.width[1] = q_max (1, scene_w / 2);
-	framebufs.ssao.height[1] = q_max (1, scene_h / 2);
+	int ssao_alloc_w = scene_w;
+	int ssao_alloc_h = scene_h;
+	if (r_drs.value > 0.f)
+	{
+		ssao_alloc_w = q_max (ssao_alloc_w, native_w);
+		ssao_alloc_h = q_max (ssao_alloc_h, native_h);
+	}
+	framebufs.ssao.width[0] = ssao_alloc_w;
+	framebufs.ssao.height[0] = ssao_alloc_h;
+	framebufs.ssao.width[1] = q_max (1, ssao_alloc_w / 2);
+	framebufs.ssao.height[1] = q_max (1, ssao_alloc_h / 2);
 	framebufs.ssao.noise_tex = GL_CreateSSAONoiseTexture ();
 	// SSAO FIX: Prefer higher precision AO targets to avoid R8 banding in dark areas.
 	GLenum ssao_format = (Q_rint (r_ssao_format.value) > 0) ? GL_R16F : GL_R8;
@@ -6038,6 +6043,7 @@ void R_WarpScaleView (const r_warp_resolve_input_t *input)
 				{
 					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
 					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_COLOR_BUFFER_BIT, blit_filter);
+					need_depth_resolve = false;
 				}
 				else
 					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, mask, blit_filter);
@@ -6047,14 +6053,15 @@ void R_WarpScaleView (const r_warp_resolve_input_t *input)
 
 	if (need_depth_resolve)
 	{
-		int dstw = (scene_size->scale != 1) ? view_rect->width : srcw;
-		int dsth = (scene_size->scale != 1) ? view_rect->height : srch;
+		int dstw = force_blit_upscale ? view_rect->width : srcw;
+		int dsth = force_blit_upscale ? view_rect->height : srch;
 
 		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved.scene_fbo);
 		glReadBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, resolved.composite_fbo);
 		glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+		need_depth_resolve = false;
 	}
 
 	if (!resolved.msaa && !needwarpscale)

@@ -787,11 +787,13 @@ static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, co
 		if (weapon)
 		{
 			qboolean has_weapon = (((int) self->v.items) & weapon) != 0;
-			score = has_weapon ? 50.f : 170.f;
+			score = has_weapon ? 50.f : 200.f;
 			if (weapon == IT_ROCKET_LAUNCHER || weapon == IT_LIGHTNING || weapon == IT_SUPER_NAILGUN)
-				score += has_weapon ? 20.f : 70.f;
+				score += has_weapon ? 20.f : 90.f;
 			if (!BotCombat_HasAnyRangedAmmo (self))
-				score += has_weapon ? 15.f : 90.f;
+				score += has_weapon ? 15.f : 130.f;
+			if (!has_weapon && self->v.health < 50.f)
+				score += 40.f;
 		}
 		break;
 	}
@@ -818,17 +820,17 @@ static float BotAI_ItemScore (bot_state_t *bot, edict_t *self, edict_t *item, co
 			break;
 		}
 		if (!BotCombat_HasAnyRangedAmmo (self))
-			score += 120.f;
+			score += 150.f;
 		break;
 	}
 
 	case BOT_ITEM_HEALTH:
-		if (self->v.health < 35.f)
-			score = 240.f;
-		else if (self->v.health < 70.f)
-			score = 170.f;
+		if (self->v.health < 50.f)
+			score = 260.f;
+		else if (self->v.health < 80.f)
+			score = 180.f;
 		else
-			score = 45.f;
+			score = 40.f;
 		break;
 
 	case BOT_ITEM_ARMOR:
@@ -954,6 +956,9 @@ static const char *BotAI_DebugDecisionReason (bot_state_t *bot)
 
 	case BOT_STATE_STUCK_RECOVERY:
 		return "recovering from being stuck";
+
+	case BOT_STATE_CAMP:
+		return "camping";
 
 	case BOT_STATE_ROAM:
 		if (bot->has_goal)
@@ -1223,6 +1228,8 @@ const char *BotAI_StateName (bot_ai_state_t state)
 		return "RETREAT";
 	case BOT_STATE_STUCK_RECOVERY:
 		return "STUCK_RECOVERY";
+	case BOT_STATE_CAMP:
+		return "CAMP";
 	default:
 		return "UNKNOWN";
 	}
@@ -1279,6 +1286,9 @@ void BotAI_ResetState (bot_state_t *bot)
 	bot->stuck_window_count = 0;
 	bot->no_move_target_streak = 0;
 	bot->obstacle_avoid_streak = 0;
+	bot->camp_until = 0.0;
+	VectorCopy (vec3_origin, bot->camp_pos);
+	bot->camp_yaw = 0.f;
 	bot->dbg_stuck_events = 0;
 	bot->dbg_repaths = 0;
 	bot->dbg_blocked_shots = 0;
@@ -2165,8 +2175,8 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 			}
 		}
 
-		should_retreat = (self->v.health < 40.f || no_combat_ammo);
-		can_exit_retreat = (self->v.health > 55.f && !no_combat_ammo);
+		should_retreat = (self->v.health + self->v.armorvalue * 0.6f < 55.f || no_combat_ammo);
+		can_exit_retreat = (self->v.health + self->v.armorvalue * 0.5f > 80.f && !no_combat_ammo);
 
 		if (qcvm->time < bot->stuck_until)
 			bot->state = BOT_STATE_STUCK_RECOVERY;
@@ -2468,7 +2478,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 
 			if (*out_impulse != 0)
 				fire_weapon = current_weapon;
-			can_fire = BotCombat_ShouldFire (self, bot->enemy, fire_weapon, self->v.v_angle, &blocked_fire);
+			can_fire = BotCombat_ShouldFire (self, bot->enemy, fire_weapon, aim_angles, &blocked_fire);
 			if (can_fire)
 			{
 				*out_attack = true;
@@ -2515,12 +2525,37 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		break;
 
 	case BOT_STATE_STUCK_RECOVERY:
-		move_speed = 280.f * BotAI_ClampedAgility (bot);
-		bot->strafe_dir = (BotAI_Random01 (bot, 23U) > 0.5f ? 1.f : -1.f);
-		outcmd->forwardmove = bot->strafe_dir * 200.f;
-		outcmd->sidemove = (BotAI_Random01 (bot, 24U) > 0.5f ? 1.f : -1.f) * 220.f;
-		outcmd->upmove = BotAI_Random01 (bot, 25U) > 0.4f ? 300.f : 0.f;
+	{
+		vec3_t escape_target;
+		vec3_t escape_angles;
+		move_speed = 320.f * BotAI_ClampedAgility (bot);
+		if (BotAI_FindLocalEscapeTarget (bot, self, escape_target))
+		{
+			vec3_t escape_dir;
+			VectorSubtract (escape_target, self->v.origin, escape_dir);
+			escape_dir[2] = 0.f;
+			if (VectorNormalize (escape_dir) > 0.f)
+			{
+				VectorCopy (escape_dir, move_dir);
+				VectorAngles (move_dir, escape_angles);
+				out_vangle[YAW] = BotAI_ApproachAngle (out_vangle[YAW], escape_angles[YAW], 720.f * host_frametime);
+				BotAI_ComputeDirectionalMove (out_vangle, move_dir, move_speed, outcmd);
+			}
+		}
+		else
+		{
+			if (qcvm->time >= bot->next_strafe_change)
+			{
+				bot->strafe_dir = -bot->strafe_dir;
+				bot->next_strafe_change = qcvm->time + 0.35;
+			}
+			outcmd->forwardmove = 200.f;
+			outcmd->sidemove = bot->strafe_dir * 220.f;
+		}
+		outcmd->upmove = 320.f;
+		bot->next_jump_time = 0.0;
 		break;
+	}
 
 	case BOT_STATE_SEARCH:
 		move_speed = 250.f;
@@ -2556,7 +2591,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 				VectorAngles (move_dir, move_angles);
 				out_vangle[YAW] = BotAI_ApproachAngle (out_vangle[YAW], move_angles[YAW], 720.f * host_frametime);
 			}
-			if (bot->obstacle_avoid_streak >= 18)
+			if (bot->obstacle_avoid_streak >= 10)
 			{
 				bot->stuck_until = qcvm->time + 0.75;
 				bot->dbg_stuck_events++;
@@ -2614,7 +2649,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 				if (qcvm->time - bot->stuck_window_start > 8.0)
 					bot->stuck_window_count = 0;
 			}
-			else if (cmd_mag > 80.f && (qcvm->time - bot->last_progress_time) > 1.25)
+			else if (cmd_mag > 80.f && (qcvm->time - bot->last_progress_time) > 0.7)
 			{
 				bot->stuck_until = qcvm->time + 0.75;
 				bot->dbg_stuck_events++;

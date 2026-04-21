@@ -129,6 +129,25 @@ static qboolean R_EntityLightDebugEnabled (const entity_t *e)
 	return (e->model->flags & EF_ROTATE) != 0;
 }
 
+static qboolean R_ModelLightSampleDirAtPoint (const vec3_t pos, vec3_t out_dir)
+{
+	vec3_t sample_rgb;
+
+	if (!cl.worldmodel || !cl.worldmodel->lightdirdata)
+	{
+		R_DefaultStaticLightDir (out_dir);
+		return false;
+	}
+
+	if (!R_SampleLightmapAndDeluxemapAtPoint (pos, sample_rgb, out_dir) || VectorLength (out_dir) <= 1e-6f)
+	{
+		R_DefaultStaticLightDir (out_dir);
+		return false;
+	}
+
+	return true;
+}
+
 static const char *R_EntityTypeName (const qmodel_t *model)
 {
 	if (!model)
@@ -590,6 +609,7 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 {
 	vec3_t lightgrid_effective = {0.f, 0.f, 0.f};
 	vec3_t lightpoint_color = {0.f, 0.f, 0.f};
+	vec3_t staticlightdir = {0.f, 0.f, 0.f};
 	vec3_t target_color255 = {0.f, 0.f, 0.f};
 	qboolean lightgrid_valid = false;
 	qboolean used_lightgrid = false;
@@ -599,12 +619,16 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 	qboolean budget_fallback = false;
 	int sample_count = 0;
 	double start_time = Sys_DoubleTime ();
-	const qboolean legacy_compatible = (r_model_light_multisample.value <= 0.f && r_model_lightgrid_assist.value <= 0.f);
+	const qboolean force_viewmodel_multisample = (e == &cl.viewent);
+	const qboolean force_alias_multisample = (e->model && e->model->type == mod_alias);
+	const qboolean use_multisample = force_alias_multisample || force_viewmodel_multisample || (r_model_light_multisample.value > 0.f && e->model);
+	const qboolean legacy_compatible = (!use_multisample && r_model_lightgrid_assist.value <= 0.f);
 	qmodel_t *lightmodel = cl.worldmodel ? cl.worldmodel : e->model;
 	entity_static_light_source_t static_source = ENTITY_STATIC_LIGHT_NONE;
 	float intensity;
 
 	VectorClear (out_color255);
+	R_DefaultStaticLightDir (staticlightdir);
 
 	if (legacy_compatible)
 	{
@@ -656,6 +680,8 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 			VectorCopy (lightpoint_color, out_color255);
 			used_lightpoint = VectorLength (lightpoint_color) > 0.f;
 		}
+
+		R_ModelLightSampleDirAtPoint (e->origin, staticlightdir);
 	}
 	else
 	{
@@ -664,13 +690,15 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 		int num_samples = 1;
 		float total_weight = 0.f;
 		vec3_t weighted_color = {0.f, 0.f, 0.f};
+		vec3_t weighted_dir = {0.f, 0.f, 0.f};
 		float grid_weight = 0.f;
 		float point_weight = 0.f;
+		float dir_weight = 0.f;
 
 		VectorCopy (e->origin, sample_pos[0]);
 		sample_weight[0] = 1.f;
 
-		if (r_model_light_multisample.value > 0.f && e->model)
+		if (use_multisample && e->model)
 		{
 			const float height = q_max (e->model->maxs[2] - e->model->mins[2], 0.f);
 			const float half_extent_x = q_max (fabsf (e->model->mins[0]), fabsf (e->model->maxs[0]));
@@ -678,9 +706,40 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 
 			num_samples = 0;
 			VectorCopy (e->origin, sample_pos[num_samples]);
-			sample_weight[num_samples++] = 0.5f;
+			sample_weight[num_samples++] = force_viewmodel_multisample ? 0.28f : 0.5f;
 
-			if (height > 1.f)
+			if (force_viewmodel_multisample)
+			{
+				vec3_t local_offset;
+				const float xofs = CLAMP (4.f, half_extent_x * 0.4f, 20.f);
+				const float yofs = CLAMP (4.f, half_extent_y * 0.4f, 20.f);
+				const float zofs = CLAMP (4.f, q_max (height, 8.f) * 0.25f, 20.f);
+
+				VectorSet (local_offset, xofs, 0.f, 0.f);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
+				sample_weight[num_samples++] = 0.12f;
+
+				VectorSet (local_offset, -xofs, 0.f, 0.f);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
+				sample_weight[num_samples++] = 0.12f;
+
+				VectorSet (local_offset, 0.f, yofs, 0.f);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
+				sample_weight[num_samples++] = 0.12f;
+
+				VectorSet (local_offset, 0.f, -yofs, 0.f);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
+				sample_weight[num_samples++] = 0.12f;
+
+				VectorSet (local_offset, 0.f, 0.f, zofs);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
+				sample_weight[num_samples++] = 0.12f;
+
+				VectorSet (local_offset, 0.f, 0.f, -zofs);
+				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
+				sample_weight[num_samples++] = 0.12f;
+			}
+			else if (height > 1.f)
 			{
 				vec3_t local_offset = {0.f, 0.f, height * 0.25f};
 				R_ModelLightBuildSamplePos (e, local_offset, sample_pos[num_samples]);
@@ -743,6 +802,17 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 			VectorMA (weighted_color, w, sample.color255, weighted_color);
 			total_weight += w;
 
+			{
+				vec3_t sample_dir;
+				qboolean have_dir = R_ModelLightSampleDirAtPoint (sample_pos[i], sample_dir);
+
+				if (have_dir || force_viewmodel_multisample)
+				{
+					VectorMA (weighted_dir, w, sample_dir, weighted_dir);
+					dir_weight += w;
+				}
+			}
+
 			if (sample.used_lightgrid)
 			{
 				VectorMA (lightgrid_effective, w, sample.lightgrid_effective, lightgrid_effective);
@@ -767,6 +837,19 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 
 		if (point_weight > 0.f)
 			VectorScale (lightpoint_color, 1.f / point_weight, lightpoint_color);
+
+		if (dir_weight > 0.f)
+		{
+			VectorScale (weighted_dir, 1.f / dir_weight, weighted_dir);
+			if (VectorNormalize (weighted_dir) <= 1e-6f)
+				R_DefaultStaticLightDir (weighted_dir);
+		}
+		else
+		{
+			R_DefaultStaticLightDir (weighted_dir);
+		}
+
+		VectorCopy (weighted_dir, staticlightdir);
 	}
 
 	intensity = R_SampleIntensity255 (out_color255);
@@ -859,6 +942,8 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 		VectorClear (info->dynamic_color);
 		VectorCopy (info->static_color, info->final_color);
 	}
+
+	VectorCopy (staticlightdir, e->lightcache.staticlightdir);
 
 	R_ModelLightStats_AddCall (sample_count > 0 ? sample_count : 1, used_multisample, budget_fallback, (Sys_DoubleTime () - start_time) * 1000.0);
 	return used_lightgrid || used_lightpoint || used_minlight;

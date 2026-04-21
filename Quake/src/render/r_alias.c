@@ -31,7 +31,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_skyvis.h"
 
 extern cvar_t gl_overbright_models, gl_fullbrights, r_lerpmodels, r_lerpmove, r_model_halflambert; //johnfitz
-extern cvar_t r_alias_q3lighting;
 extern cvar_t r_tonemap;
 extern cvar_t scr_fov, cl_gun_fovscale, cl_gun_x, cl_gun_y, cl_gun_z;
 extern cvar_t r_oit;
@@ -382,24 +381,19 @@ void R_SetupAliasLighting (entity_t     *e)
         VectorCopy (static_color, lightcolor);
         VectorCopy (static_color, ambientcolor);
 
-        if (e != &cl.viewent && cl.worldmodel && cl.worldmodel->lightdirdata)
+        if (VectorLength (e->lightcache.staticlightdir) > 1e-6f)
+        {
+                VectorCopy (e->lightcache.staticlightdir, staticlightdir);
+        }
+        else if (cl.worldmodel && cl.worldmodel->lightdirdata)
         {
                 vec3_t sample_rgb;
                 vec3_t sample_dir;
-                float dir_blend = CLAMP (0.f, r_alias_q3lighting.value, 1.f);
-
-                if ((e->model->flags & EF_ROTATE) != 0)
-                        dir_blend *= 0.25f;
-
-                if (dir_blend > 0.f &&
-                        R_SampleLightmapAndDeluxemapAtPoint (e->origin, sample_rgb, sample_dir) &&
+                if (R_SampleLightmapAndDeluxemapAtPoint (e->origin, sample_rgb, sample_dir) &&
                         VectorLength (sample_dir) > 1e-6f)
                 {
-                        // Blend towards deluxemap direction only when opted in.
-                        // Rotating bonus items keep a much softer influence so the
-                        // player-facing side does not get pushed into shadow.
                         vec3_t blended_dir;
-                        VectorLerp (staticlightdir, sample_dir, dir_blend, blended_dir);
+                        VectorCopy (sample_dir, blended_dir);
                         if (VectorNormalize (blended_dir) > 1e-6f)
                                 VectorCopy (blended_dir, staticlightdir);
                 }
@@ -529,7 +523,7 @@ ibuf.global.ambient_sky_tint[2] = r_framedata.skyvis_tint[2];
 ibuf.global.ambient_sky_tint[3] = r_framedata.skyvis_tint[3];
 ibuf.global.post_exposure = r_autoexposure_debug_exposure;
 ibuf.global.tonemap_mode = r_tonemap.value;
-ibuf.global._pad1[0] = CLAMP (r_alias_q3lighting.value, 0.f, 1.f);
+ibuf.global._pad1[0] = 1.f;
 ibuf.global._pad_tail[0] = 0.f;
 ibuf.global._pad_tail[1] = 0.f;
 

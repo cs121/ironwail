@@ -367,9 +367,17 @@ vec4 ApplySoftEmulationPostFX(vec3 color, vec2 fragCoord, float scale, float dit
 
 vec3 ApplyDRSSharpen(vec3 color, vec2 uv, vec2 invTexSize)
 {
-        (void)uv;
-        (void)invTexSize;
-        return color;
+        float strength = clamp(DRSParams.x, 0.0, 1.0);
+        float ratio = clamp(DRSParams.y, 0.0, 1.0);
+        if (strength < 1e-3 || ratio > 0.999)
+                return color;
+        float scale = strength * (1.0 - ratio) * 4.0;
+        vec3 n0 = texture(GammaTexture, uv + vec2(-invTexSize.x, 0.0)).rgb;
+        vec3 n1 = texture(GammaTexture, uv + vec2( invTexSize.x, 0.0)).rgb;
+        vec3 n2 = texture(GammaTexture, uv + vec2(0.0, -invTexSize.y)).rgb;
+        vec3 n3 = texture(GammaTexture, uv + vec2(0.0,  invTexSize.y)).rgb;
+        vec3 laplacian = (n0 + n1 + n2 + n3) * 0.25 - color;
+        return max(color - laplacian * scale, vec3(0.0));
 }
 
 void main()

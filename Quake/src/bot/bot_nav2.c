@@ -1,17 +1,60 @@
 #include "quakedef.h"
 #include "bot_nav2.h"
 
-#include <ctype.h>
-
 #define BOT_NAV_MAX_NODES 8192
 #define BOT_NAV_MAX_LINKS 65536
+#define BOT_NAV_MAX_TRAVERSALS 65536
 #define BOT_NAV_INF 1.0e30f
+
+#define BOT_NAV2_MAGIC "NAV2"
+#define BOT_NAV2_VERSION 15
+
+typedef struct nav2_header_s
+{
+	char	magic[4];
+	int	version;
+	int	node_count;
+	int	link_count;
+	int	traversal_count;
+} nav2_header_t;
+
+typedef struct nav2_node_s
+{
+	int	flags;
+	int	link_count;
+	int	first_link;
+	float	radius;
+} nav2_node_t;
+
+typedef struct nav2_link_s
+{
+	int	target_node;
+	short	type;
+	short	traversal_index;
+} nav2_link_t;
+
+typedef struct nav2_traversal_s
+{
+	int	type;
+	int	param0;
+	int	param1;
+	int	param2;
+} nav2_traversal_t;
+
+typedef struct nav2_reader_s
+{
+	const byte	*data;
+	size_t	len;
+	size_t	ofs;
+} nav2_reader_t;
 
 typedef struct bot_nav_node_s
 {
 	vec3_t	pos;
 	int		first_link;
+	int		link_count;
 	int		flags;
+	float	radius;
 } bot_nav_node_t;
 
 typedef struct bot_nav_link_s
@@ -19,7 +62,8 @@ typedef struct bot_nav_link_s
 	int		to;
 	int		next;
 	float	cost;
-	int		flags;
+	int		type;
+	int		traversal_index;
 } bot_nav_link_t;
 
 typedef struct bot_nav_graph_s
@@ -29,6 +73,8 @@ typedef struct bot_nav_graph_s
 	int		version;
 	int		node_count;
 	int		link_count;
+	int		traversal_count;
+	int		edict_ref_count;
 	bot_nav_node_t	nodes[BOT_NAV_MAX_NODES];
 	bot_nav_link_t	links[BOT_NAV_MAX_LINKS];
 
@@ -51,19 +97,38 @@ static bot_nav_graph_t g_bot_nav;
 
 extern cvar_t bot_nav_debug;
 
-static uint32_t BotNav_ReadU32 (const byte *p)
+static qboolean BotNav_ReadBytes (nav2_reader_t *r, void *out, size_t size)
+{
+	if (!r || !out)
+		return false;
+	if (size > r->len - r->ofs)
+		return false;
+	Q_memcpy (out, r->data + r->ofs, size);
+	r->ofs += size;
+	return true;
+}
+
+static qboolean BotNav_ReadU32Raw (nav2_reader_t *r, uint32_t *out)
 {
 	uint32_t value;
-	Q_memcpy (&value, p, sizeof (value));
-	return (uint32_t) LittleLong ((int) value);
+
+	if (!BotNav_ReadBytes (r, &value, sizeof (value)))
+		return false;
+	*out = (uint32_t) LittleLong ((int) value);
+	return true;
 }
 
-static int BotNav_ReadS32 (const byte *p)
+static qboolean BotNav_ReadS32Raw (nav2_reader_t *r, int *out)
 {
-	return (int) BotNav_ReadU32 (p);
+	uint32_t value;
+
+	if (!BotNav_ReadU32Raw (r, &value))
+		return false;
+	*out = (int) value;
+	return true;
 }
 
-static float BotNav_ReadF32 (const byte *p)
+static qboolean BotNav_ReadF32Raw (nav2_reader_t *r, float *out)
 {
 	union
 	{
@@ -71,8 +136,37 @@ static float BotNav_ReadF32 (const byte *p)
 		float f;
 	} value;
 
-	value.u = BotNav_ReadU32 (p);
-	return value.f;
+	if (!BotNav_ReadU32Raw (r, &value.u))
+		return false;
+	*out = value.f;
+	return true;
+}
+
+static qboolean BotNav_ReadS16Raw (nav2_reader_t *r, short *out)
+{
+	short value;
+
+	if (!BotNav_ReadBytes (r, &value, sizeof (value)))
+		return false;
+	*out = (short) LittleShort ((short) value);
+	return true;
+}
+
+static qboolean BotNav_ReadHeader (nav2_reader_t *r, nav2_header_t *header)
+{
+	if (!r || !header)
+		return false;
+	if (!BotNav_ReadBytes (r, header->magic, sizeof (header->magic)))
+		return false;
+	if (!BotNav_ReadS32Raw (r, &header->version))
+		return false;
+	if (!BotNav_ReadS32Raw (r, &header->node_count))
+		return false;
+	if (!BotNav_ReadS32Raw (r, &header->link_count))
+		return false;
+	if (!BotNav_ReadS32Raw (r, &header->traversal_count))
+		return false;
+	return true;
 }
 
 static void BotNav_ResetGraph (void)
@@ -84,6 +178,8 @@ static void BotNav_ResetGraph (void)
 	g_bot_nav.version = 0;
 	g_bot_nav.node_count = 0;
 	g_bot_nav.link_count = 0;
+	g_bot_nav.traversal_count = 0;
+	g_bot_nav.edict_ref_count = 0;
 	g_bot_nav.search_gen = 0;
 	g_bot_nav.open_heap_size = 0;
 	g_bot_nav.debug_search_calls = 0;
@@ -219,20 +315,22 @@ static void BotNav_InitNodeForSearch (int node, uint32_t search_gen)
 	g_bot_nav.open_heap_index[node] = -1;
 }
 
-static qboolean BotNav_LinkExists (int from, int to)
+static qboolean BotNav_LinkExists (int from, int to, int type, int traversal_index)
 {
 	int link_idx;
 
 	for (link_idx = g_bot_nav.nodes[from].first_link; link_idx >= 0; link_idx = g_bot_nav.links[link_idx].next)
 	{
-		if (g_bot_nav.links[link_idx].to == to)
+		if (g_bot_nav.links[link_idx].to == to
+			&& g_bot_nav.links[link_idx].type == type
+			&& g_bot_nav.links[link_idx].traversal_index == traversal_index)
 			return true;
 	}
 
 	return false;
 }
 
-static qboolean BotNav_AddDirectedLink (int from, int to, float cost, int flags)
+static qboolean BotNav_AddDirectedLink (int from, int to, float cost, int type, int traversal_index)
 {
 	bot_nav_link_t *link;
 
@@ -242,7 +340,7 @@ static qboolean BotNav_AddDirectedLink (int from, int to, float cost, int flags)
 	if (from == to)
 		return false;
 
-	if (BotNav_LinkExists (from, to))
+	if (BotNav_LinkExists (from, to, type, traversal_index))
 		return true;
 
 	if (g_bot_nav.link_count >= BOT_NAV_MAX_LINKS)
@@ -260,24 +358,15 @@ static qboolean BotNav_AddDirectedLink (int from, int to, float cost, int flags)
 	link = &g_bot_nav.links[g_bot_nav.link_count++];
 	link->to = to;
 	link->cost = cost;
-	link->flags = flags;
+	link->type = type;
+	link->traversal_index = traversal_index;
 	link->next = g_bot_nav.nodes[from].first_link;
 	g_bot_nav.nodes[from].first_link = g_bot_nav.link_count - 1;
 
 	return true;
 }
 
-static qboolean BotNav_AddLinkBidirectional (int a, int b, float cost, int flags)
-{
-	qboolean ok1;
-	qboolean ok2;
-
-	ok1 = BotNav_AddDirectedLink (a, b, cost, flags);
-	ok2 = BotNav_AddDirectedLink (b, a, cost, flags);
-	return ok1 && ok2;
-}
-
-static qboolean BotNav_AddNode (const vec3_t pos, int flags)
+static qboolean BotNav_AddNode (const vec3_t pos, int flags, float radius)
 {
 	bot_nav_node_t *node;
 
@@ -287,385 +376,9 @@ static qboolean BotNav_AddNode (const vec3_t pos, int flags)
 	node = &g_bot_nav.nodes[g_bot_nav.node_count++];
 	VectorCopy (pos, node->pos);
 	node->flags = flags;
+	node->radius = radius;
 	node->first_link = -1;
-	return true;
-}
-
-static char *BotNav_Trim (char *str)
-{
-	char *end;
-
-	while (*str && isspace ((unsigned char) *str))
-		++str;
-
-	end = str + strlen (str);
-	while (end > str && isspace ((unsigned char) end[-1]))
-		*--end = '\0';
-
-	return str;
-}
-
-static qboolean BotNav_ProbablyText (const byte *data, size_t len)
-{
-	size_t i;
-	size_t printable = 0;
-	size_t zeroes = 0;
-
-	for (i = 0; i < len; ++i)
-	{
-		unsigned char c = data[i];
-		if (!c)
-		{
-			zeroes++;
-			continue;
-		}
-		if (isprint (c) || isspace (c))
-			printable++;
-	}
-
-	if (zeroes > len / 32)
-		return false;
-
-	return printable > (len * 3) / 4;
-}
-
-static void BotNav_AutoLinkNodes (void)
-{
-	const float max_dist = 640.f;
-	const float max_dist2 = max_dist * max_dist;
-	int i;
-
-	if (g_bot_nav.node_count <= 1)
-		return;
-
-	if (g_bot_nav.node_count > 2048)
-		return;
-
-	for (i = 0; i < g_bot_nav.node_count; ++i)
-	{
-		int nearest_idx[4] = {-1, -1, -1, -1};
-		float nearest_dist2[4] = {BOT_NAV_INF, BOT_NAV_INF, BOT_NAV_INF, BOT_NAV_INF};
-		int j;
-		int slot;
-
-		for (j = 0; j < g_bot_nav.node_count; ++j)
-		{
-			vec3_t delta;
-			float dist2;
-
-			if (i == j)
-				continue;
-
-			VectorSubtract (g_bot_nav.nodes[j].pos, g_bot_nav.nodes[i].pos, delta);
-			dist2 = DotProduct (delta, delta);
-			if (dist2 > max_dist2)
-				continue;
-
-			for (slot = 0; slot < 4; ++slot)
-			{
-				int move;
-
-				if (dist2 >= nearest_dist2[slot])
-					continue;
-
-				for (move = 3; move > slot; --move)
-				{
-					nearest_dist2[move] = nearest_dist2[move - 1];
-					nearest_idx[move] = nearest_idx[move - 1];
-				}
-
-				nearest_dist2[slot] = dist2;
-				nearest_idx[slot] = j;
-				break;
-			}
-		}
-
-		for (slot = 0; slot < 4; ++slot)
-		{
-			if (nearest_idx[slot] >= 0)
-				BotNav_AddLinkBidirectional (i, nearest_idx[slot], sqrtf (nearest_dist2[slot]), 0);
-		}
-	}
-}
-
-static qboolean BotNav_IsLinkPassable (int from, int to)
-{
-	vec3_t start;
-	vec3_t end;
-	trace_t tr;
-
-	if ((unsigned int) from >= (unsigned int) g_bot_nav.node_count || (unsigned int) to >= (unsigned int) g_bot_nav.node_count)
-		return false;
-
-	VectorCopy (g_bot_nav.nodes[from].pos, start);
-	VectorCopy (g_bot_nav.nodes[to].pos, end);
-	start[2] += 18.f;
-	end[2] += 18.f;
-
-	tr = SV_Move (start, vec3_origin, vec3_origin, end, MOVE_NOMONSTERS, NULL);
-	return !tr.startsolid && !tr.allsolid && tr.fraction >= 0.98f;
-}
-
-static void BotNav_PruneBlockedLinks (void)
-{
-	int *old_first;
-	bot_nav_link_t *old_links;
-	int old_link_count;
-	int from;
-	int removed = 0;
-
-	if (g_bot_nav.node_count <= 0 || g_bot_nav.link_count <= 0)
-		return;
-
-	old_first = (int *) q_malloc ((size_t) g_bot_nav.node_count * sizeof (int));
-	old_links = (bot_nav_link_t *) q_malloc ((size_t) g_bot_nav.link_count * sizeof (bot_nav_link_t));
-	if (!old_first || !old_links)
-	{
-		if (old_first)
-			q_free(old_first);
-		if (old_links)
-			q_free(old_links);
-		return;
-	}
-
-	Q_memcpy (old_first, &g_bot_nav.nodes[0].first_link, (size_t) g_bot_nav.node_count * sizeof (int));
-	Q_memcpy (old_links, g_bot_nav.links, (size_t) g_bot_nav.link_count * sizeof (bot_nav_link_t));
-	old_link_count = g_bot_nav.link_count;
-	g_bot_nav.link_count = 0;
-
-	for (from = 0; from < g_bot_nav.node_count; ++from)
-		g_bot_nav.nodes[from].first_link = -1;
-
-	for (from = 0; from < g_bot_nav.node_count; ++from)
-	{
-		int li;
-		for (li = old_first[from]; li >= 0; li = old_links[li].next)
-		{
-			int to;
-			bot_nav_link_t *dst;
-
-			if ((unsigned int) li >= (unsigned int) old_link_count)
-				break;
-			to = old_links[li].to;
-			if ((unsigned int) to >= (unsigned int) g_bot_nav.node_count)
-			{
-				removed++;
-				continue;
-			}
-			if (!BotNav_IsLinkPassable (from, to))
-			{
-				removed++;
-				continue;
-			}
-			if (BotNav_LinkExists (from, to))
-				continue;
-			if (g_bot_nav.link_count >= BOT_NAV_MAX_LINKS)
-				break;
-
-			dst = &g_bot_nav.links[g_bot_nav.link_count++];
-			*dst = old_links[li];
-			dst->next = g_bot_nav.nodes[from].first_link;
-			g_bot_nav.nodes[from].first_link = g_bot_nav.link_count - 1;
-		}
-	}
-
-	q_free(old_first);
-	q_free(old_links);
-
-	if (bot_nav_debug.value && removed > 0)
-		Con_Printf ("BotNav: pruned %d blocked/invalid links\n", removed);
-}
-
-static qboolean BotNav_FinalizeLoad (const char *mapname)
-{
-	if (g_bot_nav.node_count < 2)
-		return false;
-
-	if (g_bot_nav.link_count <= 0)
-		BotNav_AutoLinkNodes ();
-
-	if (g_bot_nav.link_count <= 0)
-		return false;
-
-	g_bot_nav.loaded = true;
-	q_strlcpy (g_bot_nav.mapname, mapname, sizeof (g_bot_nav.mapname));
-	return true;
-}
-
-static qboolean BotNav_ParseBinaryLayout (const byte *data, size_t len, int version, int node_count, int link_count, size_t node_ofs, size_t link_ofs)
-{
-	int i;
-	size_t stride;
-
-	if (node_count <= 0 || node_count > BOT_NAV_MAX_NODES)
-		return false;
-	if (link_count <= 0 || link_count > BOT_NAV_MAX_LINKS)
-		return false;
-
-	if (node_ofs >= len || node_ofs + (size_t) node_count * 12 > len)
-		return false;
-
-	if (!link_ofs)
-		link_ofs = node_ofs + (size_t) node_count * 12;
-
-	if (link_ofs >= len)
-		return false;
-
-	BotNav_ResetGraph ();
-	g_bot_nav.version = version;
-
-	for (i = 0; i < node_count; ++i)
-	{
-		vec3_t pos;
-		const byte *p = data + node_ofs + i * 12;
-
-		pos[0] = BotNav_ReadF32 (p + 0);
-		pos[1] = BotNav_ReadF32 (p + 4);
-		pos[2] = BotNav_ReadF32 (p + 8);
-		if (!BotNav_AddNode (pos, 0))
-			return false;
-	}
-
-	stride = 8;
-	if (link_ofs + (size_t) link_count * 12 <= len)
-		stride = 12;
-	else if (link_ofs + (size_t) link_count * 8 > len)
-		return false;
-
-	for (i = 0; i < link_count; ++i)
-	{
-		const byte *p = data + link_ofs + i * stride;
-		int from = BotNav_ReadS32 (p + 0);
-		int to = BotNav_ReadS32 (p + 4);
-		float cost = 0.f;
-
-		if ((unsigned int) from >= (unsigned int) node_count || (unsigned int) to >= (unsigned int) node_count)
-			continue;
-
-		if (stride >= 12)
-			cost = BotNav_ReadF32 (p + 8);
-
-		BotNav_AddLinkBidirectional (from, to, cost, 0);
-	}
-
-	return true;
-}
-
-static qboolean BotNav_ParseBinary (const byte *data, size_t len)
-{
-	int version;
-	int node_count;
-	int link_count;
-	size_t node_ofs;
-	size_t link_ofs;
-
-	if (len < 16)
-		return false;
-
-	if (memcmp (data, "NAV2", 4) != 0 && memcmp (data, "2VAN", 4) != 0 && memcmp (data, "nav2", 4) != 0)
-		return false;
-
-	version = BotNav_ReadS32 (data + 4);
-	node_count = BotNav_ReadS32 (data + 8);
-	link_count = BotNav_ReadS32 (data + 12);
-
-	if (BotNav_ParseBinaryLayout (data, len, version, node_count, link_count, 16u, 0u))
-		return true;
-
-	if (len < 24)
-		return false;
-
-	node_ofs = (size_t) BotNav_ReadU32 (data + 16);
-	link_ofs = (size_t) BotNav_ReadU32 (data + 20);
-	if (BotNav_ParseBinaryLayout (data, len, version, node_count, link_count, node_ofs, link_ofs))
-		return true;
-
-	return false;
-}
-
-static qboolean BotNav_ParseText (char *text)
-{
-	const char *cursor;
-	stringview_t line;
-	int pending_from[BOT_NAV_MAX_LINKS];
-	int pending_to[BOT_NAV_MAX_LINKS];
-	float pending_cost[BOT_NAV_MAX_LINKS];
-	int pending_count;
-	int link_idx;
-
-	BotNav_ResetGraph ();
-	cursor = text;
-	pending_count = 0;
-
-	while (COM_ParseLine (&cursor, &line))
-	{
-		char buffer[512];
-		char *trim;
-		float x, y, z;
-		float cost;
-		int a, b;
-		int copied;
-
-		copied = (int) q_min (line.len, sizeof (buffer) - 1);
-		Q_memcpy (buffer, line.data, copied);
-		buffer[copied] = '\0';
-
-		trim = BotNav_Trim (buffer);
-		if (!trim[0])
-			continue;
-		if (trim[0] == '#' || trim[0] == ';' || (trim[0] == '/' && trim[1] == '/'))
-			continue;
-
-		if (sscanf (trim, "node %f %f %f", &x, &y, &z) == 3 ||
-			sscanf (trim, "v %f %f %f", &x, &y, &z) == 3)
-		{
-			vec3_t pos;
-			pos[0] = x;
-			pos[1] = y;
-			pos[2] = z;
-			BotNav_AddNode (pos, 0);
-			continue;
-		}
-
-		if (sscanf (trim, "%*d %f %f %f", &x, &y, &z) == 3)
-		{
-			vec3_t pos;
-			pos[0] = x;
-			pos[1] = y;
-			pos[2] = z;
-			BotNav_AddNode (pos, 0);
-			continue;
-		}
-
-		cost = 0.f;
-		if (sscanf (trim, "link %d %d %f", &a, &b, &cost) >= 2 ||
-			sscanf (trim, "edge %d %d %f", &a, &b, &cost) >= 2 ||
-			sscanf (trim, "e %d %d %f", &a, &b, &cost) >= 2 ||
-			sscanf (trim, "%d %d %f", &a, &b, &cost) >= 2)
-		{
-			if (pending_count < BOT_NAV_MAX_LINKS)
-			{
-				pending_from[pending_count] = a;
-				pending_to[pending_count] = b;
-				pending_cost[pending_count] = cost;
-				pending_count++;
-			}
-			continue;
-		}
-	}
-
-	for (link_idx = 0; link_idx < pending_count; ++link_idx)
-	{
-		int from = pending_from[link_idx];
-		int to = pending_to[link_idx];
-		float cost = pending_cost[link_idx];
-
-		if ((unsigned int) from >= (unsigned int) g_bot_nav.node_count || (unsigned int) to >= (unsigned int) g_bot_nav.node_count)
-			continue;
-
-		BotNav_AddLinkBidirectional (from, to, cost, 0);
-	}
-
+	node->link_count = 0;
 	return true;
 }
 
@@ -677,7 +390,13 @@ void BotNav_Shutdown (void)
 void BotNav_LoadForMap (const char *mapname)
 {
 	byte *data;
-	char *text_copy;
+	nav2_reader_t reader;
+	nav2_header_t header;
+	nav2_node_t *nodes;
+	vec3_t *origins;
+	nav2_link_t *links;
+	byte *link_used;
+	int *edict_refs;
 	size_t len;
 	char path[MAX_QPATH];
 	char loaded_path[MAX_QPATH];
@@ -685,13 +404,13 @@ void BotNav_LoadForMap (const char *mapname)
 	{
 		"maps/%s.nav2",
 		"bots/navigation/%s.nav2",
-		"bots/navigation/%s.nav",
-		"bots/nav/%s.nav2",
-		"bots/nav/%s.nav",
-		"maps/%s.nav"
+		"bots/nav/%s.nav2"
 	};
 	int ci;
-	qboolean parsed;
+	int i;
+	int j;
+	int edict_ref_count;
+	qboolean success;
 
 	BotNav_ResetGraph ();
 
@@ -713,57 +432,196 @@ void BotNav_LoadForMap (const char *mapname)
 	if (!data)
 	{
 		if (bot_nav_debug.value)
-			Con_Printf ("BotNav: no nav/nav2 found for %s\n", mapname);
+			Con_Printf ("BotNav: no nav2 found for %s\n", mapname);
 		return;
 	}
 
 	len = (size_t) com_filesize;
-	parsed = false;
-	text_copy = NULL;
+	reader.data = data;
+	reader.len = len;
+	reader.ofs = 0;
+	nodes = NULL;
+	origins = NULL;
+	links = NULL;
+	link_used = NULL;
+	edict_refs = NULL;
+	edict_ref_count = 0;
+	success = false;
 
-	if (!BotNav_ProbablyText (data, len))
-		parsed = BotNav_ParseBinary (data, len);
+	if (!BotNav_ReadHeader (&reader, &header))
+		goto cleanup;
+	if (memcmp (header.magic, BOT_NAV2_MAGIC, 4) != 0)
+		goto cleanup;
+	if (header.version != BOT_NAV2_VERSION)
+		goto cleanup;
+	if (header.node_count <= 0 || header.node_count > BOT_NAV_MAX_NODES)
+		goto cleanup;
+	if (header.link_count <= 0 || header.link_count > BOT_NAV_MAX_LINKS)
+		goto cleanup;
+	if (header.traversal_count < 0 || header.traversal_count > BOT_NAV_MAX_TRAVERSALS)
+		goto cleanup;
 
-	if (!parsed)
+	nodes = (nav2_node_t *) q_malloc ((size_t) header.node_count * sizeof (*nodes));
+	origins = (vec3_t *) q_malloc ((size_t) header.node_count * sizeof (*origins));
+	links = (nav2_link_t *) q_malloc ((size_t) header.link_count * sizeof (*links));
+	link_used = (byte *) q_malloc ((size_t) header.link_count);
+	if (!nodes || !origins || !links || !link_used)
+		goto cleanup;
+	Q_memset (link_used, 0, (size_t) header.link_count);
+
+	for (i = 0; i < header.node_count; ++i)
 	{
-		text_copy = (char *) q_malloc(len + 1);
-		if (text_copy)
+		if (!BotNav_ReadS32Raw (&reader, &nodes[i].flags)
+			|| !BotNav_ReadS32Raw (&reader, &nodes[i].link_count)
+			|| !BotNav_ReadS32Raw (&reader, &nodes[i].first_link)
+			|| !BotNav_ReadF32Raw (&reader, &nodes[i].radius))
+			goto cleanup;
+		if (nodes[i].link_count < 0)
+			goto cleanup;
+		if (!(nodes[i].radius >= 0.f))
+			goto cleanup;
+	}
+
+	for (i = 0; i < header.node_count; ++i)
+	{
+		if (!BotNav_ReadF32Raw (&reader, &origins[i][0])
+			|| !BotNav_ReadF32Raw (&reader, &origins[i][1])
+			|| !BotNav_ReadF32Raw (&reader, &origins[i][2]))
+			goto cleanup;
+	}
+
+	for (i = 0; i < header.link_count; ++i)
+	{
+		if (!BotNav_ReadS32Raw (&reader, &links[i].target_node)
+			|| !BotNav_ReadS16Raw (&reader, &links[i].type)
+			|| !BotNav_ReadS16Raw (&reader, &links[i].traversal_index))
+			goto cleanup;
+	}
+
+	for (i = 0; i < header.traversal_count; ++i)
+	{
+		int traversal_type;
+		int param0;
+		int param1;
+		int param2;
+
+		if (!BotNav_ReadS32Raw (&reader, &traversal_type)
+			|| !BotNav_ReadS32Raw (&reader, &param0)
+			|| !BotNav_ReadS32Raw (&reader, &param1)
+			|| !BotNav_ReadS32Raw (&reader, &param2))
+			goto cleanup;
+		(void) traversal_type;
+		(void) param0;
+		(void) param1;
+		(void) param2;
+	}
+
+	if (reader.ofs < reader.len)
+	{
+		size_t remaining = reader.len - reader.ofs;
+
+		if (remaining % sizeof (int) != 0)
+			goto cleanup;
+		edict_ref_count = (int) (remaining / sizeof (int));
+		if (edict_ref_count > 0)
 		{
-			if (len > 0)
-				Q_memcpy (text_copy, data, len);
-			text_copy[len] = '\0';
-			parsed = BotNav_ParseText (text_copy);
-			if (parsed)
-				g_bot_nav.version = 1;
-		}
-			else if (bot_nav_debug.value)
+			edict_refs = (int *) q_malloc ((size_t) edict_ref_count * sizeof (*edict_refs));
+			if (!edict_refs)
+				goto cleanup;
+			for (i = 0; i < edict_ref_count; ++i)
 			{
-				Con_Printf ("BotNav: out of memory while parsing %s\n", loaded_path);
+				if (!BotNav_ReadS32Raw (&reader, &edict_refs[i]))
+					goto cleanup;
 			}
 		}
+	}
 
-	if (parsed && BotNav_FinalizeLoad (mapname))
+	for (i = 0; i < header.node_count; ++i)
 	{
-		if (bot_nav_debug.value)
+		int first_link = nodes[i].first_link;
+		int link_count = nodes[i].link_count;
+
+		if (first_link < 0 || link_count < 0)
+			goto cleanup;
+		if (first_link > header.link_count)
+			goto cleanup;
+		if (link_count > header.link_count - first_link)
+			goto cleanup;
+
+		for (j = 0; j < link_count; ++j)
 		{
-			Con_Printf (
-				"BotNav: loaded %s (%d nodes, %d links, v%d)\n",
-				loaded_path,
-				g_bot_nav.node_count,
-				g_bot_nav.link_count,
-				g_bot_nav.version
-			);
+			int link_index = first_link + j;
+
+			if (links[link_index].target_node < 0 || links[link_index].target_node >= header.node_count)
+				goto cleanup;
+			if (links[link_index].traversal_index < -1 || links[link_index].traversal_index >= header.traversal_count)
+				goto cleanup;
+			if (link_used[link_index])
+				goto cleanup;
+			link_used[link_index] = 1;
 		}
 	}
-	else
+
+	for (i = 0; i < header.link_count; ++i)
+	{
+		if (!link_used[i])
+			goto cleanup;
+	}
+
+	BotNav_ResetGraph ();
+	g_bot_nav.version = header.version;
+	g_bot_nav.traversal_count = header.traversal_count;
+	g_bot_nav.edict_ref_count = edict_ref_count;
+
+	for (i = 0; i < header.node_count; ++i)
+	{
+		if (!BotNav_AddNode (origins[i], nodes[i].flags, nodes[i].radius))
+			goto cleanup;
+		g_bot_nav.nodes[i].link_count = nodes[i].link_count;
+	}
+
+	for (i = 0; i < header.node_count; ++i)
+	{
+		int first_link = nodes[i].first_link;
+		int link_count = nodes[i].link_count;
+
+		for (j = 0; j < link_count; ++j)
+		{
+			int link_index = first_link + j;
+			vec3_t delta;
+			float cost;
+
+			VectorSubtract (origins[links[link_index].target_node], origins[i], delta);
+			cost = VectorLength (delta);
+			if (cost <= 0.f)
+				cost = 1.f;
+			if (!BotNav_AddDirectedLink (i, links[link_index].target_node, cost, links[link_index].type, links[link_index].traversal_index))
+				goto cleanup;
+		}
+	}
+
+	g_bot_nav.loaded = true;
+	q_strlcpy (g_bot_nav.mapname, mapname, sizeof (g_bot_nav.mapname));
+	success = true;
+
+cleanup:
+	if (!success)
 	{
 		if (bot_nav_debug.value)
-			Con_Printf ("BotNav: failed to parse %s, fallback roaming active\n", loaded_path);
+			Con_Printf ("BotNav: failed to load strict NAV2 %s\n", loaded_path);
 		BotNav_ResetGraph ();
 	}
 
-	if (text_copy)
-		q_free(text_copy);
+	if (edict_refs)
+		q_free (edict_refs);
+	if (link_used)
+		q_free (link_used);
+	if (links)
+		q_free (links);
+	if (origins)
+		q_free (origins);
+	if (nodes)
+		q_free (nodes);
 	q_free(data);
 }
 
