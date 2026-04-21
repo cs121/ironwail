@@ -1048,7 +1048,7 @@ void main()
 		result.rgb += result.rgb * rim_light * rim_factor;
 	}
 
-	if (CausticsParams0.x > 0.5 && MODE != 2 && (in_flags & CF_MAT_SKY) == 0u)
+	if (CausticsParams0.x > 0.5 && (in_flags & CF_MAT_SKY) == 0u)
 	{
 		float caustic_term = 0.0;
 		float intensity = max(CausticsParams0.z, 0.0);

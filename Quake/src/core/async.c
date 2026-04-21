@@ -1246,6 +1246,28 @@ void Jobs_Shutdown (void)
 	fs_recent_completed_write = 0;
 	memset (fs_recent_completed_ids, 0, sizeof (fs_recent_completed_ids));
 	SDL_UnlockMutex (fs_mutex);
+
+	SDL_LockMutex (jobs_mutex);
+	for (int prio = JOBS_PRIORITY_HIGH; prio < JOBS_PRIORITY_COUNT; ++prio)
+	{
+		q_free (jobs_queues[prio].items);
+		jobs_queues[prio].items = NULL;
+		jobs_queues[prio].head = 0;
+		jobs_queues[prio].tail = 0;
+		jobs_queues[prio].count = 0;
+		jobs_queues[prio].capacity = 0;
+	}
+	SDL_UnlockMutex (jobs_mutex);
+
+	SDL_DestroyCond (jobs_not_full);
+	SDL_DestroyCond (jobs_not_empty);
+	SDL_DestroyMutex (jobs_mutex);
+	jobs_not_full = NULL;
+	jobs_not_empty = NULL;
+	jobs_mutex = NULL;
+
+	SDL_DestroyMutex (fs_mutex);
+	fs_mutex = NULL;
 }
 
 void Jobs_Init (void)

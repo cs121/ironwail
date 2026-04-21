@@ -35,6 +35,7 @@ extern cvar_t r_lightgrid_debug;
 static qboolean r_lightgrid_debug_sample_reported = false;
 static const qmodel_t *r_lightgrid_debug_last_world = NULL;
 static int r_itemlight_last_frame[MAX_EDICTS];
+enum { R_ENTITY_STATIC_LIGHT_MAX_SAMPLES = 11 };
 
 typedef struct model_light_stats_s {
 	int frame;
@@ -685,8 +686,9 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 	}
 	else
 	{
-		vec3_t sample_pos[8];
-		float sample_weight[8];
+		/* 1 origin sample + 6 forced viewmodel offsets + 4 extent offsets. */
+		vec3_t sample_pos[R_ENTITY_STATIC_LIGHT_MAX_SAMPLES];
+		float sample_weight[R_ENTITY_STATIC_LIGHT_MAX_SAMPLES];
 		int num_samples = 1;
 		float total_weight = 0.f;
 		vec3_t weighted_color = {0.f, 0.f, 0.f};

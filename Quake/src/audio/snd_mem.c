@@ -99,6 +99,8 @@ typedef struct pending_snd_job_s
 	byte *decoded;
 	int decoded_bytes;
 	int status;
+	int target_speed;
+	qboolean as_8bit;
 	/*
 	 * Producer/consumer handoff between async file/decode worker threads and
 	 * the main thread: workers publish status/data, then set done atomically;
@@ -165,7 +167,7 @@ static void S_LoadSoundDecodeJob (void *userdata)
 		return;
 	}
 
-	stepscale = (float) job->info.rate / shm->speed;
+	stepscale = (float) job->info.rate / job->target_speed;
 	outcount = (int) (job->info.samples / stepscale);
 	if (outcount <= 0)
 	{
@@ -174,7 +176,7 @@ static void S_LoadSoundDecodeJob (void *userdata)
 		return;
 	}
 
-	job->decoded_bytes = outcount * (loadas8bit.value ? 1 : job->info.width);
+	job->decoded_bytes = outcount * (job->as_8bit ? 1 : job->info.width);
 	job->decoded = (byte *) q_malloc(job->decoded_bytes);
 	if (!job->decoded)
 		Sys_Error ("S_LoadSoundDecodeJob: out of memory");
@@ -189,7 +191,7 @@ static void S_LoadSoundDecodeJob (void *userdata)
 			sample = LittleShort (((short *) src)[srcsample]);
 		else
 			sample = ((int)((unsigned char) src[srcsample]) - 128) << 8;
-		if (loadas8bit.value)
+		if (job->as_8bit)
 			((signed char *) dst)[i] = sample >> 8;
 		else if (job->info.width == 2)
 			((short *) dst)[i] = (short) sample;
@@ -249,10 +251,10 @@ static sfxcache_t *S_CommitPendingSound (pending_snd_job_t *job)
 		return NULL;
 	}
 
-	sc->length = job->decoded_bytes / (loadas8bit.value ? 1 : job->info.width);
+	sc->length = job->decoded_bytes / (job->as_8bit ? 1 : job->info.width);
 	sc->loopstart = job->info.loopstart;
-	sc->speed = shm->speed;
-	sc->width = loadas8bit.value ? 1 : job->info.width;
+	sc->speed = job->target_speed;
+	sc->width = job->as_8bit ? 1 : job->info.width;
 	sc->stereo = 0;
 	memcpy (sc->data, job->decoded, job->decoded_bytes);
 
@@ -304,6 +306,8 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 
 		job->sfx = s;
 		q_strlcpy (job->name, s->name, sizeof (job->name));
+		job->target_speed = shm->speed;
+		job->as_8bit = loadas8bit.value != 0;
 
 		job->next = pending_snd_jobs;
 		pending_snd_jobs = job;

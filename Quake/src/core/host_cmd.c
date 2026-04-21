@@ -387,7 +387,7 @@ static void ExtraMaps_Add (const char *name, const searchpath_t *source)
 {
 	levelinfo_t info;
 	memset (&info, 0, sizeof (info));
-	info.type.value = ExtraMaps_Categorize (name, source);
+	SDL_AtomicSet (&info.type, ExtraMaps_Categorize (name, source));
 	FileList_AddWithData (name, &info, sizeof (info), &extralevels);
 	maxlevelnamelen = q_max (maxlevelnamelen, strlen (name));
 }
@@ -1100,7 +1100,7 @@ static void Modlist_Add (const char *name)
 	item = FileList_AddWithData (name, NULL, sizeof (*info), &modlist);
 
 	info = (modinfo_t *) (item + 1);
-	info->status.value = MODSTATUS_INSTALLED;
+	SDL_AtomicSet (&info->status, MODSTATUS_INSTALLED);
 
 	// look for descript.ion file in mod dir and use first non-empty line as full name
 	if (!info->full_name)
@@ -2349,10 +2349,10 @@ qboolean Host_IsSaving (void)
 	if (saving)
 		return true;
 
-	if (save_data.abort.value && sv.lastsave[0])
+	if (SDL_AtomicGet (&save_data.abort) && sv.lastsave[0])
 	{
 		sv.lastsave[0] = '\0';
-		if (save_data.abort.value < 0)
+		if (SDL_AtomicGet (&save_data.abort) < 0)
 			Con_Printf ("Save error.\n");
 	}
 
@@ -2384,6 +2384,7 @@ static int Host_BackgroundSave (void *param)
 			if (SDL_AtomicGet(&save->abort))
 			{
 				abort = true;
+				Con_DPrintf ("SaveThread: aborted after %d/%d edicts\n", i, save->num_edicts);
 				break;
 			}
 			ED_Write (save, ed);
@@ -2539,7 +2540,7 @@ static void Host_Savegame_f (void)
 
 	q_strlcpy (save_data.path, name, sizeof (save_data.path));
 	save_data.file = f;
-	save_data.abort.value = 0;
+	SDL_AtomicSet (&save_data.abort, 0);
 
 	PR_SwitchQCVM (&sv.qcvm);
 	SaveData_Fill (&save_data);
