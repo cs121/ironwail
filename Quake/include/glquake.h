@@ -140,7 +140,6 @@ extern	cvar_t	r_scale;
 extern	cvar_t	r_scene_scale_debug;
 extern	cvar_t	r_drs;
 extern	cvar_t	r_drs_use_gpu;
-extern	cvar_t	r_drs_target_ms;
 extern	cvar_t	r_drs_target_fps;
 extern	cvar_t	r_drs_min_scale;
 extern	cvar_t	r_drs_max_scale;
@@ -151,6 +150,8 @@ extern	cvar_t	r_drs_cooldown_after_up;
 extern	cvar_t	r_drs_hysteresis_ms;
 extern	cvar_t	r_drs_filter_alpha;
 extern	cvar_t	r_drs_debug;
+extern	cvar_t	r_drs_step_size;
+extern	cvar_t	r_drs_sharpen;
 extern	cvar_t	r_shadow;
 extern	cvar_t	r_shadow_sun;
 extern	cvar_t	r_shadow_dlight;
@@ -657,6 +658,7 @@ typedef struct r_scene_size_s
 	int width;
 	int height;
 	int scale;
+	float resolution_ratio;
 } r_scene_size_t;
 
 typedef struct r_render_scene_input_s
@@ -1000,6 +1002,7 @@ typedef struct scene_size_info_s
 	int scene_width;
 	int scene_height;
 	int scene_scale;
+	float resolution_ratio;
 	qboolean size_changed;
 	qboolean scale_changed;
 	qboolean source_changed;
@@ -1013,6 +1016,8 @@ int R_GetNativeRenderHeight (void);
 int R_GetSceneRenderWidth (void);
 int R_GetSceneRenderHeight (void);
 int R_GetSceneRenderScale (void);
+float R_GetSceneResolutionRatio (void);
+void R_ResetDRSState (void);
 void R_GetSceneTexelSize (float *out_inv_w, float *out_inv_h);
 void R_GetOutputTexelSize (float *out_inv_w, float *out_inv_h);
 int R_GetSceneResizeGeneration (void);

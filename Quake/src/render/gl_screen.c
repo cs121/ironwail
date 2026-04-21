@@ -759,6 +759,52 @@ void SCR_DrawFPS (void)
 
 /*
 ==============
+SCR_DrawDRSDebug
+==============
+*/
+void SCR_DrawDRSDebug (void)
+{
+	scene_size_info_t scene_size;
+	char st[32];
+	int x, y;
+	int width;
+
+	if (r_drs_debug.value <= 0.f)
+		return;
+
+	R_GetSceneSizeInfo (&scene_size);
+	if (scene_size.scene_width <= 0 || scene_size.scene_height <= 0)
+		return;
+
+	q_snprintf (st, sizeof (st), "drs %dx%d %.0f%%",
+		scene_size.scene_width, scene_size.scene_height,
+		scene_size.resolution_ratio * 100.f);
+
+	width = (int)strlen (st) * 8;
+	if (hudstyle != HUD_CLASSIC)
+	{
+		x = 320 - 16 - width;
+		y = 8;
+		if (scr_clock.value) y += 8;
+		if (scr_showfps.value) y += 8;
+		GL_SetCanvas (CANVAS_TOPRIGHT);
+	}
+	else
+	{
+		x = 320 - width;
+		y = 200 - 8;
+		if (scr_clock.value) y -= 8;
+		if (scr_showfps.value) y -= 8;
+		GL_SetCanvas (CANVAS_BOTTOMRIGHT);
+	}
+
+	Draw_Fill (x - 4, y - 2, width + 8, 10, 0, 0.5f);
+	Draw_String (x, y, st);
+	scr_tileclear_updates = 0;
+}
+
+/*
+==============
 SCR_DrawSpeed
 ==============
 */
@@ -2267,6 +2313,7 @@ void SCR_UpdateScreen (void)
 		SCR_DrawClock (); //johnfitz
 		SCR_DrawDemoControls ();
 		SCR_DrawSpeed ();
+		SCR_DrawDRSDebug ();
 		SCR_DrawEdictInfo ();
 		SCR_DrawConsole ();
 		M_Draw ();

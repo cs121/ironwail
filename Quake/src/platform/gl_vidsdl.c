@@ -760,6 +760,8 @@ static void VID_RecreateRenderTargets (const char *reason, qboolean delete_exist
 	 * toggles cannot reuse stale pass selection from the previous layout. */
 	R_FrameGraph_SetRenderFramePlan (NULL);
 
+	R_ResetDRSState ();
+
 	if (delete_existing)
 		GL_DeleteFrameBuffers ();
 

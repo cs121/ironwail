@@ -766,10 +766,9 @@ cvar_t	r_scale = { "r_scale", "1", CVAR_ARCHIVE };
 cvar_t	r_scene_scale_debug = { "r_scene_scale_debug", "0", CVAR_NONE };
 cvar_t	r_drs = { "r_drs", "0", CVAR_ARCHIVE };
 cvar_t	r_drs_use_gpu = { "r_drs_use_gpu", "1", CVAR_ARCHIVE };
-cvar_t	r_drs_target_ms = { "r_drs_target_ms", "16.6", CVAR_ARCHIVE };
 cvar_t	r_drs_target_fps = { "r_drs_target_fps", "0", CVAR_ARCHIVE };
-cvar_t	r_drs_min_scale = { "r_drs_min_scale", "1", CVAR_ARCHIVE };
-cvar_t	r_drs_max_scale = { "r_drs_max_scale", "4", CVAR_ARCHIVE };
+cvar_t	r_drs_min_scale = { "r_drs_min_scale", "25", CVAR_ARCHIVE };
+cvar_t	r_drs_max_scale = { "r_drs_max_scale", "100", CVAR_ARCHIVE };
 cvar_t	r_drs_step_up = { "r_drs_step_up", "1", CVAR_ARCHIVE };
 cvar_t	r_drs_step_down = { "r_drs_step_down", "1", CVAR_ARCHIVE };
 cvar_t	r_drs_cooldown_after_down = { "r_drs_cooldown_after_down", "8", CVAR_ARCHIVE };
@@ -777,7 +776,8 @@ cvar_t	r_drs_cooldown_after_up = { "r_drs_cooldown_after_up", "2", CVAR_ARCHIVE 
 cvar_t	r_drs_hysteresis_ms = { "r_drs_hysteresis_ms", "0.5", CVAR_ARCHIVE };
 cvar_t	r_drs_filter_alpha = { "r_drs_filter_alpha", "0.25", CVAR_ARCHIVE };
 cvar_t	r_drs_debug = { "r_drs_debug", "0", CVAR_NONE };
-cvar_t	r_drs_guard_mode = { "r_drs_guard_mode", "0", CVAR_ARCHIVE };
+cvar_t	r_drs_step_size = { "r_drs_step_size", "0.02", CVAR_ARCHIVE };
+cvar_t	r_drs_sharpen = { "r_drs_sharpen", "0.3", CVAR_ARCHIVE };
 
 static float view_znear;
 static float view_zfar;
@@ -794,9 +794,11 @@ typedef struct render_scene_size_state_s {
 	int scene_width;
 	int scene_height;
 	int scene_scale;
+	float scene_resolution_ratio;
 	int prev_scene_width;
 	int prev_scene_height;
 	int prev_scene_scale;
+	float prev_scene_resolution_ratio;
 	scene_scale_source_t scale_source;
 	scene_scale_source_t prev_scale_source;
 	qboolean size_changed;
@@ -810,45 +812,44 @@ static int r_scene_resize_generation = 0;
 static qboolean r_scene_resize_pending_invalidation = false;
 
 typedef struct render_drs_state_s {
-	int dynamic_scale;
+	float dynamic_resolution;
 	float filtered_ms;
 	float last_raw_ms;
 	qboolean initialized;
 	qboolean last_gpu_valid;
 	int upscale_cooldown;
+	int down_steps_this_second;
+	float down_rate_accumulator;
 } render_drs_state_t;
 
 static render_drs_state_t r_drs_state;
 static void R_InvalidateTemporalHistoryOnSceneResize (void);
 
-static int R_GetDRSMinScale (void)
+static float R_GetDRSMinResolution (void)
 {
-	int max_supported = q_max (1, vid.maxscale);
-	return CLAMP (1, (int)Q_rint (r_drs_min_scale.value), max_supported);
+	return CLAMP (0.01f, r_drs_min_scale.value * 0.01f, 1.f);
 }
 
-static int R_GetDRSMaxScale (int min_scale)
+static float R_GetDRSMaxResolution (void)
 {
-	int max_supported = q_max (1, vid.maxscale);
-	return CLAMP (min_scale, (int)Q_rint (r_drs_max_scale.value), max_supported);
+	float min_resolution = R_GetDRSMinResolution ();
+	return CLAMP (min_resolution, r_drs_max_scale.value * 0.01f, 1.f);
 }
 
-static int R_ClampSceneScaleSupported (int scale)
+static float R_QuantizeResolution (float ratio)
 {
-	int max_supported = q_max (1, vid.maxscale);
-	return CLAMP (1, scale, max_supported);
-}
-
-static int R_ClampDRSScale (int scale)
-{
-	int min_scale = q_max (1, R_GetDRSMinScale ());
-	int max_scale = q_max (min_scale, R_GetDRSMaxScale (min_scale));
-	return CLAMP (min_scale, scale, max_scale);
+	float step = CLAMP (0.01f, r_drs_step_size.value, 0.10f);
+	return floorf (ratio / step + 0.5f) * step;
 }
 
 static const char *R_GetSceneScaleSourceNameInternal (scene_scale_source_t source)
 {
 	return source == SCENE_SCALE_SOURCE_DYNAMIC ? "dynamic" : "manual";
+}
+
+void R_ResetDRSState (void)
+{
+	memset (&r_drs_state, 0, sizeof (r_drs_state));
 }
 
 static void R_UpdateDynamicResolutionScale (void)
@@ -860,17 +861,17 @@ static void R_UpdateDynamicResolutionScale (void)
 	float target_ms;
 	float alpha;
 	float hysteresis_ms;
-	int min_scale;
-	int max_scale;
-	int step_up;
-	int step_down;
+	float min_resolution;
+	float max_resolution;
+	float step;
 	int cooldown_after_down;
 	int cooldown_after_up;
-	int current_scale;
-	int new_scale;
+	float current_resolution;
+	float new_resolution;
 	int debug_level;
 	qboolean use_gpu = (r_drs_use_gpu.value > 0.f);
 	qboolean use_gpu_timing = false;
+	const int max_down_rate = 4;
 
 	if (r_drs.value <= 0.f)
 	{
@@ -884,44 +885,62 @@ static void R_UpdateDynamicResolutionScale (void)
 	if (raw_ms <= 0.0)
 		raw_ms = 0.001;
 
-	target_ms = (r_drs_target_ms.value > 0.f)
-		? r_drs_target_ms.value
-		: ((r_drs_target_fps.value > 1.f) ? (1000.f / r_drs_target_fps.value) : (1000.f / 60.f));
+	/* DRS is driven by an explicit FPS target when enabled. */
+	if (r_drs_target_fps.value > 1.f)
+		target_ms = 1000.f / r_drs_target_fps.value;
+	else
+		target_ms = 1000.f / 60.f;
 	target_ms = CLAMP (1.f, target_ms, 1000.f);
 
 	alpha = CLAMP (0.01f, r_drs_filter_alpha.value, 1.f);
 	hysteresis_ms = q_max (0.f, r_drs_hysteresis_ms.value);
-	min_scale = R_GetDRSMinScale ();
-	max_scale = R_GetDRSMaxScale (min_scale);
-	step_up = CLAMP (1, (int)Q_rint (r_drs_step_up.value), 8);
-	step_down = CLAMP (1, (int)Q_rint (r_drs_step_down.value), 8);
+	min_resolution = R_GetDRSMinResolution ();
+	max_resolution = R_GetDRSMaxResolution ();
+	step = CLAMP (0.01f, r_drs_step_size.value, 0.10f);
 	cooldown_after_down = CLAMP (0, (int)Q_rint (r_drs_cooldown_after_down.value), 120);
 	cooldown_after_up = CLAMP (0, (int)Q_rint (r_drs_cooldown_after_up.value), 120);
 	debug_level = (int)Q_rint (r_drs_debug.value);
 
 	if (!r_drs_state.initialized)
 	{
-		r_drs_state.dynamic_scale = R_ClampDRSScale (q_max (1, r_refdef.scale));
+		r_drs_state.dynamic_resolution = max_resolution;
 		r_drs_state.filtered_ms = (float)raw_ms;
 		r_drs_state.last_raw_ms = (float)raw_ms;
 		r_drs_state.last_gpu_valid = use_gpu_timing;
 		r_drs_state.initialized = true;
 		r_drs_state.upscale_cooldown = 0;
+		r_drs_state.down_steps_this_second = 0;
+		r_drs_state.down_rate_accumulator = 0.f;
 		if (debug_level > 0)
-			Con_DPrintf ("drs init: scale=%d raw_ms=%.2f source=%s target=%.2f\n",
-				r_drs_state.dynamic_scale, (float)raw_ms, use_gpu_timing ? "gpu" : "frame", target_ms);
+			Con_DPrintf ("drs init: res=%.0f%% raw_ms=%.2f source=%s target=%.2f\n",
+				r_drs_state.dynamic_resolution * 100.f, (float)raw_ms, use_gpu_timing ? "gpu" : "frame", target_ms);
 		return;
 	}
 
 	r_drs_state.filtered_ms = r_drs_state.filtered_ms * (1.f - alpha) + (float)raw_ms * alpha;
 	r_drs_state.last_raw_ms = (float)raw_ms;
 	r_drs_state.last_gpu_valid = use_gpu_timing;
-	current_scale = R_ClampDRSScale (r_drs_state.dynamic_scale > 0 ? r_drs_state.dynamic_scale : q_max (1, r_refdef.scale));
-	new_scale = current_scale;
+
+	if (host_frametime > 0.0)
+	{
+		r_drs_state.down_rate_accumulator += (float)host_frametime;
+		if (r_drs_state.down_rate_accumulator >= 1.f)
+		{
+			r_drs_state.down_steps_this_second = 0;
+			r_drs_state.down_rate_accumulator -= 1.f;
+		}
+	}
+
+	current_resolution = CLAMP (min_resolution, r_drs_state.dynamic_resolution, max_resolution);
+	new_resolution = current_resolution;
 
 	if (r_drs_state.filtered_ms > target_ms + hysteresis_ms)
 	{
-		new_scale = q_min (max_scale, current_scale + step_down);
+		if (r_drs_state.down_steps_this_second < max_down_rate)
+		{
+			new_resolution = q_max (min_resolution, current_resolution - step);
+			r_drs_state.down_steps_this_second++;
+		}
 		r_drs_state.upscale_cooldown = cooldown_after_down;
 	}
 	else if (r_drs_state.filtered_ms < target_ms - hysteresis_ms)
@@ -930,7 +949,7 @@ static void R_UpdateDynamicResolutionScale (void)
 			r_drs_state.upscale_cooldown--;
 		else
 		{
-			new_scale = q_max (min_scale, current_scale - step_up);
+			new_resolution = max_resolution;
 			r_drs_state.upscale_cooldown = cooldown_after_up;
 		}
 	}
@@ -939,20 +958,23 @@ static void R_UpdateDynamicResolutionScale (void)
 		r_drs_state.upscale_cooldown--;
 	}
 
-	if (new_scale != current_scale && debug_level > 0)
+	if (new_resolution != current_resolution && debug_level > 0)
 	{
-		Con_DPrintf ("drs scale: %d -> %d raw_ms=%.2f filtered_ms=%.2f target_ms=%.2f source=%s\n",
-			current_scale, new_scale, (float)raw_ms, r_drs_state.filtered_ms, target_ms,
+		Con_DPrintf ("drs res: %.0f%% -> %.0f%% (%dx%d) raw_ms=%.2f filtered_ms=%.2f target_ms=%.2f source=%s\n",
+			current_resolution * 100.f, new_resolution * 100.f,
+			(int)ceilf (q_max (1, r_refdef.vrect.width) * new_resolution),
+			(int)ceilf (q_max (1, r_refdef.vrect.height) * new_resolution),
+			(float)raw_ms, r_drs_state.filtered_ms, target_ms,
 			use_gpu_timing ? "gpu" : "frame");
 	}
 	else if (debug_level > 1)
 	{
-		Con_DPrintf ("drs sample: scale=%d raw_ms=%.2f filtered_ms=%.2f target_ms=%.2f source=%s\n",
-			current_scale, (float)raw_ms, r_drs_state.filtered_ms, target_ms,
+		Con_DPrintf ("drs sample: res=%.0f%% raw_ms=%.2f filtered_ms=%.2f target_ms=%.2f source=%s\n",
+			current_resolution * 100.f, (float)raw_ms, r_drs_state.filtered_ms, target_ms,
 			use_gpu_timing ? "gpu" : "frame");
 	}
 
-	r_drs_state.dynamic_scale = new_scale;
+	r_drs_state.dynamic_resolution = new_resolution;
 }
 
 static void R_UpdateSceneSizeState (void)
@@ -966,18 +988,35 @@ static void R_UpdateSceneSizeState (void)
 	int base_scene_height = q_max (1, r_refdef.vrect.height);
 	scene_scale_source_t scale_source = SCENE_SCALE_SOURCE_MANUAL;
 	qboolean was_initialized = r_scene_size_state.initialized;
+	float resolution_ratio = 1.f;
+	qboolean using_drs = false;
 
-	if (r_drs.value > 0.f && r_drs_state.dynamic_scale > 0)
+	if (r_drs.value > 0.f && r_drs_state.initialized && r_drs_state.dynamic_resolution > 0.f)
 	{
-		requested_scale = r_drs_state.dynamic_scale;
 		scale_source = SCENE_SCALE_SOURCE_DYNAMIC;
+		using_drs = true;
+		float clamped = CLAMP (R_GetDRSMinResolution (), r_drs_state.dynamic_resolution, R_GetDRSMaxResolution ());
+		resolution_ratio = R_QuantizeResolution (clamped);
+		requested_scale = 1;
 	}
-	requested_scale = R_ClampSceneScaleSupported (q_max (1, requested_scale));
-	if (r_drs.value > 0.f)
-		requested_scale = R_ClampDRSScale (requested_scale);
+	else
+	{
+		requested_scale = q_max (1, requested_scale);
+		resolution_ratio = 1.f / (float)requested_scale;
+	}
 
-	int scene_width = (base_scene_width + requested_scale - 1) / requested_scale;
-	int scene_height = (base_scene_height + requested_scale - 1) / requested_scale;
+	int scene_width, scene_height;
+	if (using_drs)
+	{
+		scene_width = q_max (1, ((int)ceilf ((float)base_scene_width * resolution_ratio) + 3) & ~3);
+		scene_height = q_max (1, ((int)ceilf ((float)base_scene_height * resolution_ratio) + 3) & ~3);
+	}
+	else
+	{
+		scene_width = (base_scene_width + requested_scale - 1) / requested_scale;
+		scene_height = (base_scene_height + requested_scale - 1) / requested_scale;
+	}
+
 	qboolean size_changed;
 	qboolean scale_changed;
 	qboolean source_changed;
@@ -988,6 +1027,7 @@ static void R_UpdateSceneSizeState (void)
 		r_scene_size_state.prev_scene_height = scene_height;
 		r_scene_size_state.prev_scene_scale = requested_scale;
 		r_scene_size_state.prev_scale_source = scale_source;
+		r_scene_size_state.prev_scene_resolution_ratio = resolution_ratio;
 	}
 
 	size_changed = !was_initialized
@@ -996,7 +1036,8 @@ static void R_UpdateSceneSizeState (void)
 		|| r_scene_size_state.native_width != native_width
 		|| r_scene_size_state.native_height != native_height;
 	scale_changed = !was_initialized
-		|| r_scene_size_state.scene_scale != requested_scale;
+		|| r_scene_size_state.scene_scale != requested_scale
+		|| r_scene_size_state.scene_resolution_ratio != resolution_ratio;
 	source_changed = !was_initialized
 		|| r_scene_size_state.scale_source != scale_source;
 
@@ -1006,6 +1047,7 @@ static void R_UpdateSceneSizeState (void)
 		r_scene_size_state.prev_scene_height = was_initialized ? r_scene_size_state.scene_height : scene_height;
 		r_scene_size_state.prev_scene_scale = was_initialized ? r_scene_size_state.scene_scale : requested_scale;
 		r_scene_size_state.prev_scale_source = was_initialized ? r_scene_size_state.scale_source : scale_source;
+		r_scene_size_state.prev_scene_resolution_ratio = was_initialized ? r_scene_size_state.scene_resolution_ratio : resolution_ratio;
 		r_scene_resize_generation++;
 		r_scene_resize_pending_invalidation = true;
 	}
@@ -1015,6 +1057,7 @@ static void R_UpdateSceneSizeState (void)
 	r_scene_size_state.scene_width = scene_width;
 	r_scene_size_state.scene_height = scene_height;
 	r_scene_size_state.scene_scale = requested_scale;
+	r_scene_size_state.scene_resolution_ratio = resolution_ratio;
 	r_scene_size_state.scale_source = scale_source;
 	r_scene_size_state.size_changed = size_changed;
 	r_scene_size_state.scale_changed = scale_changed;
@@ -1023,19 +1066,27 @@ static void R_UpdateSceneSizeState (void)
 
 	if ((drs_debug > 0 || debug > 0) && was_initialized && (scale_changed || source_changed))
 	{
-		Con_DPrintf ("scene_scale: 1/%d(%s) -> 1/%d(%s)\n",
-			r_scene_size_state.prev_scene_scale,
-			R_GetSceneScaleSourceNameInternal (r_scene_size_state.prev_scale_source),
-			r_scene_size_state.scene_scale,
-			R_GetSceneScaleSourceNameInternal (r_scene_size_state.scale_source));
+		if (using_drs)
+			Con_DPrintf ("scene_scale: %.0f%%(%s) -> %.0f%%(%s)\n",
+				r_scene_size_state.prev_scene_resolution_ratio * 100.f,
+				R_GetSceneScaleSourceNameInternal (r_scene_size_state.prev_scale_source),
+				r_scene_size_state.scene_resolution_ratio * 100.f,
+				R_GetSceneScaleSourceNameInternal (r_scene_size_state.scale_source));
+		else
+			Con_DPrintf ("scene_scale: 1/%d(%s) -> 1/%d(%s)\n",
+				r_scene_size_state.prev_scene_scale,
+				R_GetSceneScaleSourceNameInternal (r_scene_size_state.prev_scale_source),
+				r_scene_size_state.scene_scale,
+				R_GetSceneScaleSourceNameInternal (r_scene_size_state.scale_source));
 	}
 
 	if (debug > 0 && (debug > 1 || size_changed || scale_changed || source_changed))
 	{
-		Con_DPrintf ("scene_size: output=%dx%d view=%dx%d scale=%d(%s) scene=%dx%d prev=%dx%d changed(size=%d scale=%d source=%d)\n",
+		Con_DPrintf ("scene_size: output=%dx%d view=%dx%d scale=%d res=%.0f%%(%s) scene=%dx%d prev=%dx%d changed(size=%d scale=%d source=%d)\n",
 			r_scene_size_state.native_width, r_scene_size_state.native_height,
 			base_scene_width, base_scene_height,
-			r_scene_size_state.scene_scale, R_GetSceneScaleSourceNameInternal (r_scene_size_state.scale_source),
+			r_scene_size_state.scene_scale, r_scene_size_state.scene_resolution_ratio * 100.f,
+			R_GetSceneScaleSourceNameInternal (r_scene_size_state.scale_source),
 			r_scene_size_state.scene_width, r_scene_size_state.scene_height,
 			r_scene_size_state.prev_scene_width, r_scene_size_state.prev_scene_height,
 			size_changed ? 1 : 0, scale_changed ? 1 : 0, source_changed ? 1 : 0);
@@ -1070,6 +1121,12 @@ int R_GetSceneRenderScale (void)
 {
 	R_UpdateSceneSizeState ();
 	return r_scene_size_state.scene_scale;
+}
+
+float R_GetSceneResolutionRatio (void)
+{
+	R_UpdateSceneSizeState ();
+	return r_scene_size_state.scene_resolution_ratio;
 }
 
 void R_GetSceneTexelSize (float *out_inv_w, float *out_inv_h)
@@ -1109,6 +1166,7 @@ void R_GetSceneSizeInfo (scene_size_info_t *out_info)
 	out_info->scene_width = r_scene_size_state.scene_width;
 	out_info->scene_height = r_scene_size_state.scene_height;
 	out_info->scene_scale = r_scene_size_state.scene_scale;
+	out_info->resolution_ratio = r_scene_size_state.scene_resolution_ratio;
 	out_info->size_changed = r_scene_size_state.size_changed;
 	out_info->scale_changed = r_scene_size_state.scale_changed;
 	out_info->source_changed = r_scene_size_state.source_changed;
@@ -1141,11 +1199,6 @@ static qboolean R_DoFEnabled (void)
 	return r_dof.value > 0.f && r_dof_strength.value > 0.f;
 }
 
-static qboolean R_PostFX_DRSGuardActive (void)
-{
-	return R_GetSceneRenderScale () != 1 || r_drs.value > 0.f;
-}
-
 qboolean R_SSAO_EnabledEffective (void)
 {
 	return (r_ssao.value > 0.f && r_ssao_intensity.value > 0.f) || r_ssao_debug.value > 0.f;
@@ -1153,14 +1206,11 @@ qboolean R_SSAO_EnabledEffective (void)
 
 qboolean R_PostFX_DoFEnabledEffective (void)
 {
-	return R_DoFEnabled () && !R_PostFX_DRSGuardActive ();
+	return R_DoFEnabled ();
 }
 
 qboolean R_PostFX_GodraysPreviewEnabledEffective (void)
 {
-	if (R_PostFX_DRSGuardActive ())
-		return false;
-
 	if (!R_Godrays_IsReady (cl.worldmodel, r_framecount))
 		return false;
 
@@ -1448,6 +1498,14 @@ void GL_CreateFrameBuffers (void)
 	int native_h = R_GetNativeRenderHeight ();
 	int scene_w = R_GetSceneRenderWidth ();
 	int scene_h = R_GetSceneRenderHeight ();
+	int alloc_w = scene_w;
+	int alloc_h = scene_h;
+
+	if (r_drs.value > 0.f)
+	{
+		alloc_w = q_max (alloc_w, native_w);
+		alloc_h = q_max (alloc_h, native_h);
+	}
 
 	framebufs.ssao.valid = false;
 	r_ssao_invalid_warned = false;
@@ -1547,12 +1605,12 @@ void GL_CreateFrameBuffers (void)
 	/* scene framebuffer (color + depth + stencil, potentially multisampled) */
 	framebufs.scene.samples = Q_nextPow2 ((int)q_max (1.f, vid_fsaa.value));
 	framebufs.scene.samples = CLAMP (1, framebufs.scene.samples, framebufs.max_samples);
-	framebufs.scene.width = scene_w;
-	framebufs.scene.height = scene_h;
+	framebufs.scene.width = alloc_w;
+	framebufs.scene.height = alloc_h;
 
-	framebufs.scene.color_tex = GL_CreateFBOAttachment (color_format, scene_w, scene_h, framebufs.scene.samples, GL_NEAREST, "scene colors");
-	framebufs.scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, scene_w, scene_h, framebufs.scene.samples, GL_NEAREST, "scene velocity");
-	framebufs.scene.depth_stencil_tex = GL_CreateFBOAttachment (depth_format, scene_w, scene_h, framebufs.scene.samples, GL_NEAREST, "scene depth/stencil");
+	framebufs.scene.color_tex = GL_CreateFBOAttachment (color_format, alloc_w, alloc_h, framebufs.scene.samples, GL_NEAREST, "scene colors");
+	framebufs.scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, alloc_w, alloc_h, framebufs.scene.samples, GL_NEAREST, "scene velocity");
+	framebufs.scene.depth_stencil_tex = GL_CreateFBOAttachment (depth_format, alloc_w, alloc_h, framebufs.scene.samples, GL_NEAREST, "scene depth/stencil");
 	{
 		GLuint colors[2] = { framebufs.scene.color_tex, framebufs.scene.velocity_tex };
 		framebufs.scene.fbo = GL_CreateFBO (framebufs.scene.samples > 1 ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D,
@@ -1564,8 +1622,8 @@ void GL_CreateFrameBuffers (void)
 	}
 
 	/* weighted blended order-independent transparency (accum + revealage, potentially multisampled */
-	framebufs.oit.accum_tex = GL_CreateFBOAttachment (GL_RGBA16F, scene_w, scene_h, framebufs.scene.samples, GL_NEAREST, "oit accum");
-	framebufs.oit.revealage_tex = GL_CreateFBOAttachment (GL_R8, scene_w, scene_h, framebufs.scene.samples, GL_NEAREST, "oit revealage");
+	framebufs.oit.accum_tex = GL_CreateFBOAttachment (GL_RGBA16F, alloc_w, alloc_h, framebufs.scene.samples, GL_NEAREST, "oit accum");
+	framebufs.oit.revealage_tex = GL_CreateFBOAttachment (GL_R8, alloc_w, alloc_h, framebufs.scene.samples, GL_NEAREST, "oit revealage");
 
 	// FIX #1: Initialize MRT array before using it
 	framebufs.oit.mrt[0] = framebufs.oit.accum_tex;
@@ -1581,10 +1639,10 @@ void GL_CreateFrameBuffers (void)
 	/* resolved scene framebuffer (color only) */
 	if (framebufs.scene.samples > 1)
 	{
-		framebufs.resolved_scene.width = scene_w;
-		framebufs.resolved_scene.height = scene_h;
-		framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, scene_w, scene_h, 1, GL_NEAREST, "resolved scene colors");
-		framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, scene_w, scene_h, 1, GL_NEAREST, "resolved scene velocity");
+		framebufs.resolved_scene.width = alloc_w;
+		framebufs.resolved_scene.height = alloc_h;
+		framebufs.resolved_scene.color_tex = GL_CreateFBOAttachment (color_format, alloc_w, alloc_h, 1, GL_NEAREST, "resolved scene colors");
+		framebufs.resolved_scene.velocity_tex = GL_CreateFBOAttachment (GL_RGBA16F, alloc_w, alloc_h, 1, GL_NEAREST, "resolved scene velocity");
 		{
 			GLuint colors[2] = { framebufs.resolved_scene.color_tex, framebufs.resolved_scene.velocity_tex };
 			framebufs.resolved_scene.fbo = GL_CreateFBO (GL_TEXTURE_2D, colors, 2, 0, 0, "resolved scene fbo");
@@ -3155,8 +3213,6 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 	float view_max_x;
 	float view_max_y;
 	float inv_scale;
-	qboolean scaled_scene;
-	qboolean drs_postfx_guard = false;
 	postfx_state_t postfx_state;
 	float postfx_exposure_add;
 	float postfx_bloom_boost;
@@ -3302,23 +3358,13 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 	}
 
 	inv_scale = 1.f / (float)q_max (1, scene_size->scale);
-	scaled_scene = (scene_size->scale != 1);
-	{
-		int guard_mode = CLAMP (0, (int)Q_rint (r_drs_guard_mode.value), 1);
-		drs_postfx_guard = scaled_scene || (guard_mode == 1 && r_drs.value > 0.f);
-	}
-
-	godrays_enabled = (!drs_postfx_guard
-		&& r_godrays.value > 0.f
+	if (r_drs.value > 0.f)
+		inv_scale = scene_size->resolution_ratio;
+	godrays_enabled = (r_godrays.value > 0.f
 		&& R_GodraysMediumEnabled ()
 		&& R_Godrays_IsReady (cl.worldmodel, r_framecount));
 	godrays_debug = (r_godrays_debug.value > 0.f) ? 1.f : 0.f;
 	godrays_debug_source = CLAMP (0.f, r_godrays_debug_source.value, 2.f);
-	if (drs_postfx_guard)
-	{
-		godrays_debug = 0.f;
-		godrays_debug_source = 0.f;
-	}
 	godrays_debug_enabled = (godrays_debug > 0.f || godrays_debug_source > 0.f);
 	godrays_preview = (godrays_enabled || (godrays_debug_enabled && R_Godrays_IsReady (cl.worldmodel, r_framecount)));
 	if (!godrays_preview)
@@ -3361,8 +3407,6 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 
 	motion_strength = q_max (0.f, r_motionblur.value);
 	if (!GL_ShouldApplyMotionBlur ())
-		motion_strength = 0.f;
-	if (drs_postfx_guard)
 		motion_strength = 0.f;
 	motion_shutter = q_max (0.f, r_motionblur_shutter.value);
 	motion_effective_shutter = motion_strength * motion_shutter;
@@ -3467,7 +3511,8 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	{
 		float post_contrast = CLAMP (0.8f, r_color_contrast.value, 1.2f);
-		GL_Uniform4fFunc (0, 1.f, post_contrast, 1.f / (float)q_max (1, R_GetSceneRenderScale ()), dither);
+		float inv_scale_val = (r_drs.value > 0.f) ? scene_size->resolution_ratio : (1.f / (float)q_max (1, R_GetSceneRenderScale ()));
+		GL_Uniform4fFunc (0, 1.f, post_contrast, inv_scale_val, dither);
 	}
 	{
 		int debug_mode = (int)Q_rint (CLAMP (0.f, r_debug_colorspace.value, 4.f));
@@ -3520,6 +3565,11 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 	dv_time = (float)cl.time;
 	GL_Uniform4fFunc (25, postfx_damage_trauma, dv_time, 0.f, 0.f);
 	GL_Uniform4fFunc (26, postfx_damage_dir_x, postfx_damage_dir_y, postfx_damage_dir_strength, 0.f);
+	{
+		float drs_sharpen = CLAMP (0.f, r_drs_sharpen.value, 1.f);
+		float drs_ratio = scene_size->resolution_ratio;
+		GL_Uniform4fFunc (27, drs_sharpen, drs_ratio, 0.f, 0.f);
+	}
 	{
 		GLint godrays_params_loc = GL_GetUniformLocationFunc ? GL_GetUniformLocationFunc (glprogs.postprocess[variant], "GodraysParams") : -1;
 		if (godrays_params_loc >= 0)
@@ -5891,6 +5941,7 @@ void R_WarpScaleView (const r_warp_resolve_input_t *input)
 	qboolean needwarpscale;
 	qboolean need_depth_resolve;
 	qboolean force_blit_upscale;
+	GLenum blit_filter = GL_NEAREST;
 	qboolean effective_dof_enabled;
 	qboolean effective_ssao_enabled;
 	qboolean effective_godrays_preview;
@@ -5921,6 +5972,13 @@ void R_WarpScaleView (const r_warp_resolve_input_t *input)
 	srch = scene_size->height;
 
 	force_blit_upscale = (scene_size->scale != 1) || (r_drs.value > 0.f);
+	{
+		float ratio = scene_size->resolution_ratio;
+		if (r_drs.value > 0.f && ratio > 0.f && ratio < 0.999f)
+			blit_filter = GL_LINEAR;
+		else
+			blit_filter = GL_NEAREST;
+	}
 	needwarpscale = water_warp && !force_blit_upscale;
 	fbodest = needs_postprocess ? resolved.composite_fbo : 0;
 	effective_dof_enabled = input->dof_enabled;
@@ -5976,7 +6034,13 @@ void R_WarpScaleView (const r_warp_resolve_input_t *input)
 				GLbitfield mask = GL_COLOR_BUFFER_BIT;
 				if (need_depth_resolve)
 					mask |= GL_DEPTH_BUFFER_BIT;
-				GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, mask, GL_NEAREST);
+				if (mask & GL_DEPTH_BUFFER_BIT)
+				{
+					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_COLOR_BUFFER_BIT, blit_filter);
+				}
+				else
+					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, mask, blit_filter);
 			}
 		}
 	}
@@ -6004,17 +6068,18 @@ void R_WarpScaleView (const r_warp_resolve_input_t *input)
 			glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		else
 			glDrawBuffer (GL_BACK);
+	{
+		if (need_depth_resolve)
 		{
-			GLbitfield mask = GL_COLOR_BUFFER_BIT;
-			if (need_depth_resolve)
-			{
-				mask |= GL_DEPTH_BUFFER_BIT;
-				need_depth_resolve = false;
-			}
 			GL_BlitFramebufferFunc (0, 0, srcw, srch,
 				srcx, srcy, srcx + dstw, srcy + dsth,
-				mask, GL_NEAREST);
+				GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+			need_depth_resolve = false;
 		}
+		GL_BlitFramebufferFunc (0, 0, srcw, srch,
+			srcx, srcy, srcx + dstw, srcy + dsth,
+			GL_COLOR_BUFFER_BIT, blit_filter);
+	}
 	}
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);

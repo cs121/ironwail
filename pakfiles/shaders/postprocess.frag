@@ -135,6 +135,7 @@ layout(location=23) uniform vec4 PostFXLUTParams; // x: lut size, y: lut id, z: 
 layout(location=24) uniform vec4 PostFXFogColor; // rgb: underwater fog color, w: scene fog density (saved before Fog_DisableGFog)
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: time, z: unused, w: unused
 layout(location=26) uniform vec4 DamageDirParams; // xy: damage dir in view space (screen), z: dir strength, w: unused
+layout(location=27) uniform vec4 DRSParams; // x: sharpen amount, y: resolution ratio, zw: unused
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -362,6 +363,13 @@ vec4 ApplySoftEmulationPostFX(vec3 color, vec2 fragCoord, float scale, float dit
         outColor.rgb = vec3(UnpackRGB8(remap)) * (1./255.);
 #endif // PALETTIZE
         return outColor;
+}
+
+vec3 ApplyDRSSharpen(vec3 color, vec2 uv, vec2 invTexSize)
+{
+        (void)uv;
+        (void)invTexSize;
+        return color;
 }
 
 void main()
@@ -755,5 +763,6 @@ void main()
         }
         if (outputSrgb > 0.5)
                 mapped = LinearToSRGB(mapped);
+        mapped = ApplyDRSSharpen(mapped, uv, invTexSize);
         out_fragcolor = ApplySoftEmulationPostFX(mapped, gl_FragCoord.xy, scale, dither);
 }

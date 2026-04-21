@@ -1158,6 +1158,7 @@ static void GLBackend_PassRenderScene (RenderPassContext *ctx)
 	input.scene_size.width = R_GetSceneRenderWidth ();
 	input.scene_size.height = R_GetSceneRenderHeight ();
 	input.scene_size.scale = R_GetSceneRenderScale ();
+	input.scene_size.resolution_ratio = R_GetSceneResolutionRatio ();
 	input.has_worldmodel = (cl.worldmodel != NULL);
 
 	R_RenderScene (&input);
@@ -1196,6 +1197,7 @@ static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
 	input.scene_size.width = R_GetSceneRenderWidth ();
 	input.scene_size.height = R_GetSceneRenderHeight ();
 	input.scene_size.scale = R_GetSceneRenderScale ();
+	input.scene_size.resolution_ratio = R_GetSceneResolutionRatio ();
 	input.needs_postprocess = GL_NeedsPostprocess ();
 	input.dof_enabled = R_PostFX_DoFEnabledEffective ();
 	input.ssao_enabled = R_SSAO_EnabledEffective ();
@@ -1219,6 +1221,7 @@ static void GLBackend_PassPostProcess (RenderPassContext *ctx)
 	input.scene_size.width = R_GetSceneRenderWidth ();
 	input.scene_size.height = R_GetSceneRenderHeight ();
 	input.scene_size.scale = R_GetSceneRenderScale ();
+	input.scene_size.resolution_ratio = R_GetSceneResolutionRatio ();
 	input.composite_written_this_frame = ctx ? ctx->composite_written_this_frame : false;
 
 	GL_PostProcess (&input);
