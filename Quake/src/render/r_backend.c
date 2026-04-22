@@ -1774,8 +1774,9 @@ void R_Backend_Init (void)
 	R_Backend_Register (&s_vulkan_stub_backend);
 	R_Backend_Register (&s_dx12_stub_backend);
 	R_Backend_LoadRendererPlugins ();
-	/* Stability fallback during ref_gl extraction: keep built-in OpenGL backend authoritative. */
-	GL_Backend_Register ();
+	/* Keep an already-loaded OpenGL plugin authoritative; otherwise fall back to the built-in copy. */
+	if (!R_Backend_HasRegisteredName ("OpenGL"))
+		GL_Backend_Register ();
 
 	if (!R_Backend_HasRegisteredName ("OpenGL"))
 	{
