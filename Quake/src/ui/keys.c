@@ -350,8 +350,10 @@ void Key_Console (int key)
 		if (keydown[K_CTRL])
 		{
 			//skip initial empty lines
-			int i, x;
+			int i, x, canvas_height;
 			char *line;
+
+			R_GetCanvasMetrics (NULL, NULL, NULL, &canvas_height);
 
 			for (i = con_current - con_totallines + 1; i <= con_current; i++)
 			{
@@ -364,7 +366,7 @@ void Key_Console (int key)
 				if (x != con_linewidth)
 					break;
 			}
-			con_backscroll = CLAMP(0, con_current-i%con_totallines-2, con_totallines-(glheight>>3)-1);
+			con_backscroll = CLAMP(0, con_current-i%con_totallines-2, con_totallines-(canvas_height>>3)-1);
 		}
 		else	key_linepos = 1;
 		Con_TabComplete (TABCOMPLETE_AUTOHINT);

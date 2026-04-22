@@ -11,7 +11,7 @@ def fail(msg: str) -> None:
 
 def main() -> None:
     root = pathlib.Path(__file__).resolve().parents[1]
-    text = (root / "Quake" / "r_passes.c").read_text(encoding="utf-8")
+    text = (root / "Quake" / "src" / "render" / "r_passes.c").read_text(encoding="utf-8")
 
     if "s_scene_color_attachments" not in text:
         fail("missing scene color attachment table")

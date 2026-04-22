@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "r_part_q3p.h"
+#include "devstats.h"
 
 extern cvar_t r_particles_mode;
 

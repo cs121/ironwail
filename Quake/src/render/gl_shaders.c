@@ -220,11 +220,32 @@ static GLuint *gl_programs;
 static GLuint gl_current_program;
 static int gl_num_programs;
 static int gl_programs_capacity;
+static char **gl_program_debug_names;
+static char **gl_program_stages;
+static unsigned *gl_program_permutation_keys;
+
+static char *GL_DupString (const char *src)
+{
+	size_t len;
+	char *copy;
+
+	if (!src)
+		src = "";
+	len = strlen (src) + 1;
+	copy = (char *)q_malloc (len);
+	if (!copy)
+		Sys_Error ("GL_DupString: out of memory");
+	q_strlcpy (copy, src, len);
+	return copy;
+}
 
 static void GL_EnsureProgramCapacity (int needed)
 {
 	int newcapacity;
 	GLuint *newprograms;
+	char **new_debug_names;
+	char **new_stages;
+	unsigned *new_permutation_keys;
 
 	if (needed <= gl_programs_capacity)
 		return;
@@ -236,8 +257,24 @@ static void GL_EnsureProgramCapacity (int needed)
 	newprograms = (GLuint *) q_realloc(gl_programs, newcapacity * sizeof (*gl_programs));
 	if (!newprograms)
 		Sys_Error ("GL_EnsureProgramCapacity: out of memory");
+	new_debug_names = (char **)q_realloc (gl_program_debug_names, newcapacity * sizeof (*gl_program_debug_names));
+	if (!new_debug_names)
+		Sys_Error ("GL_EnsureProgramCapacity(debug_names): out of memory");
+	new_stages = (char **)q_realloc (gl_program_stages, newcapacity * sizeof (*gl_program_stages));
+	if (!new_stages)
+		Sys_Error ("GL_EnsureProgramCapacity(stages): out of memory");
+	new_permutation_keys = (unsigned *)q_realloc (gl_program_permutation_keys, newcapacity * sizeof (*gl_program_permutation_keys));
+	if (!new_permutation_keys)
+		Sys_Error ("GL_EnsureProgramCapacity(permutation_keys): out of memory");
+
+	memset (new_debug_names + gl_programs_capacity, 0, (newcapacity - gl_programs_capacity) * sizeof (*new_debug_names));
+	memset (new_stages + gl_programs_capacity, 0, (newcapacity - gl_programs_capacity) * sizeof (*new_stages));
+	memset (new_permutation_keys + gl_programs_capacity, 0, (newcapacity - gl_programs_capacity) * sizeof (*new_permutation_keys));
 
 	gl_programs = newprograms;
+	gl_program_debug_names = new_debug_names;
+	gl_program_stages = new_stages;
+	gl_program_permutation_keys = new_permutation_keys;
 	gl_programs_capacity = newcapacity;
 }
 
@@ -455,7 +492,7 @@ static GLuint GL_CreateShader (GLenum type, const char *source, const char *extr
 GL_CreateProgramFromShaders
 =============
 */
-static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders, const char *name)
+static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders, const char *name, const char *stage, unsigned permutation_key)
 {
 	GLuint program;
 	GLint status;
@@ -483,6 +520,9 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 
 	GL_EnsureProgramCapacity (gl_num_programs + 1);
 	gl_programs[gl_num_programs] = program;
+	gl_program_debug_names[gl_num_programs] = GL_DupString (name);
+	gl_program_stages[gl_num_programs] = GL_DupString (stage ? stage : "graphics");
+	gl_program_permutation_keys[gl_num_programs] = permutation_key;
 	gl_num_programs++;
 
 	return program;
@@ -751,6 +791,8 @@ static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GL
         char macros[1024];
         char eval[256];
         char *pipe;
+	const char *stage;
+	unsigned permutation_key;
         int i, realcount;
         GLuint shaders[2];
         GLuint program;
@@ -829,6 +871,8 @@ static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GL
 	}
 
 	name = eval;
+	stage = (count == 1 && types[0] == GL_COMPUTE_SHADER) ? "compute" : "graphics";
+	permutation_key = COM_HashBlock (name, strlen (name));
 
 	realcount = 0;
 	for (i = 0; i < count; i++)
@@ -841,7 +885,7 @@ static GLuint GL_CreateProgramFromFiles (int count, const char **paths, const GL
 		}
 	}
 
-        program = GL_CreateProgramFromShaders (shaders, realcount, name);
+        program = GL_CreateProgramFromShaders (shaders, realcount, name, stage, permutation_key);
 
         return program;
 }
@@ -891,6 +935,9 @@ typedef struct shader_build_state_s
 {
 	glprogs_t progs;
 	GLuint *programs;
+	char **program_debug_names;
+	char **program_stages;
+	unsigned *program_permutation_keys;
 	int num_programs;
 	int programs_capacity;
 	shader_cache_t *cache;
@@ -905,6 +952,9 @@ static void GL_CaptureBuildState (shader_build_state_t *state)
 
 	state->progs = glprogs;
 	state->programs = gl_programs;
+	state->program_debug_names = gl_program_debug_names;
+	state->program_stages = gl_program_stages;
+	state->program_permutation_keys = gl_program_permutation_keys;
 	state->num_programs = gl_num_programs;
 	state->programs_capacity = gl_programs_capacity;
 	state->cache = shader_cache;
@@ -919,6 +969,9 @@ static void GL_ApplyBuildState (const shader_build_state_t *state)
 
 	glprogs = state->progs;
 	gl_programs = state->programs;
+	gl_program_debug_names = state->program_debug_names;
+	gl_program_stages = state->program_stages;
+	gl_program_permutation_keys = state->program_permutation_keys;
 	gl_num_programs = state->num_programs;
 	gl_programs_capacity = state->programs_capacity;
 	shader_cache = state->cache;
@@ -934,9 +987,19 @@ static void GL_FreeBuildState (shader_build_state_t *state)
 		return;
 
 	for (i = 0; i < state->num_programs; ++i)
+	{
 		GL_DeleteProgramFunc (state->programs[i]);
+		q_free (state->program_debug_names ? state->program_debug_names[i] : NULL);
+		q_free (state->program_stages ? state->program_stages[i] : NULL);
+	}
 	q_free (state->programs);
+	q_free (state->program_debug_names);
+	q_free (state->program_stages);
+	q_free (state->program_permutation_keys);
 	state->programs = NULL;
+	state->program_debug_names = NULL;
+	state->program_stages = NULL;
+	state->program_permutation_keys = NULL;
 	state->num_programs = 0;
 	state->programs_capacity = 0;
 
@@ -1002,6 +1065,32 @@ void GL_UseProgram (GLuint program)
 GLuint GL_GetCurrentProgram (void)
 {
 	return gl_current_program;
+}
+
+qboolean GL_QueryProgramMetadata (GLuint program, const char **out_debug_name, const char **out_entry_point, const char **out_stage, unsigned *out_permutation_key)
+{
+	int i;
+
+	if (!program)
+		return false;
+
+	for (i = 0; i < gl_num_programs; ++i)
+	{
+		if (gl_programs[i] != program)
+			continue;
+
+		if (out_debug_name)
+			*out_debug_name = (gl_program_debug_names && gl_program_debug_names[i]) ? gl_program_debug_names[i] : "unknown";
+		if (out_entry_point)
+			*out_entry_point = "main";
+		if (out_stage)
+			*out_stage = (gl_program_stages && gl_program_stages[i]) ? gl_program_stages[i] : "graphics";
+		if (out_permutation_key)
+			*out_permutation_key = gl_program_permutation_keys ? gl_program_permutation_keys[i] : 0u;
+		return true;
+	}
+
+	return false;
 }
 
 /*
@@ -1208,9 +1297,17 @@ void GL_DeleteShaders (void)
         for (i = 0; i < gl_num_programs; i++)
         {
                 GL_DeleteProgramFunc (gl_programs[i]);
+		q_free (gl_program_debug_names ? gl_program_debug_names[i] : NULL);
+		q_free (gl_program_stages ? gl_program_stages[i] : NULL);
         }
         q_free(gl_programs);
+	q_free (gl_program_debug_names);
+	q_free (gl_program_stages);
+	q_free (gl_program_permutation_keys);
         gl_programs = NULL;
+	gl_program_debug_names = NULL;
+	gl_program_stages = NULL;
+	gl_program_permutation_keys = NULL;
         gl_num_programs = 0;
         gl_programs_capacity = 0;
 

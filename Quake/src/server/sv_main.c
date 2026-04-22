@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "phys_interact.h"
 #include "bot_main.h"
+#include "devstats.h"
 
 server_t	sv;
 server_static_t	svs;

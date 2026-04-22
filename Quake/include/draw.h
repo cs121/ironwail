@@ -61,10 +61,10 @@ void Draw_ResetClipping (void);
 void Draw_GetCanvasTransform (canvastype canvas, drawtransform_t *transform);
 void Draw_GetTransformBounds (const drawtransform_t *transform, float *left, float *top, float *right, float *bottom);
 
-void GL_SetCanvas (canvastype newcanvas); //johnfitz
-void GL_SetCanvasColor (float r, float g, float b, float a);
-void GL_PushCanvasColor (float r, float g, float b, float a);
-void GL_PopCanvasColor (void);
+void Draw_SetCanvas (canvastype newcanvas);
+void Draw_SetCanvasColor (float r, float g, float b, float a);
+void Draw_PushCanvasColor (float r, float g, float b, float a);
+void Draw_PopCanvasColor (void);
 
 #endif	/* _QUAKE_DRAW_H */
 

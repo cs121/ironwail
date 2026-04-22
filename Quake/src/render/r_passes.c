@@ -1,6 +1,5 @@
 #include "quakedef.h"
 
-#include "glquake.h"
 #include "r_framegraph.h"
 
 #define FG_PASS_BASELINE_DETERMINISTIC_STATE ( \

@@ -663,6 +663,11 @@ void GL_SetCanvasColor (float r, float g, float b, float a)
 	;
 }
 
+void Draw_SetCanvasColor (float r, float g, float b, float a)
+{
+	GL_SetCanvasColor (r, g, b, a);
+}
+
 /*
 ================
 GL_PushCanvasColor
@@ -675,6 +680,11 @@ void GL_PushCanvasColor (float r, float g, float b, float a)
 	GL_SetCanvasColor (r, g, b, a);
 }
 
+void Draw_PushCanvasColor (float r, float g, float b, float a)
+{
+	GL_PushCanvasColor (r, g, b, a);
+}
+
 /*
 ================
 GL_PopCanvasColor
@@ -684,6 +694,11 @@ void GL_PopCanvasColor (void)
 {
 	if (--glcanvas.colorstacktop < 0)
 		Sys_Error ("GL_PopCanvasColor: underflow");
+}
+
+void Draw_PopCanvasColor (void)
+{
+	GL_PopCanvasColor ();
 }
 
 /*
@@ -1301,6 +1316,11 @@ void GL_SetCanvas (canvastype newcanvas)
 	glcanvas.type = newcanvas;
 	Draw_GetCanvasTransform (glcanvas.type, &glcanvas.transform);
 	Draw_GetTransformBounds (&glcanvas.transform, &glcanvas.left, &glcanvas.top, &glcanvas.right, &glcanvas.bottom);
+}
+
+void Draw_SetCanvas (canvastype newcanvas)
+{
+	GL_SetCanvas (newcanvas);
 }
 
 /*

@@ -106,10 +106,8 @@ call :log "[INFO] MSBuild-Version:"
 "%MSBUILD%" -version >> "%DIAG_FILE%" 2>&1
 for /f "usebackq delims=" %%v in (`"%MSBUILD%" -version 2^>nul`) do call :log "        %%v"
 
-call :log "[1/6] Clean + Build \"%SLN%\" (Release x64)..."
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$ErrorActionPreference='Stop';" ^
-  "& '%MSBUILD%' '%SLN%' '/t:Clean;Build' '/p:Configuration=Release;Platform=x64' '/m' '/v:m' 2>&1 | Tee-Object -FilePath '%LOG_FILE%'" 
+call :log "[1/6] Build \"%SLN%\" (Release x64)..."
+"%MSBUILD%" "%SLN%" "/t:Build" "/p:Configuration=Release;Platform=x64" /v:m > "%LOG_FILE%" 2>&1
 if errorlevel 1 (
   call :log "[ERROR] Build fehlgeschlagen."
   call :log "[INFO] Vollstaendiges Build-Log: %LOG_FILE%"

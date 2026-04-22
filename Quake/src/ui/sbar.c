@@ -269,7 +269,7 @@ void Sbar_Init (void)
 
 /*
 =============
-Sbar_DrawPic -- johnfitz -- rewritten now that GL_SetCanvas is doing the work
+Sbar_DrawPic -- johnfitz -- rewritten now that Draw_SetCanvas is doing the work
 =============
 */
 void Sbar_DrawPic (int x, int y, qpic_t *pic)
@@ -284,14 +284,14 @@ Sbar_DrawPicAlpha -- johnfitz
 */
 void Sbar_DrawPicAlpha (int x, int y, qpic_t *pic, float alpha)
 {
-	GL_SetCanvasColor(1,1,1,alpha);
+	Draw_SetCanvasColor(1,1,1,alpha);
 	Draw_Pic (x, y + 24, pic);
-	GL_SetCanvasColor(1,1,1,1); // ericw -- changed from glColor3f to work around intel 855 bug with "r_oldwater 0" and "scr_sbaralpha 0"
+	Draw_SetCanvasColor(1,1,1,1); // ericw -- changed from glColor3f to work around intel 855 bug with "r_oldwater 0" and "scr_sbaralpha 0"
 }
 
 /*
 ================
-Sbar_DrawCharacter -- johnfitz -- rewritten now that GL_SetCanvas is doing the work
+Sbar_DrawCharacter -- johnfitz -- rewritten now that Draw_SetCanvas is doing the work
 ================
 */
 void Sbar_DrawCharacter (int x, int y, int num)
@@ -301,7 +301,7 @@ void Sbar_DrawCharacter (int x, int y, int num)
 
 /*
 ================
-Sbar_DrawString -- johnfitz -- rewritten now that GL_SetCanvas is doing the work
+Sbar_DrawString -- johnfitz -- rewritten now that Draw_SetCanvas is doing the work
 ================
 */
 void Sbar_DrawString (int x, int y, const char *str)
@@ -537,12 +537,14 @@ Sbar_MiniScoreboardSizeCheck
 */
 int Sbar_MiniScoreboardSizeCheck(void)
 {
+	int canvas_width;
 	float scale;
 
-	scale = CLAMP(1.0f, scr_sbarscale.value, (float)glwidth / 320.0f); //johnfitz
+	R_GetCanvasMetrics (NULL, NULL, &canvas_width, NULL);
+	scale = CLAMP(1.0f, scr_sbarscale.value, (float)canvas_width / 320.0f); //johnfitz
 
 	//MAX_SCOREBOARDNAME = 32, so total width for this overlay plus sbar is 632, but we can cut off some i guess
-	if (glwidth / scale < 512 || scr_viewsize.value >= 120) //johnfitz -- test should consider scr_sbarscale
+	if (canvas_width / scale < 512 || scr_viewsize.value >= 120) //johnfitz -- test should consider scr_sbarscale
 		return 0;
 
 	return 1;
@@ -793,7 +795,7 @@ void Sbar_DrawInventoryQW (void)
 	{
 		int extraguns = 2 * hipnotic;
 
-		GL_SetCanvas (CANVAS_SBAR_QW_INV);
+		Draw_SetCanvas (CANVAS_SBAR_QW_INV);
 
 		// weapons
 		for (i = 0; i < 7; i++)
@@ -950,7 +952,7 @@ void Sbar_DrawInventoryQW (void)
 	}
 
 	// draw items/powerups with main hud
-	GL_SetCanvas (CANVAS_SBAR);
+	Draw_SetCanvas (CANVAS_SBAR);
 
 	flashon = 0;
 	// items
@@ -1262,7 +1264,7 @@ static void Sbar_DrawSigils (void)
 	if (!sb_showscores && (cl.time - t > 3.f || scr_viewsize.value >= 120))
 		return;
 
-	GL_SetCanvas (CANVAS_SBAR);
+	Draw_SetCanvas (CANVAS_SBAR);
 
 	x = 160 - 32/2;
 	if (sb_showscores)
@@ -1617,6 +1619,7 @@ Sbar_Draw
 void Sbar_Draw (void)
 {
 	qboolean invuln;
+	int canvas_width, canvas_height;
 	int armor;
 	float x, y, w, h; //johnfitz
 	qpic_t *pic;
@@ -1628,7 +1631,7 @@ void Sbar_Draw (void)
 	{
 		qboolean deathmatchoverlay = false;
 		sb_updates++;
-		GL_SetCanvas (CANVAS_CSQC); //johnfitz
+		Draw_SetCanvas (CANVAS_CSQC); //johnfitz
 		PR_SwitchQCVM(&cl.qcvm);
 		pr_global_struct->frametime = host_frametime;
 		if (qcvm->extglobals.cltime)
@@ -1657,7 +1660,7 @@ void Sbar_Draw (void)
 
 		if (deathmatchoverlay && cl.gametype == GAME_DEATHMATCH)
 		{
-			GL_SetCanvas (CANVAS_SBAR);
+			Draw_SetCanvas (CANVAS_SBAR);
 			Sbar_DeathmatchOverlay ();
 		}
 		return;
@@ -1666,26 +1669,27 @@ void Sbar_Draw (void)
 	if (cl.intermission)
 		return; //johnfitz -- never draw sbar during intermission
 
-	if (sb_updates >= vid.numpages && !gl_clear.value && scr_sbaralpha.value >= 1 //johnfitz -- gl_clear, scr_sbaralpha
+	if (sb_updates >= vid.numpages && !R_IsClearEnabled () && scr_sbaralpha.value >= 1 //johnfitz -- gl_clear, scr_sbaralpha
         && vid_gamma.value == 1)                         //ericw -- must draw sbar every frame if doing glsl gamma
 		return;
 
 	sb_updates++;
 
-	GL_SetCanvas (CANVAS_DEFAULT); //johnfitz
+	Draw_SetCanvas (CANVAS_DEFAULT); //johnfitz
 
 	//johnfitz -- don't waste fillrate by clearing the area behind the sbar
-	w = CLAMP (320.0f, scr_sbarscale.value * 320.0f, (float)glwidth);
-	if (sb_lines && glwidth > w)
+	R_GetCanvasMetrics (NULL, NULL, &canvas_width, &canvas_height);
+	w = CLAMP (320.0f, scr_sbarscale.value * 320.0f, (float)canvas_width);
+	if (sb_lines && canvas_width > w)
 	{
 		if (scr_sbaralpha.value < 1)
-			Draw_TileClear (0, glheight - sb_lines, glwidth, sb_lines);
+			Draw_TileClear (0, canvas_height - sb_lines, canvas_width, sb_lines);
 		if (cl.gametype == GAME_DEATHMATCH)
-			Draw_TileClear (w, glheight - sb_lines, glwidth - w, sb_lines);
+			Draw_TileClear (w, canvas_height - sb_lines, canvas_width - w, sb_lines);
 		else
 		{
-			Draw_TileClear (0, glheight - sb_lines, (glwidth - w) / 2.0f, sb_lines);
-			Draw_TileClear ((glwidth - w) / 2.0f + w, glheight - sb_lines, (glwidth - w) / 2.0f, sb_lines);
+			Draw_TileClear (0, canvas_height - sb_lines, (canvas_width - w) / 2.0f, sb_lines);
+			Draw_TileClear ((canvas_width - w) / 2.0f + w, canvas_height - sb_lines, (canvas_width - w) / 2.0f, sb_lines);
 		}
 	}
 	//johnfitz
@@ -1695,7 +1699,7 @@ void Sbar_Draw (void)
 
 	if (hudstyle == HUD_CLASSIC || hudstyle == HUD_QUAKEWORLD)
 	{
-		GL_SetCanvas (CANVAS_SBAR); //johnfitz
+		Draw_SetCanvas (CANVAS_SBAR); //johnfitz
 
 		if (hudstyle == HUD_CLASSIC)	//classic hud
 		{
@@ -1716,9 +1720,9 @@ void Sbar_Draw (void)
 			{
 				if (!Sbar_MiniScoreboardSizeCheck() || cl.gametype != GAME_DEATHMATCH)
 				{
-					GL_SetCanvas(CANVAS_SBAR_QW_INV);
+					Draw_SetCanvas(CANVAS_SBAR_QW_INV);
 					Sbar_DrawFragsQW();
-					GL_SetCanvas(CANVAS_SBAR);
+					Draw_SetCanvas(CANVAS_SBAR);
 				}
 			}
 		}
@@ -1781,14 +1785,14 @@ void Sbar_Draw (void)
 	{
 		if (sb_showscores || cl.stats[STAT_HEALTH] <= 0)
 		{
-			GL_SetCanvas (CANVAS_SBAR); //johnfitz
+			Draw_SetCanvas (CANVAS_SBAR); //johnfitz
 			Sbar_DrawPicAlpha (0, 0, sb_scorebar, scr_sbaralpha.value); //johnfitz -- scr_sbaralpha
 			Sbar_DrawScoreboard ();
 			sb_updates = 0;
 		}
 		else if (scr_viewsize.value < 120) //johnfitz -- check viewsize instead of sb_lines
 		{
-			GL_SetCanvas (CANVAS_SBAR2);
+			Draw_SetCanvas (CANVAS_SBAR2);
 
 			x = (int)(glcanvas.left + SBAR2_MARGIN_X + 0.5f);
 			y = (int)(glcanvas.bottom - SBAR2_MARGIN_Y - 48 + 0.5f);
@@ -1918,7 +1922,7 @@ void Sbar_DeathmatchOverlay (void)
 	char	num[12];
 	scoreboard_t	*s;
 
-	GL_SetCanvas (CANVAS_MENU); //johnfitz
+	Draw_SetCanvas (CANVAS_MENU); //johnfitz
 
 	pic = Draw_CachePic ("gfx/ranking.lmp");
 	M_DrawPic ((320-pic->width)/2, 8, pic);
@@ -1982,7 +1986,7 @@ void Sbar_DeathmatchOverlay (void)
 		y += 10;
 	}
 
-	GL_SetCanvas (CANVAS_SBAR); //johnfitz
+	Draw_SetCanvas (CANVAS_SBAR); //johnfitz
 }
 
 /*
@@ -2072,7 +2076,7 @@ void Sbar_IntermissionOverlay (void)
 	if (cl.qcvm.extfuncs.CSQC_DrawScores && !qcvm)
 	{
 		float w, h;
-		GL_SetCanvas (CANVAS_CSQC);
+		Draw_SetCanvas (CANVAS_CSQC);
 		PR_SwitchQCVM(&cl.qcvm);
 		if (qcvm->extglobals.cltime)
 			*qcvm->extglobals.cltime = realtime;
@@ -2102,7 +2106,7 @@ void Sbar_IntermissionOverlay (void)
 		return;
 	}
 
-	GL_SetCanvas (CANVAS_MENU); //johnfitz
+	Draw_SetCanvas (CANVAS_MENU); //johnfitz
 
 	q_snprintf (time, sizeof (time), "%d:%02d", cl.completed_time / 60, cl.completed_time % 60);
 	q_snprintf (secrets, sizeof (secrets), "%d/%2d", cl.stats[STAT_SECRETS], cl.stats[STAT_TOTALSECRETS]);
@@ -2138,7 +2142,7 @@ void Sbar_FinaleOverlay (void)
 {
 	qpic_t	*pic;
 
-	GL_SetCanvas (CANVAS_MENU); //johnfitz
+	Draw_SetCanvas (CANVAS_MENU); //johnfitz
 
 	pic = Draw_CachePic ("gfx/finale.lmp");
 	Draw_Pic ( (320 - pic->width)/2, 16, pic); //johnfitz -- stretched menus

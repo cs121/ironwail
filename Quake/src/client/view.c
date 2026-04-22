@@ -22,7 +22,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // view.c -- player eye positioning
 
 #include "quakedef.h"
-#include "glquake.h"
 #include "cl_iwmusic.h"
 #include "cl_postfx.h"
 
@@ -73,6 +72,7 @@ cvar_t	gl_cshiftpercent_contents = {"gl_cshiftpercent_contents", "100", CVAR_ARC
 cvar_t	gl_cshiftpercent_damage = {"gl_cshiftpercent_damage", "100", CVAR_ARCHIVE}; // QuakeSpasm
 cvar_t	gl_cshiftpercent_bonus = {"gl_cshiftpercent_bonus", "100", CVAR_ARCHIVE}; // QuakeSpasm
 cvar_t	gl_cshiftpercent_powerup = {"gl_cshiftpercent_powerup", "100", CVAR_ARCHIVE}; // QuakeSpasm
+extern cvar_t gl_polyblend;
 
 cvar_t	r_viewmodel_quake = {"r_viewmodel_quake", "0", CVAR_ARCHIVE};
 
@@ -658,23 +658,7 @@ void V_PolyBlend (void)
 	// Blend happens as a late overlay to keep postprocess (e.g. SSAO/tonemap) from
 	// affecting UI-style color shifts like pickups or damage flashes.
 
-	GL_UseProgram (glprogs.viewblend);
-	{
-		const unsigned state = GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0);
-		RenderBackendPipelineDesc pipeline_desc;
-		RenderBackendDynamicState dynamic_state;
-		memset (&pipeline_desc, 0, sizeof (pipeline_desc));
-		memset (&dynamic_state, 0, sizeof (dynamic_state));
-		pipeline_desc.state_bits = state;
-		dynamic_state.blend_state = state;
-		dynamic_state.depth_state = state;
-		dynamic_state.raster_state = state;
-		R_Backend_BindPipeline (&pipeline_desc);
-		R_Backend_SetDynamicState (&dynamic_state);
-	}
-	GL_Uniform4fvFunc (0, 1, v_blend);
-
-	R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
+	R_DrawPolyblendOverlay (v_blend);
 
 	v_blend[3] = 0.f; // make sure this doesn't get applied again later in the pipeline
 }

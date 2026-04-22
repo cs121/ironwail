@@ -8,8 +8,8 @@ RAW_GL_CALL_RE = re.compile(r"\bgl[A-Z][A-Za-z0-9_]*\b")
 
 # Phase 2 guardrails: keep raw GL calls out of non-backend renderer files.
 ENFORCED_FILES = (
-    pathlib.Path("Quake/r_world.c"),
-    pathlib.Path("Quake/r_postfx.c"),
+    pathlib.Path("Quake/src/render/r_world.c"),
+    pathlib.Path("Quake/src/render/r_postfx.c"),
 )
 
 

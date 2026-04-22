@@ -421,50 +421,12 @@ typedef enum
 } zrange_t;
 void GL_DepthRange (zrange_t range);
 
-typedef enum
-{
-	ALPHAMODE_BASIC,
-	ALPHAMODE_SORTED,
-	ALPHAMODE_OIT,
-
-	ALPHAMODE_COUNT
-} alphamode_t;
-
-alphamode_t R_GetAlphaMode (void);
-alphamode_t R_GetEffectiveAlphaMode (void);
-void R_SetAlphaMode (alphamode_t mode);
-
 //johnfitz -- rendering statistics
 extern int rs_brushpolys, rs_aliaspolys, rs_skypolys;
 extern int rs_dynamiclightmaps, rs_brushpasses, rs_aliaspasses, rs_skypasses;
 
 //johnfitz -- track developer statistics that vary every frame
-#ifndef RENDERER_PLUGIN_BUILD
-extern cvar_t devstats;
-#endif
-typedef struct {
-	int		packetsize;
-	int		edicts;
-	int		visedicts;
-	int		efrags;
-	int		tempents;
-	int		beams;
-	int		dlights;
-	int		gpu_upload;
-} devstats_t;
-#ifndef RENDERER_PLUGIN_BUILD
-extern devstats_t dev_stats, dev_peakstats;
-#endif
-
-//ohnfitz -- reduce overflow warning spam
-typedef struct {
-	double	packetsize;
-	double	efrags;
-	double	beams;
-	double	varstring;
-} overflowtimes_t;
-extern overflowtimes_t dev_overflows; //this stores the last time overflow messages were displayed, not the last time overflows occured
-#define CONSOLE_RESPAM_TIME 3 // seconds between repeated warning messages
+#include "devstats.h"
 
 //johnfitz -- moved here from r_brush.c
 extern int gl_lightmap_format, gl_lightmap_type, lightmap_bytes;
@@ -826,6 +788,7 @@ extern glprogs_t glprogs;
 
 void GL_UseProgram (GLuint program);
 GLuint GL_GetCurrentProgram (void);
+qboolean GL_QueryProgramMetadata (GLuint program, const char **out_debug_name, const char **out_entry_point, const char **out_stage, unsigned *out_permutation_key);
 void GL_ClearCachedProgram (void);
 void GL_CreateShaders (void);
 void GL_DeleteShaders (void);
@@ -1023,5 +986,10 @@ float R_GetViewZNear (void);
 float R_GetViewZFar (void);
 
 float GL_WaterAlphaForTextureType (textype_t type);
+
+void GL_SetCanvas (canvastype newcanvas);
+void GL_SetCanvasColor (float r, float g, float b, float a);
+void GL_PushCanvasColor (float r, float g, float b, float a);
+void GL_PopCanvasColor (void);
 
 #endif	/* GLQUAKE_H */

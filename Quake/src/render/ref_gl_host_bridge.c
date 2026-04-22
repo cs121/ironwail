@@ -1,4 +1,5 @@
 #include "quakedef.h"
+#include "devstats.h"
 #include "renderer_host_bridge.h"
 #include "render.h"
 #include "client.h"

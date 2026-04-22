@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cl_iwmusic.h"
 #include "lightgrid.h"
 #include "r_dlight_pool.h"
+#include "devstats.h"
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -859,7 +860,7 @@ int CL_ReadFromServer (void)
 		num_dlights = stats.active;
 	}
 	if (num_dlights > 32 && dev_peakstats.dlights <= 32)
-		Con_DWarning ("%i dlights exceeded standard limit of 32 (max = %d).\n", num_dlights, DLIGHT_GPU_MAX);
+		Con_DWarning ("%i dlights exceeded standard limit of 32 (max = %d).\n", num_dlights, DLightPool_GetBudget ());
 	dev_stats.dlights = num_dlights;
 	dev_peakstats.dlights = q_max(num_dlights, dev_peakstats.dlights);
 

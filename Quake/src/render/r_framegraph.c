@@ -1,7 +1,6 @@
 #include "quakedef.h"
 
 #include "r_framegraph.h"
-#include "gl_shadow_runtime.h"
 
 extern cvar_t r_gl_state_validate;
 extern cvar_t r_framegraph_autobind;
@@ -1027,7 +1026,7 @@ static void FG_MaybePrintStats (void)
 		return;
 	if (r_speeds.value < 3.f)
 		return;
-	if (r_framecount < s_last_stats_print + 60)
+	if (host_framecount < s_last_stats_print + 60)
 		return;
 
 	memset (gpu_channels, 0, sizeof (gpu_channels));
@@ -1064,7 +1063,7 @@ static void FG_MaybePrintStats (void)
 		gpu_channels[FG_PASS_STATS_FOG],
 		gpu_channels[FG_PASS_STATS_POST]);
 
-	s_last_stats_print = r_framecount;
+	s_last_stats_print = host_framecount;
 }
 
 static void FG_ApplyPassBaseline (const RenderPassDesc *pass, const RenderPassContext *ctx)
@@ -1076,10 +1075,10 @@ static void FG_ApplyPassBaseline (const RenderPassDesc *pass, const RenderPassCo
 
 	if ((baseline_bits & FG_PASS_BASELINE_REQUIRE_AUTOBIND) != 0u
 		&& r_framegraph_autobind.value <= 0.f
-		&& s_pass_baseline_autobind_warn_frame != r_framecount)
+		&& s_pass_baseline_autobind_warn_frame != host_framecount)
 	{
 		Con_DWarning ("FrameGraph: pass baseline requires r_framegraph_autobind 1, but it is disabled\n");
-		s_pass_baseline_autobind_warn_frame = r_framecount;
+		s_pass_baseline_autobind_warn_frame = host_framecount;
 	}
 
 	(void)ctx;
@@ -1357,12 +1356,12 @@ void R_FrameGraph_SetRenderFramePlan (const RenderFramePlan *plan)
 	}
 
 	s_cached_plan = *plan;
-	s_cached_plan_frame = r_framecount;
+	s_cached_plan_frame = host_framecount;
 }
 
 qboolean R_FrameGraph_GetRenderFramePlan (RenderFramePlan *out_plan)
 {
-	if (s_cached_plan_frame != r_framecount)
+	if (s_cached_plan_frame != host_framecount)
 		return false;
 	if (out_plan)
 	*out_plan = s_cached_plan;
@@ -1471,7 +1470,7 @@ void R_FrameGraph_RenderView (void)
 	{
 		RenderBackendCommandEncoderDesc encoder_desc;
 		encoder_desc.name = "framegraph-main";
-		encoder_desc.frame_index = (unsigned)r_framecount;
+		encoder_desc.frame_index = (unsigned)host_framecount;
 		encoder_desc.flags = R_BACKEND_COMMAND_ENCODER_DEBUG_LABEL;
 		R_Backend_BeginCommandEncoder (&encoder_desc);
 	}

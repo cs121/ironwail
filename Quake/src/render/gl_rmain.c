@@ -5002,6 +5002,60 @@ void R_DrawViewModel (void)
 	GL_EndGroup ();
 }
 
+void R_DrawPolyblendOverlay (const float blend_rgba[4])
+{
+	const unsigned state = GLS_BLEND_ALPHA | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(0);
+	RenderBackendPipelineDesc pipeline_desc;
+	RenderBackendDynamicState dynamic_state;
+
+	if (!blend_rgba)
+		return;
+
+	GL_UseProgram (glprogs.viewblend);
+	memset (&pipeline_desc, 0, sizeof (pipeline_desc));
+	memset (&dynamic_state, 0, sizeof (dynamic_state));
+	pipeline_desc.state_bits = state;
+	dynamic_state.blend_state = state;
+	dynamic_state.depth_state = state;
+	dynamic_state.raster_state = state;
+	R_Backend_BindPipeline (&pipeline_desc);
+	R_Backend_SetDynamicState (&dynamic_state);
+	GL_Uniform4fvFunc (0, 1, blend_rgba);
+	R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, 3);
+}
+
+void R_GetCanvasMetrics (int *out_x, int *out_y, int *out_width, int *out_height)
+{
+	if (out_x)
+		*out_x = glx;
+	if (out_y)
+		*out_y = gly;
+	if (out_width)
+		*out_width = glwidth;
+	if (out_height)
+		*out_height = glheight;
+}
+
+int R_GetSceneSampleCount (void)
+{
+	return framebufs.scene.samples;
+}
+
+int R_GetMaxSampleCount (void)
+{
+	return framebufs.max_samples;
+}
+
+float R_GetMaxAnisotropy (void)
+{
+	return gl_max_anisotropy;
+}
+
+qboolean R_IsClearEnabled (void)
+{
+	return (gl_clear.value != 0.f);
+}
+
 typedef struct debugvert_s
 {
 	vec3_t		pos;

@@ -382,13 +382,13 @@ static void M_PrintDotFill (int x, int y, const char *text, int cols, qboolean c
 		--cols;
 	}
 
-	GL_SetCanvasColor (1.f, 1.f, 1.f, 0.375f);
+	Draw_SetCanvasColor (1.f, 1.f, 1.f, 0.375f);
 	while (cols --> 0)
 	{
 		M_DrawCharacter (x, y, '.' ^ mask);
 		x += 8;
 	}
-	GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
+	Draw_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
 }
 
 static int M_WordLength (const char *text)
@@ -746,9 +746,9 @@ void M_List_DrawSearch (const menulist_t *list, int cx, int cy, int maxlen)
 		M_DrawCharacter (cx + (i-ofs)*8, cy, list->search.text[i]);
 
 	alpha = CLAMP (0.f, (float) list->search.timeout / SEARCH_FADE_TIMEOUT, 1.f);
-	GL_SetCanvasColor (1.f, 1.f, 1.f, alpha);
+	Draw_SetCanvasColor (1.f, 1.f, 1.f, alpha);
 	M_DrawCharacter (cx + (i-ofs)*8, cy, list->search.errtimeout ? 11^128 : 11);
-	GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
+	Draw_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
 }
 
 qboolean M_List_UseScrollbar (menulist_t *list, int yrel)
@@ -1936,17 +1936,17 @@ void M_Maps_Draw (void)
 				else
 					q_strlcpy (buf, message, sizeof (buf));
 
-				GL_SetCanvasColor (1, 1, 1, 0.375f);
+				Draw_SetCanvasColor (1, 1, 1, 0.375f);
 				for (/**/; j < namecols; j++)
 					M_DrawCharacter (x + j*8, y + i*8, '.' | mask);
 				if (message)
-					GL_SetCanvasColor (1, 1, 1, 1);
+					Draw_SetCanvasColor (1, 1, 1, 1);
 
 				M_PrintScroll (x + namecols*8, y + i*8, desccols*8, buf,
 					selected ? mapsmenu.ticker.scroll_time : 0.0, true);
 				
 				if (!message)
-					GL_SetCanvasColor (1, 1, 1, 1);
+					Draw_SetCanvasColor (1, 1, 1, 1);
 			}
 		}
 
@@ -2918,12 +2918,12 @@ chooses next AA level in order, then updates vid_fsaa cvar
 */
 static void VID_Menu_ChooseNextAA (int dir)
 {
-	int samples = framebufs.scene.samples;
+	int samples = R_GetSceneSampleCount ();
 	if (dir < 0)
 		samples <<= 1;
 	else
 		samples >>= 1;
-	Cvar_SetValue ("vid_fsaa", CLAMP (1, samples, framebufs.max_samples));
+	Cvar_SetValue ("vid_fsaa", CLAMP (1, samples, R_GetMaxSampleCount ()));
 }
 
 /*
@@ -2940,7 +2940,7 @@ static void VID_Menu_ChooseNextAnisotropy (int dir)
 		aniso <<= 1;
 	else
 		aniso >>= 1;
-	Cvar_SetValueQuick (&gl_texture_anisotropy, CLAMP (1, aniso, (int)gl_max_anisotropy));
+	Cvar_SetValueQuick (&gl_texture_anisotropy, CLAMP (1, aniso, (int)R_GetMaxAnisotropy ()));
 }
 
 /*
@@ -4151,12 +4151,12 @@ qboolean M_SetSliderValue (int option, float f)
 		Cvar_SetValueQuick (&r_scale, f);
 		return true;
 	case OPT_ANISO:
-		f = Exp2f (floor (f * Log2f (gl_max_anisotropy) + 0.5f));
-		Cvar_SetValueQuick (&gl_texture_anisotropy, CLAMP (1, (int)f, (int)gl_max_anisotropy));
+		f = Exp2f (floor (f * Log2f (R_GetMaxAnisotropy ()) + 0.5f));
+		Cvar_SetValueQuick (&gl_texture_anisotropy, CLAMP (1, (int)f, (int)R_GetMaxAnisotropy ()));
 		return true;
 	case OPT_FSAA:
-		f = Exp2f (floor (f * Log2f (framebufs.max_samples) + 0.5f));
-		Cvar_SetValue ("vid_fsaa", CLAMP (1, (int)f, framebufs.max_samples));
+		f = Exp2f (floor (f * Log2f (R_GetMaxSampleCount ()) + 0.5f));
+		Cvar_SetValue ("vid_fsaa", CLAMP (1, (int)f, R_GetMaxSampleCount ()));
 		return true;
 	case OPT_MOUSESPEED:	// mouse speed
 		f = f * 10.f + 1.f;
@@ -4530,8 +4530,12 @@ static void M_Options_DrawItem (int y, int item)
 		M_DrawCheckbox (x, y, (int)vid_vsync.value);
 		break;
 	case OPT_FSAA:
-		r = GetLogFraction (framebufs.scene.samples, 1.f, framebufs.max_samples);
-		M_DrawSlider (x, y, r, framebufs.scene.samples >= 2 ? va("%ix", framebufs.scene.samples) : "Off");
+		{
+			const int scene_samples = R_GetSceneSampleCount ();
+			const int max_samples = R_GetMaxSampleCount ();
+			r = GetLogFraction (scene_samples, 1.f, max_samples);
+			M_DrawSlider (x, y, r, scene_samples >= 2 ? va("%ix", scene_samples) : "Off");
+		}
 		break;
 	case OPT_FSAA_MODE:
 		M_Print (x, y, vid_fsaamode.value ? "Full" : "Edges only");
@@ -4541,7 +4545,7 @@ static void M_Options_DrawItem (int y, int item)
 		M_DrawSlider (x, y, r, r_refdef.scale >= 2 ? va("1/%i", r_refdef.scale) : "Off");
 		break;
 	case OPT_ANISO:
-		r = GetLogFraction (gl_texfilter.anisotropy, 1.f, gl_max_anisotropy);
+		r = GetLogFraction (gl_texfilter.anisotropy, 1.f, R_GetMaxAnisotropy ());
 		M_DrawSlider (x, y, r, gl_texfilter.anisotropy >= 2.f ? va("%ix", (int)gl_texfilter.anisotropy) : "Off");
 		break;
 	case OPT_TEXFILTER:
@@ -4563,7 +4567,7 @@ static void M_Options_DrawItem (int y, int item)
 		M_Print (x, y, VID_Menu_GetAlphaModeDesc ());
 		break;
         case OPT_DLIGHTS:
-                M_DrawCheckbox (x, y, r_dynamic.value);
+                M_DrawCheckbox (x, y, Cvar_VariableValue ("r_dynamic"));
                 break;
 	case OPT_SOFTEMU:
 		M_Print (x, y, VID_Menu_GetSoftEmuDesc ());
@@ -4741,7 +4745,7 @@ static void M_Options_DrawFadeScreen (void)
 	int y, firstvis, numvis;
 	float frac, y0, y1;
 
-	GL_SetCanvas (CANVAS_MENU);
+	Draw_SetCanvas (CANVAS_MENU);
 	y0 = glcanvas.top;
 	y1 = glcanvas.bottom;
 
@@ -4788,7 +4792,7 @@ void M_Options_Draw (void)
 
 	alpha = 1.f - optionsmenu.preview.frac;
 	alpha *= alpha;
-	GL_PushCanvasColor (1.f, 1.f, 1.f, alpha);
+	Draw_PushCanvasColor (1.f, 1.f, 1.f, alpha);
 
 	M_DrawTransPic (16, 4, Draw_CachePic ("gfx/qplaque.lmp") );
 	p = Draw_CachePic ("gfx/p_option.lmp");
@@ -4820,12 +4824,12 @@ void M_Options_Draw (void)
 		if (enabled != wasenabled)
 		{
 			float val = enabled ? 1.f : 0.375f;
-			GL_SetCanvasColor (val, val, val, alpha);
+			Draw_SetCanvasColor (val, val, val, alpha);
 			wasenabled = enabled;
 		}
 
 		if (isolated)
-			GL_PushCanvasColor (1.f, 1.f, 1.f, 1.f);
+			Draw_PushCanvasColor (1.f, 1.f, 1.f, 1.f);
 
 		M_Options_DrawItem (y, option);
 
@@ -4834,12 +4838,12 @@ void M_Options_Draw (void)
 			M_DrawArrowCursor (OPTIONS_MIDPOS - 20, y);
 
 		if (isolated)
-			GL_PopCanvasColor ();
+			Draw_PopCanvasColor ();
 
 		y += 8;
 	}
 
-	GL_PopCanvasColor ();
+	Draw_PopCanvasColor ();
 }
 
 void M_Options_Key (int k)
@@ -5220,9 +5224,9 @@ void M_Keys_Draw (void)
 			{
 				if (j)
 				{
-					GL_SetCanvasColor (1.f, 1.f, 1.f, 0.375f);
+					Draw_SetCanvasColor (1.f, 1.f, 1.f, 0.375f);
 					print_fn (x, y, ",");
-					GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
+					Draw_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
 					x += 16;
 				}
 				name = Key_KeynumToFriendlyString (keys[j]);
@@ -5233,9 +5237,9 @@ void M_Keys_Draw (void)
 			if (j == 0)
 			{
 				if (!active)
-					GL_SetCanvasColor (1.f, 1.f, 1.f, 0.375f);
+					Draw_SetCanvasColor (1.f, 1.f, 1.f, 0.375f);
 				print_fn (x, y, "???");
-				GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
+				Draw_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
 			}
 		}
 
@@ -6773,17 +6777,17 @@ void M_Mods_Draw (void)
 				else
 					q_strlcpy (buf, message, sizeof (buf));
 
-				GL_SetCanvasColor (1, 1, 1, 0.375f);
+				Draw_SetCanvasColor (1, 1, 1, 0.375f);
 				for (/**/; j < namecols; j++)
 					M_DrawCharacter (x + j*8, y + i*8, '.' | mask);
 				if (message)
-					GL_SetCanvasColor (1, 1, 1, 1);
+					Draw_SetCanvasColor (1, 1, 1, 1);
 
 				M_PrintScroll (x + namecols*8, y + i*8, desccols*8, buf,
 					selected ? modsmenu.ticker.scroll_time : 0.0, true);
 
 				if (!message)
-					GL_SetCanvasColor (1, 1, 1, 1);
+					Draw_SetCanvasColor (1, 1, 1, 1);
 			}
 		}
 
@@ -7301,7 +7305,7 @@ void M_Draw (void)
 		m_recursiveDraw = false;
 	}
 
-	GL_SetCanvas (CANVAS_MENU); //johnfitz
+	Draw_SetCanvas (CANVAS_MENU); //johnfitz
 
 		{
 		const menu_screen_dispatch_t *dispatch = M_GetDispatch (m_state);
@@ -7363,8 +7367,12 @@ void M_Mousemove (int screenx, int screeny)
 		return;
 
 	Draw_GetCanvasTransform (CANVAS_MENU, &transform);
-	x = (screenx - glx) * 2.f / (float) glwidth - 1.f;
-	y = (screeny - gly) * 2.f / (float) glheight - 1.f;
+	{
+		int canvas_x, canvas_y, canvas_width, canvas_height;
+		R_GetCanvasMetrics (&canvas_x, &canvas_y, &canvas_width, &canvas_height);
+		x = (screenx - canvas_x) * 2.f / (float) canvas_width - 1.f;
+		y = (screeny - canvas_y) * 2.f / (float) canvas_height - 1.f;
+	}
 	y = -y;
 	x = (x - transform.offset[0]) / transform.scale[0];
 	y = (y - transform.offset[1]) / transform.scale[1];

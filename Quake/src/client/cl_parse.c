@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cl_iwmusic.h"
 #include "bgmusic.h"
 #include "steam.h"
+#include "devstats.h"
 
 const char *svc_strings[] =
 {

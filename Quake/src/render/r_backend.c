@@ -4,6 +4,7 @@
 #include "renderer_host_bridge.h"
 #include "render_dispatch.h"
 #include "gl_backend.h"
+#include "glquake.h"
 
 enum
 {
@@ -51,9 +52,37 @@ static int s_warned_missing_descriptor_binding_support_frame = -1;
 static int s_warned_missing_bind_pipeline_support_frame = -1;
 static int s_warned_missing_pipeline_state_support_frame = -1;
 static int s_warned_missing_dynamic_state_support_frame = -1;
-static qboolean s_warned_host_resource_registration_unimplemented = false;
-static qboolean s_warned_host_shader_metadata_unimplemented = false;
-static qboolean s_warned_host_pipeline_metadata_unimplemented = false;
+
+enum
+{
+	R_BACKEND_MAX_EXTERNAL_RESOURCES = 1024,
+	R_BACKEND_MAX_PIPELINE_METADATA = 512
+};
+
+typedef struct r_backend_external_resource_entry_s
+{
+	qboolean in_use;
+	unsigned int assigned_resource_id;
+	unsigned int producer_epoch;
+	unsigned int last_touched_epoch;
+	iw_renderer_host_resource_handle_t handle;
+} r_backend_external_resource_entry_t;
+
+typedef struct r_backend_pipeline_metadata_entry_s
+{
+	qboolean in_use;
+	unsigned int pipeline_id;
+	unsigned int state_bits;
+	unsigned int shader_count;
+	unsigned int shader_ids[8];
+	char debug_name[96];
+} r_backend_pipeline_metadata_entry_t;
+
+static r_backend_external_resource_entry_t s_external_resource_registry[R_BACKEND_MAX_EXTERNAL_RESOURCES];
+static r_backend_pipeline_metadata_entry_t s_pipeline_metadata_registry[R_BACKEND_MAX_PIPELINE_METADATA];
+static unsigned int s_upload_transient_epoch = 1u;
+static unsigned int s_upload_completed_epoch = 0u;
+static int s_upload_last_begin_frame = -1;
 
 static qboolean R_Backend_Host_GetSurfaceInfo (iw_renderer_host_surface_info_t *out_info);
 static qboolean R_Backend_Host_ResolveResourceBySlot (render_backend_resource_slot_t slot, iw_renderer_host_resource_handle_t *out_handle);
@@ -96,6 +125,7 @@ static const iw_renderer_plugin_pipeline_services_t s_plugin_pipeline_services =
 
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
 cvar_t r_backend_api = { "r_backend_api", "gl", CVAR_ARCHIVE };
+cvar_t r_backend_allow_builtin_gl = { "r_backend_allow_builtin_gl", "1", CVAR_ARCHIVE };
 
 /*
 ================
@@ -248,6 +278,180 @@ static qboolean R_Backend_FillHostResourceHandleFromRef (const RenderGraphResour
 	out_handle->lifetime = entry->lifetime;
 	out_handle->slot = entry->slot;
 	return true;
+}
+
+static void R_Backend_ClearExternalResourceRegistry (void)
+{
+	memset (s_external_resource_registry, 0, sizeof (s_external_resource_registry));
+	s_upload_transient_epoch = 1u;
+	s_upload_completed_epoch = 0u;
+	s_upload_last_begin_frame = -1;
+}
+
+static qboolean R_Backend_ExternalResourceHandleEquals (const iw_renderer_host_resource_handle_t *lhs, const iw_renderer_host_resource_handle_t *rhs)
+{
+	if (!lhs || !rhs)
+		return false;
+
+	if (lhs->resource_id != 0u && rhs->resource_id != 0u)
+		return lhs->resource_id == rhs->resource_id;
+
+	return lhs->native_id == rhs->native_id
+		&& lhs->type == rhs->type
+		&& lhs->lifetime == rhs->lifetime
+		&& lhs->slot == rhs->slot;
+}
+
+static r_backend_external_resource_entry_t *R_Backend_FindExternalResourceEntry (const iw_renderer_host_resource_handle_t *handle)
+{
+	unsigned i;
+
+	if (!handle)
+		return NULL;
+
+	for (i = 0; i < (unsigned)R_BACKEND_MAX_EXTERNAL_RESOURCES; ++i)
+	{
+		r_backend_external_resource_entry_t *entry = &s_external_resource_registry[i];
+		if (!entry->in_use)
+			continue;
+		if (R_Backend_ExternalResourceHandleEquals (&entry->handle, handle))
+			return entry;
+	}
+
+	return NULL;
+}
+
+static r_backend_external_resource_entry_t *R_Backend_AllocExternalResourceEntry (void)
+{
+	unsigned i;
+
+	for (i = 0; i < (unsigned)R_BACKEND_MAX_EXTERNAL_RESOURCES; ++i)
+	{
+		if (!s_external_resource_registry[i].in_use)
+			return &s_external_resource_registry[i];
+	}
+
+	return NULL;
+}
+
+static r_backend_external_resource_entry_t *R_Backend_FindExternalResourceEntryByAssignedId (unsigned int resource_id)
+{
+	unsigned i;
+
+	if (resource_id == 0u)
+		return NULL;
+
+	for (i = 0; i < (unsigned)R_BACKEND_MAX_EXTERNAL_RESOURCES; ++i)
+	{
+		r_backend_external_resource_entry_t *entry = &s_external_resource_registry[i];
+		if (!entry->in_use)
+			continue;
+		if (entry->assigned_resource_id == resource_id)
+			return entry;
+	}
+
+	return NULL;
+}
+
+static void R_Backend_ReapTransientExternalResources (void)
+{
+	unsigned i;
+
+	for (i = 0; i < (unsigned)R_BACKEND_MAX_EXTERNAL_RESOURCES; ++i)
+	{
+		r_backend_external_resource_entry_t *entry = &s_external_resource_registry[i];
+		if (!entry->in_use)
+			continue;
+		if (entry->handle.lifetime != R_BACKEND_RESOURCE_LIFETIME_FRAME)
+			continue;
+		if (entry->last_touched_epoch > s_upload_completed_epoch)
+			continue;
+
+		memset (entry, 0, sizeof (*entry));
+	}
+}
+
+static void R_Backend_ClearPipelineMetadataRegistry (void)
+{
+	memset (s_pipeline_metadata_registry, 0, sizeof (s_pipeline_metadata_registry));
+}
+
+static r_backend_pipeline_metadata_entry_t *R_Backend_FindPipelineMetadataEntry (unsigned int pipeline_id)
+{
+	unsigned i;
+
+	if (pipeline_id == 0u)
+		return NULL;
+
+	for (i = 0; i < (unsigned)R_BACKEND_MAX_PIPELINE_METADATA; ++i)
+	{
+		r_backend_pipeline_metadata_entry_t *entry = &s_pipeline_metadata_registry[i];
+		if (!entry->in_use)
+			continue;
+		if (entry->pipeline_id == pipeline_id)
+			return entry;
+	}
+
+	return NULL;
+}
+
+static r_backend_pipeline_metadata_entry_t *R_Backend_AllocPipelineMetadataEntry (void)
+{
+	unsigned i;
+
+	for (i = 0; i < (unsigned)R_BACKEND_MAX_PIPELINE_METADATA; ++i)
+	{
+		if (!s_pipeline_metadata_registry[i].in_use)
+			return &s_pipeline_metadata_registry[i];
+	}
+
+	return NULL;
+}
+
+static void R_Backend_RecordPipelineMetadata (const RenderBackendPipelineDesc *pipeline)
+{
+	r_backend_pipeline_metadata_entry_t *entry;
+	unsigned shader_id;
+	const char *shader_name = NULL;
+	const char *shader_entry = NULL;
+	const char *shader_stage = NULL;
+	unsigned permutation_key = 0u;
+	char fallback_name[96];
+
+	if (!pipeline || pipeline->pipeline_id == 0u)
+		return;
+
+	entry = R_Backend_FindPipelineMetadataEntry (pipeline->pipeline_id);
+	if (!entry)
+		entry = R_Backend_AllocPipelineMetadataEntry ();
+	if (!entry)
+		return;
+
+	shader_id = (unsigned)GL_GetCurrentProgram ();
+	memset (entry, 0, sizeof (*entry));
+	entry->in_use = true;
+	entry->pipeline_id = pipeline->pipeline_id;
+	entry->state_bits = pipeline->state_bits;
+	if (shader_id != 0u)
+	{
+		entry->shader_count = 1u;
+		entry->shader_ids[0] = shader_id;
+	}
+
+	if (shader_id != 0u && GL_QueryProgramMetadata ((GLuint)shader_id, &shader_name, &shader_entry, &shader_stage, &permutation_key))
+	{
+		(void)shader_entry;
+		(void)shader_stage;
+		if (permutation_key != 0u)
+			q_snprintf (entry->debug_name, sizeof (entry->debug_name), "pipeline %u|%s|perm %u", pipeline->pipeline_id, shader_name, permutation_key);
+		else
+			q_snprintf (entry->debug_name, sizeof (entry->debug_name), "pipeline %u|%s", pipeline->pipeline_id, shader_name);
+	}
+	else
+	{
+		q_snprintf (fallback_name, sizeof (fallback_name), "pipeline %u|state 0x%08x", pipeline->pipeline_id, pipeline->state_bits);
+		q_strlcpy (entry->debug_name, fallback_name, sizeof (entry->debug_name));
+	}
 }
 
 void R_Backend_QuerySurfaceInfo (RenderBackendSurfaceInfo *out_info)
@@ -632,17 +836,59 @@ static qboolean R_Backend_Host_ResolveResourceByRef (const render_backend_resour
 
 static qboolean R_Backend_Host_RegisterExternalResource (const iw_renderer_host_resource_handle_t *resource, unsigned int *out_resource_id)
 {
-	(void)resource;
-	/* TODO(ref_gl autark, Quake/r_backend.c): back this call with a backend-neutral
-	 * host-side resource registry that survives across plugin boundaries. */
-	if (out_resource_id)
-		*out_resource_id = 0u;
-	if (!s_warned_host_resource_registration_unimplemented)
+	r_backend_external_resource_entry_t *entry;
+	iw_renderer_host_resource_handle_t normalized;
+	unsigned slot_index;
+
+	if (!resource || resource->struct_size < sizeof (*resource))
 	{
-		Con_DWarning ("Renderer plugin host API: register_external_resource is not implemented yet (reserved for ref_gl autark extraction).\n");
-		s_warned_host_resource_registration_unimplemented = true;
+		if (out_resource_id)
+			*out_resource_id = 0u;
+		return false;
 	}
-	return false;
+
+	normalized = *resource;
+	normalized.struct_size = sizeof (normalized);
+
+	entry = R_Backend_FindExternalResourceEntry (&normalized);
+	if (entry)
+	{
+		entry->handle = normalized;
+		entry->last_touched_epoch = s_upload_transient_epoch;
+		if (normalized.lifetime == R_BACKEND_RESOURCE_LIFETIME_FRAME)
+			entry->producer_epoch = s_upload_transient_epoch;
+		else
+			entry->producer_epoch = 0u;
+		if (out_resource_id)
+			*out_resource_id = entry->assigned_resource_id;
+		return true;
+	}
+
+	entry = R_Backend_AllocExternalResourceEntry ();
+	if (!entry)
+	{
+		if (out_resource_id)
+			*out_resource_id = 0u;
+		Con_DWarning ("Renderer plugin host API: external resource registry capacity reached (%d).\n",
+			R_BACKEND_MAX_EXTERNAL_RESOURCES);
+		return false;
+	}
+
+	memset (entry, 0, sizeof (*entry));
+	entry->in_use = true;
+	entry->handle = normalized;
+	entry->last_touched_epoch = s_upload_transient_epoch;
+	slot_index = (unsigned)(entry - s_external_resource_registry);
+	if (normalized.resource_id != 0u)
+		entry->assigned_resource_id = normalized.resource_id;
+	else
+		entry->assigned_resource_id = 0x40000000u + slot_index + 1u;
+	if (normalized.lifetime == R_BACKEND_RESOURCE_LIFETIME_FRAME)
+		entry->producer_epoch = s_upload_transient_epoch;
+
+	if (out_resource_id)
+		*out_resource_id = entry->assigned_resource_id;
+	return true;
 }
 
 static qboolean R_Backend_Host_QueryUploadEpoch (iw_renderer_host_upload_epoch_t *out_epoch)
@@ -653,43 +899,81 @@ static qboolean R_Backend_Host_QueryUploadEpoch (iw_renderer_host_upload_epoch_t
 	memset (out_epoch, 0, sizeof (*out_epoch));
 	out_epoch->struct_size = sizeof (*out_epoch);
 	out_epoch->frame_index = (unsigned)q_max (0, r_framecount);
-	out_epoch->transient_epoch = out_epoch->frame_index;
-	out_epoch->completed_epoch = (out_epoch->frame_index > 0u) ? (out_epoch->frame_index - 1u) : 0u;
+	out_epoch->transient_epoch = s_upload_transient_epoch;
+	out_epoch->completed_epoch = s_upload_completed_epoch;
 	return true;
 }
 
 static qboolean R_Backend_Host_IsTransientResourceAlive (unsigned int resource_id, unsigned int producer_epoch)
 {
-	(void)resource_id;
-	return (producer_epoch == (unsigned int)q_max (0, r_framecount));
+	r_backend_external_resource_entry_t *entry;
+
+	if (producer_epoch == 0u)
+		return false;
+
+	if (resource_id != 0u)
+	{
+		entry = R_Backend_FindExternalResourceEntryByAssignedId (resource_id);
+		if (entry)
+		{
+			if (entry->handle.lifetime != R_BACKEND_RESOURCE_LIFETIME_FRAME)
+				return true;
+			if (entry->producer_epoch != 0u && producer_epoch != entry->producer_epoch)
+				return false;
+			return producer_epoch > s_upload_completed_epoch;
+		}
+	}
+
+	return producer_epoch > s_upload_completed_epoch;
 }
 
 static qboolean R_Backend_Host_GetShaderMetadata (unsigned int shader_id, iw_renderer_host_shader_metadata_t *out_metadata)
 {
-	(void)shader_id;
-	(void)out_metadata;
-	/* TODO(ref_gl autark, Quake/r_backend.c): source shader metadata from a
-	 * renderer-owned registry instead of ad-hoc GL program globals. */
-	if (!s_warned_host_shader_metadata_unimplemented)
-	{
-		Con_DWarning ("Renderer plugin host API: get_shader_metadata is not implemented yet (metadata registry extraction pending).\n");
-		s_warned_host_shader_metadata_unimplemented = true;
-	}
-	return false;
+	const char *debug_name = NULL;
+	const char *entry_point = NULL;
+	const char *stage = NULL;
+	unsigned permutation_key = 0u;
+
+	if (!out_metadata || out_metadata->struct_size < sizeof (*out_metadata))
+		return false;
+	if (shader_id == 0u)
+		return false;
+	if (!GL_QueryProgramMetadata ((GLuint)shader_id, &debug_name, &entry_point, &stage, &permutation_key))
+		return false;
+
+	memset (out_metadata, 0, sizeof (*out_metadata));
+	out_metadata->struct_size = sizeof (*out_metadata);
+	out_metadata->shader_id = shader_id;
+	out_metadata->debug_name = debug_name ? debug_name : "unknown";
+	out_metadata->entry_point = entry_point ? entry_point : "main";
+	out_metadata->stage = stage ? stage : "graphics";
+	out_metadata->permutation_key = permutation_key;
+	return true;
 }
 
 static qboolean R_Backend_Host_GetPipelineMetadata (unsigned int pipeline_id, iw_renderer_host_pipeline_metadata_t *out_metadata)
 {
-	(void)pipeline_id;
-	(void)out_metadata;
-	/* TODO(ref_gl autark, Quake/r_backend.c): expose stable pipeline metadata IDs
-	 * generated by backend-neutral pass/draw planning. */
-	if (!s_warned_host_pipeline_metadata_unimplemented)
-	{
-		Con_DWarning ("Renderer plugin host API: get_pipeline_metadata is not implemented yet (pipeline registry extraction pending).\n");
-		s_warned_host_pipeline_metadata_unimplemented = true;
-	}
-	return false;
+	r_backend_pipeline_metadata_entry_t *entry;
+	unsigned i;
+
+	if (!out_metadata || out_metadata->struct_size < sizeof (*out_metadata))
+		return false;
+	if (pipeline_id == 0u)
+		return false;
+
+	entry = R_Backend_FindPipelineMetadataEntry (pipeline_id);
+	if (!entry)
+		return false;
+
+	memset (out_metadata, 0, sizeof (*out_metadata));
+	out_metadata->struct_size = sizeof (*out_metadata);
+	out_metadata->pipeline_id = entry->pipeline_id;
+	out_metadata->debug_name = entry->debug_name;
+	out_metadata->state_bits = entry->state_bits;
+	out_metadata->shader_count = q_min (entry->shader_count, (unsigned)Q_COUNTOF (out_metadata->shader_ids));
+	for (i = 0; i < out_metadata->shader_count; ++i)
+		out_metadata->shader_ids[i] = entry->shader_ids[i];
+	return true;
 }
 
 /*
@@ -978,11 +1262,7 @@ static void R_Backend_LoadRendererPlugins (void)
 		}
 	}
 
-	/* Keep a deterministic in-process OpenGL plugin fallback for installs without DLL/SO deployment. */
-	if (!R_Backend_HasRegisteredName ("OpenGL"))
-	{
-		Sys_Error ("No OpenGL renderer plugin found; %s not found or failed to load.\n", s_ref_gl_plugin_filename);
-	}
+	/* OpenGL fallback registration is handled by R_Backend_Init() policy. */
 }
 
 static void R_Backend_ApplySelectionToCvar (void)
@@ -1465,10 +1745,13 @@ void R_Backend_Init (void)
 	memset (&s_last_populated_resources, 0, sizeof (s_last_populated_resources));
 	s_last_populated_resources_valid = false;
 	s_last_populated_resources_frame = -1;
+	R_Backend_ClearExternalResourceRegistry ();
+	R_Backend_ClearPipelineMetadataRegistry ();
 	s_warned_missing_descriptor_binding_support_frame = -1;
 	memset (s_missing_resource_warn_frame, 0xff, sizeof (s_missing_resource_warn_frame));
 	Cvar_RegisterVariable (&r_backend);
 	Cvar_RegisterVariable (&r_backend_api);
+	Cvar_RegisterVariable (&r_backend_allow_builtin_gl);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
 	Cvar_SetCallback (&r_backend_api, R_Backend_ApiChanged_f);
 	R_Backend_PrintApiHelp ();
@@ -1490,8 +1773,28 @@ void R_Backend_Init (void)
 
 	R_Backend_Register (&s_vulkan_stub_backend);
 	R_Backend_Register (&s_dx12_stub_backend);
-	GL_Backend_Register ();
 	R_Backend_LoadRendererPlugins ();
+	/* Stability fallback during ref_gl extraction: keep built-in OpenGL backend authoritative. */
+	GL_Backend_Register ();
+
+	if (!R_Backend_HasRegisteredName ("OpenGL"))
+	{
+		if (r_backend_allow_builtin_gl.value != 0.0f)
+		{
+			iw_renderer_plugin_host_api_t host_api;
+			R_Backend_FillPluginHostApi (&host_api);
+			if (!R_Backend_RegisterBuiltinPluginOpenGL (&host_api))
+			{
+				Sys_Error ("Failed to register built-in OpenGL backend fallback.\n");
+			}
+			Con_Warning ("ref_gl renderer plugin not found; using built-in OpenGL fallback (set r_backend_allow_builtin_gl 0 to require external renderer DLLs).\n");
+		}
+		else
+		{
+			Sys_Error ("No OpenGL renderer plugin found; %s not found or failed to load and r_backend_allow_builtin_gl=0.\n",
+				s_ref_gl_plugin_filename);
+		}
+	}
 
 	if (!s_active_backend && s_registered_backend_count > 0)
 		s_active_backend = s_registered_backends[0];
@@ -1516,6 +1819,8 @@ void R_Backend_Shutdown (void)
 	s_registered_backend_count = 0;
 	s_active_backend = NULL;
 	s_gl_backend = NULL;
+	R_Backend_ClearExternalResourceRegistry ();
+	R_Backend_ClearPipelineMetadataRegistry ();
 	s_backend_initialized = false;
 	s_command_encoder_recording = false;
 	s_command_encoder_frame = -1;
@@ -1558,6 +1863,12 @@ const RenderBackendCaps *R_Backend_GetCaps (void)
 void R_Backend_BeginFrame (void)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (s_upload_last_begin_frame != r_framecount)
+	{
+		s_upload_last_begin_frame = r_framecount;
+		s_upload_transient_epoch++;
+	}
+	R_Backend_ReapTransientExternalResources ();
 	if (backend && backend->begin_frame)
 		backend->begin_frame ();
 }
@@ -1567,6 +1878,10 @@ void R_Backend_EndFrame (void)
 	const IRenderBackend *backend = R_GetRenderBackend ();
 	if (backend && backend->end_frame)
 		backend->end_frame ();
+	if (s_upload_transient_epoch > 0u)
+		s_upload_completed_epoch = s_upload_transient_epoch - 1u;
+	else
+		s_upload_completed_epoch = 0u;
 }
 
 void R_Backend_Present (void)
@@ -1638,6 +1953,8 @@ void R_Backend_BindPipeline (const RenderBackendPipelineDesc *pipeline)
 		}
 		SDL_assert (!"Renderer backend missing pipeline binding callbacks");
 	}
+
+	R_Backend_RecordPipelineMetadata (pipeline);
 }
 
 void R_Backend_SetDynamicState (const RenderBackendDynamicState *dynamic_state)

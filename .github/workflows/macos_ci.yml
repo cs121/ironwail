@@ -10,6 +10,8 @@ jobs:
     - uses: actions/checkout@v4
     - name: Enforce No Raw GL Calls In Non-Backend Files
       run: python3 python/check_no_raw_gl_calls.py
+    - name: Enforce GL Symbol Boundaries
+      run: python3 python/check_gl_symbol_boundaries.py
     - name: Check Renderer Plugin ABI Contract
       run: python3 python/check_renderer_plugin_abi.py
     - name: Check FrameGraph Pass Contracts

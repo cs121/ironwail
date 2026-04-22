@@ -38,8 +38,8 @@ This checklist is the Phase 3 baseline for bringing up a second renderer backend
 
 ## 6) TODOs for `ref_gl` autonomous extraction
 
-- [ ] `Quake/r_backend.c`: implement `resource_services.register_external_resource` against a backend-owned handle registry (currently explicit stub + warning).
-- [ ] `Quake/r_backend.c`: replace temporary upload epoch shim in `upload_services.query_upload_epoch` / `is_transient_resource_alive` with real transient allocator lifetime tracking.
-- [ ] `Quake/r_backend.c` + `Quake/gl_shaders.c`: add a backend-neutral shader/pipeline metadata registry for `pipeline_services.get_shader_metadata` and `get_pipeline_metadata`.
-- [ ] `Quake/ref_gl_plugin.c`: switch from `builtin_opengl_backend` handoff to a self-owned backend implementation once host services are sufficient.
+- [x] `Quake/r_backend.c`: `resource_services.register_external_resource` now uses a host-side external resource registry with stable assigned IDs and duplicate-handle dedup.
+- [x] `Quake/r_backend.c`: replaced framecount upload shim with host-managed transient upload epochs + liveness tracking tied to external resource registry lifetime.
+- [x] `Quake/r_backend.c` + `Quake/gl_shaders.c`: added shader metadata query and host pipeline metadata registry used by `pipeline_services.get_shader_metadata` / `get_pipeline_metadata`.
+- [x] `Quake/ref_gl_plugin.c`: switched to direct `register_backend` using `GL_Backend_GetInterface()`; host now treats external `ref_gl` as primary path, with optional built-in fallback via `r_backend_allow_builtin_gl`.
 - [ ] `Quake/r_framegraph.c`: keep pass data production backend-neutral; continue moving any remaining renderer-global assumptions behind backend service adapters.

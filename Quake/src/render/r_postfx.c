@@ -264,9 +264,9 @@ void R_PostFX_GetState (postfx_state_t *out_state)
 	CL_PostFX_GetState (out_state);
 }
 
-GLuint R_PostFX_GetLUTTexture (void)
+unsigned R_PostFX_GetLUTTexture (void)
 {
-	return r_postfx_lut_tex;
+	return (unsigned)r_postfx_lut_tex;
 }
 
 int R_PostFX_GetLUTSize (void)

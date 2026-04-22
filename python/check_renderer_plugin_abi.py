@@ -16,11 +16,11 @@ def require(pattern: str, text: str, label: str) -> None:
 
 def main() -> None:
     root = pathlib.Path(__file__).resolve().parents[1]
-    header = (root / "Quake" / "renderer_plugin.h").read_text(encoding="utf-8")
-    backend = (root / "Quake" / "r_backend.c").read_text(encoding="utf-8")
-    builtin = (root / "Quake" / "renderer_builtin_gl_plugin.c").read_text(encoding="utf-8")
+    header = (root / "Quake" / "include" / "renderer_plugin.h").read_text(encoding="utf-8")
+    backend = (root / "Quake" / "src" / "render" / "r_backend.c").read_text(encoding="utf-8")
+    builtin = (root / "Quake" / "src" / "render" / "renderer_builtin_gl_plugin.c").read_text(encoding="utf-8")
 
-    require(r"#define\s+IW_RENDERER_PLUGIN_ABI_MAJOR\s+3u?\b", header, "ABI major version 3")
+    require(r"#define\s+IW_RENDERER_PLUGIN_ABI_MAJOR\s+4u?\b", header, "ABI major version 4")
     require(r"#define\s+IW_RENDERER_PLUGIN_ABI_MINOR\s+0u?\b", header, "ABI minor version 0")
     require(r"qboolean\s*\(\*register_backend\)\s*\(\s*const IRenderBackend \*backend\s*\)\s*;", header, "host register_backend callback")
     require(r"qboolean\s*\(\*register_builtin_backend\)\s*\(\s*const char \*backend_name\s*\)\s*;", header, "deprecated compatibility callback")

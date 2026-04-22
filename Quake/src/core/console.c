@@ -161,11 +161,14 @@ static size_t Con_StrLen (int line)
 static void Con_ScreenToCanvas (int x, int y, int *outx, int *outy)
 {
 	drawtransform_t	transform;
+	int canvas_x, canvas_y, canvas_width, canvas_height;
 	float			px, py;
 
+	R_GetCanvasMetrics (&canvas_x, &canvas_y, &canvas_width, &canvas_height);
+
 	// screen space to [-1..1]
-	px = (x - glx) * 2.f / (float) glwidth - 1.f;
-	py = (y - gly) * 2.f / (float) glheight - 1.f;
+	px = (x - canvas_x) * 2.f / (float) canvas_width - 1.f;
+	py = (y - canvas_y) * 2.f / (float) canvas_height - 1.f;
 	py = -py;
 
 	// [-1..1] to console canvas
@@ -1088,11 +1091,15 @@ Con_Linefeed
 */
 static void Con_Linefeed (void)
 {
+	int canvas_height;
+
+	R_GetCanvasMetrics (NULL, NULL, NULL, &canvas_height);
+
 	//johnfitz -- improved scrolling
 	if (con_backscroll)
 		con_backscroll++;
-	if (con_backscroll > con_totallines - (glheight>>3) - 1)
-		con_backscroll = con_totallines - (glheight>>3) - 1;
+	if (con_backscroll > con_totallines - (canvas_height>>3) - 1)
+		con_backscroll = con_totallines - (canvas_height>>3) - 1;
 	//johnfitz
 
 	con_x = 0;
@@ -2115,7 +2122,7 @@ void Con_DrawNotify (void)
 	const char	*text;
 	float	alpha;
 
-	GL_SetCanvas (CANVAS_CONSOLE); //johnfitz
+	Draw_SetCanvas (CANVAS_CONSOLE); //johnfitz
 	v = vid.conheight; //johnfitz
 
 	for (i = con_current-NUM_CON_TIMES+1; i <= con_current; i++)
@@ -2129,7 +2136,7 @@ void Con_DrawNotify (void)
 
 		clearnotify = 0;
 
-		GL_SetCanvasColor (1.f, 1.f, 1.f, alpha);
+		Draw_SetCanvasColor (1.f, 1.f, 1.f, alpha);
 		if (con_notifycenter.value)
 		{
 			int len = con_linewidth;
@@ -2141,7 +2148,7 @@ void Con_DrawNotify (void)
 		else
 			for (x = 0; x < con_linewidth; x++)
 				Draw_Character ((x+1)<<3, v, text[x]);
-		GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
+		Draw_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
 
 		v += 8;
 
@@ -2214,10 +2221,10 @@ void Con_DrawInput (void)
 // draw tab completion hint
 	if (key_tabhint[0])
 	{
-		GL_SetCanvasColor (1.0f, 1.0f, 1.0f, 0.75f);
+		Draw_SetCanvasColor (1.0f, 1.0f, 1.0f, 0.75f);
 		for (i = 0; key_tabhint[i] && i+1+len-ofs < con_linewidth+CON_MARGIN*2; i++)
 			Draw_Character ((i+1+len-ofs)<<3, vid.conheight - 16, key_tabhint[i] | 0x80);
-		GL_SetCanvasColor (1.0f, 1.0f, 1.0f, 1.0f);
+		Draw_SetCanvasColor (1.0f, 1.0f, 1.0f, 1.0f);
 	}
 
 // johnfitz -- new cursor handling
@@ -2272,6 +2279,7 @@ The typing input line at the bottom should only be drawn if typing is allowed
 void Con_DrawConsole (int lines, qboolean drawbg, qboolean drawinput)
 {
 	int	i, x, y, j, sb, rows;
+	int canvas_height;
 	const char	*text;
 	qboolean forced;
 	float alpha = 1.f;
@@ -2281,8 +2289,9 @@ void Con_DrawConsole (int lines, qboolean drawbg, qboolean drawinput)
 	if (lines <= 0)
 		return;
 
-	con_vislines = lines * vid.conheight / glheight;
-	GL_SetCanvas (CANVAS_CONSOLE);
+	R_GetCanvasMetrics (NULL, NULL, NULL, &canvas_height);
+	con_vislines = lines * vid.conheight / canvas_height;
+	Draw_SetCanvas (CANVAS_CONSOLE);
 
 // draw the background
 	if (drawbg)
@@ -2292,7 +2301,7 @@ void Con_DrawConsole (int lines, qboolean drawbg, qboolean drawinput)
 	forced = con_forcedup && M_WantsConsole (&alpha);
 	if (!forced)
 		alpha = 1.f;
-	GL_PushCanvasColor (1.f, 1.f, 1.f, alpha);
+	Draw_PushCanvasColor (1.f, 1.f, 1.f, alpha);
 
 // draw the buffer text
 	rows = (con_vislines +7)/8;
@@ -2349,7 +2358,7 @@ void Con_DrawConsole (int lines, qboolean drawbg, qboolean drawinput)
 	text = CONSOLE_TITLE_STRING;
 	M_PrintWhite (vid.conwidth - (strlen (text) << 3), vid.conheight - 8, text);
 
-	GL_PopCanvasColor ();
+	Draw_PopCanvasColor ();
 }
 
 

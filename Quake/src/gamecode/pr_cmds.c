@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "q_ctype.h"
+#include "devstats.h"
 
 #define	STRINGTEMP_BUFFERS		1024
 #define	STRINGTEMP_LENGTH		1024
@@ -2149,9 +2150,9 @@ static void PF_cl_drawcharacter(void)
 	if (charcode == 32)
 		return; //don't waste time on spaces
 
-	GL_SetCanvasColor (rgb[0], rgb[1], rgb[2], alpha);
+	Draw_SetCanvasColor (rgb[0], rgb[1], rgb[2], alpha);
 	DrawQC_CharacterQuad (pos[0], pos[1], charcode, size[0], size[1]);
-	GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
+	Draw_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
 }
 
 static void PF_cl_drawrawstring(void)
@@ -2169,13 +2170,13 @@ static void PF_cl_drawrawstring(void)
 	if (!*text)
 		return; //don't waste time on spaces
 
-	GL_SetCanvasColor (rgb[0], rgb[1], rgb[2], alpha);
+	Draw_SetCanvasColor (rgb[0], rgb[1], rgb[2], alpha);
 	while ((c = *text++))
 	{
 		DrawQC_CharacterQuad (x, pos[1], c, size[0], size[1]);
 		x += size[0];
 	}
-	GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
+	Draw_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
 }
 static void PF_cl_drawstring(void)
 {
@@ -2197,11 +2198,11 @@ static void PF_cl_drawstring(void)
 
 	while ((c = PR_Markup_Parse(&mu)))
 	{
-		GL_SetCanvasColor (mu.colour[0], mu.colour[1], mu.colour[2], mu.colour[3]);
+		Draw_SetCanvasColor (mu.colour[0], mu.colour[1], mu.colour[2], mu.colour[3]);
 		DrawQC_CharacterQuad (x, pos[1], c, size[0], size[1]);
 		x += size[0];
 	}
-	GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
+	Draw_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
 }
 static void PF_cl_stringwidth(void)
 {

@@ -36,6 +36,15 @@ typedef struct lightcell_s lightcell_t;
 typedef lightcell_t lightgrid_probe_t;
 typedef struct lightgrid_s lightgrid_t;
 
+typedef enum
+{
+	ALPHAMODE_BASIC,
+	ALPHAMODE_SORTED,
+	ALPHAMODE_OIT,
+
+	ALPHAMODE_COUNT
+} alphamode_t;
+
 typedef struct lightcache_s {
 	int					surfidx; // < 0: black surface; == 0: no cache; > 0: 1+index of surface
 	vec3_t				pos;
@@ -161,7 +170,11 @@ typedef struct refdef_s
 
 extern	refdef_t	r_refdef;
 extern vec3_t	r_origin, vpn, vright, vup;
+extern cvar_t	r_scale;
 
+alphamode_t R_GetAlphaMode (void);
+alphamode_t R_GetEffectiveAlphaMode (void);
+void R_SetAlphaMode (alphamode_t mode);
 
 void R_Init (void);
 void R_RenderView (void);		// must set r_refdef first
@@ -169,6 +182,24 @@ void R_ClearEfrags (void);
 void R_CheckEfrags (void); //johnfitz
 void R_AddEfrags (entity_t *ent);
 void R_AddStaticModels (const byte *vis);
+qboolean R_Shadow_SunEnabled (void);
+void R_DrawPolyblendOverlay (const float blend_rgba[4]);
+void R_StorePrevFrameState (void);
+void R_CaptureSSAOFogHandoffState (void);
+void R_MarkFrameRenderedThisUpdate (void);
+void R_GetCanvasMetrics (int *out_x, int *out_y, int *out_width, int *out_height);
+int R_GetSceneSampleCount (void);
+int R_GetMaxSampleCount (void);
+float R_GetMaxAnisotropy (void);
+qboolean R_IsClearEnabled (void);
+void R_ClearBoundingBoxes (void);
+void R_TranslatePlayerSkin (int playernum);
+void R_TranslateNewPlayerSkin (int playernum);
+void Fog_ParseServerMessage (void);
+void Sky_LoadSkyBox (const char *name);
+void Sky_ClearAll (void);
+void R_NewGame (void);
+void CL_RunParticles (void);
 
 void R_NewMap (void);
 void R_ParseDlightEntities (void);
