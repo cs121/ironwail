@@ -581,10 +581,6 @@ cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVA
 cvar_t	r_tonemap = { "r_tonemap", "2", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_autoexposure = { "r_autoexposure", "1", CVAR_ARCHIVE };
-cvar_t	r_autoexposure_async = { "r_autoexposure_async", "1", CVAR_ARCHIVE };
-cvar_t	r_ae_min_scene_luma = { "r_ae_min_scene_luma", "0.001", CVAR_ARCHIVE };
-cvar_t	r_ae_min_exposure = { "r_ae_min_exposure", "0.25", CVAR_ARCHIVE };
-cvar_t	r_ae_max_exposure = { "r_ae_max_exposure", "8.0", CVAR_ARCHIVE };
 cvar_t	r_exposure_bias = { "r_exposure_bias", "1.0", CVAR_ARCHIVE };
 cvar_t	r_exposure_min = { "r_exposure_min", "0.85", CVAR_ARCHIVE };
 cvar_t	r_exposure_max = { "r_exposure_max", "1.15", CVAR_ARCHIVE };
@@ -764,16 +760,10 @@ qboolean r_fullbright_cheatsafe, r_lightmap_cheatsafe, r_drawworld_cheatsafe; //
 cvar_t	r_scale = { "r_scale", "1", CVAR_ARCHIVE };
 cvar_t	r_scene_scale_debug = { "r_scene_scale_debug", "0", CVAR_NONE };
 cvar_t	r_drs = { "r_drs", "0", CVAR_ARCHIVE };
-cvar_t	r_drs_use_gpu = { "r_drs_use_gpu", "1", CVAR_ARCHIVE };
 	cvar_t	r_drs_target_fps = { "r_drs_target_fps", "0", CVAR_ARCHIVE };
 	cvar_t	r_drs_min_scale = { "r_drs_min_scale", "25", CVAR_ARCHIVE };
 	cvar_t	r_drs_max_scale = { "r_drs_max_scale", "100", CVAR_ARCHIVE };
-	cvar_t	r_drs_cooldown_after_down = { "r_drs_cooldown_after_down", "8", CVAR_ARCHIVE };
-	cvar_t	r_drs_cooldown_after_up = { "r_drs_cooldown_after_up", "2", CVAR_ARCHIVE };
-	cvar_t	r_drs_hysteresis_ms = { "r_drs_hysteresis_ms", "0.5", CVAR_ARCHIVE };
-cvar_t	r_drs_filter_alpha = { "r_drs_filter_alpha", "0.25", CVAR_ARCHIVE };
-cvar_t	r_drs_debug = { "r_drs_debug", "0", CVAR_NONE };
-cvar_t	r_drs_step_size = { "r_drs_step_size", "0.02", CVAR_ARCHIVE };
+ cvar_t	r_drs_debug = { "r_drs_debug", "0", CVAR_NONE };
 cvar_t	r_drs_sharpen = { "r_drs_sharpen", "0.3", CVAR_ARCHIVE };
 
 static float view_znear;
@@ -835,7 +825,7 @@ static float R_GetDRSMaxResolution (void)
 
 static float R_QuantizeResolution (float ratio)
 {
-	float step = CLAMP (0.01f, r_drs_step_size.value, 0.10f);
+	float step = CLAMP (0.01f, 0.02f, 0.10f);
 	return floorf (ratio / step + 0.5f) * step;
 }
 
@@ -866,7 +856,7 @@ static void R_UpdateDynamicResolutionScale (void)
 	float current_resolution;
 	float new_resolution;
 	int debug_level;
-	qboolean use_gpu = (r_drs_use_gpu.value > 0.f);
+	qboolean use_gpu = qtrue;
 	qboolean use_gpu_timing = false;
 	const int max_down_rate = 4;
 
@@ -889,13 +879,13 @@ static void R_UpdateDynamicResolutionScale (void)
 		target_ms = 1000.f / 60.f;
 	target_ms = CLAMP (1.f, target_ms, 1000.f);
 
-	alpha = CLAMP (0.01f, r_drs_filter_alpha.value, 1.f);
-	hysteresis_ms = q_max (0.f, r_drs_hysteresis_ms.value);
+	alpha = CLAMP (0.01f, 0.25f, 1.f);
+	hysteresis_ms = q_max (0.f, 0.5f);
 	min_resolution = R_GetDRSMinResolution ();
 	max_resolution = R_GetDRSMaxResolution ();
-	step = CLAMP (0.01f, r_drs_step_size.value, 0.10f);
-	cooldown_after_down = CLAMP (0, (int)Q_rint (r_drs_cooldown_after_down.value), 120);
-	cooldown_after_up = CLAMP (0, (int)Q_rint (r_drs_cooldown_after_up.value), 120);
+	step = CLAMP (0.01f, 0.02f, 0.10f);
+	cooldown_after_down = CLAMP (0, (int)Q_rint (8.f), 120);
+	cooldown_after_up = CLAMP (0, (int)Q_rint (2.f), 120);
 	debug_level = (int)Q_rint (r_drs_debug.value);
 
 	if (!r_drs_state.initialized)
@@ -1586,7 +1576,7 @@ void GL_CreateFrameBuffers (void)
 	framebufs.ssao.height[1] = q_max (1, ssao_alloc_h / 2);
 	framebufs.ssao.noise_tex = GL_CreateSSAONoiseTexture ();
 	// SSAO FIX: Prefer higher precision AO targets to avoid R8 banding in dark areas.
-	GLenum ssao_format = (Q_rint (r_ssao_format.value) > 0) ? GL_R16F : GL_R8;
+	GLenum ssao_format = GL_R16F;
 	for (int i = 0; i < 2; ++i)
 	{
 		int width = framebufs.ssao.width[i];
@@ -2092,7 +2082,7 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 	Con_DPrintf ("SSAO depth range: [%0.4f, %0.4f] reversedZ=%d mode=%d znear=%0.4f zfar=%0.4f cutoff=%0.4f viewRect=[%0.3f,%0.3f]-[%0.3f,%0.3f] ssao=%dx%d debug=%d\n",
 		depth_range[0], depth_range[1],
 		gl_clipcontrol_able ? 1 : 0,
-		(int)Q_rint (r_ssao_reversedz_mode.value),
+		0,
 		view_znear, view_zfar,
 		gl_clipcontrol_able ? 0.001f : 0.999f,
 		view_min_x, view_min_y, view_max_x, view_max_y,
@@ -2137,8 +2127,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 
 	float reversed_z = gl_clipcontrol_able ? 1.f : 0.f;
 	float depth_cutoff = gl_clipcontrol_able ? 0.001f : 0.999f;
-	int reversed_z_mode = (int)Q_rint (r_ssao_reversedz_mode.value);
-	reversed_z_mode = CLAMP (0, reversed_z_mode, 2);
+	int reversed_z_mode = 0;
 	int debug_mode_cvar = (int)Q_rint (r_ssao_debug.value);
 	int debug_mode_i = (debug_mode_cvar > 0) ? CLAMP (1, debug_mode_cvar, 14) : -1;
 	qboolean debug_show_ao_raw = (debug_mode_i == 10);
@@ -2980,7 +2969,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment);
 	glPixelStorei (GL_PACK_ALIGNMENT, 1);
 
-	if (r_autoexposure_async.value > 0.f && framebufs.autoexposure.pbo[0] && framebufs.autoexposure.pbo[1] && GL_AutoExposurePBOAvailable ())
+	if (framebufs.autoexposure.pbo[0] && framebufs.autoexposure.pbo[1] && GL_AutoExposurePBOAvailable ())
 	{
 		const int write_index = framebufs.autoexposure.pbo_index;
 		const int read_index = write_index ^ 1;
@@ -3015,10 +3004,8 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 	}
 	else
 	{
-		if (r_autoexposure_async.value > 0.f && GL_AutoExposurePBOAvailable () && !framebufs.autoexposure.pbo_ready)
+		if (GL_AutoExposurePBOAvailable () && !framebufs.autoexposure.pbo_ready)
 			GL_AutoExposureInitPBOs ();
-		else if (r_autoexposure_async.value <= 0.f && framebufs.autoexposure.pbo_ready)
-			GL_AutoExposureDeletePBOs ();
 
 		glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, pixels);
 		glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
@@ -3082,7 +3069,7 @@ static float GL_UpdateAutoExposure (void)
 		return current_exposure;
 
 	{
-		const float min_scene_luma = q_max (0.f, r_ae_min_scene_luma.value);
+		const float min_scene_luma = q_max (0.f, 0.001f);
 		scene_luminance = q_max (scene_luminance, min_scene_luma);
 		r_autoexposure_debug_luminance = scene_luminance;
 	}
@@ -3099,8 +3086,8 @@ static float GL_UpdateAutoExposure (void)
 		const float bias = q_max (0.f, r_exposure_bias.value);
 		const float min_exposure = q_min (r_exposure_min.value, r_exposure_max.value);
 		const float max_exposure = q_max (r_exposure_min.value, r_exposure_max.value);
-		const float hard_min_exposure = q_max (0.f, q_min (r_ae_min_exposure.value, r_ae_max_exposure.value));
-		const float hard_max_exposure = q_max (hard_min_exposure, q_max (r_ae_min_exposure.value, r_ae_max_exposure.value));
+		const float hard_min_exposure = q_max (0.f, q_min (0.25f, 8.0f));
+		const float hard_max_exposure = q_max (hard_min_exposure, q_max (0.25f, 8.0f));
 		float interpolation = (scene_log - min_scene_log) / (max_scene_log - min_scene_log);
 		float target = LERP (hard_max_exposure, hard_min_exposure, interpolation) * bias;
 		float speed_up = q_max (0.f, r_exposure_speed_up.value);

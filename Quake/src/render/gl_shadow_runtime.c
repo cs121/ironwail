@@ -15,33 +15,14 @@ extern cvar_t r_shadow_dlight_max;
 extern cvar_t r_shadow_sun_distance;
 extern cvar_t r_shadow_sun_size;
 extern cvar_t r_shadow_dlight_size;
-extern cvar_t r_shadow_sun_bias;
-extern cvar_t r_shadow_dlight_bias;
-extern cvar_t r_shadow_sun_pcf;
-extern cvar_t r_shadow_dlight_pcf;
-extern cvar_t r_shadow_sun_snap;
-extern cvar_t r_shadow_sun_split1;
-extern cvar_t r_shadow_sun_split2;
-extern cvar_t r_shadow_sun_split3;
 extern cvar_t r_shadow_sun_cascades;
-extern cvar_t r_shadow_sun_split_mode;
-extern cvar_t r_shadow_sun_split_lambda;
-extern cvar_t r_shadow_mark_mode;
 extern cvar_t r_shadow_profile;
-extern cvar_t r_shadow_cull_vis;
-extern cvar_t r_shadow_cull_backface;
-extern cvar_t r_shadow_cull_frustum;
-extern cvar_t r_shadow_cull_sphere;
-extern cvar_t r_shadow_receiver_bias;
 extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_log;
 extern cvar_t r_rimlight;
-extern cvar_t r_rimlight_world;
 extern cvar_t r_rimlight_models;
 extern cvar_t r_rimlight_intensity;
 extern cvar_t r_rimlight_power;
-extern cvar_t r_rimlight_sun;
-extern cvar_t r_rimlight_dlight;
 extern cvar_t r_rimlight_shadow;
 extern cvar_t r_drawworld;
 
@@ -131,8 +112,8 @@ static int r_shadow_profile_last_frame = -1024;
 
 static void R_Shadow_BuildSplitRatios (int cascade_count, float sun_dist, float out_ratio[SHADOW_SUN_CASCADE_MAX])
 {
-	int mode = CLAMP (0, (int)Q_rint (r_shadow_sun_split_mode.value), 3);
-	float lambda = CLAMP (0.f, r_shadow_sun_split_lambda.value, 1.f);
+	int mode = 0;
+	float lambda = 0.65f;
 	int i;
 
 	for (i = 0; i < SHADOW_SUN_CASCADE_MAX; ++i)
@@ -140,9 +121,9 @@ static void R_Shadow_BuildSplitRatios (int cascade_count, float sun_dist, float 
 
 	if (mode == 0)
 	{
-		out_ratio[0] = CLAMP (0.05f, r_shadow_sun_split1.value, 0.95f);
-		out_ratio[1] = CLAMP (out_ratio[0] + 0.02f, r_shadow_sun_split2.value, 0.97f);
-		out_ratio[2] = CLAMP (out_ratio[1] + 0.02f, r_shadow_sun_split3.value, 0.99f);
+		out_ratio[0] = 0.12f;
+		out_ratio[1] = 0.35f;
+		out_ratio[2] = 0.70f;
 		out_ratio[3] = 1.f;
 		return;
 	}
@@ -189,49 +170,14 @@ qboolean R_Shadow_DlightEnabled (void)
 void R_Shadow_NormalizeSettings (void)
 {
 	int ivalue;
-	float fvalue;
 
-	ivalue = (r_shadow_mark_mode.value > 0.f) ? 1 : 0;
-	if (ivalue != (int)r_shadow_mark_mode.value)
-		Cvar_SetValueQuick (&r_shadow_mark_mode, (float)ivalue);
 	ivalue = (r_shadow_profile.value > 0.f) ? 1 : 0;
 	if (ivalue != (int)r_shadow_profile.value)
 		Cvar_SetValueQuick (&r_shadow_profile, (float)ivalue);
-	ivalue = (r_shadow_cull_vis.value > 0.f) ? 1 : 0;
-	if (ivalue != (int)r_shadow_cull_vis.value)
-		Cvar_SetValueQuick (&r_shadow_cull_vis, (float)ivalue);
-	ivalue = (r_shadow_cull_backface.value > 0.f) ? 1 : 0;
-	if (ivalue != (int)r_shadow_cull_backface.value)
-		Cvar_SetValueQuick (&r_shadow_cull_backface, (float)ivalue);
-	ivalue = (r_shadow_cull_frustum.value > 0.f) ? 1 : 0;
-	if (ivalue != (int)r_shadow_cull_frustum.value)
-		Cvar_SetValueQuick (&r_shadow_cull_frustum, (float)ivalue);
-	ivalue = (r_shadow_cull_sphere.value > 0.f) ? 1 : 0;
-	if (ivalue != (int)r_shadow_cull_sphere.value)
-		Cvar_SetValueQuick (&r_shadow_cull_sphere, (float)ivalue);
 
-	fvalue = CLAMP (0.f, r_shadow_receiver_bias.value, 16.f);
-	if (fvalue != r_shadow_receiver_bias.value)
-		Cvar_SetValueQuick (&r_shadow_receiver_bias, fvalue);
 	ivalue = CLAMP (1, (int)Q_rint (r_shadow_sun_cascades.value), SHADOW_SUN_CASCADE_MAX);
 	if (ivalue != (int)r_shadow_sun_cascades.value)
 		Cvar_SetValueQuick (&r_shadow_sun_cascades, (float)ivalue);
-	ivalue = CLAMP (0, (int)Q_rint (r_shadow_sun_split_mode.value), 3);
-	if (ivalue != (int)r_shadow_sun_split_mode.value)
-		Cvar_SetValueQuick (&r_shadow_sun_split_mode, (float)ivalue);
-	fvalue = CLAMP (0.f, r_shadow_sun_split_lambda.value, 1.f);
-	if (fvalue != r_shadow_sun_split_lambda.value)
-		Cvar_SetValueQuick (&r_shadow_sun_split_lambda, fvalue);
-
-	fvalue = CLAMP (0.05f, r_shadow_sun_split1.value, 0.95f);
-	if (fvalue != r_shadow_sun_split1.value)
-		Cvar_SetValueQuick (&r_shadow_sun_split1, fvalue);
-	fvalue = CLAMP (r_shadow_sun_split1.value + 0.05f, r_shadow_sun_split2.value, 0.97f);
-	if (fvalue != r_shadow_sun_split2.value)
-		Cvar_SetValueQuick (&r_shadow_sun_split2, fvalue);
-	fvalue = CLAMP (r_shadow_sun_split2.value + 0.05f, r_shadow_sun_split3.value, 0.99f);
-	if (fvalue != r_shadow_sun_split3.value)
-		Cvar_SetValueQuick (&r_shadow_sun_split3, fvalue);
 }
 
 void R_Shadow_ResetRuntime (shadow_runtime_t *state)
@@ -374,7 +320,7 @@ void R_Shadow_UpdateSunMatrix (shadow_runtime_t *state)
 		R_Shadow_MatrixLook (view, eye, forward, up);
 		R_Shadow_MatrixOrtho (proj, -radius, radius, -radius, radius, znear, zfar);
 
-		if (r_shadow_sun_snap.value > 0.f && framebufs.shadow.sun_size > 0)
+		if (framebufs.shadow.sun_size > 0)
 		{
 			texel = (radius * 2.f) / q_max (1.f, (float)framebufs.shadow.sun_size);
 			center_ls[0] = view[0] * center[0] + view[4] * center[1] + view[8] * center[2] + view[12];
@@ -395,8 +341,8 @@ void R_Shadow_UpdateSunMatrix (shadow_runtime_t *state)
 	{
 		Con_Printf ("Shadow sun cascades: count=%d mode=%d lambda=%.2f dist=%.1f splits=(%.2f %.2f %.2f)\n",
 			cascade_count,
-			CLAMP (0, (int)Q_rint (r_shadow_sun_split_mode.value), 3),
-			CLAMP (0.f, r_shadow_sun_split_lambda.value, 1.f),
+			0,
+			0.65f,
 			sun_dist,
 			split_ratio[0], split_ratio[1], split_ratio[2]);
 	}
@@ -707,13 +653,13 @@ qboolean R_Shadow_GetSunOcclusionData (float out_viewproj[16], float *out_bias, 
 			memcpy (out_viewproj, r_shadow_identity_mat4, sizeof (r_shadow_identity_mat4));
 	}
 	if (out_bias)
-		*out_bias = enabled ? q_max (0.f, r_shadow_sun_bias.value) : 0.f;
+		*out_bias = enabled ? 0.0015f : 0.f;
 	if (out_pcf_uv)
 	{
 		float texel = (enabled && framebufs.shadow.sun_size > 0)
 			? (1.f / (float)framebufs.shadow.sun_size)
 			: 0.f;
-		*out_pcf_uv = enabled ? (q_max (0.f, r_shadow_sun_pcf.value) * texel) : 0.f;
+		*out_pcf_uv = enabled ? (1.5f * texel) : 0.f;
 	}
 
 	return enabled;
@@ -743,13 +689,13 @@ qboolean R_Shadow_GetSunCascadeData (float out_viewproj[4][16], float out_splits
 	if (out_count)
 		*out_count = enabled ? r_shadow_state.sun_cascade_count : 0;
 	if (out_bias)
-		*out_bias = enabled ? q_max (0.f, r_shadow_sun_bias.value) : 0.f;
+		*out_bias = enabled ? 0.0015f : 0.f;
 	if (out_pcf_uv)
 	{
 		float texel = (enabled && framebufs.shadow.sun_size > 0)
 			? (1.f / (float)framebufs.shadow.sun_size)
 			: 0.f;
-		*out_pcf_uv = enabled ? (q_max (0.f, r_shadow_sun_pcf.value) * texel) : 0.f;
+		*out_pcf_uv = enabled ? (1.5f * texel) : 0.f;
 	}
 
 	return enabled;
@@ -792,22 +738,22 @@ void R_Shadow_ApplyWorldReceiverUniforms (GLuint program)
 		GL_Uniform4fFunc (u->dlight_indices, (float)idx[0], (float)idx[1], (float)idx[2], (float)idx[3]);
 	if (u->bias_counts >= 0)
 		GL_Uniform4fFunc (u->bias_counts, (float)r_shadow_state.num_dlights,
-			q_max (0.f, r_shadow_sun_bias.value),
-			q_max (0.f, r_shadow_dlight_bias.value),
-			q_max (0.f, r_shadow_receiver_bias.value));
+			0.0015f,
+			0.02f,
+			2.0f);
 	if (u->pcf_texel >= 0)
 		GL_Uniform4fFunc (u->pcf_texel,
-			q_max (0.f, r_shadow_sun_pcf.value),
-			q_max (0.f, r_shadow_dlight_pcf.value),
+			1.5f,
+			0.75f,
 			framebufs.shadow.sun_size > 0 ? 1.f / (float)framebufs.shadow.sun_size : 0.f,
 			framebufs.shadow.dlight_size > 0 ? 1.f / (float)framebufs.shadow.dlight_size : 0.f);
 	rim_master = (r_rimlight.value > 0.f) ? 1.f : 0.f;
-	rim_world = (r_rimlight_world.value > 0.f) ? 1.f : 0.f;
+	rim_world = 1.f;
 	rim_models = (r_rimlight_models.value > 0.f) ? 1.f : 0.f;
 	rim_intensity = q_max (0.f, r_rimlight_intensity.value);
 	rim_power = q_max (0.5f, r_rimlight_power.value);
-	rim_sun = q_max (0.f, r_rimlight_sun.value);
-	rim_dlight = q_max (0.f, r_rimlight_dlight.value);
+	rim_sun = 1.0f;
+	rim_dlight = 1.0f;
 	rim_shadow = (r_rimlight_shadow.value > 0.f) ? 1.f : 0.f;
 	if (u->rim_params0 >= 0)
 		GL_Uniform4fFunc (u->rim_params0, rim_master, rim_intensity, rim_power, rim_shadow);
@@ -1013,9 +959,9 @@ static qboolean R_Shadow_EntityPassesCull (entity_t *ent, const vec4_t *sphere, 
 		return false;
 	if (ent == &cl_entities[0])
 		return true;
-	if (sphere && r_shadow_cull_sphere.value > 0.f && R_Shadow_EntityOutsideSphere (ent, *sphere))
+	if (sphere && R_Shadow_EntityOutsideSphere (ent, *sphere))
 		return false;
-	if (frustum4 && r_shadow_cull_frustum.value > 0.f)
+	if (frustum4)
 	{
 		R_GetEntityBounds (ent, mins, maxs);
 		if (R_Shadow_AABBOutsideFrustum (mins, maxs, frustum4))
@@ -1060,7 +1006,7 @@ static void R_RenderSunShadowMap (void)
 {
 	int cascade;
 	vec3_t dummy = { 0.f, 0.f, 0.f };
-	qboolean shadow_mark = (r_shadow_mark_mode.value > 0.f) && (r_shadow_draw_ctx.brush_count > 0);
+	qboolean shadow_mark = (r_shadow_draw_ctx.brush_count > 0);
 
 	if (!R_Shadow_SunEnabled () || !framebufs.shadow.sun_fbo || !framebufs.shadow.sun_depth_tex)
 		return;
@@ -1073,11 +1019,8 @@ static void R_RenderSunShadowMap (void)
 		shadow_draw_context_t pass_ctx;
 		const shadow_draw_context_t *ctx = &r_shadow_draw_ctx;
 
-		if (r_shadow_cull_frustum.value > 0.f)
-		{
-			R_Shadow_FilterDrawContext (&r_shadow_draw_ctx, &pass_ctx, NULL, r_shadow_state.sun_frustum[cascade]);
-			ctx = &pass_ctx;
-		}
+		R_Shadow_FilterDrawContext (&r_shadow_draw_ctx, &pass_ctx, NULL, r_shadow_state.sun_frustum[cascade]);
+		ctx = &pass_ctx;
 		if (ctx->brush_count <= 0 && ctx->alias_count <= 0)
 			continue;
 
@@ -1087,9 +1030,9 @@ static void R_RenderSunShadowMap (void)
 				r_shadow_state.sun_eye[cascade],
 				r_shadow_state.sun_frustum[cascade],
 				NULL,
-				r_shadow_cull_vis.value > 0.f,
-				r_shadow_cull_backface.value > 0.f,
-				r_shadow_cull_frustum.value > 0.f);
+				qfalse,
+				qfalse,
+				qtrue);
 		}
 
 		GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.sun_depth_tex, 0, cascade);
@@ -1107,7 +1050,7 @@ static void R_RenderSunShadowMap (void)
 static void R_RenderDLightShadowMaps (void)
 {
 	int slot, face;
-	qboolean shadow_mark = (r_shadow_mark_mode.value > 0.f) && (r_shadow_draw_ctx.brush_count > 0);
+	qboolean shadow_mark = (r_shadow_draw_ctx.brush_count > 0);
 
 	if (!R_Shadow_DlightEnabled () || !framebufs.shadow.dlight_fbo || !framebufs.shadow.dlight_depth_tex)
 		return;
@@ -1127,24 +1070,14 @@ static void R_RenderDLightShadowMaps (void)
 			vec4_t sphere;
 			int layer = slot * SHADOW_DLIGHT_FACES + face;
 
-			if (r_shadow_cull_frustum.value > 0.f || r_shadow_cull_sphere.value > 0.f)
-			{
-				if (r_shadow_cull_sphere.value > 0.f)
-				{
-					sphere[0] = (*light)[0];
-					sphere[1] = (*light)[1];
-					sphere[2] = (*light)[2];
-					sphere[3] = (*light)[3];
-				}
-				else
-				{
-					sphere[0] = sphere[1] = sphere[2] = sphere[3] = 0.f;
-				}
-				R_Shadow_FilterDrawContext (&r_shadow_draw_ctx, &pass_ctx,
-					(r_shadow_cull_sphere.value > 0.f) ? &sphere : NULL,
-					(r_shadow_cull_frustum.value > 0.f) ? r_shadow_state.dlight_frustum[slot][face] : NULL);
-				ctx = &pass_ctx;
-			}
+			sphere[0] = (*light)[0];
+			sphere[1] = (*light)[1];
+			sphere[2] = (*light)[2];
+			sphere[3] = (*light)[3];
+			R_Shadow_FilterDrawContext (&r_shadow_draw_ctx, &pass_ctx,
+				&sphere,
+				r_shadow_state.dlight_frustum[slot][face]);
+			ctx = &pass_ctx;
 			if (ctx->brush_count <= 0 && ctx->alias_count <= 0)
 				continue;
 
@@ -1157,10 +1090,10 @@ static void R_RenderDLightShadowMaps (void)
 				R_MarkSurfaces_Shadow (
 					*light,
 					r_shadow_state.dlight_frustum[slot][face],
-					(r_shadow_cull_sphere.value > 0.f) ? &sphere : NULL,
-					r_shadow_cull_vis.value > 0.f,
-					r_shadow_cull_backface.value > 0.f,
-					r_shadow_cull_frustum.value > 0.f);
+					&sphere,
+					qfalse,
+					qfalse,
+					qtrue);
 			}
 
 			GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.dlight_depth_tex, 0, layer);
@@ -1217,7 +1150,7 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 		R_Shadow_UpdateDlightMatrices (&r_shadow_state);
 	if (!want_sun_shadow && !want_dlight_shadows)
 		return;
-	marked_for_shadow = (r_shadow_draw_ctx.brush_count > 0 && r_shadow_mark_mode.value > 0.f);
+	marked_for_shadow = (r_shadow_draw_ctx.brush_count > 0);
 
 	have_query_api = (GL_GenQueriesFunc && GL_BeginQueryFunc && GL_EndQueryFunc
 		&& GL_GetQueryObjectui64vFunc && GL_DeleteQueriesFunc);

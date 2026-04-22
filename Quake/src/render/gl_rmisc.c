@@ -42,7 +42,6 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #endif
 
 //johnfitz -- new cvars
-extern cvar_t r_clearcolor;
 extern cvar_t r_flatlightstyles;
 extern cvar_t r_lerplightstyles;
 extern cvar_t gl_fullbrights;

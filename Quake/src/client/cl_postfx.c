@@ -62,39 +62,12 @@ static float			postfx_damage_dir_strength;
 
 extern cvar_t r_postfx;
 extern cvar_t r_postfx_pickup;
-extern cvar_t r_postfx_pickup_exposure;
-extern cvar_t r_postfx_pickup_bloom;
-extern cvar_t r_postfx_pickup_duration;
 extern cvar_t r_postfx_damage;
 extern cvar_t r_post_damage_doublevision;
-extern cvar_t r_post_damage_trauma_scale;
-extern cvar_t r_post_damage_trauma_decay;
+
 extern cvar_t r_postfx_powerup;
-extern cvar_t r_postfx_powerup_lut_strength;
-extern cvar_t r_postfx_lut_strength_powerup;
-extern cvar_t r_postfx_powerup_ramp_in;
-extern cvar_t r_postfx_powerup_ramp_out;
 extern cvar_t r_postfx_underwater;
-extern cvar_t r_postfx_underwater_grade_strength;
-extern cvar_t r_postfx_lut_strength_underwater;
-extern cvar_t r_postfx_underwater_fog_strength;
-extern cvar_t r_postfx_underwater_ramp_in;
-extern cvar_t r_postfx_underwater_ramp_out;
-extern cvar_t r_postfx_underwater_fog_water_r;
-extern cvar_t r_postfx_underwater_fog_water_g;
-extern cvar_t r_postfx_underwater_fog_water_b;
-extern cvar_t r_postfx_underwater_fog_slime_r;
-extern cvar_t r_postfx_underwater_fog_slime_g;
-extern cvar_t r_postfx_underwater_fog_slime_b;
-extern cvar_t r_postfx_underwater_fog_lava_r;
-extern cvar_t r_postfx_underwater_fog_lava_g;
-extern cvar_t r_postfx_underwater_fog_lava_b;
 extern cvar_t r_postfx_quad;
-extern cvar_t r_postfx_quad_emissive_boost;
-extern cvar_t r_postfx_quad_bloom_boost;
-extern cvar_t r_postfx_quad_pulse_speed;
-extern cvar_t r_postfx_quad_pulse_intensity;
-extern cvar_t r_postfx_bloom_mode;
 extern cvar_t r_postfx_debug;
 
 static float PostFX_Saturate (float value)
@@ -254,7 +227,7 @@ void CL_PostFX_Frame (void)
 	if (r_post_damage_doublevision.value > 0.f)
 	{
 		/* Cap aggressive legacy cfg decay so DV remains perceptible after impact. */
-		float decay = CLAMP (0.5f, r_post_damage_trauma_decay.value, 3.4f);
+		float decay = CLAMP (0.5f, 3.2f, 3.4f);
 		float decay_factor = (decay > 0.f) ? expf (-decay * dt) : 1.f;
 		postfx_damage_trauma = PostFX_Saturate (postfx_damage_trauma * decay_factor);
 		postfx_damage_dir_strength = PostFX_Saturate (postfx_damage_dir_strength * decay_factor);
@@ -267,10 +240,10 @@ void CL_PostFX_Frame (void)
 
 	desired_lut = PostFX_DesiredPowerupLUT ();
 	target_strength = (r_postfx_powerup.value > 0.f && desired_lut != PFX_LUT_NONE)
-		? q_max (0.f, q_max (r_postfx_powerup_lut_strength.value, r_postfx_lut_strength_powerup.value))
+		? 0.6f
 		: 0.f;
-	ramp_in = q_max (0.f, r_postfx_powerup_ramp_in.value);
-	ramp_out = q_max (0.f, r_postfx_powerup_ramp_out.value);
+	ramp_in = 0.2f;
+	ramp_out = 0.3f;
 	postfx_powerup_strength = PostFX_SmoothedLerp (postfx_powerup_strength, target_strength, dt, ramp_in, ramp_out);
 	if (postfx_powerup_strength > 0.f)
 		postfx_powerup_lut = desired_lut;
@@ -278,13 +251,13 @@ void CL_PostFX_Frame (void)
 		postfx_powerup_lut = PFX_LUT_NONE;
 
 	grade_strength = (r_postfx_underwater.value > 0.f && postfx_underwater_postfx_active)
-		? q_max (0.f, q_max (r_postfx_underwater_grade_strength.value, r_postfx_lut_strength_underwater.value))
+		? 0.5f
 		: 0.f;
 	fog_strength = (r_postfx_underwater.value > 0.f && postfx_underwater_postfx_active)
-		? q_max (0.f, r_postfx_underwater_fog_strength.value)
+		? 0.4f
 		: 0.f;
-	ramp_in = q_max (0.f, r_postfx_underwater_ramp_in.value);
-	ramp_out = q_max (0.f, r_postfx_underwater_ramp_out.value);
+	ramp_in = 0.2f;
+	ramp_out = 0.2f;
 	postfx_underwater_grade = PostFX_SmoothedLerp (postfx_underwater_grade, grade_strength, dt, ramp_in, ramp_out);
 	postfx_underwater_fog = PostFX_SmoothedLerp (postfx_underwater_fog, fog_strength, dt, ramp_in, ramp_out);
 }
@@ -298,7 +271,7 @@ void CL_PostFX_PushPickup (void)
 	if (r_postfx.value <= 0.f || r_postfx_pickup.value <= 0.f)
 		return;
 
-	duration = q_max (0.05f, r_postfx_pickup_duration.value);
+	duration = 0.48f;
 	intensity = PostFX_Saturate (r_postfx_pickup.value);
 
 	event = PostFX_AllocEvent ();
@@ -310,8 +283,8 @@ void CL_PostFX_PushPickup (void)
 	event->attack = duration * 0.2f;
 	event->decay = duration * 0.8f;
 	event->intensity = intensity;
-	event->params[0] = r_postfx_pickup_exposure.value;
-	event->params[1] = r_postfx_pickup_bloom.value;
+	event->params[0] = 0.95f;
+	event->params[1] = 1.35f;
 	event->active = true;
 }
 
@@ -329,7 +302,7 @@ void CL_PostFX_PushDamage (float damage_amount, const vec2_t screen_dir, float d
 	if (r_postfx.value > 0.f && r_post_damage_doublevision.value > 0.f)
 	{
 		/* Keep DV visible even when old configs persist a weak trauma scale. */
-		float trauma_scale = q_max (0.08f, r_post_damage_trauma_scale.value);
+		float trauma_scale = q_max (0.08f, 0.09f);
 		float trauma_kick = PostFX_Saturate (damage_amount * trauma_scale);
 		if (trauma_kick > 0.f)
 			postfx_damage_trauma = PostFX_Saturate (postfx_damage_trauma + trauma_kick);
@@ -454,7 +427,7 @@ void CL_PostFX_GetState (postfx_state_t *out_state)
 		{
 		case PFX_EVENT_PICKUP:
 			exposure += weight * event->params[0];
-			if (r_postfx_bloom_mode.value > 0.f)
+			if (qtrue)
 				bloom_add = q_max (bloom_add, weight * event->params[1]);
 			else
 				bloom_add += weight * event->params[1];
@@ -476,20 +449,20 @@ void CL_PostFX_GetState (postfx_state_t *out_state)
 	out_state->underwater_grade_strength = PostFX_Saturate (postfx_underwater_grade);
 	out_state->underwater_fog_strength = PostFX_Saturate (postfx_underwater_fog);
 
-	fog_r = r_postfx_underwater_fog_water_r.value;
-	fog_g = r_postfx_underwater_fog_water_g.value;
-	fog_b = r_postfx_underwater_fog_water_b.value;
+	fog_r = 0.2f;
+	fog_g = 0.35f;
+	fog_b = 0.5f;
 	if (postfx_contents == CONTENTS_SLIME)
 	{
-		fog_r = r_postfx_underwater_fog_slime_r.value;
-		fog_g = r_postfx_underwater_fog_slime_g.value;
-		fog_b = r_postfx_underwater_fog_slime_b.value;
+		fog_r = 0.1f;
+		fog_g = 0.25f;
+		fog_b = 0.1f;
 	}
 	else if (postfx_contents == CONTENTS_LAVA)
 	{
-		fog_r = r_postfx_underwater_fog_lava_r.value;
-		fog_g = r_postfx_underwater_fog_lava_g.value;
-		fog_b = r_postfx_underwater_fog_lava_b.value;
+		fog_r = 0.6f;
+		fog_g = 0.2f;
+		fog_b = 0.05f;
 	}
 	out_state->underwater_fog_color[0] = PostFX_Saturate (fog_r);
 	out_state->underwater_fog_color[1] = PostFX_Saturate (fog_g);
@@ -519,12 +492,11 @@ void CL_PostFX_GetState (postfx_state_t *out_state)
 
 	if (r_postfx_quad.value > 0.f && (cl.items & IT_QUAD))
 	{
-		out_state->emissive_boost = q_max (0.f, r_postfx_quad_emissive_boost.value);
-		out_state->bloom_boost += q_max (0.f, r_postfx_quad_bloom_boost.value);
-		if (r_postfx_quad_pulse_intensity.value > 0.f && r_postfx_quad_pulse_speed.value > 0.f)
+		out_state->emissive_boost = 0.5f;
+		out_state->bloom_boost += 0.4f;
 		{
-			pulse = 0.5f + 0.5f * sinf ((float)cl.time * r_postfx_quad_pulse_speed.value * (float)M_PI * 2.f);
-			out_state->emissive_boost += pulse * q_max (0.f, r_postfx_quad_pulse_intensity.value);
+			pulse = 0.5f + 0.5f * sinf ((float)cl.time * 2.0f * (float)M_PI * 2.f);
+			out_state->emissive_boost += pulse * 0.1f;
 		}
 		out_state->emissive_boost = q_max (0.f, out_state->emissive_boost);
 	}
