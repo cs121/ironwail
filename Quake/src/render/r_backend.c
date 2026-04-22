@@ -126,6 +126,7 @@ static const iw_renderer_plugin_pipeline_services_t s_plugin_pipeline_services =
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
 cvar_t r_backend_api = { "r_backend_api", "gl", CVAR_ARCHIVE };
 cvar_t r_backend_allow_builtin_gl = { "r_backend_allow_builtin_gl", "1", CVAR_ARCHIVE };
+cvar_t r_refgl_debug = { "r_refgl_debug", "0", CVAR_ARCHIVE };
 
 /*
 ================
@@ -1134,9 +1135,14 @@ static qboolean R_Backend_LoadPluginFromPath (const char *path)
 	if (!path || !path[0])
 		return false;
 
+	Con_DPrintf ("R_Backend_LoadPluginFromPath: loading '%s'\n", path);
+
 	lib = Sys_LoadLibrary (path);
 	if (!lib)
+	{
+		Con_Warning ("R_Backend_LoadPluginFromPath: Sys_LoadLibrary failed for '%s'\n", path);
 		return false;
+	}
 
 	query_fn = (iw_renderer_plugin_query_fn) Sys_GetLibraryFunction (lib, "IW_RendererPlugin_Query");
 	if (!query_fn)
@@ -1219,6 +1225,7 @@ static void R_Backend_LoadRendererPlugins (void)
 	int search_dir_count = 0;
 	const char *ext_find;
 	int i;
+	int plugins_loaded = 0;
 
 #ifdef _WIN32
 	ext_find = "dll";
@@ -1236,6 +1243,8 @@ static void R_Backend_LoadRendererPlugins (void)
 		search_dirs[search_dir_count++] = ".";
 	}
 
+	Con_DPrintf ("R_Backend_LoadRendererPlugins: scanning %d search directories\n", search_dir_count);
+
 	for (i = 0; i < search_dir_count; ++i)
 	{
 		const char *dir = search_dirs[i];
@@ -1243,6 +1252,8 @@ static void R_Backend_LoadRendererPlugins (void)
 			continue;
 		if (i > 0 && search_dirs[0] && !q_strcasecmp (dir, search_dirs[0]))
 			continue;
+
+		Con_DPrintf ("R_Backend_LoadRendererPlugins: scanning '%s' for *.%s\n", dir, ext_find);
 
 		for (find = Sys_FindFirst (dir, ext_find); find; find = Sys_FindNext (find))
 		{
@@ -1258,9 +1269,13 @@ static void R_Backend_LoadRendererPlugins (void)
 			if ((size_t) q_snprintf (plugin_path, sizeof (plugin_path), "%s/%s", dir, find->name) >= sizeof (plugin_path))
 				continue;
 
-			R_Backend_LoadPluginFromPath (plugin_path);
+			if (R_Backend_LoadPluginFromPath (plugin_path))
+				++plugins_loaded;
 		}
 	}
+
+	if (plugins_loaded == 0)
+		Con_Warning ("R_Backend_LoadRendererPlugins: no renderer plugins loaded.\n");
 
 	/* OpenGL fallback registration is handled by R_Backend_Init() policy. */
 }
@@ -1752,6 +1767,7 @@ void R_Backend_Init (void)
 	Cvar_RegisterVariable (&r_backend);
 	Cvar_RegisterVariable (&r_backend_api);
 	Cvar_RegisterVariable (&r_backend_allow_builtin_gl);
+	Cvar_RegisterVariable (&r_refgl_debug);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
 	Cvar_SetCallback (&r_backend_api, R_Backend_ApiChanged_f);
 	R_Backend_PrintApiHelp ();
@@ -1773,7 +1789,8 @@ void R_Backend_Init (void)
 
 	R_Backend_Register (&s_vulkan_stub_backend);
 	R_Backend_Register (&s_dx12_stub_backend);
-	R_Backend_LoadRendererPlugins ();
+	if (r_refgl_debug.value != 0.0f || COM_CheckParm ("-refgl_debug") > 0)
+		R_Backend_LoadRendererPlugins ();
 	/* Keep an already-loaded OpenGL plugin authoritative; otherwise fall back to the built-in copy. */
 	if (!R_Backend_HasRegisteredName ("OpenGL"))
 		GL_Backend_Register ();

@@ -190,6 +190,7 @@ extern	cvar_t	r_oit;
 extern	cvar_t	r_alphasort;
 
 extern	cvar_t	gl_clear;
+extern	cvar_t	r_clearcolor;
 extern	cvar_t	gl_polyblend;
 extern	cvar_t	gl_nocolors;
 extern	cvar_t	gl_finish;

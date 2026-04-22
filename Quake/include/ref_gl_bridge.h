@@ -3,6 +3,10 @@
 
 #ifdef RENDERER_PLUGIN_BUILD
 
+#ifdef _WIN32
+#include <intrin.h>
+#endif
+
 #include "renderer_host_bridge.h"
 
 extern const iw_renderer_host_bridge_t *g_host_bridge;

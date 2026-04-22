@@ -319,7 +319,7 @@ void main()
 	if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
 	{
 		vec3 rim_light = rim_dlight_accum * RimLightParams1.w;
-		color += albedo * rim_light * rim_factor;
+		color += color * rim_light * rim_factor;
 	}
 
 	if (pp_debug_mode > 0)

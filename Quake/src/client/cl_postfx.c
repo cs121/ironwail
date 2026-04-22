@@ -427,7 +427,7 @@ void CL_PostFX_GetState (postfx_state_t *out_state)
 		{
 		case PFX_EVENT_PICKUP:
 			exposure += weight * event->params[0];
-			if (qtrue)
+			if (true)
 				bloom_add = q_max (bloom_add, weight * event->params[1]);
 			else
 				bloom_add += weight * event->params[1];

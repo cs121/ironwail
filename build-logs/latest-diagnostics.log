@@ -9,8 +9,8 @@ Build + Deploy Ironwail (Release x64)
 [INFO] Projektdatei gefunden: Windows\VisualStudio\ironwail.vcxproj
 [INFO] Sammle Diagnosedaten...
 ==== Environment ====
-DATE=22.04.2026
-TIME= 2:13:09,54
+DATE=23.04.2026
+TIME= 1:28:59,19
 CD=C:\Quake\source\ironwail
 PROCESSOR_ARCHITECTURE=AMD64
 VisualStudioVersion=

@@ -748,12 +748,12 @@ void R_Shadow_ApplyWorldReceiverUniforms (GLuint program)
 			framebufs.shadow.sun_size > 0 ? 1.f / (float)framebufs.shadow.sun_size : 0.f,
 			framebufs.shadow.dlight_size > 0 ? 1.f / (float)framebufs.shadow.dlight_size : 0.f);
 	rim_master = (r_rimlight.value > 0.f) ? 1.f : 0.f;
-	rim_world = 1.f;
+	rim_world = (r_rimlight_world.value > 0.f) ? 1.f : 0.f;
 	rim_models = (r_rimlight_models.value > 0.f) ? 1.f : 0.f;
 	rim_intensity = q_max (0.f, r_rimlight_intensity.value);
 	rim_power = q_max (0.5f, r_rimlight_power.value);
-	rim_sun = 1.0f;
-	rim_dlight = 1.0f;
+	rim_sun = q_max (0.f, r_rimlight_sun.value);
+	rim_dlight = q_max (0.f, r_rimlight_dlight.value);
 	rim_shadow = (r_rimlight_shadow.value > 0.f) ? 1.f : 0.f;
 	if (u->rim_params0 >= 0)
 		GL_Uniform4fFunc (u->rim_params0, rim_master, rim_intensity, rim_power, rim_shadow);
@@ -1030,9 +1030,9 @@ static void R_RenderSunShadowMap (void)
 				r_shadow_state.sun_eye[cascade],
 				r_shadow_state.sun_frustum[cascade],
 				NULL,
-				qfalse,
-				qfalse,
-				qtrue);
+				false,
+				false,
+				true);
 		}
 
 		GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.sun_depth_tex, 0, cascade);
@@ -1091,9 +1091,9 @@ static void R_RenderDLightShadowMaps (void)
 					*light,
 					r_shadow_state.dlight_frustum[slot][face],
 					&sphere,
-					qfalse,
-					qfalse,
-					qtrue);
+					false,
+					false,
+					true);
 			}
 
 			GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.dlight_depth_tex, 0, layer);

@@ -581,6 +581,10 @@ cvar_t	r_motionblur_depththreshold = { "r_motionblur_depththreshold", "0.1", CVA
 cvar_t	r_tonemap = { "r_tonemap", "2", CVAR_ARCHIVE };
 cvar_t	r_tonemap_exposure = { "r_tonemap_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_autoexposure = { "r_autoexposure", "1", CVAR_ARCHIVE };
+cvar_t	r_autoexposure_async = { "r_autoexposure_async", "1", CVAR_ARCHIVE };
+cvar_t	r_ae_min_scene_luma = { "r_ae_min_scene_luma", "0.01", CVAR_ARCHIVE };
+cvar_t	r_ae_min_exposure = { "r_ae_min_exposure", "0.85", CVAR_ARCHIVE };
+cvar_t	r_ae_max_exposure = { "r_ae_max_exposure", "1.15", CVAR_ARCHIVE };
 cvar_t	r_exposure_bias = { "r_exposure_bias", "1.0", CVAR_ARCHIVE };
 cvar_t	r_exposure_min = { "r_exposure_min", "0.85", CVAR_ARCHIVE };
 cvar_t	r_exposure_max = { "r_exposure_max", "1.15", CVAR_ARCHIVE };
@@ -760,10 +764,16 @@ qboolean r_fullbright_cheatsafe, r_lightmap_cheatsafe, r_drawworld_cheatsafe; //
 cvar_t	r_scale = { "r_scale", "1", CVAR_ARCHIVE };
 cvar_t	r_scene_scale_debug = { "r_scene_scale_debug", "0", CVAR_NONE };
 cvar_t	r_drs = { "r_drs", "0", CVAR_ARCHIVE };
+cvar_t	r_drs_use_gpu = { "r_drs_use_gpu", "1", CVAR_ARCHIVE };
 	cvar_t	r_drs_target_fps = { "r_drs_target_fps", "0", CVAR_ARCHIVE };
 	cvar_t	r_drs_min_scale = { "r_drs_min_scale", "25", CVAR_ARCHIVE };
 	cvar_t	r_drs_max_scale = { "r_drs_max_scale", "100", CVAR_ARCHIVE };
- cvar_t	r_drs_debug = { "r_drs_debug", "0", CVAR_NONE };
+cvar_t	r_drs_cooldown_after_down = { "r_drs_cooldown_after_down", "8", CVAR_ARCHIVE };
+cvar_t	r_drs_cooldown_after_up = { "r_drs_cooldown_after_up", "2", CVAR_ARCHIVE };
+cvar_t	r_drs_hysteresis_ms = { "r_drs_hysteresis_ms", "0.5", CVAR_ARCHIVE };
+cvar_t	r_drs_filter_alpha = { "r_drs_filter_alpha", "0.25", CVAR_ARCHIVE };
+cvar_t	r_drs_debug = { "r_drs_debug", "0", CVAR_NONE };
+cvar_t	r_drs_step_size = { "r_drs_step_size", "0.02", CVAR_ARCHIVE };
 cvar_t	r_drs_sharpen = { "r_drs_sharpen", "0.3", CVAR_ARCHIVE };
 
 static float view_znear;
@@ -856,7 +866,7 @@ static void R_UpdateDynamicResolutionScale (void)
 	float current_resolution;
 	float new_resolution;
 	int debug_level;
-	qboolean use_gpu = qtrue;
+	qboolean use_gpu = (r_drs_use_gpu.value != 0.f);
 	qboolean use_gpu_timing = false;
 	const int max_down_rate = 4;
 
@@ -879,13 +889,13 @@ static void R_UpdateDynamicResolutionScale (void)
 		target_ms = 1000.f / 60.f;
 	target_ms = CLAMP (1.f, target_ms, 1000.f);
 
-	alpha = CLAMP (0.01f, 0.25f, 1.f);
-	hysteresis_ms = q_max (0.f, 0.5f);
+	alpha = CLAMP (0.01f, r_drs_filter_alpha.value, 1.f);
+	hysteresis_ms = q_max (0.f, r_drs_hysteresis_ms.value);
 	min_resolution = R_GetDRSMinResolution ();
 	max_resolution = R_GetDRSMaxResolution ();
-	step = CLAMP (0.01f, 0.02f, 0.10f);
-	cooldown_after_down = CLAMP (0, (int)Q_rint (8.f), 120);
-	cooldown_after_up = CLAMP (0, (int)Q_rint (2.f), 120);
+	step = CLAMP (0.01f, r_drs_step_size.value, 0.10f);
+	cooldown_after_down = CLAMP (0, (int)Q_rint (r_drs_cooldown_after_down.value), 120);
+	cooldown_after_up = CLAMP (0, (int)Q_rint (r_drs_cooldown_after_up.value), 120);
 	debug_level = (int)Q_rint (r_drs_debug.value);
 
 	if (!r_drs_state.initialized)

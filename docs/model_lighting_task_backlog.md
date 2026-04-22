@@ -21,4 +21,3 @@ already present in the code are marked as done; the rest remain open ideas.
 
 - `r_minlight_models` remains the fallback for very dark model samples.
 - The weapon model (`cl.viewent`) still gets separate boost/minlight treatment in the alias path.
-- There is no `r_dlight_models_directional` cvar in the current tree.
