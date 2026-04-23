@@ -61,54 +61,34 @@ static int FG_MoveSetupStagePassesToFront (void);
 static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count);
 static void FG_ConsumeBackendTimerSamples (const IRenderBackend *backend);
 
-typedef struct fg_resource_bit_mapping_s
-{
-	unsigned bit;
-	render_backend_resource_slot_t slot;
-	qboolean requires_backend_resource;
-} fg_resource_bit_mapping_t;
-
-static const fg_resource_bit_mapping_t s_fg_resource_mappings[] = {
-	{ RENDER_RES_SCENE_COLOR, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, true },
-	{ RENDER_RES_SCENE_DEPTH, R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH, true },
-	{ RENDER_RES_COMPOSITE_COLOR, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR, true },
-	{ RENDER_RES_COMPOSITE_DEPTH, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH, true },
-	{ RENDER_RES_SHADOW_SUN_DEPTH, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH, true },
-	{ RENDER_RES_VELOCITY, R_BACKEND_RESOURCE_SLOT_VELOCITY, true },
-	{ RENDER_RES_DECALS, R_BACKEND_RESOURCE_SLOT_NONE, false },
-	{ RENDER_RES_SSAO_FOG_STATE, R_BACKEND_RESOURCE_SLOT_NONE, false }
+static const unsigned s_fg_resource_bits[] = {
+	RENDER_RES_SCENE_COLOR,
+	RENDER_RES_SCENE_DEPTH,
+	RENDER_RES_COMPOSITE_COLOR,
+	RENDER_RES_COMPOSITE_DEPTH,
+	RENDER_RES_SHADOW_SUN_DEPTH,
+	RENDER_RES_VELOCITY,
+	RENDER_RES_DECALS,
+	RENDER_RES_SSAO_FOG_STATE
 };
-static render_backend_resource_state_t s_resource_states[Q_COUNTOF (s_fg_resource_mappings)];
+static render_backend_resource_state_t s_resource_states[Q_COUNTOF (s_fg_resource_bits)];
 
-static const fg_resource_bit_mapping_t *FG_FindResourceMapping (unsigned bit)
+static qboolean FG_QueryResourceBinding (unsigned bit, render_backend_resource_slot_t *out_slot, qboolean *out_requires_backend_resource)
 {
-	int i;
-
-	for (i = 0; i < (int)Q_COUNTOF (s_fg_resource_mappings); ++i)
-	{
-		if (s_fg_resource_mappings[i].bit == bit)
-			return &s_fg_resource_mappings[i];
-	}
-
-	return NULL;
+	return R_Backend_GetFrameGraphResourceBinding (bit, out_slot, out_requires_backend_resource);
 }
 
 static qboolean FG_GetResourceSlotForBit (unsigned bit, render_backend_resource_slot_t *out_slot)
 {
-	const fg_resource_bit_mapping_t *mapping = FG_FindResourceMapping (bit);
-	if (!mapping)
-		return false;
-	if (out_slot)
-		*out_slot = mapping->slot;
-	return true;
+	return FG_QueryResourceBinding (bit, out_slot, NULL);
 }
 
 static int FG_FindResourceMappingIndex (unsigned bit)
 {
 	int i;
-	for (i = 0; i < (int)Q_COUNTOF (s_fg_resource_mappings); ++i)
+	for (i = 0; i < (int)Q_COUNTOF (s_fg_resource_bits); ++i)
 	{
-		if (s_fg_resource_mappings[i].bit == bit)
+		if (s_fg_resource_bits[i] == bit)
 			return i;
 	}
 	return -1;
@@ -429,16 +409,16 @@ static void FG_EmitPassBarriers (const RenderPassDesc *pass, RenderPassContext *
 	for (bit = 1u; bit != 0; bit <<= 1)
 	{
 		render_backend_resource_state_t desired_state = R_BACKEND_RESOURCE_STATE_UNKNOWN;
-		const fg_resource_bit_mapping_t *mapping;
 		const render_backend_resource_ref_t *resource_ref;
 		int mapping_index;
 		render_backend_resource_state_t before_state;
+		render_backend_resource_slot_t slot = R_BACKEND_RESOURCE_SLOT_NONE;
+		qboolean requires_backend_resource = false;
 
 		if (((pass->reads | pass->writes) & bit) == 0u)
 			continue;
 
-		mapping = FG_FindResourceMapping (bit);
-		if (!mapping || !mapping->requires_backend_resource)
+		if (!FG_QueryResourceBinding (bit, &slot, &requires_backend_resource) || !requires_backend_resource)
 			continue;
 
 		if ((pass->writes & bit) != 0u)
@@ -456,7 +436,7 @@ static void FG_EmitPassBarriers (const RenderPassDesc *pass, RenderPassContext *
 		if (desired_state == R_BACKEND_RESOURCE_STATE_UNKNOWN)
 			continue;
 
-		resource_ref = R_FrameGraph_GetResourceRef (ctx->resources, mapping->slot);
+		resource_ref = R_FrameGraph_GetResourceRef (ctx->resources, slot);
 		if (!resource_ref || (ctx->backend && ctx->backend->is_resource_valid
 			&& !ctx->backend->is_resource_valid (ctx->resources, resource_ref)))
 			continue;
@@ -499,11 +479,11 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 
 	for (bit = 1u; bit != 0; bit <<= 1)
 	{
-		const fg_resource_bit_mapping_t *mapping;
+		render_backend_resource_slot_t slot;
+		qboolean requires_backend_resource;
 		if (((pass_desc->reads | pass_desc->writes) & bit) == 0u)
 			continue;
-		mapping = FG_FindResourceMapping (bit);
-		if (!mapping)
+		if (!FG_QueryResourceBinding (bit, &slot, &requires_backend_resource))
 		{
 			if (emit_warning)
 				Con_Warning ("FrameGraph: pass '%s' uses unmapped resource bit 0x%x\n",
@@ -515,11 +495,11 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 
 	for (bit = 1u; bit != 0; bit <<= 1)
 	{
-		const fg_resource_bit_mapping_t *mapping;
+		render_backend_resource_slot_t slot;
+		qboolean requires_backend_resource;
 		if ((pass_desc->writes & bit) == 0u)
 			continue;
-		mapping = FG_FindResourceMapping (bit);
-		if (!mapping || !mapping->requires_backend_resource)
+		if (!FG_QueryResourceBinding (bit, &slot, &requires_backend_resource) || !requires_backend_resource)
 			continue;
 		if (!FG_PassHasAttachmentForBit (pass_desc, bit))
 		{
@@ -539,9 +519,12 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 		for (i = 0; i < pass_desc->num_color_attachments; ++i)
 		{
 			unsigned resource_bit = pass_desc->color_attachments[i].resource_bit;
-			const fg_resource_bit_mapping_t *mapping = FG_FindResourceMapping (resource_bit);
+			render_backend_resource_slot_t slot = R_BACKEND_RESOURCE_SLOT_NONE;
+			qboolean requires_backend_resource = false;
 
-			if (!mapping || !mapping->requires_backend_resource || mapping->slot == R_BACKEND_RESOURCE_SLOT_NONE)
+			if (!FG_QueryResourceBinding (resource_bit, &slot, &requires_backend_resource)
+				|| !requires_backend_resource
+				|| slot == R_BACKEND_RESOURCE_SLOT_NONE)
 			{
 				if (emit_warning)
 					Con_Warning ("FrameGraph: pass '%s' color attachment[%u] does not map to backend resource\n",
@@ -574,9 +557,12 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 	if (pass_desc->depth_attachment)
 	{
 		unsigned resource_bit = pass_desc->depth_attachment->resource_bit;
-		const fg_resource_bit_mapping_t *mapping = FG_FindResourceMapping (resource_bit);
+		render_backend_resource_slot_t slot = R_BACKEND_RESOURCE_SLOT_NONE;
+		qboolean requires_backend_resource = false;
 
-		if (!mapping || !mapping->requires_backend_resource || mapping->slot == R_BACKEND_RESOURCE_SLOT_NONE)
+		if (!FG_QueryResourceBinding (resource_bit, &slot, &requires_backend_resource)
+			|| !requires_backend_resource
+			|| slot == R_BACKEND_RESOURCE_SLOT_NONE)
 		{
 			if (emit_warning)
 				Con_Warning ("FrameGraph: pass '%s' depth attachment does not map to backend resource\n",
@@ -1211,13 +1197,12 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	for (bit = 1u; bit != 0; bit <<= 1)
 	{
 		qboolean read_required = true;
-		const fg_resource_bit_mapping_t *mapping;
-		render_backend_resource_slot_t slot;
+		qboolean requires_backend_resource = false;
+		render_backend_resource_slot_t slot = R_BACKEND_RESOURCE_SLOT_NONE;
 		const render_backend_resource_ref_t *resource_ref;
 		if ((pass->reads & bit) == 0)
 			continue;
-		mapping = FG_FindResourceMapping (bit);
-		if (!mapping)
+		if (!FG_QueryResourceBinding (bit, &slot, &requires_backend_resource))
 		{
 			Con_DWarning ("FrameGraph: pass '%s' uses unmapped resource bit 0x%x\n", pass->name, bit);
 			SDL_assert (!"FrameGraph pass uses unmapped resource bit");
@@ -1231,9 +1216,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 		}
 		if (!read_required)
 			continue;
-		if (!mapping->requires_backend_resource)
-			continue;
-		if (!FG_GetResourceSlotForBit (bit, &slot))
+		if (!requires_backend_resource)
 			continue;
 
 		resource_ref = R_FrameGraph_GetResourceRef (ctx->resources, slot);

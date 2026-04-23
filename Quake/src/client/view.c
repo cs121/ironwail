@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "cl_iwmusic.h"
 #include "cl_postfx.h"
+#include "render_dispatch.h"
 
 /*
 
@@ -1115,7 +1116,10 @@ void V_RenderView (void)
 
 	//johnfitz -- removed lcd code
 
-	R_RenderView ();
+	if (g_rend && g_rend->R_RenderView)
+		g_rend->R_RenderView ();
+	else
+		R_RenderView ();
 }
 
 /*

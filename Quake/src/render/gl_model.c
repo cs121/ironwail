@@ -2045,11 +2045,11 @@ static void Mod_LoadLighting (lump_t *l)
                         loadmodel->lightdatasamples = samples;
                         loadmodel->litfile = true;
 
-                        for (int i = 0; i < samples; i++, src += 3)
+                        for (int si = 0; si < samples; si++, src += 3)
                         {
-                                loadmodel->lightdata[i * 3 + 0] = src[0];
-                                loadmodel->lightdata[i * 3 + 1] = src[1];
-                                loadmodel->lightdata[i * 3 + 2] = src[2];
+                                loadmodel->lightdata[si * 3 + 0] = src[0];
+                                loadmodel->lightdata[si * 3 + 1] = src[1];
+                                loadmodel->lightdata[si * 3 + 2] = src[2];
                         }
                         /* Keep the RGB path populated as well so later code can treat
                          * BSPX RGBLIGHTING like other colored light sources. */
@@ -2382,7 +2382,7 @@ static void Mod_LoadVertexes (lump_t *l)
 		void *normal_lump = Q1BSPX_FindLump("VERTEXNORMALS", &bspxsize);
 		if (normal_lump)
 		{
-			if (bspxsize == count * sizeof(vec3_t))
+			if (bspxsize == (int)(count * sizeof(vec3_t)))
 			{
 				Q1BSPX_MarkUsed("VERTEXNORMALS");
 				normal_in = (const float *)normal_lump;
@@ -3169,12 +3169,12 @@ static void Mod_LoadFaces (lump_t *l)
                         decoupledlm = NULL;
 
                         lmshift = Q1BSPX_FindLump("LMSHIFT", &lumpsize);
-                        if (lumpsize != sizeof(*lmshift)*count)
+                        if (lumpsize != (int)(sizeof(*lmshift)*count))
                                 lmshift = NULL;
                         else
                                 Q1BSPX_MarkUsed("LMSHIFT");
                         lmoffset = Q1BSPX_FindLump("LMOFFSET", &lumpsize);
-                        if (lumpsize != sizeof(*lmoffset)*count)
+                        if (lumpsize != (int)(sizeof(*lmoffset)*count))
                                 lmoffset = NULL;
                         else
                                 Q1BSPX_MarkUsed("LMOFFSET");
@@ -3194,17 +3194,17 @@ static void Mod_LoadFaces (lump_t *l)
                                 }
                         }
                 }
-                		lmstyle16 = Q1BSPX_FindLump("LMSTYLE16", &lumpsize);
-		stylesperface = lumpsize/(sizeof(*lmstyle16)*count);
-		if (lumpsize != sizeof(*lmstyle16)*stylesperface*count)
+                lmstyle16 = Q1BSPX_FindLump("LMSTYLE16", &lumpsize);
+		stylesperface = lumpsize/(int)(sizeof(*lmstyle16)*count);
+		if (lumpsize != (int)(sizeof(*lmstyle16)*stylesperface*count))
 			lmstyle16 = NULL;
 		else
 			Q1BSPX_MarkUsed("LMSTYLE16");
 		if (!lmstyle16)
 		{
 			lmstyle8 = Q1BSPX_FindLump("LMSTYLE", &lumpsize);
-			stylesperface = lumpsize/(sizeof(*lmstyle8)*count);
-			if (lumpsize != sizeof(*lmstyle8)*stylesperface*count)
+			stylesperface = lumpsize/(int)(sizeof(*lmstyle8)*count);
+			if (lumpsize != (int)(sizeof(*lmstyle8)*stylesperface*count))
 				lmstyle8 = NULL;
 			else
 				Q1BSPX_MarkUsed("LMSTYLE");

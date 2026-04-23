@@ -5603,7 +5603,7 @@ static void R_ShowBoundingBoxes (void)
 				if (fieldofs < 0 || fieldofs > (int)sizeof (entvars_t) - (int)sizeof (eval_t))
 					continue;
 				val = (eval_t*)((char*)&focused->v + fieldofs);
-				if (fieldofs == offsetof (entvars_t, chain) || !val->edict)
+				if (fieldofs == (int)offsetof (entvars_t, chain) || !val->edict)
 					continue;
 				ed = PROG_TO_EDICT (val->edict);
 				if (ed == focused || ed->free || ed == sv_player)
@@ -5647,7 +5647,7 @@ static void R_ShowBoundingBoxes (void)
 						if (fieldofs < 0 || fieldofs > (int)sizeof (entvars_t) - (int)sizeof (eval_t))
 							continue;
 						val = (eval_t*)((char*)&ed->v + fieldofs);
-						if (fieldofs == offsetof (entvars_t, chain) || !val->edict)
+						if (fieldofs == (int)offsetof (entvars_t, chain) || !val->edict)
 							continue;
 						if (PROG_TO_EDICT (val->edict) == focused)
 							R_AddHighlightedEntity (ed, SHOWBBOX_LINK_INCOMING);

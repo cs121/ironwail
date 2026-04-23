@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bgmusic.h"
 #include "steam.h"
 #include "devstats.h"
+#include "render_dispatch.h"
 
 const char *svc_strings[] =
 {
@@ -426,7 +427,10 @@ void CL_ParseServerInfo (void)
 // local state
 	cl_entities[0].model = cl.worldmodel = cl.model_precache[1];
 
-	R_NewMap ();
+	if (g_rend && g_rend->R_NewMap)
+		g_rend->R_NewMap ();
+	else
+		R_NewMap ();
 	CL_IWMusic_NewMap ();
 
 	//johnfitz -- clear out string; we don't consider identical

@@ -748,7 +748,6 @@ void R_TranslatePlayerSkin (int playernum)
 	top = (cl.scores[playernum].colors & 0xf0)>>4;
 	bottom = cl.scores[playernum].colors &15;
 
-	//FIXME: if gl_nocolors is on, then turned off, the textures may be out of sync with the scoreboard colors.
 	if (!gl_nocolors.value)
 	{
 		if (playertextures[playernum])

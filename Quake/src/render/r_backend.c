@@ -161,6 +161,20 @@ runtime framegraph code can assert these callbacks are safe to use.
 */
 static qboolean R_Backend_ValidateContract (const IRenderBackend *backend, qboolean emit_warning)
 {
+	const qboolean has_required_pass_callbacks =
+		backend
+		&& backend->pass_setup_view
+		&& backend->pass_shadowmaps
+		&& backend->pass_render_scene
+		&& backend->pass_warp_resolve
+		&& backend->pass_postprocess
+		&& backend->pass_overlay_viewmodel
+		&& backend->pass_overlay_polyblend;
+	const qboolean has_legacy_pass_bridge =
+		backend
+		&& backend->begin_pass
+		&& backend->end_pass;
+
 	if (!backend)
 		return false;
 
@@ -182,33 +196,33 @@ static qboolean R_Backend_ValidateContract (const IRenderBackend *backend, qbool
 		return false;
 	}
 
-	if (!backend->has_required_pass_callbacks
-		|| !backend->has_required_pass_callbacks ())
+	if (backend->has_required_pass_callbacks
+		&& !backend->has_required_pass_callbacks ()
+		&& !has_legacy_pass_bridge)
 	{
 		if (emit_warning)
 		{
-			Con_Warning ("Renderer backend '%s' does not advertise required pass callback support.\n",
+			Con_Warning ("Renderer backend '%s' does not advertise required pass callback support and has no legacy pass bridge.\n",
 				backend->name ? backend->name : "<unnamed>");
 		}
 		SDL_assert (!"Renderer backend pass callback contract violation");
 		return false;
 	}
 
-	if (!backend->pass_setup_view
-		|| !backend->pass_shadowmaps
-		|| !backend->pass_render_scene
-		|| !backend->pass_warp_resolve
-		|| !backend->pass_postprocess
-		|| !backend->pass_overlay_viewmodel
-		|| !backend->pass_overlay_polyblend)
+	if (!has_required_pass_callbacks && !has_legacy_pass_bridge)
 	{
 		if (emit_warning)
 		{
-			Con_Warning ("Renderer backend '%s' is missing required render-pass callbacks.\n",
+			Con_Warning ("Renderer backend '%s' is missing required render-pass callbacks and lacks begin_pass/end_pass fallback.\n",
 				backend->name ? backend->name : "<unnamed>");
 		}
 		SDL_assert (!"Renderer backend required pass callback missing");
 		return false;
+	}
+	if (!has_required_pass_callbacks && has_legacy_pass_bridge && emit_warning)
+	{
+		Con_DWarning ("Renderer backend '%s' is running through legacy pass bridge callbacks (begin_pass/end_pass).\n",
+			backend->name ? backend->name : "<unnamed>");
 	}
 
 	return true;
@@ -237,6 +251,47 @@ const char *R_Backend_ResourceSlotName (render_backend_resource_slot_t slot)
 	case R_BACKEND_RESOURCE_SLOT_VELOCITY: return "velocity";
 	default: return "unknown";
 	}
+}
+
+typedef struct r_backend_framegraph_resource_binding_s
+{
+	unsigned bit;
+	render_backend_resource_slot_t slot;
+	qboolean requires_backend_resource;
+} r_backend_framegraph_resource_binding_t;
+
+static const r_backend_framegraph_resource_binding_t s_framegraph_resource_bindings[] = {
+	{ RENDER_RES_SCENE_COLOR, R_BACKEND_RESOURCE_SLOT_SCENE_COLOR, true },
+	{ RENDER_RES_SCENE_DEPTH, R_BACKEND_RESOURCE_SLOT_SCENE_DEPTH, true },
+	{ RENDER_RES_COMPOSITE_COLOR, R_BACKEND_RESOURCE_SLOT_COMPOSITE_COLOR, true },
+	{ RENDER_RES_COMPOSITE_DEPTH, R_BACKEND_RESOURCE_SLOT_COMPOSITE_DEPTH, true },
+	{ RENDER_RES_SHADOW_SUN_DEPTH, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH, true },
+	{ RENDER_RES_VELOCITY, R_BACKEND_RESOURCE_SLOT_VELOCITY, true },
+	{ RENDER_RES_DECALS, R_BACKEND_RESOURCE_SLOT_NONE, false },
+	{ RENDER_RES_SSAO_FOG_STATE, R_BACKEND_RESOURCE_SLOT_NONE, false }
+};
+
+qboolean R_Backend_GetFrameGraphResourceBinding (unsigned resource_bit, render_backend_resource_slot_t *out_slot, qboolean *out_requires_backend_resource)
+{
+	unsigned i;
+
+	for (i = 0; i < (unsigned)Q_COUNTOF (s_framegraph_resource_bindings); ++i)
+	{
+		const r_backend_framegraph_resource_binding_t *binding = &s_framegraph_resource_bindings[i];
+		if (binding->bit != resource_bit)
+			continue;
+		if (out_slot)
+			*out_slot = binding->slot;
+		if (out_requires_backend_resource)
+			*out_requires_backend_resource = binding->requires_backend_resource;
+		return true;
+	}
+
+	if (out_slot)
+		*out_slot = R_BACKEND_RESOURCE_SLOT_NONE;
+	if (out_requires_backend_resource)
+		*out_requires_backend_resource = false;
+	return false;
 }
 
 static const struct render_graph_backend_resource_entry_s *R_Backend_FindResourceEntryById (const RenderGraphResourceHandle *resources, unsigned resource_id)
@@ -743,8 +798,20 @@ render_backend_runtime_status_t R_Backend_GetRuntimeStatusForName (const char *b
 
 static void R_Backend_PrintApiHelp (void)
 {
+	const IRenderBackend *gl_backend = R_Backend_FindByName ("OpenGL");
+	render_backend_runtime_status_t gl_status = R_BACKEND_RUNTIME_STUB;
+
+	if (gl_backend)
+	{
+		gl_status = R_Backend_GetRuntimeStatusForBackend (gl_backend);
+	}
+	else if (IW_RendererPlugin_GetBuiltinOpenGLBackend ())
+	{
+		gl_status = R_BACKEND_RUNTIME_IMPLEMENTED;
+	}
+
 	Con_Printf ("r_backend_api help: gl=%s, vulkan=%s, dx12=%s\n",
-		R_Backend_GetRuntimeStatusLabel (R_Backend_GetRuntimeStatusForName ("OpenGL")),
+		R_Backend_GetRuntimeStatusLabel (gl_status),
 		R_Backend_GetRuntimeStatusLabel (R_Backend_GetRuntimeStatusForName ("Vulkan")),
 		R_Backend_GetRuntimeStatusLabel (R_Backend_GetRuntimeStatusForName ("DX12")));
 	Con_Printf ("  gl: production path.\n");
@@ -1226,6 +1293,9 @@ static void R_Backend_LoadRendererPlugins (void)
 	const char *ext_find;
 	int i;
 	int plugins_loaded = 0;
+	int plugin_candidates = 0;
+	int plugin_failed = 0;
+	const qboolean plugin_debug = (r_refgl_debug.value != 0.0f || COM_CheckParm ("-refgl_debug") > 0);
 
 #ifdef _WIN32
 	ext_find = "dll";
@@ -1269,13 +1339,33 @@ static void R_Backend_LoadRendererPlugins (void)
 			if ((size_t) q_snprintf (plugin_path, sizeof (plugin_path), "%s/%s", dir, find->name) >= sizeof (plugin_path))
 				continue;
 
+			++plugin_candidates;
 			if (R_Backend_LoadPluginFromPath (plugin_path))
 				++plugins_loaded;
+			else
+				++plugin_failed;
 		}
 	}
 
 	if (plugins_loaded == 0)
-		Con_Warning ("R_Backend_LoadRendererPlugins: no renderer plugins loaded.\n");
+	{
+		if (plugin_candidates == 0)
+		{
+			Con_Warning ("R_Backend_LoadRendererPlugins: no renderer plugin files found.\n");
+		}
+		else
+		{
+			Con_Warning ("R_Backend_LoadRendererPlugins: found %d plugin candidate(s), but none loaded successfully.\n",
+				plugin_candidates);
+		}
+	}
+	else if (plugin_debug)
+	{
+		Con_Printf ("R_Backend_LoadRendererPlugins: loaded=%d failed=%d candidates=%d\n",
+			plugins_loaded,
+			plugin_failed,
+			plugin_candidates);
+	}
 
 	/* OpenGL fallback registration is handled by R_Backend_Init() policy. */
 }
@@ -1624,6 +1714,13 @@ static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend)
 
 		if (!q_strcasecmp (s_registered_backends[i]->name, backend->name))
 		{
+			if (s_registered_backends[i] != backend)
+			{
+				Con_DPrintf ("Renderer backend '%s' registration overridden (%p -> %p).\n",
+					backend->name ? backend->name : "<unnamed>",
+					(const void *)s_registered_backends[i],
+					(const void *)backend);
+			}
 			s_registered_backends[i] = backend;
 			if (s_active_backend && !q_strcasecmp (s_active_backend->name, backend->name))
 				s_active_backend = backend;
@@ -1770,7 +1867,6 @@ void R_Backend_Init (void)
 	Cvar_RegisterVariable (&r_refgl_debug);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
 	Cvar_SetCallback (&r_backend_api, R_Backend_ApiChanged_f);
-	R_Backend_PrintApiHelp ();
 	if (!s_backend_audit_cmd_registered)
 	{
 		Cmd_AddCommand ("r_backend_wrapper_audit", R_Backend_WrapperAudit_f);
@@ -1791,9 +1887,6 @@ void R_Backend_Init (void)
 	R_Backend_Register (&s_dx12_stub_backend);
 	if (r_refgl_debug.value != 0.0f || COM_CheckParm ("-refgl_debug") > 0)
 		R_Backend_LoadRendererPlugins ();
-	/* Keep an already-loaded OpenGL plugin authoritative; otherwise fall back to the built-in copy. */
-	if (!R_Backend_HasRegisteredName ("OpenGL"))
-		GL_Backend_Register ();
 
 	if (!R_Backend_HasRegisteredName ("OpenGL"))
 	{
@@ -1805,11 +1898,11 @@ void R_Backend_Init (void)
 			{
 				Sys_Error ("Failed to register built-in OpenGL backend fallback.\n");
 			}
-			Con_Warning ("ref_gl renderer plugin not found; using built-in OpenGL fallback (set r_backend_allow_builtin_gl 0 to require external renderer DLLs).\n");
+			Con_Warning ("No external OpenGL renderer plugin is available; using built-in OpenGL fallback (set r_backend_allow_builtin_gl 0 to require external renderer DLLs).\n");
 		}
 		else
 		{
-			Sys_Error ("No OpenGL renderer plugin found; %s not found or failed to load and r_backend_allow_builtin_gl=0.\n",
+			Sys_Error ("No OpenGL renderer backend is available; external plugin '%s' was not loaded and r_backend_allow_builtin_gl=0.\n",
 				s_ref_gl_plugin_filename);
 		}
 	}
@@ -1818,8 +1911,12 @@ void R_Backend_Init (void)
 		s_active_backend = s_registered_backends[0];
 
 	if (!R_Backend_Select (R_Backend_ApiToCanonicalName (r_backend_api.string)))
+	{
 		if (!R_Backend_Select (r_backend.string))
-		R_Backend_ApplySelectionToCvar ();
+			R_Backend_ApplySelectionToCvar ();
+	}
+
+	R_Backend_PrintApiHelp ();
 }
 
 void R_Backend_Shutdown (void)

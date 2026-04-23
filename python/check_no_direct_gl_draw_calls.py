@@ -16,13 +16,13 @@ FORBIDDEN_PATTERNS = (
 
 def main() -> int:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    quake_dir = repo_root / "Quake"
+    source_root = repo_root / "Quake" / "src"
     allow_files = {
-        (quake_dir / "gl_backend.c").resolve(),
+        (source_root / "render" / "gl_backend.c").resolve(),
     }
     failures = []
 
-    for path in quake_dir.glob("*.c"):
+    for path in source_root.rglob("*.c"):
         full = path.resolve()
         if full in allow_files:
             continue
@@ -32,7 +32,7 @@ def main() -> int:
         for line_no, line in enumerate(lines, start=1):
             for pattern in FORBIDDEN_PATTERNS:
                 if pattern.search(line):
-                    failures.append((str(path.relative_to(repo_root)), line_no, line.strip()))
+                    failures.append((str(path.relative_to(repo_root)).replace("\\", "/"), line_no, line.strip()))
                     break
 
     if failures:

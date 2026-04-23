@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bot_main.h"
 #include "bgmusic.h"
 #include "steam.h"
+#include "render_dispatch.h"
 #include <setjmp.h>
 
 /*

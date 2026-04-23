@@ -249,3 +249,29 @@ Reviewed against the current framegraph/backend split and the still-GL-heavy exe
 6. Must-fix before serious Vulkan/DX12: state ownership, resource transitions, pass contracts, submission abstraction.
 7. Incremental path viability: **yes**, if GL remains first-class during phased migration.
 8. Confidence: **medium-high** for architecture-level findings; **medium** for runtime-correctness edge cases without exhaustive runtime tracing.
+
+## 14. ref_gl.dll status after remediation (April 23, 2026)
+
+### Resolved in this remediation
+1. Loader policy: plugin scan/load now runs unconditionally; `r_refgl_debug` is verbose-only.
+2. OpenGL selection policy: external `ref_gl.dll` is preferred, built-in OpenGL is fallback-only (`r_backend_allow_builtin_gl` gate).
+3. Entry-point dispatch: host call sites now go through `RenderDispatch_Get()` with hardened defaults, so plugin entry-points are used when present and internal functions remain safe fallback.
+4. Guardrail checks: direct-draw and legacy pipeline-state scripts now scan recursive `Quake/src` scope (not top-level only), matching migration enforcement intent.
+5. Runtime diagnostics: startup help now reflects post-registration state (observed `r_backend_api help: gl=implemented, vulkan=experimental, dx12=experimental` with plugins loaded).
+6. Pass-contract hardening: backend validation now accepts either full required pass callbacks or explicit legacy `begin_pass`/`end_pass` bridge fallback.
+7. Framegraph adapter cleanup: resource-bit to backend-slot mapping moved behind `R_Backend_GetFrameGraphResourceBinding()` so `r_framegraph.c` does not own that renderer mapping directly.
+
+### Remaining open migration topics
+1. High-level render code still contains GL-centric logic and state assumptions in several paths; backend abstraction is improved but not fully decoupled.
+2. Framegraph resource/state semantics are still coarser than explicit API needs (transition/access modeling depth remains limited).
+3. Descriptor-style binding and command-encoder style submission are still partial migration areas.
+
+### Risk / regression assessment
+1. `ref_gl.dll` loading is now robust for normal runs (no debug-gate requirement), with controlled fallback behavior when plugin loading fails.
+2. Regression risk from dispatch activation is reduced by internal default wiring and per-field entry-point overlay, but coverage still depends on continued smoke + map-load validation.
+3. Guardrail scripts now enforce the intended source scope, reducing risk of unnoticed direct-GL reintroduction.
+
+### Recommended next steps
+1. Keep `r_backend_wrapper_audit` and guardrail scripts in CI gating for renderer-affecting PRs.
+2. Add one deeper runtime smoke variant (map load + short playthrough) to complement startup-only smoke.
+3. Continue migration by removing remaining direct GL/state leakage from high-frequency pass code paths.

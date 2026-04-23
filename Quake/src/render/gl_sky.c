@@ -495,7 +495,24 @@ void Sky_LoadSkyBox (const char *name)
 			if (srcpixels)
 				memcpy (dstpixels, srcpixels, numfacebytes);
 			else
-				memset (dstpixels, 0, numfacebytes); // TODO: average out existing faces instead?
+			{
+				int k, face_count = 0;
+				const int pixcount = samesize * samesize * 4;
+				memset (dstpixels, 0, numfacebytes);
+				for (k = 0; k < 6; k++)
+				{
+					if (data[cubemap_order[k]])
+					{
+						const byte *srcface = data[cubemap_order[k]];
+						int p;
+						face_count++;
+						for (p = 0; p < pixcount; p++)
+							dstpixels[p] += (byte)(srcface[p] / 6);
+					}
+				}
+				if (face_count == 0)
+					memset (dstpixels, 0, numfacebytes);
+			}
 			newsky.cubemap_offsets[i] = dstpixels;
 		}
 
@@ -571,8 +588,7 @@ void Sky_NewMap (void)
 	//
 	data = cl.worldmodel->entities;
 	if (!data)
-		return; //FIXME: how could this possibly ever happen? -- if there's no
-	// worldspawn then the sever wouldn't send the loadmap message to the client
+		return;
 
 	data = COM_Parse(data);
 	if (!data) //should never happen

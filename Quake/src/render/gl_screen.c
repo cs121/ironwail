@@ -1606,7 +1606,7 @@ void SCR_DrawEdictInfo (void)
 			const char		*val;
 			ddef_t			*d = &qcvm->fielddefs[i];
 
-			if (d->ofs*4 == offsetof (entvars_t, classname) || !ED_IsRelevantField (ed, d))
+			if ((int)d->ofs*4 == (int)offsetof (entvars_t, classname) || !ED_IsRelevantField (ed, d))
 				continue;
 
 			COM_TintString (PR_GetString (d->s_name), tinted, sizeof (tinted));
