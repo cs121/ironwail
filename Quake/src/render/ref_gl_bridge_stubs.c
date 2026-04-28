@@ -25,6 +25,20 @@ void Bridge_Init (const iw_renderer_host_bridge_t *bridge)
 	}
 }
 
+void Bridge_DrawFlush (void)
+{
+	TexMgr_Trace ("Bridge_DrawFlush: begin");
+	Draw_Flush ();
+	TexMgr_Trace ("Bridge_DrawFlush: end");
+}
+
+void Bridge_DrawInit (void)
+{
+	TexMgr_Trace ("Bridge_DrawInit: begin");
+	Draw_Init ();
+	TexMgr_Trace ("Bridge_DrawInit: end");
+}
+
 void Con_Printf (const char *fmt, ...)
 {
 	va_list args;
@@ -385,6 +399,11 @@ qboolean CL_InCutscene (void)
 qboolean CL_IsPlayerEnt (const entity_t *ent)
 {
 	return g_bridge_fn->cl_is_player_ent (ent);
+}
+
+void CL_PostFX_Reset (void)
+{
+	g_bridge_fn->cl_postfx_reset ();
 }
 
 int MSG_ReadByte (void)
@@ -1058,6 +1077,11 @@ void PL_VID_Shutdown (void)
 	g_bridge_fn->pl_vid_shutdown ();
 }
 
+qboolean VID_EnsureGLContextCurrent (void)
+{
+	return g_bridge_fn->vid_ensure_gl_context_current ();
+}
+
 void VID_Menu_Init (void)
 {
 	g_bridge_fn->vid_menu_init ();
@@ -1293,31 +1317,6 @@ float R_SkyVis_Sample (const vec3_t pos)
 	return g_bridge_fn->r_skyvis_sample (pos);
 }
 
-float R_SSAO_SanitizeValue (float value, float fallback, float minval, float maxval)
-{
-	return g_bridge_fn->r_ssao_sanitize_value (value, fallback, minval, maxval);
-}
-
-void R_SSAO_CaptureFogState (const gpuframedata_t *framedata, r_ssao_fog_state_t *out_state)
-{
-	g_bridge_fn->r_ssao_capture_fog_state (framedata, out_state);
-}
-
-void R_SSAO_RegisterCvars (void)
-{
-	g_bridge_fn->r_ssao_register_cvars ();
-}
-
-void R_Quality_Init (void)
-{
-	g_bridge_fn->r_quality_init ();
-}
-
-void R_Quality_Update (void)
-{
-	g_bridge_fn->r_quality_update ();
-}
-
 void R_FrameGraph_RenderView (void)
 {
 	g_bridge_fn->r_framegraph_render_view ();
@@ -1372,11 +1371,6 @@ const char *R_Backend_ResourceSlotName (render_backend_resource_slot_t slot)
 	case R_BACKEND_RESOURCE_SLOT_VELOCITY: return "velocity";
 	default: return "unknown";
 	}
-}
-
-float R_Tonemap_TemperedOverbright (float overbright)
-{
-	return g_bridge_fn->r_tonemap_tempered_overbright (overbright);
 }
 
 void bc7enc_compress_block_init (void)

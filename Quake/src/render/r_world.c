@@ -88,6 +88,25 @@ static qboolean R_BrushModelHasTextureTables (const qmodel_t *model)
 		&& model->usedtextures;
 }
 
+static qboolean R_IsKnownBrushEntityModel (const entity_t *ent)
+{
+	if (!ent || !ent->model)
+		return false;
+	/* Plugin/host migration can make Mod_IsKnownModel miss world entity ownership. */
+	if (ent == &cl_entities[0])
+		return true;
+	return Mod_IsKnownModel (ent->model);
+}
+
+static qmodel_t *R_GetBrushEntityModel (entity_t *ent)
+{
+	if (!ent)
+		return NULL;
+	if (ent == &cl_entities[0] && cl.worldmodel)
+		return cl.worldmodel;
+	return ent->model;
+}
+
 static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *out_texnum)
 {
 	int used_count;
@@ -1373,9 +1392,12 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 	for (i = 0, totalinst = 0; i < count; i++)
 	{
 		entity_t *ent = ents[i];
-		if (!ent || !Mod_IsKnownModel (ent->model))
+		qmodel_t *model = R_GetBrushEntityModel (ent);
+		if (!R_IsKnownBrushEntityModel (ent))
 			continue;
-		if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
+		if (!model)
+			continue;
+		if (model->texofs[texend] - model->texofs[texbegin] > 0)
 			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
 	}
 
@@ -1397,9 +1419,11 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 		entity_t *e = ents[i++];
 		qmodel_t *model;
 
-		if (!e || !Mod_IsKnownModel (e->model))
+		if (!e || !R_IsKnownBrushEntityModel (e))
 			continue;
-		model = e->model;
+		model = R_GetBrushEntityModel (e);
+		if (!model)
+			continue;
 		qboolean isworld = (e == &cl_entities[0]);
 		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
 			qboolean zfix = !isworld && !isstatic;
@@ -1421,9 +1445,10 @@ static void R_DrawBrushModels_MaterialStages (entity_t **ents, int count, brushp
 
 		for (numinst = 1; i < count && numinst < MAX_BMODEL_INSTANCES; i++)
 		{
-			if (!ents[i] || ents[i]->model != model)
+			qmodel_t *next_model = R_GetBrushEntityModel (ents[i]);
+			if (!ents[i] || next_model != model)
 				break;
-			numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
+			numinst += (next_model->texofs[texend] - next_model->texofs[texbegin]) > 0;
 		}
 
 		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
@@ -1601,7 +1626,7 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 	for (i = 0, totalinst = 0; i < count; i++)
 	{
 		entity_t *ent = ents[i];
-		if (!ent || !Mod_IsKnownModel (ent->model))
+		if (!R_IsKnownBrushEntityModel (ent))
 			continue;
 		if (!R_BrushModelHasTextureTables (ent->model))
 			continue;
@@ -1640,9 +1665,11 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 		entity_t *e = ents[i++];
 		qmodel_t *model;
 
-		if (!e || !Mod_IsKnownModel (e->model))
+		if (!e || !R_IsKnownBrushEntityModel (e))
 			continue;
-		model = e->model;
+		model = R_GetBrushEntityModel (e);
+		if (!model)
+			continue;
 		qboolean isworld = (e == &cl_entities[0]);
 		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
 		qboolean zfix = !isworld && !isstatic;
@@ -1664,9 +1691,10 @@ static void R_DrawBrushModels_GodrayStages (entity_t **ents, int count)
 
 		for (numinst = 1; i < count && numinst < MAX_BMODEL_INSTANCES; i++)
 		{
-			if (!ents[i] || ents[i]->model != model)
+			qmodel_t *next_model = R_GetBrushEntityModel (ents[i]);
+			if (!ents[i] || next_model != model)
 				break;
-			numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
+			numinst += (next_model->texofs[texend] - next_model->texofs[texbegin]) > 0;
 		}
 
 		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
@@ -1864,11 +1892,14 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 	for (i = 0, totalinst = 0; i < count; i++)
 	{
 		entity_t *ent = ents[i];
-		if (!ent || !Mod_IsKnownModel (ent->model))
+		qmodel_t *model = R_GetBrushEntityModel (ent);
+		if (!R_IsKnownBrushEntityModel (ent))
 			continue;
-		if (pass == BP_GODRAYS && !R_BrushModelHasTextureTables (ent->model))
+		if (!model)
 			continue;
-		if (ent->model->texofs[texend] - ent->model->texofs[texbegin] > 0)
+		if (pass == BP_GODRAYS && !R_BrushModelHasTextureTables (model))
+			continue;
+		if (model->texofs[texend] - model->texofs[texbegin] > 0)
 			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
 	}
 
@@ -1935,9 +1966,11 @@ else if (pass == BP_SKYCUBEMAP)
 		entity_t *e = ents[i++];
 		qmodel_t *model;
 
-		if (!e || !Mod_IsKnownModel (e->model))
+		if (!e || !R_IsKnownBrushEntityModel (e))
 			continue;
-		model = e->model;
+		model = R_GetBrushEntityModel (e);
+		if (!model)
+			continue;
 		if (pass == BP_GODRAYS && !R_BrushModelHasTextureTables (model))
 			continue;
 		qboolean isworld = (e == &cl_entities[0]);
@@ -1962,9 +1995,10 @@ else if (pass == BP_SKYCUBEMAP)
 
 		for (numinst = 1; i < count && numinst < MAX_BMODEL_INSTANCES; i++)
 		{
-			if (!ents[i] || ents[i]->model != model)
+			qmodel_t *next_model = R_GetBrushEntityModel (ents[i]);
+			if (!ents[i] || next_model != model)
 				break;
-			numinst += (ents[i]->model->texofs[texend] - ents[i]->model->texofs[texbegin]) > 0;
+			numinst += (next_model->texofs[texend] - next_model->texofs[texbegin]) > 0;
 		}
 
 		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
@@ -2060,13 +2094,14 @@ R_EntHasWater
 static qboolean R_EntHasWater (entity_t *ent, qboolean translucent)
 {
 	int i;
+	qmodel_t *model = R_GetBrushEntityModel (ent);
 
-	if (!ent || !Mod_IsKnownModel (ent->model))
+	if (!ent || !model || !R_IsKnownBrushEntityModel (ent))
 		return false;
 
 	for (i = TEXTYPE_FIRSTLIQUID; i < TEXTYPE_LASTLIQUID+1; i++)
 	{
-		int numtex = ent->model->texofs[i+1] - ent->model->texofs[i];
+		int numtex = model->texofs[i+1] - model->texofs[i];
 		if (numtex && (GL_WaterAlphaForEntityTextureType (ent, (textype_t)i) < 1.f) == translucent)
 			return true;
 	}
@@ -2183,16 +2218,18 @@ void R_DrawBrushModels_Water (entity_t **ents, int count, qboolean translucent)
 	{
 		int numinst;
 		entity_t *e = ents[i++];
-		if (!e || !e->model)
+		if (!e || !R_IsKnownBrushEntityModel (e))
 			continue;
-		qmodel_t *model = e->model;
+		qmodel_t *model = R_GetBrushEntityModel (e);
+		if (!model)
+			continue;
 		qboolean isworld = (e == &cl_entities[0]);
 		int frame = isworld ? 0 : e->frame;
 
 		if (!R_EntHasWater (e, translucent))
 			continue;
 
-		for (numinst = 1; i < count && ents[i]->model == model && numinst < MAX_BMODEL_INSTANCES; i++)
+		for (numinst = 1; i < count && R_GetBrushEntityModel (ents[i]) == model && numinst < MAX_BMODEL_INSTANCES; i++)
 			numinst += R_EntHasWater (ents[i], translucent);
 
 		for (j = model->texofs[TEXTYPE_FIRSTLIQUID]; j < model->texofs[TEXTYPE_LASTLIQUID+1]; j++)

@@ -27,6 +27,10 @@ static const RenderBackendCaps s_vk_caps = {
 	0u     /* max_ssbos */
 };
 
+static qboolean VK_ContextInit (void *window_handle) { (void)window_handle; return false; }
+static void VK_ContextShutdown (void) {}
+static void VK_SwapBuffers (void) {}
+
 static qboolean VK_Init (void) { return false; }
 static void VK_Shutdown (void) {}
 static void VK_OnResize (int width, int height) { (void)width; (void)height; }
@@ -89,6 +93,9 @@ static int VK_GetSceneSampleCount (void) { return 1; }
 
 static const IRenderBackend s_ref_vk_backend = {
 	"Vulkan",
+	VK_ContextInit,
+	VK_ContextShutdown,
+	VK_SwapBuffers,
 	VK_Init,
 	VK_Shutdown,
 	VK_OnResize,
@@ -146,7 +153,7 @@ static const IRenderBackend s_ref_vk_backend = {
 
 static qboolean IW_RendererRefVK_Register (const iw_renderer_plugin_host_api_t *host_api)
 {
-	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V2_SIZE)
+	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V4_SIZE)
 		return false;
 	if (!host_api->register_backend)
 		return false;

@@ -125,6 +125,9 @@ void R_FrameGraph_GetTimingSummary (double *out_gpu_ms, double *out_cpu_ms, qboo
 void R_FrameGraph_ResetPasses (void);
 qboolean R_FrameGraph_AddPass (const RenderPassDesc *pass_desc);
 void R_FrameGraph_RenderView (void);
+qboolean R_Backend_ContextInit (void *window_handle);
+void R_Backend_ContextShutdown (void);
+void R_Backend_SwapBuffers (void);
 void R_Backend_Init (void);
 void R_Backend_Shutdown (void);
 void R_Backend_Register (const IRenderBackend *backend);

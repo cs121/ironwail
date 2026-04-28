@@ -39,6 +39,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <winreg.h>
 #include <versionhelpers.h>
 #include <tlhelp32.h>
+#include <dbghelp.h>
+#pragma comment(lib, "Dbghelp.lib")
 
 #ifdef _MSC_VER
 #pragma warning (push)
@@ -72,6 +74,63 @@ static HANDLE		hinput, houtput;
 static FILE		*sys_handles[MAX_HANDLES];
 
 static double rcp_counter_freq;
+
+#ifdef _DEBUG
+static PVOID s_debug_exception_handler;
+
+static LONG CALLBACK Sys_DebugVectoredExceptionHandler (EXCEPTION_POINTERS *ep)
+{
+	void *stack[64];
+	USHORT frame_count;
+	FILE *f;
+	unsigned i;
+	HANDLE process;
+	static qboolean symbols_initialized = false;
+
+	if (!ep || !ep->ExceptionRecord)
+		return EXCEPTION_CONTINUE_SEARCH;
+	if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_ACCESS_VIOLATION
+		&& ep->ExceptionRecord->ExceptionCode != EXCEPTION_INT_DIVIDE_BY_ZERO)
+		return EXCEPTION_CONTINUE_SEARCH;
+
+	f = fopen ("C:\\Quake\\rerelease\\crash_trace.log", "a");
+	if (!f)
+		return EXCEPTION_CONTINUE_SEARCH;
+
+	fprintf (f, "code=0x%08lx address=%p\n",
+		(unsigned long)ep->ExceptionRecord->ExceptionCode,
+		ep->ExceptionRecord->ExceptionAddress);
+	process = GetCurrentProcess ();
+	if (!symbols_initialized)
+	{
+		SymSetOptions (SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+		symbols_initialized = SymInitialize (process, NULL, TRUE) ? true : false;
+	}
+	frame_count = CaptureStackBackTrace (0, countof (stack), stack, NULL);
+	for (i = 0; i < frame_count; ++i)
+	{
+		char symbol_buffer[sizeof (SYMBOL_INFO) + MAX_SYM_NAME];
+		SYMBOL_INFO *symbol = (SYMBOL_INFO *)symbol_buffer;
+		DWORD64 displacement = 0;
+		const char *name = "(nosym)";
+		memset (symbol_buffer, 0, sizeof (symbol_buffer));
+		symbol->SizeOfStruct = sizeof (SYMBOL_INFO);
+		symbol->MaxNameLen = MAX_SYM_NAME;
+		if (symbols_initialized && SymFromAddr (process, (DWORD64)(uintptr_t)stack[i], &displacement, symbol))
+			name = symbol->Name;
+		fprintf (f, "frame[%u]=%p %s+0x%llx\n", i, stack[i], name, (unsigned long long)displacement);
+	}
+	fprintf (f, "---\n");
+	fclose (f);
+	return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void Sys_DebugInstallExceptionHandler (void)
+{
+	if (!s_debug_exception_handler)
+		s_debug_exception_handler = AddVectoredExceptionHandler (1, Sys_DebugVectoredExceptionHandler);
+}
+#endif
 
 static int findhandle (void)
 {
@@ -1022,6 +1081,10 @@ qboolean Sys_IsStartedFromMapEditor (void)
 void Sys_Init (void)
 {
 	SYSTEM_INFO info;
+
+#ifdef _DEBUG
+	Sys_DebugInstallExceptionHandler ();
+#endif
 
 	Sys_SetTimerResolution ();
 	Sys_SetDPIAware ();

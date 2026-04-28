@@ -3,10 +3,12 @@
 #include "quakedef.h"
 #include "renderer_plugin.h"
 #include "ref_gl_bridge.h"
+#include "gl_backend.h"
 
 static const iw_renderer_host_bridge_t *s_bridge = NULL;
 
 static iw_renderer_entry_points_t s_entry_points;
+static void REFGL_RenderView_Entry (void);
 
 extern void R_Init (void);
 extern void R_RenderView (void);
@@ -41,6 +43,49 @@ extern void R_GetParticleDebugStats (particle_debug_stats_t *stats);
 extern void R_SetAlphaMode (alphamode_t mode);
 extern alphamode_t R_GetAlphaMode (void);
 extern alphamode_t R_GetEffectiveAlphaMode (void);
+extern void GL_CreateFrameBuffers (void);
+extern void GL_DeleteFrameBuffers (void);
+extern void R_ResetDRSState (void);
+extern void R_ResetGodraysStabilization (void);
+extern void SCR_UpdateScreen (void);
+extern void CL_RunParticles (void);
+extern qpic_t *Draw_PicFromWad2 (const char *name, unsigned int texflags);
+extern qpic_t *Draw_PicFromWad (const char *name);
+extern qpic_t *Draw_CachePic (const char *path);
+extern qpic_t *Draw_TryCachePic (const char *path, unsigned int texflags);
+extern void Draw_NewGame (void);
+extern void Draw_FillEx (float x, float y, float w, float h, const float *rgb, float alpha);
+extern void Draw_PartialFadeScreen (float x0, float x1, float y0, float y1, float alpha);
+extern void Draw_Character (int x, int y, int num);
+extern void Draw_CharacterEx (float x, float y, float dimx, float dimy, int num);
+extern void Draw_String (int x, int y, const char *str);
+extern void Draw_StringEx (float x, float y, float dim, const char *str);
+extern void Draw_Pic (int x, int y, qpic_t *pic);
+extern void Draw_SubPic (float x, float y, float w, float h, qpic_t *pic, float s1, float t1, float s2, float t2, const float *rgb, float alpha);
+extern void Draw_TransPicTranslate (int x, int y, qpic_t *pic, int top, int bottom);
+extern void Draw_ConsoleBackground (void);
+extern void Draw_TileClear (int x, int y, int w, int h);
+extern void Draw_Fill (int x, int y, int w, int h, int c, float alpha);
+extern void Draw_SetCanvas (canvastype newcanvas);
+extern void Draw_SetCanvasColor (float r, float g, float b, float a);
+extern void Draw_PushCanvasColor (float r, float g, float b, float a);
+extern void Draw_PopCanvasColor (void);
+extern void Draw_SetClipRect (float x, float y, float width, float height);
+extern void Draw_ResetClipping (void);
+extern void Draw_FadeScreen (float alpha);
+extern void GL_SetCanvas (canvastype newcanvas);
+extern void GL_SetCanvasColor (float r, float g, float b, float a);
+extern void GL_PushCanvasColor (float r, float g, float b, float a);
+extern void GL_PopCanvasColor (void);
+extern void GL_Set2D (void);
+extern void SCR_CenterPrint (const char *str);
+extern void SCR_BeginLoadingPlaque (void);
+extern void SCR_EndLoadingPlaque (void);
+extern int SCR_ModalMessage (const char *text, float timeout);
+extern void Bridge_DrawFlush (void);
+extern void Bridge_DrawInit (void);
+extern void SCR_Init (void);
+extern refdef_t r_refdef;
 
 extern const IRenderBackend *GL_Backend_GetInterface (void);
 
@@ -48,7 +93,7 @@ static void REFGL_FillEntryPoints (void)
 {
 	s_entry_points.struct_size = sizeof (iw_renderer_entry_points_t);
 	s_entry_points.R_Init = R_Init;
-	s_entry_points.R_RenderView = R_RenderView;
+	s_entry_points.R_RenderView = REFGL_RenderView_Entry;
 	s_entry_points.R_NewMap = R_NewMap;
 	s_entry_points.R_ClearEfrags = R_ClearEfrags;
 	s_entry_points.R_CheckEfrags = R_CheckEfrags;
@@ -80,6 +125,69 @@ static void REFGL_FillEntryPoints (void)
 	s_entry_points.R_PushDlights = R_PushDlights;
 	s_entry_points.R_ParseDlightEntities = R_ParseDlightEntities;
 	s_entry_points.R_GetLightgridSample = (const void *(*)(const vec3_t))R_GetLightgridSample;
+	s_entry_points.R_DrawPolyblendOverlay = R_DrawPolyblendOverlay;
+	s_entry_points.R_GetCanvasMetrics = R_GetCanvasMetrics;
+	s_entry_points.R_GetSceneSampleCount = R_GetSceneSampleCount;
+	s_entry_points.R_GetMaxSampleCount = R_GetMaxSampleCount;
+	s_entry_points.R_GetMaxAnisotropy = R_GetMaxAnisotropy;
+	s_entry_points.R_IsClearEnabled = R_IsClearEnabled;
+	s_entry_points.R_NewGame = R_NewGame;
+	s_entry_points.R_CreateFrameBuffers = GL_CreateFrameBuffers;
+	s_entry_points.R_DeleteFrameBuffers = GL_DeleteFrameBuffers;
+	s_entry_points.R_ResetDRSState = R_ResetDRSState;
+	s_entry_points.R_ResetGodraysStabilization = R_ResetGodraysStabilization;
+	s_entry_points.SCR_UpdateScreen = SCR_UpdateScreen;
+	s_entry_points.CL_RunParticles = CL_RunParticles;
+	s_entry_points.Draw_PicFromWad2 = Draw_PicFromWad2;
+	s_entry_points.Draw_PicFromWad = Draw_PicFromWad;
+	s_entry_points.Draw_CachePic = Draw_CachePic;
+	s_entry_points.Draw_TryCachePic = Draw_TryCachePic;
+	s_entry_points.Draw_NewGame = Draw_NewGame;
+	s_entry_points.Draw_FillEx = Draw_FillEx;
+	s_entry_points.Draw_PartialFadeScreen = Draw_PartialFadeScreen;
+	s_entry_points.Draw_Character = Draw_Character;
+	s_entry_points.Draw_CharacterEx = Draw_CharacterEx;
+	s_entry_points.Draw_String = Draw_String;
+	s_entry_points.Draw_StringEx = Draw_StringEx;
+	s_entry_points.Draw_Pic = Draw_Pic;
+	s_entry_points.Draw_SubPic = Draw_SubPic;
+	s_entry_points.Draw_TransPicTranslate = Draw_TransPicTranslate;
+	s_entry_points.Draw_ConsoleBackground = Draw_ConsoleBackground;
+	s_entry_points.Draw_TileClear = Draw_TileClear;
+	s_entry_points.Draw_Fill = Draw_Fill;
+	s_entry_points.Draw_SetCanvas = Draw_SetCanvas;
+	s_entry_points.Draw_SetCanvasColor = Draw_SetCanvasColor;
+	s_entry_points.Draw_PushCanvasColor = Draw_PushCanvasColor;
+	s_entry_points.Draw_PopCanvasColor = Draw_PopCanvasColor;
+	s_entry_points.Draw_SetClipRect = Draw_SetClipRect;
+	s_entry_points.Draw_ResetClipping = Draw_ResetClipping;
+	s_entry_points.Draw_FadeScreen = Draw_FadeScreen;
+	s_entry_points.GL_SetCanvas = GL_SetCanvas;
+	s_entry_points.GL_SetCanvasColor = GL_SetCanvasColor;
+	s_entry_points.GL_PushCanvasColor = GL_PushCanvasColor;
+	s_entry_points.GL_PopCanvasColor = GL_PopCanvasColor;
+	s_entry_points.GL_Set2D = GL_Set2D;
+	s_entry_points.SCR_CenterPrint = SCR_CenterPrint;
+	s_entry_points.SCR_BeginLoadingPlaque = SCR_BeginLoadingPlaque;
+	s_entry_points.SCR_EndLoadingPlaque = SCR_EndLoadingPlaque;
+	s_entry_points.SCR_ModalMessage = SCR_ModalMessage;
+	s_entry_points.Draw_Flush = Bridge_DrawFlush;
+	s_entry_points.Draw_Init = Bridge_DrawInit;
+	s_entry_points.SCR_Init = SCR_Init;
+}
+
+static void REFGL_RenderView_Entry (void)
+{
+	if (g_bridge_data && g_bridge_data->r_refdef)
+	{
+		/* Host view code owns camera transforms; plugin SCR path owns view rect/FOV/scale.
+		 * Copying the full struct can clobber plugin-computed viewport state and produce
+		 * black/invalid 3D output with only 2D overlays visible. */
+		VectorCopy (g_bridge_data->r_refdef->vieworg, r_refdef.vieworg);
+		VectorCopy (g_bridge_data->r_refdef->viewangles, r_refdef.viewangles);
+	}
+
+	R_RenderView ();
 }
 
 static qboolean IW_RendererRefGL_Register (const iw_renderer_plugin_host_api_t *host_api)
@@ -91,6 +199,7 @@ static qboolean IW_RendererRefGL_Register (const iw_renderer_plugin_host_api_t *
 	{
 		Bridge_Init (host_api->bridge);
 		s_bridge = host_api->bridge;
+		Con_Printf ("ref_gl: bridge initialized (ABI v%u)\n", host_api->bridge->abi_version);
 	}
 
 	if (!host_api->register_backend)
@@ -99,6 +208,13 @@ static qboolean IW_RendererRefGL_Register (const iw_renderer_plugin_host_api_t *
 	const IRenderBackend *gl_backend = GL_Backend_GetInterface ();
 	if (!gl_backend)
 		return false;
+
+	Con_Printf ("ref_gl: registering backend '%s' (caps: ts=%d compute=%d inst=%d indirect=%d)\n",
+		gl_backend->name,
+		gl_backend->get_caps ? gl_backend->get_caps ()->supports_timestamps : 0,
+		gl_backend->get_caps ? gl_backend->get_caps ()->supports_compute : 0,
+		gl_backend->get_caps ? gl_backend->get_caps ()->supports_draw_instanced : 0,
+		gl_backend->get_caps ? gl_backend->get_caps ()->supports_draw_indirect : 0);
 
 	if (!host_api->register_backend (gl_backend))
 		return false;
@@ -110,6 +226,8 @@ static qboolean IW_RendererRefGL_Register (const iw_renderer_plugin_host_api_t *
 		if (!host_api->register_entry_points (&s_entry_points))
 			return false;
 	}
+
+	Con_Printf ("ref_gl: plugin registered %d entry points\n", (int)(s_entry_points.struct_size));
 
 	return true;
 }

@@ -43,6 +43,9 @@ extern cvar_t r_postfx_quad;
 extern cvar_t r_postfx_lut;
 extern cvar_t r_postfx_lut_debug_id;
 extern cvar_t r_postfx_debug;
+extern cvar_t r_refgl_debug;
+extern cvar_t r_refgl_log_resources;
+extern cvar_t r_refgl_validate_lifetime;
 
 static const char *const postfx_lut_files[PFX_LUT_COUNT] =
 {
@@ -60,6 +63,8 @@ static void R_PostFX_DestroyLUTTexture (void)
 {
 	if (r_postfx_lut_tex)
 	{
+		if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+			Con_DPrintf ("ref_gl: R_PostFX_DestroyLUTTexture tex=%u size=%d\n", (unsigned)r_postfx_lut_tex, r_postfx_lut_size);
 		GL_DeleteNativeTexture (r_postfx_lut_tex);
 		r_postfx_lut_tex = 0;
 	}
@@ -104,6 +109,9 @@ static void R_PostFX_ReloadLUTs (void)
 
 	if (r_postfx_lut.value <= 0.f)
 		return;
+
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: R_PostFX_ReloadLUTs begin\n");
 
 	for (i = 1; i < PFX_LUT_COUNT; ++i)
 	{
@@ -173,6 +181,9 @@ static void R_PostFX_ReloadLUTs (void)
 
 	q_free(lut_storage);
 	r_postfx_lut_size = size;
+
+	if (r_refgl_validate_lifetime.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: R_PostFX_ReloadLUTs done tex=%u size=%d\n", (unsigned)r_postfx_lut_tex, r_postfx_lut_size);
 }
 
 void R_PostFX_RegisterCvars (void)

@@ -346,17 +346,25 @@ void S_Startup (void)
 	if (!snd_initialized)
 		return;
 
+	TexMgr_Trace ("S_Startup: before SNDDMA_Init");
 	sound_started = SNDDMA_Init(&sn);
+	TexMgr_Trace ("S_Startup: after SNDDMA_Init");
 
 	if (!sound_started)
 	{
+		TexMgr_Trace ("S_Startup: failed initializing sound");
 		Con_Printf("Failed initializing sound\n");
 	}
 	else
 	{
-		Con_Printf("Audio: %d bit, %s, %d Hz\n", shm->samplebits,
-				(shm->channels == 2) ? "stereo" : "mono", shm->speed);
+		char tracebuf[128];
+		q_snprintf (tracebuf, sizeof (tracebuf),
+			"Audio: %d bit, %s, %d Hz",
+			shm->samplebits,
+			(shm->channels == 2) ? "stereo" : "mono", shm->speed);
+		TexMgr_Trace (tracebuf);
 	}
+	TexMgr_Trace ("S_Startup: end");
 }
 
 float S_GetBusVolume (int bus_id)
@@ -391,6 +399,7 @@ void S_Init (void)
 {
 	int i;
 
+	TexMgr_Trace ("S_Init: begin");
 	if (snd_initialized)
 	{
 		Con_Printf("Sound is already initialized\n");
@@ -417,12 +426,18 @@ void S_Init (void)
 	Cvar_RegisterVariable(&snd_mixspeed);
 	Cvar_RegisterVariable(&snd_filterquality);
 	Cvar_RegisterVariable(&snd_waterfx);
+	TexMgr_Trace ("S_Init: cvar registration done");
 
+	TexMgr_Trace ("S_Init: pre-nosound check");
 	if (safemode || COM_CheckParm("-nosound"))
 		return;
+	TexMgr_Trace ("S_Init: post-nosound check");
 
-	Con_Printf("\nSound Initialization\n");
+	TexMgr_Trace ("S_Init: Sound Initialization print begin");
+	TexMgr_Trace ("Sound Initialization");
+	TexMgr_Trace ("S_Init: Sound Initialization print end");
 
+	TexMgr_Trace ("S_Init: command registration begin");
 	Cmd_AddCommand("play", S_Play);
 	Cmd_AddCommand("playvol", S_PlayVol);
 	Cmd_AddCommand("snd_play_def", S_PlayDef_f);
@@ -432,6 +447,7 @@ void S_Init (void)
 	Cmd_AddCommand("snd_list_active", S_ListActiveVoices_f);
 	Cmd_AddCommand("snd_list_def_usage", S_ListDefUsage_f);
 	Cmd_AddCommand("snd_list_legacy_mappings", S_ListLegacyMappings_f);
+	TexMgr_Trace ("S_Init: command registration end");
 
 	i = COM_CheckParm("-sndspeed");
 	if (i && i < com_argc-1)
@@ -451,19 +467,32 @@ void S_Init (void)
 		Con_Printf ("loading all sounds as 8bit\n");
 	}
 
+	TexMgr_Trace ("S_Init: Cvar_SetCallback sfxvolume begin");
 	Cvar_SetCallback(&sfxvolume, SND_Callback_sfxvolume);
+	TexMgr_Trace ("S_Init: Cvar_SetCallback sfxvolume end");
+	TexMgr_Trace ("S_Init: Cvar_SetCallback snd_filterquality begin");
 	Cvar_SetCallback(&snd_filterquality, &SND_Callback_snd_filterquality);
+	TexMgr_Trace ("S_Init: Cvar_SetCallback snd_filterquality end");
 
+	TexMgr_Trace ("S_Init: SND_InitScaletable begin");
 	SND_InitScaletable ();
+	TexMgr_Trace ("S_Init: SND_InitScaletable end");
 
+	TexMgr_Trace ("S_Init: known_sfx alloc begin");
 	known_sfx = (sfx_t *) Hunk_AllocName (MAX_SFX*sizeof(sfx_t), "sfx_t");
 	num_sfx = 0;
+	TexMgr_Trace ("S_Init: known_sfx alloc end");
 
+	TexMgr_Trace ("S_Init: S_InitWavinfoMutex begin");
 	S_InitWavinfoMutex ();
+	TexMgr_Trace ("S_Init: S_InitWavinfoMutex end");
 
 	snd_initialized = true;
+	TexMgr_Trace ("S_Init: snd_initialized set");
 
+	TexMgr_Trace ("S_Init: S_Startup begin");
 	S_Startup ();
+	TexMgr_Trace ("S_Init: S_Startup end");
 	if (sound_started == 0)
 		return;
 
@@ -474,11 +503,20 @@ void S_Init (void)
 	ambient_sfx[AMBIENT_WATER] = S_PrecacheSound ("ambience/water1.wav");
 	ambient_sfx[AMBIENT_SKY] = S_PrecacheSound ("ambience/wind2.wav");
 
+	TexMgr_Trace ("S_Init: S_CodecInit begin");
 	S_CodecInit ();
+	TexMgr_Trace ("S_Init: S_CodecInit end");
+	TexMgr_Trace ("S_Init: SoundDef_Init begin");
 	SoundDef_Init ();
+	TexMgr_Trace ("S_Init: SoundDef_Init end");
+	TexMgr_Trace ("S_Init: SoundDef_LoadAll begin");
 	SoundDef_LoadAll ();
+	TexMgr_Trace ("S_Init: SoundDef_LoadAll end");
 
+	TexMgr_Trace ("S_Init: S_StopAllSounds begin");
 	S_StopAllSounds (true);
+	TexMgr_Trace ("S_Init: S_StopAllSounds end");
+	TexMgr_Trace ("S_Init: end");
 }
 
 
@@ -578,12 +616,23 @@ sfx_t *S_PrecacheSound (const char *name)
 	if (!sound_started || nosound.value)
 		return NULL;
 
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "S_PrecacheSound: begin name=%s", name);
+		TexMgr_Trace (tracebuf);
+	}
 	sfx = S_FindName (name);
+	TexMgr_Trace ("S_PrecacheSound: after find");
 
 // cache it in
 	if (precache.value)
+	{
+		TexMgr_Trace ("S_PrecacheSound: before load");
 		S_LoadSound (sfx);
+		TexMgr_Trace ("S_PrecacheSound: after load");
+	}
 
+	TexMgr_Trace ("S_PrecacheSound: end");
 	return sfx;
 }
 

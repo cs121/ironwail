@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // draw.c -- 2d drawing
 
 #include "quakedef.h"
+#include "render_dispatch.h"
 #include "glquake.h"
 
 const vec3_t	rgb_black = {0.f, 0.f, 0.f};
@@ -120,7 +121,9 @@ typedef struct guivertex_t {
 
 static int numbatchquads = 0;
 static guivertex_t batchverts[4 * MAX_BATCH_QUADS];
+static guivertex_t batchtri_verts[6 * MAX_BATCH_QUADS];
 static GLushort batchindices[6 * MAX_BATCH_QUADS];
+static qboolean draw_initialized = false;
 
 glcanvas_t glcanvas;
 
@@ -224,9 +227,11 @@ Scrap_Upload -- johnfitz -- now uses TexMgr
 */
 void Scrap_Upload (void)
 {
+	TexMgr_Trace ("Scrap_Upload: begin");
 	scrap_texture = TexMgr_LoadImage (NULL, "scrap", SCRAP_ATLAS_WIDTH, SCRAP_ATLAS_HEIGHT, SRC_INDEXED, scrap_texels,
 		"", (src_offset_t)scrap_texels, TEXPREF_ALPHA | TEXPREF_OVERWRITE | TEXPREF_NOPICMIP);
 	scrap_dirty = false;
+	TexMgr_Trace ("Scrap_Upload: end");
 }
 
 /*
@@ -280,6 +285,10 @@ Draw_PicFromWad
 */
 qpic_t *Draw_PicFromWad2 (const char *name, unsigned int texflags)
 {
+#ifndef RENDERER_PLUGIN_BUILD
+	if (g_rend && g_rend->Draw_PicFromWad2)
+		return g_rend->Draw_PicFromWad2 (name, texflags);
+#endif
 	int i, x, y;
 	cachepic_t *pic;
 	qpic_t	*p;
@@ -344,6 +353,10 @@ qpic_t *Draw_PicFromWad2 (const char *name, unsigned int texflags)
 
 qpic_t *Draw_PicFromWad (const char *name)
 {
+#ifndef RENDERER_PLUGIN_BUILD
+	if (g_rend && g_rend->Draw_PicFromWad)
+		return g_rend->Draw_PicFromWad (name);
+#endif
 	return Draw_PicFromWad2 (name, TEXPREF_ALPHA | TEXPREF_PAD | TEXPREF_NOPICMIP);
 }
 
@@ -413,6 +426,10 @@ qpic_t	*Draw_TryCachePic (const char *path, unsigned int texflags)
 
 qpic_t	*Draw_CachePic (const char *path)
 {
+#ifndef RENDERER_PLUGIN_BUILD
+	if (g_rend && g_rend->Draw_CachePic)
+		return g_rend->Draw_CachePic (path);
+#endif
 	qpic_t *pic = Draw_TryCachePic(path, TEXPREF_ALPHA | TEXPREF_PAD | TEXPREF_NOPICMIP | TEXPREF_CLAMP);
 	if (!pic)
 		Sys_Error ("Draw_CachePic: failed to load %s", path);
@@ -457,6 +474,7 @@ Draw_LoadPics -- johnfitz
 */
 void Draw_LoadPics (void)
 {
+	TexMgr_Trace ("Draw_LoadPics: begin");
 	lumpinfo_t	*info;
 	byte		*data;
 	int			i, row, col;
@@ -467,7 +485,9 @@ void Draw_LoadPics (void)
 	if (info->disksize < 128*128)
 		Sys_Error ("Draw_LoadPics: truncated conchars");
 
-	custom_conchars = (COM_HashBlock (data, 128*218) != 0xc7e2a10a);
+	/* Only hash the bytes we actually have. The lump has historically varied
+	 * and the old fixed 128*218 probe can walk past the end on smaller builds. */
+	custom_conchars = (COM_HashBlock (data, (size_t) info->disksize) != 0xc7e2a10a);
 
 	for (i = 0; i < 256; i++)
 	{
@@ -481,6 +501,7 @@ void Draw_LoadPics (void)
 
 	draw_disc = Draw_PicFromWad ("disc");
 	draw_backtile = Draw_PicFromWad2 ("backtile", TEXPREF_ALPHA | TEXPREF_NOPICMIP); // no pad flag to force separate allocation
+	TexMgr_Trace ("Draw_LoadPics: end");
 }
 
 /*
@@ -519,6 +540,7 @@ Draw_CreateWinQuakeMenuBgTex
 */
 static void Draw_CreateWinQuakeMenuBgTex (void)
 {
+	TexMgr_Trace ("Draw_CreateWinQuakeMenuBgTex: begin");
 	static unsigned winquakemenubg_pixels[4*2] =
 	{
 		0x00ffffffu, 0xff000000u, 0xff000000u, 0xff000000u,
@@ -529,6 +551,7 @@ static void Draw_CreateWinQuakeMenuBgTex (void)
 		(byte*)winquakemenubg_pixels, "", (src_offset_t)winquakemenubg_pixels,
 		TEXPREF_ALPHA | TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP
 	);
+	TexMgr_Trace ("Draw_CreateWinQuakeMenuBgTex: end");
 }
 
 /*
@@ -539,6 +562,12 @@ Draw_Init -- johnfitz -- rewritten
 void Draw_Init (void)
 {
 	int i;
+
+	if (draw_initialized)
+		return;
+
+	if (!TexMgr_IsReady ())
+		TexMgr_Init ();
 
 	Cvar_RegisterVariable (&scr_conalpha);
 	Cvar_RegisterVariable (&scr_conbrightness);
@@ -567,8 +596,12 @@ void Draw_Init (void)
 
 	Draw_CreateWinQuakeMenuBgTex ();
 
+	GL_EnsureGUIShader ();
+
 	// load game pics
 	Draw_LoadPics ();
+
+	draw_initialized = true;
 }
 
 //==============================================================================
@@ -587,13 +620,29 @@ void Draw_Flush (void)
 	GLuint buf;
 	GLbyte *ofs;
 
-	if (!numbatchquads)
+	if (!draw_initialized)
+	{
+		numbatchquads = 0;
 		return;
+	}
+
+	TexMgr_Trace ("Draw_Flush: begin");
+	if (!numbatchquads)
+	{
+		TexMgr_Trace ("Draw_Flush: no batches");
+		return;
+	}
 
 	if (scrap_dirty && glcanvas.texture == scrap_texture)
+	{
+		TexMgr_Trace ("Draw_Flush: scrap upload begin");
 		Scrap_Upload ();
+		TexMgr_Trace ("Draw_Flush: scrap upload end");
+	}
 
+	TexMgr_Trace ("Draw_Flush: before use program");
 	GL_UseProgram (glprogs.gui);
+	TexMgr_Trace ("Draw_Flush: after use program");
 	{
 		const unsigned state = glcanvas.blendmode | GLS_NO_ZTEST | GLS_NO_ZWRITE | GLS_CULL_NONE | GLS_ATTRIBS(3);
 		RenderBackendPipelineDesc pipeline_desc;
@@ -604,22 +653,42 @@ void Draw_Flush (void)
 		dynamic_state.blend_state = state;
 		dynamic_state.depth_state = state;
 		dynamic_state.raster_state = state;
+		TexMgr_Trace ("Draw_Flush: before bind pipeline");
 		R_Backend_BindPipeline (&pipeline_desc);
+		TexMgr_Trace ("Draw_Flush: after bind pipeline");
 		R_Backend_SetDynamicState (&dynamic_state);
 	}
+	TexMgr_Trace ("Draw_Flush: before texture bind");
 	GL_Bind (GL_TEXTURE0, glcanvas.texture);
+	TexMgr_Trace ("Draw_Flush: after texture bind");
 
-	GL_Upload (GL_ARRAY_BUFFER, batchverts, sizeof(batchverts[0]) * 4 * numbatchquads, &buf, &ofs);
+	for (int i = 0; i < numbatchquads; ++i)
+	{
+		const guivertex_t *src = batchverts + i * 4;
+		guivertex_t *dst = batchtri_verts + i * 6;
+		dst[0] = src[0];
+		dst[1] = src[1];
+		dst[2] = src[2];
+		dst[3] = src[0];
+		dst[4] = src[2];
+		dst[5] = src[3];
+	}
+
+	TexMgr_Trace ("Draw_Flush: before vertex upload");
+	GL_Upload (GL_ARRAY_BUFFER, batchtri_verts, sizeof(batchtri_verts[0]) * 6 * numbatchquads, &buf, &ofs);
+	TexMgr_Trace ("Draw_Flush: after vertex upload");
+	TexMgr_Trace ("Draw_Flush: before vertex buffer bind");
 	GL_BindBuffer (GL_ARRAY_BUFFER, buf);
+	TexMgr_Trace ("Draw_Flush: after vertex buffer bind");
 	GL_VertexAttribPointerFunc (0, 2, GL_FLOAT, GL_FALSE, sizeof(batchverts[0]), ofs + offsetof(guivertex_t, pos));
 	GL_VertexAttribPointerFunc (1, 2, GL_FLOAT, GL_FALSE, sizeof(batchverts[0]), ofs + offsetof(guivertex_t, uv));
 	GL_VertexAttribPointerFunc (2, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(batchverts[0]), ofs + offsetof(guivertex_t, color));
-
-	GL_Upload (GL_ELEMENT_ARRAY_BUFFER, batchindices, sizeof(batchindices[0]) * 6 * numbatchquads, &buf, &ofs);
-	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, buf);
-	R_Backend_DrawIndexed (R_BACKEND_PRIMITIVE_TRIANGLES, R_BACKEND_INDEX_TYPE_UINT16, numbatchquads * 6, (intptr_t)ofs);
+	TexMgr_Trace ("Draw_Flush: before triangle draw");
+	R_Backend_Draw (R_BACKEND_PRIMITIVE_TRIANGLES, 0, numbatchquads * 6);
+	TexMgr_Trace ("Draw_Flush: after triangle draw");
 
 	numbatchquads = 0;
+	TexMgr_Trace ("Draw_Flush: end");
 }
 
 /*
@@ -629,6 +698,16 @@ Draw_SetTexture
 */
 static void Draw_SetTexture (gltexture_t *tex)
 {
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "Draw_SetTexture: tex=%p current=%p", (void *)tex, (void *)glcanvas.texture);
+		TexMgr_Trace (tracebuf);
+	}
+	if (!draw_initialized)
+	{
+		glcanvas.texture = tex;
+		return;
+	}
 	if (tex == glcanvas.texture)
 		return;
 	Draw_Flush ();
@@ -718,6 +797,9 @@ Draw_AllocQuad
 */
 static guivertex_t* Draw_AllocQuad (void)
 {
+	if (!draw_initialized)
+		return batchverts;
+
 	if (numbatchquads == MAX_BATCH_QUADS)
 		Draw_Flush ();
 	return batchverts + 4 * numbatchquads++;
@@ -927,6 +1009,9 @@ void Draw_ConsoleBackground (void)
 {
 	qpic_t *pic;
 	float alpha, luma;
+
+	if (!TexMgr_IsReady ())
+		return;
 
 	pic = Draw_CachePic ("gfx/conback.lmp");
 	pic->width = vid.conwidth;
@@ -1330,6 +1415,7 @@ GL_Set2D
 */
 void GL_Set2D (void)
 {
+	TexMgr_Trace ("GL_Set2D: begin");
 	glcanvas.type = CANVAS_INVALID;
 	glcanvas.texture = NULL;
 	glcanvas.blendmode = GLS_BLEND_ALPHA;
@@ -1337,5 +1423,6 @@ void GL_Set2D (void)
 	glViewport (glx, gly, glwidth, glheight);
 	GL_SetCanvas (CANVAS_DEFAULT);
 	GL_SetCanvasColor (1.f, 1.f, 1.f, 1.f);
+	TexMgr_Trace ("GL_Set2D: end");
 }
 

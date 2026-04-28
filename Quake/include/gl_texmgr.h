@@ -175,6 +175,8 @@ void TexMgr_ReloadImages (void);
 void TexMgr_ReloadNobrightImages (void);
 void TexMgr_SRGBTextures_f (cvar_t *var);
 qboolean TexMgr_ShouldUseSRGB (const char *name, enum srcformat format, unsigned flags, const char *source_file);
+qboolean TexMgr_IsReady (void);
+void TexMgr_Trace (const char *fmt, ...);
 
 int TexMgr_Pad(int s);
 int TexMgr_SafeTextureSize (int s);

@@ -719,7 +719,8 @@ not reinitialize anything.
 */
 void Host_ClearMemory (void)
 {
-	R_ClearBoundingBoxes ();
+	if (g_rend && g_rend->R_ClearBoundingBoxes)
+		g_rend->R_ClearBoundingBoxes ();
 	FS_AsyncAdvanceGeneration ();
 
 	if (cl.qcvm.extfuncs.CSQC_Shutdown)
@@ -1428,9 +1429,11 @@ void _Host_Frame (double time)
 	if (host_speeds.value)
 		time2 = Sys_DoubleTime ();
 
-	SCR_UpdateScreen ();
-
-	CL_RunParticles (); //johnfitz -- seperated from rendering
+	RenderDispatch_UpdateScreen ();
+	if (g_rend && g_rend->CL_RunParticles)
+		g_rend->CL_RunParticles ();
+	else
+		CL_RunParticles ();
 
 	if (host_speeds.value)
 		time3 = Sys_DoubleTime ();
@@ -1574,10 +1577,15 @@ void Host_Init (void)
 		M_Init ();
 		VID_Init ();
 		IN_Init ();
-		TexMgr_Init (); //johnfitz
-		Draw_Init ();
-		SCR_Init ();
-		R_Init ();
+		if (g_rend && g_rend->R_Init)
+		{
+			int temp = scr_disabled_for_loading;
+			scr_disabled_for_loading = true;
+			g_rend->R_Init ();
+			scr_disabled_for_loading = temp;
+		}
+		else
+			Sys_Error ("Renderer entrypoint R_Init unavailable (renderer plugin not loaded/registered)");
 		S_Init ();
 		CDAudio_Init ();
 		BGM_Init();
@@ -1590,7 +1598,7 @@ void Host_Init (void)
 		M_CheckMods ();
 	}
 
-	LOC_Init (); // for 2021 rerelease support.
+	LOC_Init ();
 
 	Hunk_AllocName (0, "-HOST_HUNKLEVEL-");
 	host_hunklevel = Hunk_LowMark ();
@@ -1598,15 +1606,17 @@ void Host_Init (void)
 	host_initialized = true;
 	Con_Printf ("\n========= Quake Initialized =========\n\n");
 
-	if (!COM_CheckParm ("-nomapchecks") && Sys_IsStartedFromMapEditor ())
+	if (!COM_CheckParm ("-nomapchecks"))
 	{
-		Con_Printf (
-			"Level editing environment detected, enabling map_checks\n"
-			"(pass -nomapchecks or set map_checks to 0 to disable)\n"
-		);
-		Cvar_SetValueQuick (&map_checks, 1.f);
+		if (Sys_IsStartedFromMapEditor ())
+		{
+			Con_Printf (
+				"Level editing environment detected, enabling map_checks\n"
+				"(pass -nomapchecks or set map_checks to 0 to disable)\n"
+			);
+			Cvar_SetValueQuick (&map_checks, 1.f);
+		}
 	}
-
 	if (cls.state != ca_dedicated)
 	{
 		Cbuf_InsertText ("exec quake.rc\n");

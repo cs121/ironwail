@@ -40,6 +40,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_backend.h"
 #include "r_resources_gl.h"
 
+extern cvar_t r_refgl_debug;
+extern cvar_t r_refgl_log_init;
+extern cvar_t r_refgl_log_passes;
+extern cvar_t r_refgl_log_resources;
+extern cvar_t r_refgl_validate_fbo;
+
 #ifdef RENDERER_PLUGIN_BUILD
 #define IW_PARSE_FSCANF fscanf_s
 #else
@@ -1335,6 +1341,8 @@ static GLuint GL_CreateSSAONoiseTexture (void)
 	}
 
 	glGenTextures (1, &texnum);
+	ref_gl_stats.textures_created++;
+	ref_gl_stats.textures_alive++;
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, texnum);
 	GL_ObjectLabelFunc (GL_TEXTURE, texnum, -1, "ssao noise");
 	GL_TexStorage2DFunc (GL_TEXTURE_2D, 1, GL_RG8, SSAO_NOISE_SIZE, SSAO_NOISE_SIZE);
@@ -1418,6 +1426,8 @@ static GLuint GL_CreateFBO (GLenum target, const GLuint* colors, int numcolors, 
 		Sys_Error ("GL_CreateFBO: too many color buffers (%d)", numcolors);
 
 	GL_GenFramebuffersFunc (1, &fbo);
+	ref_gl_stats.fbos_created++;
+	ref_gl_stats.fbos_alive++;
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, fbo, -1, name);
 	GL_LogErrorIfDeveloper ("GL_CreateFBO bind");
@@ -1498,6 +1508,10 @@ void GL_CreateFrameBuffers (void)
 	int scene_h = R_GetSceneRenderHeight ();
 	int alloc_w = scene_w;
 	int alloc_h = scene_h;
+
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: GL_CreateFrameBuffers native=%dx%d scene=%dx%d\n",
+			native_w, native_h, scene_w, scene_h);
 
 	if (r_drs.value > 0.f)
 	{
@@ -1587,6 +1601,8 @@ void GL_CreateFrameBuffers (void)
 	framebufs.ssao.noise_tex = GL_CreateSSAONoiseTexture ();
 	// SSAO FIX: Prefer higher precision AO targets to avoid R8 banding in dark areas.
 	GLenum ssao_format = GL_R16F;
+	if (r_refgl_validate_fbo.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: validating framebuffer completeness during GL_CreateFrameBuffers\n");
 	for (int i = 0; i < 2; ++i)
 	{
 		int width = framebufs.ssao.width[i];
@@ -1670,9 +1686,19 @@ void GL_CreateFrameBuffers (void)
 		);
 	}
 
-        GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+	GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
         GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, 0);
 	GL_RegisterFrameGraphResourceSlots ();
+
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: GL_CreateFrameBuffers done scene=%u composite=%u resolved=%u shadow=%u\n",
+			(unsigned)framebufs.scene.fbo,
+			(unsigned)framebufs.composite.fbo,
+			(unsigned)framebufs.resolved_scene.fbo,
+			(unsigned)framebufs.shadow.sun_fbo);
+
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		REFGL_StatsLogSummary ();
 }
 
 /*
@@ -1682,6 +1708,12 @@ GL_DeleteFrameBuffers
 */
 void GL_DeleteFrameBuffers (void)
 {
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: GL_DeleteFrameBuffers scene=%u composite=%u resolved=%u shadow=%u\n",
+			(unsigned)framebufs.scene.fbo,
+			(unsigned)framebufs.composite.fbo,
+			(unsigned)framebufs.resolved_scene.fbo,
+			(unsigned)framebufs.shadow.sun_fbo);
 	GL_UnregisterFrameGraphResourceSlots ();
 
 	R_Shadow_DeleteFrameBuffers ();
@@ -1737,6 +1769,12 @@ void GL_DeleteFrameBuffers (void)
 	GL_DeleteNativeTexture (framebufs.composite.color_tex);
 
 	memset (&framebufs, 0, sizeof (framebufs));
+
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		REFGL_StatsLogSummary ();
+
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: GL_DeleteFrameBuffers done\n");
 }
 
 static void GL_OrthoMatrix (float matrix[16], float left, float right, float bottom, float top, float n, float f)
@@ -2961,6 +2999,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 	const int height = framebufs.autoexposure.height;
 	const int pixel_count = width * height;
 	const GLsizeiptr pbo_size = (GLsizeiptr)(pixel_count * 4 * (int)sizeof (float));
+	const qboolean use_async_readback = (r_autoexposure_async.value > 0.f);
 	float pixels[16 * 16 * 4];
 	float luminance_samples[16 * 16];
 	GLint prev_pack_alignment = 4;
@@ -2979,7 +3018,7 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 	glGetIntegerv (GL_PACK_ALIGNMENT, &prev_pack_alignment);
 	glPixelStorei (GL_PACK_ALIGNMENT, 1);
 
-	if (framebufs.autoexposure.pbo[0] && framebufs.autoexposure.pbo[1] && GL_AutoExposurePBOAvailable ())
+	if (use_async_readback && framebufs.autoexposure.pbo[0] && framebufs.autoexposure.pbo[1] && GL_AutoExposurePBOAvailable ())
 	{
 		const int write_index = framebufs.autoexposure.pbo_index;
 		const int read_index = write_index ^ 1;
@@ -3014,8 +3053,10 @@ static qboolean GL_SampleAutoExposureLuminance (float *out_luminance)
 	}
 	else
 	{
-		if (GL_AutoExposurePBOAvailable () && !framebufs.autoexposure.pbo_ready)
+		if (use_async_readback && GL_AutoExposurePBOAvailable () && !framebufs.autoexposure.pbo_ready)
 			GL_AutoExposureInitPBOs ();
+		else if (!use_async_readback && (framebufs.autoexposure.pbo[0] || framebufs.autoexposure.pbo[1]))
+			GL_AutoExposureDeletePBOs ();
 
 		glReadPixels (0, 0, width, height, GL_RGBA, GL_FLOAT, pixels);
 		glPixelStorei (GL_PACK_ALIGNMENT, prev_pack_alignment);
@@ -3959,6 +4000,11 @@ void R_SetAlphaMode (alphamode_t mode)
 static uint32_t visedict_keys[MAX_VISEDICTS];
 static uint16_t visedict_order[2][MAX_VISEDICTS];
 
+static qboolean R_DrawWorldEnabled (void)
+{
+	return Cvar_VariableValue ("r_drawworld") > 0.f;
+}
+
 /*
 =============
 R_SortEntities
@@ -4001,7 +4047,7 @@ static void R_SortEntities (void)
 	cl_numvisedicts = j;
 
 	memset (typebins, 0, sizeof (typebins));
-	if (r_drawworld.value)
+	if (R_DrawWorldEnabled ())
 		typebins[mod_brush * 2 + 0]++; // count worldspawn
 
 	// fill entity sort key array, initial order, and per-type counts
@@ -4089,7 +4135,7 @@ static void R_SortEntities (void)
 	}
 
 	// write sorted list
-	if (r_drawworld.value)
+	if (R_DrawWorldEnabled ())
 		cl_sorted_visedicts[typebins[mod_brush * 2 + 0]++] = &cl_entities[0]; // add the world as the first brush entity
 	for (i = 0; i < cl_numvisedicts; i++)
 	{
@@ -4097,6 +4143,7 @@ static void R_SortEntities (void)
 		qboolean translucent = !ENTALPHA_OPAQUE (ent->alpha);
 		cl_sorted_visedicts[typebins[ent->model->type * 2 + translucent]++] = ent;
 	}
+
 }
 
 int SignbitsForPlane (mplane_t* out)
@@ -4821,7 +4868,7 @@ void R_SetupView (void)
 	r_drawworld_cheatsafe = true;
 	if (cl.maxclients == 1)
 	{
-		if (!r_drawworld.value) r_drawworld_cheatsafe = false;
+		if (!R_DrawWorldEnabled ()) r_drawworld_cheatsafe = false;
 
 		if (r_fullbright.value) r_fullbright_cheatsafe = true;
 		else if (r_lightmap.value) r_lightmap_cheatsafe = true;

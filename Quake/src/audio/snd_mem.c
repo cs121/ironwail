@@ -276,10 +276,18 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	pending_snd_job_t *job;
 	sfxcache_t	*sc;
 
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "S_LoadSound: begin name=%s", s ? s->name : "<null>");
+		TexMgr_Trace (tracebuf);
+	}
 // see if still in memory
 	sc = (sfxcache_t *) Cache_Check (&s->cache);
 	if (sc)
+	{
+		TexMgr_Trace ("S_LoadSound: cache hit");
 		return sc;
+	}
 
 //	Con_Printf ("S_LoadSound: %x\n", (int)stackbuf);
 
@@ -290,16 +298,25 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 	job = S_FindPendingSoundJob (s);
 	if (job)
 	{
+		TexMgr_Trace ("S_LoadSound: pending job found");
 		if (!SDL_AtomicGet (&job->done))
+		{
+			TexMgr_Trace ("S_LoadSound: pending job not done");
 			return NULL;
+		}
 		sc = S_CommitPendingSound (job);
 		if (sc)
+		{
+			TexMgr_Trace ("S_LoadSound: pending commit ok");
 			return sc;
+		}
+		TexMgr_Trace ("S_LoadSound: pending commit fell through");
 		return S_LoadSoundSync (s, namebuffer);
 	}
 
 	if (Host_AsyncAssetsEnabled ())
 	{
+		TexMgr_Trace ("S_LoadSound: async path");
 		job = (pending_snd_job_t *) q_calloc(1, sizeof (*job));
 		if (!job)
 			Sys_Error ("S_LoadSound: out of memory");
@@ -313,9 +330,11 @@ sfxcache_t *S_LoadSound (sfx_t *s)
 		pending_snd_jobs = job;
 
 		FS_AsyncRead (namebuffer, S_AsyncReadComplete, job);
+		TexMgr_Trace ("S_LoadSound: async queued");
 		return NULL;
 	}
 
+	TexMgr_Trace ("S_LoadSound: sync path");
 	return S_LoadSoundSync (s, namebuffer);
 }
 
@@ -327,16 +346,25 @@ static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer)
 	float	stepscale;
 	sfxcache_t	*sc;
 
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "S_LoadSoundSync: begin name=%s file=%s", s ? s->name : "<null>", namebuffer);
+		TexMgr_Trace (tracebuf);
+	}
 //	Con_Printf ("loading %s\n",namebuffer);
 	data = COM_LoadMallocFile (namebuffer, NULL);
+	TexMgr_Trace ("S_LoadSoundSync: after load file");
 
 	if (!data)
 	{
+		TexMgr_Trace ("S_LoadSoundSync: load file returned NULL");
 		Con_Printf ("Couldn't load %s\n", namebuffer);
 		return NULL;
 	}
 
+	TexMgr_Trace ("S_LoadSoundSync: before wavinfo");
 	info = GetWavinfo (s->name, data, com_filesize);
+	TexMgr_Trace ("S_LoadSoundSync: after wavinfo");
 	if (info.channels != 1)
 	{
 		q_free(data);
@@ -353,6 +381,7 @@ static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer)
 
 	stepscale = (float)info.rate / shm->speed;
 	len = info.samples / stepscale;
+	TexMgr_Trace ("S_LoadSoundSync: after length calc");
 
 	len = len * info.width * info.channels;
 
@@ -369,6 +398,7 @@ static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer)
 		q_free(data);
 		return NULL;
 	}
+	TexMgr_Trace ("S_LoadSoundSync: cache alloc ok");
 
 	sc->length = info.samples;
 	sc->loopstart = info.loopstart;
@@ -377,8 +407,10 @@ static sfxcache_t *S_LoadSoundSync (sfx_t *s, const char *namebuffer)
 	sc->stereo = info.channels;
 
 	ResampleSfx (s, sc->speed, sc->width, data + info.dataofs);
+	TexMgr_Trace ("S_LoadSoundSync: resample done");
 
 	q_free(data);
+	TexMgr_Trace ("S_LoadSoundSync: end");
 
 	return sc;
 }
@@ -398,6 +430,11 @@ static byte	*iff_end;
 static byte	*last_chunk;
 static byte	*iff_data;
 static int	iff_chunk_len;
+
+static qboolean WavHasBytes (const byte *p, int count)
+{
+	return p && iff_data && iff_end && p >= iff_data && count >= 0 && p + count <= iff_end;
+}
 
 static short GetLittleShort (void)
 {
@@ -486,16 +523,30 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 	if (!wav)
 		return info;
 
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "GetWavinfo: begin name=%s len=%d", name ? name : "<null>", wavlength);
+		TexMgr_Trace (tracebuf);
+	}
+	if (wavlength < 12)
+	{
+		TexMgr_Trace ("GetWavinfo: too short");
+		Con_Printf("%s is too short to be a WAV file\n", name);
+		return info;
+	}
 	iff_data = wav;
 	iff_end = wav + wavlength;
 
 // find "RIFF" chunk
+	TexMgr_Trace ("GetWavinfo: find RIFF");
 	FindChunk("RIFF");
-	if (!(data_p && !strncmp((char *)data_p + 8, "WAVE", 4)))
+	if (!data_p || !WavHasBytes (data_p, 12) || strncmp((char *)data_p + 8, "WAVE", 4) != 0)
 	{
+		TexMgr_Trace ("GetWavinfo: missing RIFF/WAVE");
 		Con_Printf("%s missing RIFF/WAVE chunks\n", name);
 		return info;
 	}
+	TexMgr_Trace ("GetWavinfo: RIFF ok");
 
 // get "fmt " chunk
 	iff_data = data_p + 12;
@@ -503,35 +554,77 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 	DumpChunks ();
 #endif
 
+	TexMgr_Trace ("GetWavinfo: find fmt");
 	FindChunk("fmt ");
-	if (!data_p)
+	if (!data_p || !WavHasBytes (data_p, 16))
 	{
+		TexMgr_Trace ("GetWavinfo: missing fmt");
 		Con_Printf("%s is missing fmt chunk\n", name);
 		return info;
 	}
+	if (iff_chunk_len < 16)
+	{
+		TexMgr_Trace ("GetWavinfo: fmt chunk too short");
+		Con_Printf("%s has a short fmt chunk (%d)\n", name, iff_chunk_len);
+		return info;
+	}
+	TexMgr_Trace ("GetWavinfo: fmt ok");
 	data_p += 8;
 	format = GetLittleShort();
 	if (format != WAV_FORMAT_PCM)
 	{
+		TexMgr_Trace ("GetWavinfo: not PCM");
 		Con_Printf("%s is not Microsoft PCM format\n", name);
 		return info;
 	}
+	TexMgr_Trace ("GetWavinfo: PCM ok");
 
+	if (!WavHasBytes (data_p, 8))
+	{
+		TexMgr_Trace ("GetWavinfo: fmt payload truncated");
+		Con_Printf("%s has a truncated fmt chunk\n", name);
+		return info;
+	}
 	info.channels = GetLittleShort();
 	info.rate = GetLittleLong();
+	if (!WavHasBytes (data_p, 4))
+	{
+		TexMgr_Trace ("GetWavinfo: fmt tail truncated");
+		Con_Printf("%s has a truncated fmt chunk tail\n", name);
+		return info;
+	}
 	data_p += 4 + 2;
+	if (!WavHasBytes (data_p, 2))
+	{
+		TexMgr_Trace ("GetWavinfo: fmt bit depth truncated");
+		Con_Printf("%s has a truncated bit depth field\n", name);
+		return info;
+	}
 	i = GetLittleShort();
 	if (i != 8 && i != 16)
+	{
+		TexMgr_Trace ("GetWavinfo: unsupported bit depth");
 		return info;
+	}
 	info.width = i / 8;
+	TexMgr_Trace ("GetWavinfo: format fields ok");
 
 // get cue chunk
+	TexMgr_Trace ("GetWavinfo: find cue");
 	FindChunk("cue ");
 	if (data_p)
 	{
 		qboolean has_valid_loop = false;
 		int cue_loopstart = -1;
 
+		if (!WavHasBytes (data_p, 36))
+		{
+			TexMgr_Trace ("GetWavinfo: cue chunk too short");
+			data_p = NULL;
+			info.loopstart = -1;
+		}
+		else
+		{
 		data_p += 32;
 		cue_loopstart = GetLittleLong();
 	//	Con_Printf("loopstart=%d\n", cue_loopstart);
@@ -556,20 +649,25 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 
 		if (!has_valid_loop)
 			info.loopstart = -1;
+		}
 	}
 	else
 		info.loopstart = -1;
+	TexMgr_Trace ("GetWavinfo: cue ok");
 
 // find data chunk
+	TexMgr_Trace ("GetWavinfo: find data");
 	FindChunk("data");
-	if (!data_p)
+	if (!data_p || !WavHasBytes (data_p, 8))
 	{
+		TexMgr_Trace ("GetWavinfo: missing data");
 		Con_Printf("%s is missing data chunk\n", name);
 		return info;
 	}
 
 	data_p += 4;
 	samples = GetLittleLong() / info.width;
+	TexMgr_Trace ("GetWavinfo: data chunk ok");
 
 	if (info.samples)
 	{
@@ -587,6 +685,7 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 	}
 
 	info.dataofs = data_p - wav;
+	TexMgr_Trace ("GetWavinfo: end");
 
 	return info;
 }

@@ -27,6 +27,10 @@ static const RenderBackendCaps s_dx12_caps = {
 	0u     /* max_ssbos */
 };
 
+static qboolean DX12_ContextInit (void *window_handle) { (void)window_handle; return false; }
+static void DX12_ContextShutdown (void) {}
+static void DX12_SwapBuffers (void) {}
+
 static qboolean DX12_Init (void) { return false; }
 static void DX12_Shutdown (void) {}
 static void DX12_OnResize (int width, int height) { (void)width; (void)height; }
@@ -89,6 +93,9 @@ static int DX12_GetSceneSampleCount (void) { return 1; }
 
 static const IRenderBackend s_ref_dx12_backend = {
 	"DX12",
+	DX12_ContextInit,
+	DX12_ContextShutdown,
+	DX12_SwapBuffers,
 	DX12_Init,
 	DX12_Shutdown,
 	DX12_OnResize,
@@ -146,7 +153,7 @@ static const IRenderBackend s_ref_dx12_backend = {
 
 static qboolean IW_RendererRefDX12_Register (const iw_renderer_plugin_host_api_t *host_api)
 {
-	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V2_SIZE)
+	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V4_SIZE)
 		return false;
 	if (!host_api->register_backend)
 		return false;

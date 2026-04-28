@@ -83,11 +83,14 @@ qboolean SNDDMA_Init (dma_t *dma)
 	char	drivername[128];
 	const char *driver, *device;
 
+	TexMgr_Trace ("SNDDMA_Init: begin");
 	if (SDL_InitSubSystem(SDL_INIT_AUDIO) < 0)
 	{
+		TexMgr_Trace ("SNDDMA_Init: SDL_InitSubSystem failed");
 		Con_Printf("Couldn't init SDL audio: %s\n", SDL_GetError());
 		return false;
 	}
+	TexMgr_Trace ("SNDDMA_Init: SDL_InitSubSystem ok");
 
 	/* Set up the desired format */
 	desired.freq = snd_mixspeed.value;
@@ -105,18 +108,24 @@ qboolean SNDDMA_Init (dma_t *dma)
 		desired.samples = 4096; /* for 96 kHz */
 	desired.callback = paint_audio;
 	desired.userdata = NULL;
+	TexMgr_Trace ("SNDDMA_Init: desired spec prepared");
 
 	/* Open the audio device */
+	TexMgr_Trace ("SNDDMA_Init: SDL_OpenAudioDevice begin");
 	sdl_audio_device = SDL_OpenAudioDevice (NULL, 0, &desired, &obtained, 0);
+	TexMgr_Trace ("SNDDMA_Init: SDL_OpenAudioDevice end");
 	if (sdl_audio_device == 0)
 	{
+		TexMgr_Trace ("SNDDMA_Init: SDL_OpenAudioDevice failed");
 		Con_Printf("Couldn't open SDL audio: %s\n", SDL_GetError());
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
 		return false;
 	}
 
+	TexMgr_Trace ("SNDDMA_Init: DMA clear begin");
 	memset ((void *) dma, 0, sizeof(dma_t));
 	shm = dma;
+	TexMgr_Trace ("SNDDMA_Init: DMA clear end");
 
 	/* Fill the audio DMA information block using the obtained format. */
 	shm->samplebits = (obtained.format & 0xFF); /* first byte of format is bits */
@@ -135,21 +144,43 @@ qboolean SNDDMA_Init (dma_t *dma)
 	shm->samples = tmp;
 	shm->samplepos = 0;
 	shm->submission_chunk = 1;
+	TexMgr_Trace ("SNDDMA_Init: DMA config end");
 
-	Con_Printf ("SDL audio spec  : %d Hz, %d samples, %d channels\n",
+	TexMgr_Trace ("SNDDMA_Init: SDL audio spec print begin");
+	{
+		char tracebuf[128];
+		q_snprintf (tracebuf, sizeof (tracebuf),
+			"SDL audio spec  : %d Hz, %d samples, %d channels",
 			obtained.freq, obtained.samples, obtained.channels);
+		TexMgr_Trace (tracebuf);
+	}
+	TexMgr_Trace ("SNDDMA_Init: SDL audio spec print end");
 
+	TexMgr_Trace ("SNDDMA_Init: audio driver query begin");
 	driver = SDL_GetCurrentAudioDriver();
 	device = SDL_GetAudioDeviceName(0, SDL_FALSE);
+	TexMgr_Trace ("SNDDMA_Init: audio driver query end");
 	q_snprintf(drivername, sizeof(drivername), "%s - %s",
 		driver != NULL ? driver : "(UNKNOWN)",
 		device != NULL ? device : "(UNKNOWN)");
+	TexMgr_Trace ("SNDDMA_Init: driver name formatted");
 	buffersize = shm->samples * (shm->samplebits / 8);
-	Con_Printf ("SDL audio driver: %s, %d bytes buffer\n", drivername, buffersize);
+	TexMgr_Trace ("SNDDMA_Init: buffersize computed");
+	TexMgr_Trace ("SNDDMA_Init: SDL audio driver print begin");
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf),
+			"SDL audio driver: %s, %d bytes buffer", drivername, buffersize);
+		TexMgr_Trace (tracebuf);
+	}
+	TexMgr_Trace ("SNDDMA_Init: SDL audio driver print end");
 
+	TexMgr_Trace ("SNDDMA_Init: buffer alloc begin");
 	shm->buffer = (unsigned char *) q_calloc(1, buffersize);
+	TexMgr_Trace ("SNDDMA_Init: buffer alloc end");
 	if (!shm->buffer)
 	{
+		TexMgr_Trace ("SNDDMA_Init: buffer alloc failed");
 		SDL_CloseAudioDevice (sdl_audio_device);
 		sdl_audio_device = 0;
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
@@ -158,8 +189,11 @@ qboolean SNDDMA_Init (dma_t *dma)
 		return false;
 	}
 
+	TexMgr_Trace ("SNDDMA_Init: SDL_PauseAudioDevice begin");
 	SDL_PauseAudioDevice (sdl_audio_device, 0);
+	TexMgr_Trace ("SNDDMA_Init: SDL_PauseAudioDevice end");
 
+	TexMgr_Trace ("SNDDMA_Init: end");
 	return true;
 }
 

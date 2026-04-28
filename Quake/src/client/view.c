@@ -659,7 +659,8 @@ void V_PolyBlend (void)
 	// Blend happens as a late overlay to keep postprocess (e.g. SSAO/tonemap) from
 	// affecting UI-style color shifts like pickups or damage flashes.
 
-	R_DrawPolyblendOverlay (v_blend);
+	if (g_rend && g_rend->R_DrawPolyblendOverlay)
+		g_rend->R_DrawPolyblendOverlay (v_blend);
 
 	v_blend[3] = 0.f; // make sure this doesn't get applied again later in the pipeline
 }
@@ -1104,8 +1105,26 @@ the entity origin, so any view position inside that will be valid
 */
 extern vrect_t	scr_vrect;
 
+static qboolean V_IsFiniteFloat (float value)
+{
+#if defined(_MSC_VER)
+	return _finite (value) != 0;
+#else
+	return isfinite (value);
+#endif
+}
+
+static qboolean V_IsFiniteVec3 (const vec3_t v)
+{
+	return V_IsFiniteFloat (v[0]) && V_IsFiniteFloat (v[1]) && V_IsFiniteFloat (v[2]);
+}
+
 void V_RenderView (void)
 {
+	static vec3_t s_last_valid_vieworg;
+	static vec3_t s_last_valid_viewangles;
+	static qboolean s_have_last_valid_view = false;
+
 	if (con_forcedup)
 		return;
 
@@ -1114,12 +1133,34 @@ void V_RenderView (void)
 	else if (!cl.paused /* && (cl.maxclients > 1 || key_dest == key_game) */)
 		V_CalcRefdef ();
 
+	/* Guard against NaN/Inf camera state causing black frames in external renderer path. */
+	if (!V_IsFiniteVec3 (r_refdef.vieworg) || !V_IsFiniteVec3 (r_refdef.viewangles))
+	{
+		if (s_have_last_valid_view)
+		{
+			VectorCopy (s_last_valid_vieworg, r_refdef.vieworg);
+			VectorCopy (s_last_valid_viewangles, r_refdef.viewangles);
+		}
+		else
+		{
+			entity_t *ent = &cl_entities[cl.viewentity];
+			VectorCopy (ent->origin, r_refdef.vieworg);
+			VectorCopy (cl.viewangles, r_refdef.viewangles);
+		}
+	}
+	else
+	{
+		VectorCopy (r_refdef.vieworg, s_last_valid_vieworg);
+		VectorCopy (r_refdef.viewangles, s_last_valid_viewangles);
+		s_have_last_valid_view = true;
+	}
+
 	//johnfitz -- removed lcd code
 
 	if (g_rend && g_rend->R_RenderView)
 		g_rend->R_RenderView ();
 	else
-		R_RenderView ();
+		Sys_Error ("Renderer entrypoints are not registered (R_RenderView).\n");
 }
 
 /*

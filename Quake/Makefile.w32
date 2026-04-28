@@ -190,7 +190,7 @@ CFLAGS+= $(CODEC_INC)
 COMMON_LIBS= -lopengl32 -lwinmm -luuid -lole32
 
 LIBS = $(COMMON_LIBS) $(NET_LIBS) $(CODEC_LINK) $(CODECLIBS)
-RENDERER_PLUGIN_TARGET = ironwail_renderer_opengl.dll
+RENDERER_PLUGIN_TARGET = ref_gl.dll
 
 # name of this makefile, so we can use it as a dependency
 MAKEFILE := $(lastword $(MAKEFILE_LIST))
@@ -226,6 +226,8 @@ GLOBJS = \
 	gl_rlight.o \
 	gl_rmain.o \
 	gl_fog.o \
+	gl_backend_runtime.o \
+	gl_backend_resources.o \
 	gl_rmisc.o \
 	r_postfx.o \
 	r_realtimelight.o \
@@ -304,8 +306,46 @@ OBJS = strlcat.o \
 
 OBJDEPS := $(OBJS:%.o=%.d)
 OBJS += $(SYSOBJ_RES)
-RENDERER_PLUGIN_OBJS = renderer_builtin_gl_plugin.o
-RENDERER_PLUGIN_DEPS = $(RENDERER_PLUGIN_OBJS:%.o=%.d)
+RENDERER_PLUGIN_SRCS = \
+	src/render/ref_gl_plugin.c \
+	src/render/ref_gl_bridge_stubs.c \
+	src/render/gl_backend.c \
+	src/render/gl_backend_runtime.c \
+	src/render/gl_backend_resources.c \
+	src/render/gl_draw.c \
+	src/render/gl_rmain.c \
+	src/render/gl_rmisc.c \
+	src/render/gl_screen.c \
+	src/platform/gl_vidsdl.c \
+	src/render/gl_model.c \
+	src/render/gl_mesh.c \
+	src/render/gl_sky.c \
+	src/render/gl_warp.c \
+	src/render/gl_texmgr.c \
+	src/render/gl_shaders.c \
+	src/render/gl_shadow.c \
+	src/render/gl_shadow_runtime.c \
+	src/render/gl_oit.c \
+	src/render/gl_lightgrid.c \
+	src/render/gl_ktx2.c \
+	src/render/gl_refrag.c \
+	src/render/gl_rlight.c \
+	src/render/gl_fog.c \
+	src/render/gl_dlight.c \
+	src/render/r_world.c \
+	src/render/r_alias.c \
+	src/render/r_entitylight.c \
+	src/render/r_part.c \
+	src/render/r_part_q3p.c \
+	src/render/r_decals.c \
+	src/render/r_sprite.c \
+	src/render/r_brush.c \
+	src/render/r_resources_gl.c \
+	src/render/r_quality.c \
+	src/render/r_sanitize.c \
+	src/render/r_ssao.c \
+	src/render/r_tonemap.c \
+	src/render/r_postfx.c
 
 # ---------------------------
 # targets / rules
@@ -338,9 +378,9 @@ ironwail.exe:	$(OBJS) $(MAKEFILE)
 	$(LINKER) $(OBJS) $(LDFLAGS) $(LIBS) $(SDL_LIBS) -o $@
 	$(call do_strip,$@)
 
-$(RENDERER_PLUGIN_TARGET): $(RENDERER_PLUGIN_OBJS) $(MAKEFILE)
+$(RENDERER_PLUGIN_TARGET): $(MAKEFILE)
 	@echo "Linking $@" && \
-	$(CC) -shared $(RENDERER_PLUGIN_OBJS) -o $@
+	$(CC) -shared $(DFLAGS) $(CFLAGS) $(SDL_CFLAGS) -DUSE_SDL2 -DRENDERER_PLUGIN_BUILD -Iinclude -include ref_gl_bridge.h $(RENDERER_PLUGIN_SRCS) $(SDL_LIBS) $(COMMON_LIBS) -o $@
 
 release:	ironwail.exe
 debug:
@@ -354,7 +394,7 @@ clean: $(MAKEFILE)
 #---------------------------------------------------------------
 
 ifneq ($(strip $(MAKECMDGOALS)),clean)
-ifneq ($(strip $(OBJDEPS) $(RENDERER_PLUGIN_DEPS)),)
--include $(OBJDEPS) $(RENDERER_PLUGIN_DEPS)
+ifneq ($(strip $(OBJDEPS)),)
+-include $(OBJDEPS)
 endif
 endif

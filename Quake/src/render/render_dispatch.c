@@ -1,56 +1,95 @@
 #include "quakedef.h"
+#include "draw.h"
 #include "glquake.h"
+#include "screen.h"
 #include "render_dispatch.h"
+
+#define CANVAS_ALIGN_LEFT		0.f
+#define CANVAS_ALIGN_CENTERX	0.5f
+#define CANVAS_ALIGN_RIGHT		1.f
+#define CANVAS_ALIGN_TOP		0.f
+#define CANVAS_ALIGN_CENTERY	0.5f
+#define CANVAS_ALIGN_BOTTOM		1.f
 
 const iw_renderer_entry_points_t *g_rend = NULL;
 
+#ifdef IW_RENDERER_HOST_FRONTEND
+cvar_t scr_menuscale = {"scr_menuscale", "1", CVAR_ARCHIVE};
+cvar_t scr_menubgalpha = {"scr_menubgalpha", "0.7", CVAR_ARCHIVE};
+cvar_t scr_menubgstyle = {"scr_menubgstyle", "-1", CVAR_ARCHIVE};
+cvar_t scr_centerprintbg = {"scr_centerprintbg", "0", CVAR_ARCHIVE};
+cvar_t scr_sbarscale = {"scr_sbarscale", "1", CVAR_ARCHIVE};
+cvar_t scr_sbaralpha = {"scr_sbaralpha", "0.75", CVAR_ARCHIVE};
+cvar_t scr_conwidth = {"scr_conwidth", "0", CVAR_ARCHIVE};
+cvar_t scr_conscale = {"scr_conscale", "1", CVAR_ARCHIVE};
+cvar_t scr_crosshairscale = {"scr_crosshairscale", "1", CVAR_ARCHIVE};
+cvar_t scr_pixelaspect = {"scr_pixelaspect", "1", CVAR_ARCHIVE};
+cvar_t scr_showfps = {"scr_showfps", "0", CVAR_ARCHIVE};
+cvar_t scr_showspeed = {"scr_showspeed", "0", CVAR_ARCHIVE};
+cvar_t scr_showspeed_ofs = {"scr_showspeed_ofs", "0", CVAR_ARCHIVE};
+cvar_t scr_clock = {"scr_clock", "0", CVAR_ARCHIVE};
+cvar_t scr_usekfont = {"scr_usekfont", "0", CVAR_NONE};
+cvar_t scr_hudstyle = {"hudstyle", "2", CVAR_ARCHIVE};
+cvar_t cl_screenshotname = {"cl_screenshotname", "screenshots/%map%_%date%_%time%", CVAR_ARCHIVE};
+cvar_t scr_demobar_timeout = {"scr_demobar_timeout", "1", CVAR_ARCHIVE};
+cvar_t scr_viewsize = {"viewsize","100",CVAR_ARCHIVE};
+cvar_t scr_fov = {"fov","90",CVAR_ARCHIVE};
+cvar_t scr_fov_adapt = {"fov_adapt","1",CVAR_ARCHIVE};
+cvar_t scr_zoomfov = {"zoom_fov","30",CVAR_ARCHIVE};
+cvar_t scr_zoomspeed = {"zoom_speed","8",CVAR_ARCHIVE};
+cvar_t scr_conspeed = {"scr_conspeed","2000",CVAR_ARCHIVE};
+cvar_t scr_centertime = {"scr_centertime","2",CVAR_NONE};
+cvar_t scr_showturtle = {"showturtle","0",CVAR_NONE};
+cvar_t scr_showpause = {"showpause","1",CVAR_NONE};
+cvar_t scr_printspeed = {"scr_printspeed","8",CVAR_NONE};
+cvar_t gl_triplebuffer = {"gl_triplebuffer", "1", CVAR_ARCHIVE};
+cvar_t cl_gun_fovscale = {"cl_gun_fovscale","1",CVAR_ARCHIVE};
+cvar_t cl_gun_x = {"cl_gun_x","0",CVAR_ARCHIVE};
+cvar_t cl_gun_y = {"cl_gun_y","0",CVAR_ARCHIVE};
+cvar_t cl_gun_z = {"cl_gun_z","0",CVAR_ARCHIVE};
+
+int glx, gly, glwidth, glheight;
+float scr_con_current;
+float scr_conlines;
+qboolean scr_initialized;
+qpic_t *scr_net;
+qpic_t *scr_turtle;
+int clearconsole;
+int clearnotify;
+vrect_t scr_vrect;
+qboolean scr_disabled_for_loading;
+qboolean scr_drawloading;
+float scr_disabled_time;
+int scr_tileclear_updates = 0;
+hudstyle_t hudstyle;
+
+cvar_t scr_conalpha = {"scr_conalpha", "0.5", CVAR_ARCHIVE};
+cvar_t scr_conbrightness = {"scr_conbrightness", "1.0", CVAR_ARCHIVE};
+
+const vec3_t rgb_black = {0.f, 0.f, 0.f};
+float scr_centertime_off = 0.f;
+qpic_t *draw_disc = NULL;
+qpic_t *pic_ovr = NULL;
+qpic_t *pic_ins = NULL;
+qpic_t *pic_nul = NULL;
+qboolean custom_conchars = false;
+glcanvas_t glcanvas;
+#endif
+
 static iw_renderer_entry_points_t s_entries;
 
-static void RenderDispatch_FillInternalEntryPoints (iw_renderer_entry_points_t *entries)
+static void RenderDispatch_ClearEntryPoints (iw_renderer_entry_points_t *entries)
 {
 	if (!entries)
 		return;
 
 	memset (entries, 0, sizeof (*entries));
 	entries->struct_size = sizeof (*entries);
-	entries->R_Init = R_Init;
-	entries->R_RenderView = R_RenderView;
-	entries->R_NewMap = R_NewMap;
-	entries->R_ClearEfrags = R_ClearEfrags;
-	entries->R_CheckEfrags = R_CheckEfrags;
-	entries->R_AddEfrags = R_AddEfrags;
-	entries->R_ParseParticleEffect = R_ParseParticleEffect;
-	entries->R_RunParticleEffect = R_RunParticleEffect;
-	entries->R_RocketTrail = R_RocketTrail;
-	entries->R_EntityParticles = R_EntityParticles;
-	entries->R_BlobExplosion = R_BlobExplosion;
-	entries->R_ParticleExplosion = R_ParticleExplosion;
-	entries->R_ParticleExplosion2 = R_ParticleExplosion2;
-	entries->R_LavaSplash = R_LavaSplash;
-	entries->R_TeleportSplash = R_TeleportSplash;
-	entries->R_SpawnImpactDecal = R_SpawnImpactDecal;
-	entries->R_SpawnImpactDecalEx = R_SpawnImpactDecalEx;
-	entries->R_TranslatePlayerSkin = R_TranslatePlayerSkin;
-	entries->R_TranslateNewPlayerSkin = R_TranslateNewPlayerSkin;
-	entries->R_ClearBoundingBoxes = R_ClearBoundingBoxes;
-	entries->R_ClearParticles = R_ClearParticles;
-	entries->R_ClearDecals = R_ClearDecals;
-	entries->R_ReloadDecals = R_ReloadDecals;
-	entries->R_InitDecals = R_InitDecals;
-	entries->R_StorePrevFrameState = R_StorePrevFrameState;
-	entries->R_GetParticleDebugStats = R_GetParticleDebugStats;
-	entries->R_SetAlphaMode = (void (*)(int))R_SetAlphaMode;
-	entries->R_GetAlphaMode = (int (*)(void))R_GetAlphaMode;
-	entries->R_GetEffectiveAlphaMode = (int (*)(void))R_GetEffectiveAlphaMode;
-	entries->R_AddStaticModels = R_AddStaticModels;
-	entries->R_PushDlights = R_PushDlights;
-	entries->R_ParseDlightEntities = R_ParseDlightEntities;
-	entries->R_GetLightgridSample = (const void *(*)(const vec3_t))R_GetLightgridSample;
 }
 
 void RenderDispatch_Init (void)
 {
-	RenderDispatch_FillInternalEntryPoints (&s_entries);
+	RenderDispatch_ClearEntryPoints (&s_entries);
 	g_rend = &s_entries;
 }
 
@@ -65,7 +104,7 @@ void RenderDispatch_SetEntryPoints (const iw_renderer_entry_points_t *entry_poin
 			s_entries.field_name = entry_points->field_name; \
 	} while (0)
 
-	RenderDispatch_FillInternalEntryPoints (&s_entries);
+	RenderDispatch_ClearEntryPoints (&s_entries);
 	if (!entry_points)
 	{
 		g_rend = &s_entries;
@@ -105,8 +144,404 @@ void RenderDispatch_SetEntryPoints (const iw_renderer_entry_points_t *entry_poin
 	IW_RENDERER_ENTRY_COPY_FN (R_PushDlights);
 	IW_RENDERER_ENTRY_COPY_FN (R_ParseDlightEntities);
 	IW_RENDERER_ENTRY_COPY_FN (R_GetLightgridSample);
+	IW_RENDERER_ENTRY_COPY_FN (R_DrawPolyblendOverlay);
+	IW_RENDERER_ENTRY_COPY_FN (R_GetCanvasMetrics);
+	IW_RENDERER_ENTRY_COPY_FN (R_GetSceneSampleCount);
+	IW_RENDERER_ENTRY_COPY_FN (R_GetMaxSampleCount);
+	IW_RENDERER_ENTRY_COPY_FN (R_GetMaxAnisotropy);
+	IW_RENDERER_ENTRY_COPY_FN (R_IsClearEnabled);
+	IW_RENDERER_ENTRY_COPY_FN (R_NewGame);
+	IW_RENDERER_ENTRY_COPY_FN (R_CreateFrameBuffers);
+	IW_RENDERER_ENTRY_COPY_FN (R_DeleteFrameBuffers);
+	IW_RENDERER_ENTRY_COPY_FN (R_ResetDRSState);
+	IW_RENDERER_ENTRY_COPY_FN (R_ResetGodraysStabilization);
+	IW_RENDERER_ENTRY_COPY_FN (SCR_UpdateScreen);
+	IW_RENDERER_ENTRY_COPY_FN (CL_RunParticles);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_PicFromWad2);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_PicFromWad);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_CachePic);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_TryCachePic);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_NewGame);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_FillEx);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_PartialFadeScreen);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_Character);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_CharacterEx);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_String);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_StringEx);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_Pic);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_SubPic);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_TransPicTranslate);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_ConsoleBackground);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_TileClear);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_Fill);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_SetCanvas);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_SetCanvasColor);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_PushCanvasColor);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_PopCanvasColor);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_SetClipRect);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_ResetClipping);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_FadeScreen);
+	IW_RENDERER_ENTRY_COPY_FN (GL_SetCanvas);
+	IW_RENDERER_ENTRY_COPY_FN (GL_SetCanvasColor);
+	IW_RENDERER_ENTRY_COPY_FN (GL_PushCanvasColor);
+	IW_RENDERER_ENTRY_COPY_FN (GL_PopCanvasColor);
+	IW_RENDERER_ENTRY_COPY_FN (GL_Set2D);
+	IW_RENDERER_ENTRY_COPY_FN (SCR_CenterPrint);
+	IW_RENDERER_ENTRY_COPY_FN (SCR_BeginLoadingPlaque);
+	IW_RENDERER_ENTRY_COPY_FN (SCR_EndLoadingPlaque);
+	IW_RENDERER_ENTRY_COPY_FN (SCR_ModalMessage);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_Flush);
+	IW_RENDERER_ENTRY_COPY_FN (Draw_Init);
+	IW_RENDERER_ENTRY_COPY_FN (SCR_Init);
 	g_rend = &s_entries;
 
 #undef IW_RENDERER_ENTRY_COPY_FN
 #undef IW_RENDERER_ENTRY_HAS_FIELD
 }
+
+void RenderDispatch_UpdateScreen (void)
+{
+	if (g_rend && g_rend->SCR_UpdateScreen)
+	{
+		g_rend->SCR_UpdateScreen ();
+		return;
+	}
+	/* Early startup can print through Con_Printf before ref_gl.dll is loaded.
+	 * Treat that as "not ready yet" instead of hard-failing the process. */
+}
+
+#ifdef IW_RENDERER_HOST_FRONTEND
+static void RenderDispatch_Unavailable (const char *name)
+{
+	Sys_Error ("Renderer entry point unavailable: %s", name);
+}
+
+#define RENDER_DISPATCH_CALL_VOID(field, ...) \
+	do { \
+		if (g_rend && g_rend->field) \
+		{ \
+			g_rend->field (__VA_ARGS__); \
+			return; \
+		} \
+		RenderDispatch_Unavailable (#field); \
+	} while (0)
+
+#define RENDER_DISPATCH_CALL_RET(field, rettype, ...) \
+	do { \
+		if (g_rend && g_rend->field) \
+			return (rettype)g_rend->field (__VA_ARGS__); \
+		RenderDispatch_Unavailable (#field); \
+		return (rettype)0; \
+	} while (0)
+
+qpic_t *Draw_PicFromWad2 (const char *name, unsigned int texflags)
+{
+	RENDER_DISPATCH_CALL_RET (Draw_PicFromWad2, qpic_t *, name, texflags);
+}
+
+qpic_t *Draw_PicFromWad (const char *name)
+{
+	RENDER_DISPATCH_CALL_RET (Draw_PicFromWad, qpic_t *, name);
+}
+
+qpic_t *Draw_CachePic (const char *path)
+{
+	RENDER_DISPATCH_CALL_RET (Draw_CachePic, qpic_t *, path);
+}
+
+qpic_t *Draw_TryCachePic (const char *path, unsigned int texflags)
+{
+	RENDER_DISPATCH_CALL_RET (Draw_TryCachePic, qpic_t *, path, texflags);
+}
+
+void Draw_NewGame (void)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_NewGame);
+}
+
+void Draw_Init (void)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_Init);
+}
+
+void Draw_Flush (void)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_Flush);
+}
+
+void Draw_Character (int x, int y, int num)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_Character, x, y, num);
+}
+
+void Draw_CharacterEx (float x, float y, float dimx, float dimy, int num)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_CharacterEx, x, y, dimx, dimy, num);
+}
+
+void Draw_String (int x, int y, const char *str)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_String, x, y, str);
+}
+
+void Draw_StringEx (float x, float y, float dim, const char *str)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_StringEx, x, y, dim, str);
+}
+
+void Draw_Pic (int x, int y, qpic_t *pic)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_Pic, x, y, (struct qpic_s *)pic);
+}
+
+void Draw_SubPic (float x, float y, float w, float h, qpic_t *pic, float s1, float t1, float s2, float t2, const float *rgb, float alpha)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_SubPic, x, y, w, h, (struct qpic_s *)pic, s1, t1, s2, t2, rgb, alpha);
+}
+
+void Draw_TransPicTranslate (int x, int y, qpic_t *pic, int top, int bottom)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_TransPicTranslate, x, y, (struct qpic_s *)pic, top, bottom);
+}
+
+void Draw_ConsoleBackground (void)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_ConsoleBackground);
+}
+
+void Draw_TileClear (int x, int y, int w, int h)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_TileClear, x, y, w, h);
+}
+
+void Draw_Fill (int x, int y, int w, int h, int c, float alpha)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_Fill, x, y, w, h, c, alpha);
+}
+
+void Draw_SetCanvas (canvastype newcanvas)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_SetCanvas, (int)newcanvas);
+}
+
+void Draw_SetCanvasColor (float r, float g, float b, float a)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_SetCanvasColor, r, g, b, a);
+}
+
+void Draw_PushCanvasColor (float r, float g, float b, float a)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_PushCanvasColor, r, g, b, a);
+}
+
+void Draw_PopCanvasColor (void)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_PopCanvasColor);
+}
+
+void Draw_SetClipRect (float x, float y, float width, float height)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_SetClipRect, x, y, width, height);
+}
+
+void Draw_ResetClipping (void)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_ResetClipping);
+}
+
+void Draw_FadeScreen (float alpha)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_FadeScreen, alpha);
+}
+
+void SCR_CenterPrint (const char *str)
+{
+	RENDER_DISPATCH_CALL_VOID (SCR_CenterPrint, str);
+}
+
+void SCR_BeginLoadingPlaque (void)
+{
+	RENDER_DISPATCH_CALL_VOID (SCR_BeginLoadingPlaque);
+}
+
+void SCR_EndLoadingPlaque (void)
+{
+	RENDER_DISPATCH_CALL_VOID (SCR_EndLoadingPlaque);
+}
+
+int SCR_ModalMessage (const char *text, float timeout)
+{
+	if (g_rend && g_rend->SCR_ModalMessage)
+		return g_rend->SCR_ModalMessage (text, timeout);
+	RenderDispatch_Unavailable ("SCR_ModalMessage");
+	return 0;
+}
+
+void SCR_Init (void)
+{
+	RENDER_DISPATCH_CALL_VOID (SCR_Init);
+}
+
+void SCR_UpdateScreen (void)
+{
+	RenderDispatch_UpdateScreen ();
+}
+
+void SCR_PixelAspect_f (cvar_t *cvar)
+{
+	(void)cvar;
+	VID_RecalcInterfaceSize ();
+}
+
+void SCR_UpdateZoom (void)
+{
+	float speed = scr_zoomspeed.value > 0.f ? scr_zoomspeed.value : 1e6f;
+	float delta = cl.zoomdir * speed * (cl.time - cl.oldtime);
+	if (!delta)
+		return;
+
+	cl.zoom += delta;
+	if (cl.zoom >= 1.f)
+	{
+		cl.zoom = 1.f;
+		cl.zoomdir = 0.f;
+	}
+	else if (cl.zoom <= 0.f)
+	{
+		cl.zoom = 0.f;
+		cl.zoomdir = 0.f;
+	}
+
+	vid.recalc_refdef = 1;
+}
+
+void Draw_FillEx (float x, float y, float w, float h, const float *rgb, float alpha)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_FillEx, x, y, w, h, rgb, alpha);
+}
+
+void Draw_PartialFadeScreen (float x0, float x1, float y0, float y1, float alpha)
+{
+	RENDER_DISPATCH_CALL_VOID (Draw_PartialFadeScreen, x0, x1, y0, y1, alpha);
+}
+
+void GL_SetCanvas (canvastype newcanvas)
+{
+	RENDER_DISPATCH_CALL_VOID (GL_SetCanvas, (int)newcanvas);
+}
+
+void GL_SetCanvasColor (float r, float g, float b, float a)
+{
+	RENDER_DISPATCH_CALL_VOID (GL_SetCanvasColor, r, g, b, a);
+}
+
+void GL_PushCanvasColor (float r, float g, float b, float a)
+{
+	RENDER_DISPATCH_CALL_VOID (GL_PushCanvasColor, r, g, b, a);
+}
+
+void GL_PopCanvasColor (void)
+{
+	RENDER_DISPATCH_CALL_VOID (GL_PopCanvasColor);
+}
+
+void GL_Set2D (void)
+{
+	RENDER_DISPATCH_CALL_VOID (GL_Set2D);
+}
+
+static void RenderDispatch_Transform2 (float width, float height, float scalex, float scaley, float alignx, float aligny, drawtransform_t *out)
+{
+	float scrwidth = vid.guiwidth;
+	float scrheight = vid.guiheight;
+	out->scale[0] = scalex * 2.f / scrwidth;
+	out->scale[1] = scaley * -2.f / scrheight;
+	out->offset[0] = (scrwidth - width * scalex) * alignx / scrwidth * 2.f - 1.f;
+	out->offset[1] = (scrheight - height * scaley) * aligny / scrheight * -2.f + 1.f;
+	out->offset[0] += 0.61803399f / 2.f / glwidth;
+	out->offset[1] += 0.61803399f / 2.f / glheight;
+}
+
+static void RenderDispatch_Transform (float width, float height, float scale, float alignx, float aligny, drawtransform_t *out)
+{
+	RenderDispatch_Transform2 (width, height, scale, scale, alignx, aligny, out);
+}
+
+void Draw_GetCanvasTransform (canvastype type, drawtransform_t *transform)
+{
+	extern vrect_t scr_vrect;
+	float s, s2;
+
+	switch (type)
+	{
+	case CANVAS_DEFAULT:
+		RenderDispatch_Transform (vid.guiwidth, vid.guiheight, 1.f, CANVAS_ALIGN_CENTERX, CANVAS_ALIGN_CENTERY, transform);
+		break;
+	case CANVAS_CONSOLE:
+		s = (float)vid.guiwidth / vid.conwidth;
+		s2 = (float)vid.guiheight / vid.conheight;
+		RenderDispatch_Transform2 (vid.conwidth, vid.conheight, s, s2, CANVAS_ALIGN_CENTERX, CANVAS_ALIGN_CENTERY, transform);
+		transform->offset[1] += (1.f - scr_con_current / glheight) * 2.f;
+		break;
+	case CANVAS_MENU:
+		s = q_min ((float)vid.guiwidth / 320.0f, (float)vid.guiheight / 200.0f);
+		s = CLAMP (1.0f, scr_menuscale.value, s);
+		RenderDispatch_Transform (320, 200, s, CANVAS_ALIGN_CENTERX, CANVAS_ALIGN_CENTERY, transform);
+		break;
+	case CANVAS_CSQC:
+		s = CLAMP (1.0f, scr_sbarscale.value, vid.guiwidth / 320.0f);
+		RenderDispatch_Transform (vid.guiwidth / s, vid.guiheight / s, s, CANVAS_ALIGN_CENTERX, CANVAS_ALIGN_CENTERY, transform);
+		break;
+	case CANVAS_SBAR:
+		if (hudstyle == HUD_QUAKEWORLD)
+			s = CLAMP (1.0f, scr_sbarscale.value, (float)vid.guiheight / 240.0f);
+		else
+			s = CLAMP (1.0f, scr_sbarscale.value, (float)vid.guiwidth / 320.0f);
+		if (cl.gametype == GAME_DEATHMATCH && (hudstyle == HUD_CLASSIC || hudstyle == HUD_QUAKEWORLD))
+			RenderDispatch_Transform (320, 48, s, CANVAS_ALIGN_LEFT, CANVAS_ALIGN_BOTTOM, transform);
+		else
+			RenderDispatch_Transform (320, 48, s, CANVAS_ALIGN_CENTERX, CANVAS_ALIGN_BOTTOM, transform);
+		break;
+	case CANVAS_SBAR_QW_INV:
+		s = CLAMP (1.0f, scr_sbarscale.value, (float)vid.guiheight / 240.0f);
+		RenderDispatch_Transform (48, 48, s, CANVAS_ALIGN_RIGHT, CANVAS_ALIGN_BOTTOM, transform);
+		break;
+	case CANVAS_SBAR2:
+		s = q_min (vid.guiwidth / 400.0f, vid.guiheight / 225.0f);
+		s = CLAMP (1.0f, scr_sbarscale.value, s);
+		RenderDispatch_Transform (vid.guiwidth / s, vid.guiheight / s, s, CANVAS_ALIGN_CENTERX, CANVAS_ALIGN_CENTERY, transform);
+		break;
+	case CANVAS_CROSSHAIR:
+		s = CLAMP (1.0f, scr_crosshairscale.value, 10.0f);
+		RenderDispatch_Transform (vid.guiwidth / s / 2, vid.guiheight / s / 2, s, CANVAS_ALIGN_LEFT, CANVAS_ALIGN_BOTTOM, transform);
+		transform->offset[0] += 1.f;
+		transform->offset[1] += 1.f - ((scr_vrect.y + scr_vrect.height / 2) * 2 / (float)glheight);
+		break;
+	case CANVAS_BOTTOMLEFT:
+		s = (float)vid.guiwidth / vid.conwidth;
+		RenderDispatch_Transform (320, 200, s, CANVAS_ALIGN_LEFT, CANVAS_ALIGN_BOTTOM, transform);
+		break;
+	case CANVAS_BOTTOMRIGHT:
+		s = (float)vid.guiwidth / vid.conwidth;
+		RenderDispatch_Transform (320, 200, s, CANVAS_ALIGN_RIGHT, CANVAS_ALIGN_BOTTOM, transform);
+		break;
+	case CANVAS_TOPRIGHT:
+		s = (float)vid.guiwidth / vid.conwidth;
+		RenderDispatch_Transform (320, 200, s, CANVAS_ALIGN_RIGHT, CANVAS_ALIGN_TOP, transform);
+		break;
+	default:
+		Sys_Error ("Draw_GetCanvasTransform: bad canvas type");
+	}
+}
+
+void Draw_GetTransformBounds (const drawtransform_t *transform, float *left, float *top, float *right, float *bottom)
+{
+	*left = (-1.f - transform->offset[0]) / transform->scale[0];
+	*right = (1.f - transform->offset[0]) / transform->scale[0];
+	*bottom = (-1.f - transform->offset[1]) / transform->scale[1];
+	*top = (1.f - transform->offset[1]) / transform->scale[1];
+}
+
+#undef RENDER_DISPATCH_CALL_RET
+#undef RENDER_DISPATCH_CALL_VOID
+#endif

@@ -125,7 +125,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;IRONWAIL_ENFORCE_SAFE_CRT=1;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;IRONWAIL_ENFORCE_SAFE_CRT=1;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;IW_RENDERER_HOST_FRONTEND=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -163,7 +163,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USE_WINSOCK2;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;IRONWAIL_ENFORCE_SAFE_CRT=1;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;_USE_WINSOCK2;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;IRONWAIL_ENFORCE_SAFE_CRT=1;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;IW_RENDERER_HOST_FRONTEND=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -200,7 +200,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <AdditionalIncludeDirectories>..\curl\include;..\SDL2\include;..\codecs\include;..\misc\include;..\..\Quake\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USE_WINSOCK2;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;IRONWAIL_ENFORCE_SAFE_CRT=1;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USE_WINSOCK2;_CRT_NONSTDC_NO_DEPRECATE;_WINSOCK_DEPRECATED_NO_WARNINGS;IRONWAIL_ENFORCE_SAFE_CRT=1;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;IW_RENDERER_HOST_FRONTEND=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <PrecompiledHeader>Use</PrecompiledHeader>
@@ -261,7 +261,6 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile Include="..\..\Quake\src\core\cvar.c" />
     <ClCompile Include="..\..\Quake\src\core\fs_pack.c" />
     <ClCompile Include="..\..\Quake\src\core\fs_searchpath.c" />
-    <ClCompile Include="..\..\Quake\src\render\gl_draw.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_fog.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_lightgrid.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_mesh.c" />
@@ -272,12 +271,13 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile Include="..\..\Quake\src\render\gl_oit.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_shadow.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_shadow_runtime.c" />
-    <ClCompile Include="..\..\Quake\src\render\gl_backend.c" />
+<ClCompile Include="..\..\Quake\src\render\gl_backend.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_backend_runtime.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_backend_resources.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_rmain.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_rmisc.c" />
     <ClCompile Include="..\..\Quake\src\render\r_skyvis.c" />
     <ClCompile Include="..\..\Quake\src\render\r_decals.c" />
-    <ClCompile Include="..\..\Quake\src\render\gl_screen.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_shaders.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_sky.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_texmgr.c" />

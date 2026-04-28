@@ -25,6 +25,9 @@ extern cvar_t r_rimlight_intensity;
 extern cvar_t r_rimlight_power;
 extern cvar_t r_rimlight_shadow;
 extern cvar_t r_drawworld;
+extern cvar_t r_refgl_debug;
+extern cvar_t r_refgl_log_resources;
+extern cvar_t r_refgl_validate_fbo;
 
 extern cvar_t r_sun_light;
 extern qboolean R_WorldHasSun (void);
@@ -463,6 +466,9 @@ void R_Shadow_CreateFrameBuffers (void)
 	int sun_size = R_Shadow_ClampMapSize (r_shadow_sun_size.value);
 	int dlight_size = R_Shadow_ClampMapSize (r_shadow_dlight_size.value);
 
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: R_Shadow_CreateFrameBuffers sun=%d dlight=%d\n", sun_size, dlight_size);
+
 	framebufs.shadow.sun_depth_tex = 0;
 	framebufs.shadow.sun_fbo = 0;
 	framebufs.shadow.dlight_depth_tex = 0;
@@ -481,6 +487,8 @@ void R_Shadow_CreateFrameBuffers (void)
 	}
 
 	glGenTextures (1, &framebufs.shadow.sun_depth_tex);
+	ref_gl_stats.textures_created++;
+	ref_gl_stats.textures_alive++;
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D_ARRAY, framebufs.shadow.sun_depth_tex);
 	GL_ObjectLabelFunc (GL_TEXTURE, framebufs.shadow.sun_depth_tex, -1, "shadow sun depth");
 	GL_TexStorage3DFunc (GL_TEXTURE_2D_ARRAY, 1, GL_DEPTH_COMPONENT24, sun_size, sun_size, SHADOW_SUN_CASCADE_MAX);
@@ -493,6 +501,8 @@ void R_Shadow_CreateFrameBuffers (void)
 	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &framebufs.shadow.sun_fbo);
+	ref_gl_stats.fbos_created++;
+	ref_gl_stats.fbos_alive++;
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.shadow.sun_fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, framebufs.shadow.sun_fbo, -1, "shadow sun fbo");
 	GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.sun_depth_tex, 0, 0);
@@ -513,6 +523,8 @@ void R_Shadow_CreateFrameBuffers (void)
 			sun_size, sun_size, SHADOW_SUN_CASCADE_MAX);
 
 	glGenTextures (1, &framebufs.shadow.dlight_depth_tex);
+	ref_gl_stats.textures_created++;
+	ref_gl_stats.textures_alive++;
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_CUBE_MAP_ARRAY, framebufs.shadow.dlight_depth_tex);
 	GL_ObjectLabelFunc (GL_TEXTURE, framebufs.shadow.dlight_depth_tex, -1, "shadow dlight depth cubearray");
 	GL_TexStorage3DFunc (GL_TEXTURE_CUBE_MAP_ARRAY, 1, GL_DEPTH_COMPONENT24, dlight_size, dlight_size, SHADOW_DLIGHT_MAX * SHADOW_DLIGHT_FACES);
@@ -525,6 +537,8 @@ void R_Shadow_CreateFrameBuffers (void)
 	glTexParameteri (GL_TEXTURE_CUBE_MAP_ARRAY, GL_TEXTURE_MAX_LEVEL, 0);
 
 	GL_GenFramebuffersFunc (1, &framebufs.shadow.dlight_fbo);
+	ref_gl_stats.fbos_created++;
+	ref_gl_stats.fbos_alive++;
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, framebufs.shadow.dlight_fbo);
 	GL_ObjectLabelFunc (GL_FRAMEBUFFER, framebufs.shadow.dlight_fbo, -1, "shadow dlight fbo");
 	GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.dlight_depth_tex, 0, 0);
@@ -547,12 +561,23 @@ void R_Shadow_CreateFrameBuffers (void)
 
 	framebufs.shadow.available = true;
 	GL_ResourceRegistry_RegisterSlot (R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);
+
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: R_Shadow_CreateFrameBuffers done sun_fbo=%u dlight_fbo=%u\n",
+			(unsigned)framebufs.shadow.sun_fbo,
+			(unsigned)framebufs.shadow.dlight_fbo);
 }
 
 void R_Shadow_DeleteFrameBuffers (void)
 {
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: R_Shadow_DeleteFrameBuffers sun_fbo=%u dlight_fbo=%u\n",
+			(unsigned)framebufs.shadow.sun_fbo,
+			(unsigned)framebufs.shadow.dlight_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.shadow.sun_fbo);
 	GL_DeleteFramebuffersFunc (1, &framebufs.shadow.dlight_fbo);
+	ref_gl_stats.fbos_destroyed += 2;
+	ref_gl_stats.fbos_alive -= 2;
 	GL_DeleteNativeTexture (framebufs.shadow.sun_depth_tex);
 	GL_DeleteNativeTexture (framebufs.shadow.dlight_depth_tex);
 	framebufs.shadow.sun_depth_tex = 0;
@@ -605,6 +630,12 @@ void R_Shadow_ReconcileResources (void)
 		retry_after_frame = r_framecount + 300;
 	else
 		retry_after_frame = 0;
+
+	if (r_refgl_validate_fbo.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: R_Shadow_ReconcileResources want=%d have=%d retry_after=%d\n",
+			want_shadows ? 1 : 0,
+			have_any_resources ? 1 : 0,
+			retry_after_frame);
 }
 
 static int R_Shadow_FindCurrentIndexForSlot (const dlight_t *source)

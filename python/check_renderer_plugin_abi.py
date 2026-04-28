@@ -20,11 +20,10 @@ def main() -> None:
     backend = (root / "Quake" / "src" / "render" / "r_backend.c").read_text(encoding="utf-8")
     builtin = (root / "Quake" / "src" / "render" / "renderer_builtin_gl_plugin.c").read_text(encoding="utf-8")
 
-    require(r"#define\s+IW_RENDERER_PLUGIN_ABI_MAJOR\s+4u?\b", header, "ABI major version 4")
+    require(r"#define\s+IW_RENDERER_PLUGIN_ABI_MAJOR\s+5u?\b", header, "ABI major version 5")
     require(r"#define\s+IW_RENDERER_PLUGIN_ABI_MINOR\s+0u?\b", header, "ABI minor version 0")
     require(r"qboolean\s*\(\*register_backend\)\s*\(\s*const IRenderBackend \*backend\s*\)\s*;", header, "host register_backend callback")
-    require(r"qboolean\s*\(\*register_builtin_backend\)\s*\(\s*const char \*backend_name\s*\)\s*;", header, "deprecated compatibility callback")
-    require(r"const IRenderBackend \*builtin_opengl_backend\s*;", header, "builtin_opengl_backend pointer")
+    require(r"qboolean\s*\(\*register_entry_points\)\s*\(\s*const iw_renderer_entry_points_t \*entry_points\s*\)\s*;", header, "host register_entry_points callback")
     require(r"const iw_renderer_plugin_surface_services_t \*surface_services\s*;", header, "surface services pointer")
     require(r"const iw_renderer_plugin_resource_services_t \*resource_services\s*;", header, "resource services pointer")
     require(r"const iw_renderer_plugin_upload_services_t \*upload_services\s*;", header, "upload services pointer")
@@ -35,7 +34,8 @@ def main() -> None:
     require(r"resource_services", backend, "host API wiring for v3 resource services")
     require(r"upload_services", backend, "host API wiring for v3 upload services")
     require(r"pipeline_services", backend, "host API wiring for v3 pipeline services")
-    require(r"register_backend", builtin, "builtin plugin direct backend registration path")
+    require(r"IW_RendererBuiltinGL_Register", builtin, "builtin plugin register callback")
+    require(r"IW_RendererPlugin_Query", builtin, "builtin plugin query export")
 
     print("[renderer-plugin-abi] OK")
 

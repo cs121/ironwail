@@ -250,28 +250,48 @@ Reviewed against the current framegraph/backend split and the still-GL-heavy exe
 7. Incremental path viability: **yes**, if GL remains first-class during phased migration.
 8. Confidence: **medium-high** for architecture-level findings; **medium** for runtime-correctness edge cases without exhaustive runtime tracing.
 
-## 14. ref_gl.dll status after remediation (April 23, 2026)
+## 14. ref_gl.dll status after remediation (April 24, 2026)
 
 ### Resolved in this remediation
-1. Loader policy: plugin scan/load now runs unconditionally; `r_refgl_debug` is verbose-only.
-2. OpenGL selection policy: external `ref_gl.dll` is preferred, built-in OpenGL is fallback-only (`r_backend_allow_builtin_gl` gate).
-3. Entry-point dispatch: host call sites now go through `RenderDispatch_Get()` with hardened defaults, so plugin entry-points are used when present and internal functions remain safe fallback.
-4. Guardrail checks: direct-draw and legacy pipeline-state scripts now scan recursive `Quake/src` scope (not top-level only), matching migration enforcement intent.
-5. Runtime diagnostics: startup help now reflects post-registration state (observed `r_backend_api help: gl=implemented, vulkan=experimental, dx12=experimental` with plugins loaded).
-6. Pass-contract hardening: backend validation now accepts either full required pass callbacks or explicit legacy `begin_pass`/`end_pass` bridge fallback.
-7. Framegraph adapter cleanup: resource-bit to backend-slot mapping moved behind `R_Backend_GetFrameGraphResourceBinding()` so `r_framegraph.c` does not own that renderer mapping directly.
+1. Loader policy is now strict external-plugin-first with hard failure when OpenGL plugin registration is missing; debug cvar no longer gates plugin scanning.
+2. Built-in OpenGL fallback contract was removed from plugin host API (ABI major bumped to 5); legacy built-in registration callbacks were removed from host/plugin interfaces.
+3. Host callsites for critical render entrypoints were moved to `g_rend` dispatch (`R_Init`, `R_RenderView`, `R_NewMap`, plus additional skin/particle/decal-related callsites).
+4. Dispatch initialization was hardened to plugin-only entrypoint tables (no internal renderer fallback table in `render_dispatch`).
+5. Runtime diagnostics were validated in Debug x64 smoke runs (normal + `-refgl_debug`): plugin load lines and `r_backend_api help: gl=implemented, vulkan=experimental, dx12=experimental` are consistent.
+6. Guardrail scripts (`check_no_direct_gl_draw_calls.py`, `check_no_legacy_pipeline_state_calls.py`) were aligned to explicit scan-root traversal under `Quake/src`.
+7. Legacy builtin backend export function (`IW_RendererPlugin_GetBuiltinOpenGLBackend`) was removed from GL backend code.
+8. Startup hard-fail diagnostics were hardened to persist in `qconsole.log` via warning-first emission before fatal exit paths.
+9. `gl_backend.c` was split so GL proc-loader + cached fixed-function runtime helpers now live in `gl_backend_runtime.c` (reduced coupling in backend interface unit).
+10. `gl_backend_resources.c` now owns GL resource registry functions; `ironwail.vcxproj` no longer compiles `gl_backend.c` (plugin interface implementation moved one step closer to plugin-only ownership).
+11. `gl_vidsdl.c` host path now routes framebuffer recreation and DRS/godrays reset through dispatch entrypoints, removing direct host calls to those renderer implementation symbols.
+
+### Verification performed
+1. Multiple Debug x64 solution builds succeeded after remediation updates.
+2. Per-phase smoke tests were executed repeatedly from `C:\Quake\rerelease`:
+   normal: `-condebug -nosteamapi` (5s)
+   debug plugin path: `-condebug -nosteamapi -refgl_debug` (5s)
+3. Observed logs show successful plugin loads (`ref_gl`, `ref_vk`, `ref_dx12`) and no new assert/crash signatures in startup smoke.
+4. Static migration guardrails passed:
+   `python/check_gl_symbol_boundaries.py`
+   `python/check_no_raw_gl_calls.py`
+   `python/check_no_direct_gl_draw_calls.py`
+   `python/check_no_legacy_pipeline_state_calls.py`
+   `python/check_renderer_topology.py`
+5. Negative-path runtime check (April 24, 2026): temporarily removing `C:\Quake\rerelease\ref_gl.dll` produced deterministic startup warning:
+   missing required plugin + searched directories, followed by hard failure.
 
 ### Remaining open migration topics
-1. High-level render code still contains GL-centric logic and state assumptions in several paths; backend abstraction is improved but not fully decoupled.
-2. Framegraph resource/state semantics are still coarser than explicit API needs (transition/access modeling depth remains limited).
-3. Descriptor-style binding and command-encoder style submission are still partial migration areas.
+1. Host build graph still compiles internal OpenGL renderer units in Visual Studio target (`ironwail.vcxproj`), so full binary-level externalization is not yet complete.
+2. Build-system convergence is still incomplete in validation terms: CMake + Makefile topology is migrated to `ref_gl`, but cross-build runtime verification (Linux/MinGW) is still pending.
+3. Platform/video ownership split is still partial; `gl_vidsdl.c` remains shared and continues to hold GL lifecycle responsibilities that should be fully renderer-module-owned in final architecture.
+4. Renderer core still contains GL-centric pass/state logic that blocks full explicit-backend neutrality.
 
 ### Risk / regression assessment
-1. `ref_gl.dll` loading is now robust for normal runs (no debug-gate requirement), with controlled fallback behavior when plugin loading fails.
-2. Regression risk from dispatch activation is reduced by internal default wiring and per-field entry-point overlay, but coverage still depends on continued smoke + map-load validation.
-3. Guardrail scripts now enforce the intended source scope, reducing risk of unnoticed direct-GL reintroduction.
+1. Startup behavior is now stricter and clearer: if required OpenGL plugin registration is absent, host fails early with explicit diagnostics.
+2. Dispatch-path regressions are reduced by explicit host-side null checks and hard-fail guards on required entrypoints.
+3. Main residual risk is architectural, not immediate runtime stability: host/build topology still allows internal renderer code paths to exist in host binaries.
 
 ### Recommended next steps
-1. Keep `r_backend_wrapper_audit` and guardrail scripts in CI gating for renderer-affecting PRs.
-2. Add one deeper runtime smoke variant (map load + short playthrough) to complement startup-only smoke.
-3. Continue migration by removing remaining direct GL/state leakage from high-frequency pass code paths.
+1. Complete host build-graph extraction: remove renderer implementation units from `ironwail` host targets and leave them only in `ref_gl`.
+2. Run full CMake/Linux/MinGW build + runtime smoke validation to close cross-build-system verification.
+3. Add negative-path runtime matrix to CI (`ref_gl.dll` missing, bad ABI, failed registration) to enforce deterministic hard-fail diagnostics.

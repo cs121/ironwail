@@ -430,7 +430,7 @@ void CL_ParseServerInfo (void)
 	if (g_rend && g_rend->R_NewMap)
 		g_rend->R_NewMap ();
 	else
-		R_NewMap ();
+		Sys_Error ("Renderer entrypoints are not registered (R_NewMap).\n");
 	CL_IWMusic_NewMap ();
 
 	//johnfitz -- clear out string; we don't consider identical
@@ -548,7 +548,12 @@ void CL_ParseUpdate (int bits)
 	{
 		ent->skinnum = skin;
 		if (num > 0 && num <= cl.maxclients)
-			R_TranslateNewPlayerSkin (num - 1); //johnfitz -- was R_TranslatePlayerSkin
+		{
+			if (g_rend && g_rend->R_TranslateNewPlayerSkin)
+				g_rend->R_TranslateNewPlayerSkin (num - 1); //johnfitz -- was R_TranslatePlayerSkin
+			else
+				Sys_Error ("Renderer entrypoints are not registered (R_TranslateNewPlayerSkin).\n");
+		}
 	}
 	if (bits & U_EFFECTS)
 		ent->effects = MSG_ReadByte();
@@ -663,7 +668,12 @@ void CL_ParseUpdate (int bits)
 		else
 			forcelink = true;	// hack to make null model players work
 		if (num > 0 && num <= cl.maxclients)
-			R_TranslateNewPlayerSkin (num - 1); //johnfitz -- was R_TranslatePlayerSkin
+		{
+			if (g_rend && g_rend->R_TranslateNewPlayerSkin)
+				g_rend->R_TranslateNewPlayerSkin (num - 1); //johnfitz -- was R_TranslatePlayerSkin
+			else
+				Sys_Error ("Renderer entrypoints are not registered (R_TranslateNewPlayerSkin).\n");
+		}
 
 		ent->lerpflags |= LERP_RESETANIM; //johnfitz -- don't lerp animation across model changes
 	}
@@ -914,7 +924,10 @@ void CL_NewTranslation (int slot)
 	memcpy (dest, vid.colormap, sizeof(cl.scores[slot].translations));
 	top = cl.scores[slot].colors & 0xf0;
 	bottom = (cl.scores[slot].colors &15)<<4;
-	R_TranslatePlayerSkin (slot);
+	if (g_rend && g_rend->R_TranslatePlayerSkin)
+		g_rend->R_TranslatePlayerSkin (slot);
+	else
+		Sys_Error ("Renderer entrypoints are not registered (R_TranslatePlayerSkin).\n");
 
 	for (i = 0; i < VID_GRADES; i++, dest += 256, source+=256)
 	{
@@ -967,7 +980,10 @@ void CL_ParseStatic (int version) //johnfitz -- added a parameter
 	ent->scale = ent->baseline.scale;
 	VectorCopy (ent->baseline.origin, ent->origin);
 	VectorCopy (ent->baseline.angles, ent->angles);
-	R_AddEfrags (ent);
+	if (g_rend && g_rend->R_AddEfrags)
+		g_rend->R_AddEfrags (ent);
+	else
+		Sys_Error ("Renderer entrypoints are not registered (R_AddEfrags).\n");
 }
 
 /*
@@ -1241,7 +1257,10 @@ void CL_ParseServerMessage (void)
 			break;
 
 		case svc_particle:
-			R_ParseParticleEffect ();
+			if (g_rend && g_rend->R_ParseParticleEffect)
+				g_rend->R_ParseParticleEffect ();
+			else
+				Sys_Error ("Renderer entrypoints are not registered (R_ParseParticleEffect).\n");
 			break;
 
 		case svc_spawnbaseline:
@@ -1282,7 +1301,10 @@ void CL_ParseServerMessage (void)
 			{
 				if (cl.num_statics > 128)
 					Con_DWarning ("%i static entities exceeds standard limit of 128 (max = %d).\n", cl.num_statics, MAX_STATIC_ENTITIES);
-				R_CheckEfrags ();
+				if (g_rend && g_rend->R_CheckEfrags)
+					g_rend->R_CheckEfrags ();
+				else
+					Sys_Error ("Renderer entrypoints are not registered (R_CheckEfrags).\n");
 			}
 			//johnfitz
 			CL_SignonReply ();

@@ -238,6 +238,7 @@ static void R_Decals_ResetRuntime (void)
 {
 	int i;
 
+	TexMgr_Trace ("Decals_ResetRuntime begin");
 	memset (decal_instances, 0, sizeof (decal_instances));
 	decal_vert_cursor = 0;
 	decal_inst_count = 0;
@@ -247,6 +248,7 @@ static void R_Decals_ResetRuntime (void)
 
 	for (i = MAX_DECAL_INSTANCES - 1; i >= 0; --i)
 		decal_free_list[decal_free_count++] = i;
+	TexMgr_Trace ("Decals_ResetRuntime end free_count=%d", decal_free_count);
 }
 
 static decalblend_t R_DecalParseBlend (const char *s)
@@ -278,20 +280,29 @@ static qboolean R_DecalLoadTexture (decaldef_t *def)
 	byte *data;
 	char texname[96];
 
+	TexMgr_Trace ("DecalLoadTexture begin: %s path=%s", def->name, def->texture_path);
 	data = Image_LoadImage (def->texture_path, &w, &h, &fmt);
 	if (!data)
+	{
+		TexMgr_Trace ("DecalLoadTexture missing image: %s path=%s", def->name, def->texture_path);
 		return false;
+	}
 
 	q_snprintf (texname, sizeof (texname), "decal:%s", def->name);
 	def->texture = TexMgr_LoadImage (NULL, texname, w, h, fmt, data, def->texture_path, 0,
 		TEXPREF_ALPHA | TEXPREF_NOPICMIP | TEXPREF_CLAMP);
+	TexMgr_Trace ("DecalLoadTexture end: %s texture=%p valid=%d", def->name, (void *)def->texture, def->texture != NULL);
 	return def->texture != NULL;
 }
 
 static void R_DecalFinalizeDef (decaldef_t *def)
 {
+	TexMgr_Trace ("DecalFinalizeDef begin: %s path=%s category=%s", def->name, def->texture_path, def->category);
 	if (!def->name[0] || !def->texture_path[0] || !def->category[0])
+	{
+		TexMgr_Trace ("DecalFinalizeDef skip: %s path=%s category=%s", def->name, def->texture_path, def->category);
 		return;
+	}
 
 	if (def->size_max < def->size_min)
 		def->size_max = def->size_min;
@@ -318,6 +329,7 @@ static void R_DecalFinalizeDef (decaldef_t *def)
 		def->atlas_v1 = q_min (1.f, def->atlas_v0 + 0.001f);
 
 	def->valid = R_DecalLoadTexture (def);
+	TexMgr_Trace ("DecalFinalizeDef end: %s valid=%d texture=%p", def->name, def->valid, (void *)def->texture);
 }
 
 static void R_Decals_LoadScript (const char *path)
@@ -327,8 +339,12 @@ static void R_Decals_LoadScript (const char *path)
 	decaldef_t *def = NULL;
 
 	if (!data)
+	{
+		TexMgr_Trace ("Decals_LoadScript missing: %s", path);
 		return;
+	}
 
+	TexMgr_Trace ("Decals_LoadScript begin: %s", path);
 	c = R_DecalSkipUTF8BOM (data);
 	while ((c = COM_Parse (c)))
 	{
@@ -425,14 +441,17 @@ static void R_Decals_LoadScript (const char *path)
 		R_DecalFinalizeDef (def);
 
 	q_free(data);
+	TexMgr_Trace ("Decals_LoadScript end: %s", path);
 }
 
 static void R_Decals_LoadScripts (void)
 {
 	num_decal_defs = 0;
 	memset (decal_defs, 0, sizeof (decal_defs));
+	TexMgr_Trace ("Decals_LoadScripts begin");
 	R_Decals_LoadScript ("decals.material");
 	R_Decals_LoadScript ("materials/decals.material");
+	TexMgr_Trace ("Decals_LoadScripts end");
 }
 
 static decaldef_t *R_FindDecalDefByCategory (const char *category)
@@ -1257,19 +1276,24 @@ void R_InitDecals (void)
 	Cvar_RegisterVariable (&r_decals_max);
 	Cvar_RegisterVariable (&r_decals_debug);
 	Cvar_RegisterVariable (&r_decals_instanced);
+	TexMgr_Trace ("R_InitDecals begin");
 	R_Decals_LoadScripts ();
 	R_Decals_ResetRuntime ();
+	TexMgr_Trace ("R_InitDecals end");
 }
 
 void R_ClearDecals (void)
 {
+	TexMgr_Trace ("R_ClearDecals");
 	R_Decals_ResetRuntime ();
 }
 
 void R_ReloadDecals (void)
 {
+	TexMgr_Trace ("R_ReloadDecals begin");
 	R_Decals_LoadScripts ();
 	R_Decals_ResetRuntime ();
+	TexMgr_Trace ("R_ReloadDecals end");
 }
 
 static void R_Decals_ExecFrameGraphPass (RenderPassContext *ctx)

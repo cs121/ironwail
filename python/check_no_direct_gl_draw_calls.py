@@ -13,27 +13,35 @@ FORBIDDEN_PATTERNS = (
     re.compile(r"\bGL_MultiDrawElementsIndirectFunc\b"),
 )
 
+SCAN_ROOTS = (
+    pathlib.Path("Quake/src"),
+)
+
 
 def main() -> int:
     repo_root = pathlib.Path(__file__).resolve().parents[1]
-    source_root = repo_root / "Quake" / "src"
     allow_files = {
-        (source_root / "render" / "gl_backend.c").resolve(),
+        (repo_root / "Quake" / "src" / "render" / "gl_backend.c").resolve(),
     }
     failures = []
 
-    for path in source_root.rglob("*.c"):
-        full = path.resolve()
-        if full in allow_files:
+    for scan_root in SCAN_ROOTS:
+        root = repo_root / scan_root
+        if not root.is_dir():
             continue
 
-        text = full.read_text(encoding="utf-8")
-        lines = text.splitlines()
-        for line_no, line in enumerate(lines, start=1):
-            for pattern in FORBIDDEN_PATTERNS:
-                if pattern.search(line):
-                    failures.append((str(path.relative_to(repo_root)).replace("\\", "/"), line_no, line.strip()))
-                    break
+        for path in root.rglob("*.c"):
+            full = path.resolve()
+            if full in allow_files:
+                continue
+
+            text = full.read_text(encoding="utf-8")
+            lines = text.splitlines()
+            for line_no, line in enumerate(lines, start=1):
+                for pattern in FORBIDDEN_PATTERNS:
+                    if pattern.search(line):
+                        failures.append((str(path.relative_to(repo_root)).replace("\\", "/"), line_no, line.strip()))
+                        break
 
     if failures:
         print("Direct GL draw call check failed:")

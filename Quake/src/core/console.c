@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "q_ctype.h"
+#include "render_dispatch.h"
 
 #include <sys/types.h>
 #include <time.h>
@@ -158,13 +159,31 @@ static size_t Con_StrLen (int line)
 	return len;
 }
 
+static void Con_GetCanvasMetricsCompat (int *out_x, int *out_y, int *out_width, int *out_height)
+{
+	if (g_rend && g_rend->R_GetCanvasMetrics)
+	{
+		g_rend->R_GetCanvasMetrics (out_x, out_y, out_width, out_height);
+		return;
+	}
+
+	if (out_x)
+		*out_x = 0;
+	if (out_y)
+		*out_y = 0;
+	if (out_width)
+		*out_width = q_max (1, vid.width);
+	if (out_height)
+		*out_height = q_max (1, vid.height);
+}
+
 static void Con_ScreenToCanvas (int x, int y, int *outx, int *outy)
 {
 	drawtransform_t	transform;
 	int canvas_x, canvas_y, canvas_width, canvas_height;
 	float			px, py;
 
-	R_GetCanvasMetrics (&canvas_x, &canvas_y, &canvas_width, &canvas_height);
+	Con_GetCanvasMetricsCompat (&canvas_x, &canvas_y, &canvas_width, &canvas_height);
 
 	// screen space to [-1..1]
 	px = (x - canvas_x) * 2.f / (float) canvas_width - 1.f;
@@ -1093,7 +1112,7 @@ static void Con_Linefeed (void)
 {
 	int canvas_height;
 
-	R_GetCanvasMetrics (NULL, NULL, NULL, &canvas_height);
+	Con_GetCanvasMetricsCompat (NULL, NULL, NULL, &canvas_height);
 
 	//johnfitz -- improved scrolling
 	if (con_backscroll)
@@ -1292,7 +1311,7 @@ void Con_Printf (const char *fmt, ...)
 		if (!inupdate)
 		{
 			inupdate = true;
-			SCR_UpdateScreen ();
+			RenderDispatch_UpdateScreen ();
 			inupdate = false;
 		}
 	}
@@ -2289,7 +2308,9 @@ void Con_DrawConsole (int lines, qboolean drawbg, qboolean drawinput)
 	if (lines <= 0)
 		return;
 
-	R_GetCanvasMetrics (NULL, NULL, NULL, &canvas_height);
+	Con_GetCanvasMetricsCompat (NULL, NULL, NULL, &canvas_height);
+	if (canvas_height <= 0)
+		return;
 	con_vislines = lines * vid.conheight / canvas_height;
 	Draw_SetCanvas (CANVAS_CONSOLE);
 
@@ -2385,7 +2406,7 @@ void Con_NotifyBox (const char *text)
 	do
 	{
 		t1 = Sys_DoubleTime ();
-		SCR_UpdateScreen ();
+	RenderDispatch_UpdateScreen ();
 		Sys_SendKeyEvents ();
 		Key_GetGrabbedInput (&lastkey, &lastchar);
 		Sys_Sleep (16);

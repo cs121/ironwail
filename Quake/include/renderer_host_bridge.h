@@ -14,6 +14,7 @@ struct edict_s;
 struct hull_s;
 struct trace_s;
 struct lumpinfo_s;
+struct qpic_s;
 struct quakeparms_s;
 struct mousecursor_s;
 
@@ -103,7 +104,7 @@ typedef enum {key_game, key_console, key_message, key_menu} keydest_t;
 #endif
 #endif
 
-#define IW_RENDERER_HOST_BRIDGE_ABI_VERSION 1u
+#define IW_RENDERER_HOST_BRIDGE_ABI_VERSION 3u
 
 typedef struct iw_renderer_host_bridge_functions_s
 {
@@ -202,6 +203,7 @@ typedef struct iw_renderer_host_bridge_functions_s
 
 	qboolean (*cl_in_cutscene)(void);
 	qboolean (*cl_is_player_ent)(const entity_t *ent);
+	void (*cl_postfx_reset)(void);
 
 	int (*msg_read_byte)(void);
 	int (*msg_read_short)(void);
@@ -211,6 +213,8 @@ typedef struct iw_renderer_host_bridge_functions_s
 	qboolean (*m_forced_center_print)(float *alpha);
 	qboolean (*m_forced_underwater)(void);
 	void (*m_draw_text_box)(int x, int y, int width, int lines);
+	void (*draw_init)(void);
+	void (*draw_flush)(void);
 
 	void (*v_polyblend)(void);
 
@@ -223,6 +227,7 @@ typedef struct iw_renderer_host_bridge_functions_s
 	void *(*vid_get_window)(void);
 	qboolean (*vid_has_mouse_focus)(void);
 	qboolean (*vid_is_minimized)(void);
+	qboolean (*vid_ensure_gl_context_current)(void);
 	void (*vid_set_window_title)(const char *title);
 	void (*vid_recalc_console_size)(void);
 	void (*vid_recalc_interface_size)(void);
@@ -438,6 +443,7 @@ typedef struct iw_renderer_host_bridge_data_s
 	const double *realtime;
 	const double *host_frametime;
 	const double *host_rawframetime;
+	refdef_t *r_refdef;
 	const qboolean *host_initialized;
 	byte **host_colormap;
 	client_state_t *cl;
@@ -539,6 +545,55 @@ typedef struct iw_renderer_entry_points_s
 	void (*R_PushDlights)(void);
 	void (*R_ParseDlightEntities)(void);
 	const void *(*R_GetLightgridSample)(const vec3_t pos);
+	void (*R_DrawPolyblendOverlay)(const float blend_rgba[4]);
+	void (*R_GetCanvasMetrics)(int *out_x, int *out_y, int *out_width, int *out_height);
+	int (*R_GetSceneSampleCount)(void);
+	int (*R_GetMaxSampleCount)(void);
+	float (*R_GetMaxAnisotropy)(void);
+	qboolean (*R_IsClearEnabled)(void);
+	void (*R_NewGame)(void);
+	void (*R_CreateFrameBuffers)(void);
+	void (*R_DeleteFrameBuffers)(void);
+	void (*R_ResetDRSState)(void);
+	void (*R_ResetGodraysStabilization)(void);
+	void (*SCR_UpdateScreen)(void);
+	void (*CL_RunParticles)(void);
+	struct qpic_s *(*Draw_PicFromWad2)(const char *name, unsigned int texflags);
+	struct qpic_s *(*Draw_PicFromWad)(const char *name);
+	struct qpic_s *(*Draw_CachePic)(const char *path);
+	struct qpic_s *(*Draw_TryCachePic)(const char *path, unsigned int texflags);
+	void (*Draw_NewGame)(void);
+	void (*Draw_FillEx)(float x, float y, float w, float h, const float *rgb, float alpha);
+	void (*Draw_PartialFadeScreen)(float x0, float x1, float y0, float y1, float alpha);
+	void (*Draw_Character)(int x, int y, int num);
+	void (*Draw_CharacterEx)(float x, float y, float dimx, float dimy, int num);
+	void (*Draw_String)(int x, int y, const char *str);
+	void (*Draw_StringEx)(float x, float y, float dim, const char *str);
+	void (*Draw_Pic)(int x, int y, struct qpic_s *pic);
+	void (*Draw_SubPic)(float x, float y, float w, float h, struct qpic_s *pic, float s1, float t1, float s2, float t2, const float *rgb, float alpha);
+	void (*Draw_TransPicTranslate)(int x, int y, struct qpic_s *pic, int top, int bottom);
+	void (*Draw_ConsoleBackground)(void);
+	void (*Draw_TileClear)(int x, int y, int w, int h);
+	void (*Draw_Fill)(int x, int y, int w, int h, int c, float alpha);
+	void (*Draw_SetCanvas)(int newcanvas);
+	void (*Draw_SetCanvasColor)(float r, float g, float b, float a);
+	void (*Draw_PushCanvasColor)(float r, float g, float b, float a);
+	void (*Draw_PopCanvasColor)(void);
+	void (*Draw_SetClipRect)(float x, float y, float width, float height);
+	void (*Draw_ResetClipping)(void);
+	void (*Draw_FadeScreen)(float alpha);
+	void (*GL_SetCanvas)(int newcanvas);
+	void (*GL_SetCanvasColor)(float r, float g, float b, float a);
+	void (*GL_PushCanvasColor)(float r, float g, float b, float a);
+	void (*GL_PopCanvasColor)(void);
+	void (*GL_Set2D)(void);
+	void (*SCR_CenterPrint)(const char *str);
+	void (*SCR_BeginLoadingPlaque)(void);
+	void (*SCR_EndLoadingPlaque)(void);
+	int (*SCR_ModalMessage)(const char *text, float timeout);
+	void (*Draw_Flush)(void);
+	void (*Draw_Init)(void);
+	void (*SCR_Init)(void);
 } iw_renderer_entry_points_t;
 
 #endif

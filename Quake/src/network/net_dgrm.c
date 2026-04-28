@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "net_sys.h"
 #include "net_defs.h"
 #include "net_dgrm.h"
+#include "render_dispatch.h"
 
 // This is enables a simple IP banning mechanism
 #define BAN_TEST
@@ -1311,7 +1312,7 @@ static qsocket_t *_Datagram_Connect (const char *host)
 
 	// send the connection request
 	Con_Printf("trying...\n");
-	SCR_UpdateScreen ();
+	RenderDispatch_UpdateScreen ();
 	start_time = net_time;
 
 	for (reps = 0; reps < 3; reps++)
@@ -1337,7 +1338,7 @@ static qsocket_t *_Datagram_Connect (const char *host)
 					Con_Printf("wrong reply address\n");
 					Con_Printf("Expected: %s | %s\n", dfunc.AddrToString (&sendaddr), StrAddr(&sendaddr));
 					Con_Printf("Received: %s | %s\n", dfunc.AddrToString (&readaddr), StrAddr(&readaddr));
-					SCR_UpdateScreen ();
+					RenderDispatch_UpdateScreen ();
 					ret = 0;
 					continue;
 				}
@@ -1376,7 +1377,7 @@ static qsocket_t *_Datagram_Connect (const char *host)
 			break;
 
 		Con_Printf("still trying...\n");
-		SCR_UpdateScreen ();
+		RenderDispatch_UpdateScreen ();
 		start_time = SetNetTime();
 	}
 

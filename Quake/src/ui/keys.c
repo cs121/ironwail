@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "arch_def.h"
 #include "q_ctype.h"
+#include "render_dispatch.h"
 
 /* key up events are sent even if in console mode */
 
@@ -310,7 +311,7 @@ void Key_Console (int key)
 		key_linepos = 1;
 		key_tabhint[0] = '\0';
 		if (cls.state == ca_disconnected)
-			SCR_UpdateScreen (); // force an update, because the command may take some time
+			RenderDispatch_UpdateScreen (); // force an update, because the command may take some time
 		return;
 
 	case K_TAB:
@@ -353,7 +354,10 @@ void Key_Console (int key)
 			int i, x, canvas_height;
 			char *line;
 
-			R_GetCanvasMetrics (NULL, NULL, NULL, &canvas_height);
+			if (g_rend && g_rend->R_GetCanvasMetrics)
+				g_rend->R_GetCanvasMetrics (NULL, NULL, NULL, &canvas_height);
+			else
+				canvas_height = q_max (1, vid.height);
 
 			for (i = con_current - con_totallines + 1; i <= con_current; i++)
 			{

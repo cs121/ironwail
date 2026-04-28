@@ -29,6 +29,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "menu_options.h"
 #include "menu_mods.h"
 #include "menu_video.h"
+#include "render_dispatch.h"
 
 #include <time.h>
 
@@ -57,6 +58,45 @@ extern cvar_t gl_texture_anisotropy;
 extern cvar_t host_maxfps;
 extern cvar_t scr_showfps;
 extern cvar_t scr_showspeed;
+
+static int Menu_GetSceneSampleCountCompat (void)
+{
+	if (g_rend && g_rend->R_GetSceneSampleCount)
+		return g_rend->R_GetSceneSampleCount ();
+	return 1;
+}
+
+static int Menu_GetMaxSampleCountCompat (void)
+{
+	if (g_rend && g_rend->R_GetMaxSampleCount)
+		return g_rend->R_GetMaxSampleCount ();
+	return 1;
+}
+
+static float Menu_GetMaxAnisotropyCompat (void)
+{
+	if (g_rend && g_rend->R_GetMaxAnisotropy)
+		return g_rend->R_GetMaxAnisotropy ();
+	return 1.f;
+}
+
+static void Menu_GetCanvasMetricsCompat (int *out_x, int *out_y, int *out_width, int *out_height)
+{
+	if (g_rend && g_rend->R_GetCanvasMetrics)
+	{
+		g_rend->R_GetCanvasMetrics (out_x, out_y, out_width, out_height);
+		return;
+	}
+
+	if (out_x)
+		*out_x = 0;
+	if (out_y)
+		*out_y = 0;
+	if (out_width)
+		*out_width = q_max (1, vid.width);
+	if (out_height)
+		*out_height = q_max (1, vid.height);
+}
 extern cvar_t scr_clock;
 extern cvar_t vid_width;
 extern cvar_t vid_height;
@@ -2918,12 +2958,12 @@ chooses next AA level in order, then updates vid_fsaa cvar
 */
 static void VID_Menu_ChooseNextAA (int dir)
 {
-	int samples = R_GetSceneSampleCount ();
+	int samples = Menu_GetSceneSampleCountCompat ();
 	if (dir < 0)
 		samples <<= 1;
 	else
 		samples >>= 1;
-	Cvar_SetValue ("vid_fsaa", CLAMP (1, samples, R_GetMaxSampleCount ()));
+	Cvar_SetValue ("vid_fsaa", CLAMP (1, samples, Menu_GetMaxSampleCountCompat ()));
 }
 
 /*
@@ -2940,7 +2980,7 @@ static void VID_Menu_ChooseNextAnisotropy (int dir)
 		aniso <<= 1;
 	else
 		aniso >>= 1;
-	Cvar_SetValueQuick (&gl_texture_anisotropy, CLAMP (1, aniso, (int)R_GetMaxAnisotropy ()));
+	Cvar_SetValueQuick (&gl_texture_anisotropy, CLAMP (1, aniso, (int)Menu_GetMaxAnisotropyCompat ()));
 }
 
 /*
@@ -3038,7 +3078,10 @@ VID_Menu_ChooseNextAlphaMode
 */
 static void VID_Menu_ChooseNextAlphaMode (int dir)
 {
-	R_SetAlphaMode ((R_GetAlphaMode () + ALPHAMODE_COUNT + dir) % ALPHAMODE_COUNT);
+			if (g_rend && g_rend->R_SetAlphaMode && g_rend->R_GetAlphaMode)
+				g_rend->R_SetAlphaMode ((g_rend->R_GetAlphaMode () + ALPHAMODE_COUNT + dir) % ALPHAMODE_COUNT);
+			else
+				Sys_Error ("Renderer entrypoints are not registered (R_SetAlphaMode/R_GetAlphaMode).\n");
 }
 
 /*
@@ -3048,7 +3091,9 @@ VID_Menu_GetAlphaModeDesc
 */
 static const char *VID_Menu_GetAlphaModeDesc (void)
 {
-	switch (R_GetEffectiveAlphaMode ())
+		if (!g_rend || !g_rend->R_GetEffectiveAlphaMode)
+			Sys_Error ("Renderer entrypoints are not registered (R_GetEffectiveAlphaMode).\n");
+		switch (g_rend->R_GetEffectiveAlphaMode ())
 	{
 	case ALPHAMODE_BASIC:		return "Basic";
 	case ALPHAMODE_SORTED:		return "Dynamic";
@@ -4151,12 +4196,12 @@ qboolean M_SetSliderValue (int option, float f)
 		Cvar_SetValueQuick (&r_scale, f);
 		return true;
 	case OPT_ANISO:
-		f = Exp2f (floor (f * Log2f (R_GetMaxAnisotropy ()) + 0.5f));
-		Cvar_SetValueQuick (&gl_texture_anisotropy, CLAMP (1, (int)f, (int)R_GetMaxAnisotropy ()));
+		f = Exp2f (floor (f * Log2f (Menu_GetMaxAnisotropyCompat ()) + 0.5f));
+		Cvar_SetValueQuick (&gl_texture_anisotropy, CLAMP (1, (int)f, (int)Menu_GetMaxAnisotropyCompat ()));
 		return true;
 	case OPT_FSAA:
-		f = Exp2f (floor (f * Log2f (R_GetMaxSampleCount ()) + 0.5f));
-		Cvar_SetValue ("vid_fsaa", CLAMP (1, (int)f, R_GetMaxSampleCount ()));
+		f = Exp2f (floor (f * Log2f (Menu_GetMaxSampleCountCompat ()) + 0.5f));
+		Cvar_SetValue ("vid_fsaa", CLAMP (1, (int)f, Menu_GetMaxSampleCountCompat ()));
 		return true;
 	case OPT_MOUSESPEED:	// mouse speed
 		f = f * 10.f + 1.f;
@@ -4531,8 +4576,8 @@ static void M_Options_DrawItem (int y, int item)
 		break;
 	case OPT_FSAA:
 		{
-			const int scene_samples = R_GetSceneSampleCount ();
-			const int max_samples = R_GetMaxSampleCount ();
+			const int scene_samples = Menu_GetSceneSampleCountCompat ();
+			const int max_samples = Menu_GetMaxSampleCountCompat ();
 			r = GetLogFraction (scene_samples, 1.f, max_samples);
 			M_DrawSlider (x, y, r, scene_samples >= 2 ? va("%ix", scene_samples) : "Off");
 		}
@@ -4545,7 +4590,7 @@ static void M_Options_DrawItem (int y, int item)
 		M_DrawSlider (x, y, r, r_refdef.scale >= 2 ? va("1/%i", r_refdef.scale) : "Off");
 		break;
 	case OPT_ANISO:
-		r = GetLogFraction (gl_texfilter.anisotropy, 1.f, R_GetMaxAnisotropy ());
+		r = GetLogFraction (gl_texfilter.anisotropy, 1.f, Menu_GetMaxAnisotropyCompat ());
 		M_DrawSlider (x, y, r, gl_texfilter.anisotropy >= 2.f ? va("%ix", (int)gl_texfilter.anisotropy) : "Off");
 		break;
 	case OPT_TEXFILTER:
@@ -7369,7 +7414,7 @@ void M_Mousemove (int screenx, int screeny)
 	Draw_GetCanvasTransform (CANVAS_MENU, &transform);
 	{
 		int canvas_x, canvas_y, canvas_width, canvas_height;
-		R_GetCanvasMetrics (&canvas_x, &canvas_y, &canvas_width, &canvas_height);
+		Menu_GetCanvasMetricsCompat (&canvas_x, &canvas_y, &canvas_width, &canvas_height);
 		x = (screenx - canvas_x) * 2.f / (float) canvas_width - 1.f;
 		y = (screeny - canvas_y) * 2.f / (float) canvas_height - 1.f;
 	}

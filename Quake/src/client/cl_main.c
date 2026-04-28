@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "lightgrid.h"
 #include "r_dlight_pool.h"
 #include "devstats.h"
+#include "render_dispatch.h"
 
 // we need to declare some mouse variables here, because the menu system
 // references them even when on a unix system.
@@ -474,7 +475,10 @@ static void CL_RocketTrail (entity_t *ent, int type)
 	ent->traildelay -= cl.time - cl.oldtime;
 	if (ent->traildelay > 0.f)
 		return;
-	R_RocketTrail (ent->trailorg, ent->origin, type);
+	if (g_rend && g_rend->R_RocketTrail)
+		g_rend->R_RocketTrail (ent->trailorg, ent->origin, type);
+	else
+		Sys_Error ("Renderer entrypoints are not registered (R_RocketTrail).\n");
 	CL_ResetTrail (ent);
 }
 
@@ -668,7 +672,12 @@ void CL_RelinkEntities (void)
 			ent->angles[1] = bobjrotate;
 
 		if (ent->effects & EF_BRIGHTFIELD)
-			R_EntityParticles (ent);
+		{
+			if (g_rend && g_rend->R_EntityParticles)
+				g_rend->R_EntityParticles (ent);
+			else
+				Sys_Error ("Renderer entrypoints are not registered (R_EntityParticles).\n");
+		}
 
 		if (ent->effects & EF_MUZZLEFLASH)
 		{

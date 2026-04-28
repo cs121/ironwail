@@ -73,4 +73,7 @@ extern qcvm_t *qcvm;
 
 #endif /* RENDERER_PLUGIN_BUILD */
 
+void Bridge_DrawInit (void);
+void Bridge_DrawFlush (void);
+
 #endif /* REF_GL_BRIDGE_H */

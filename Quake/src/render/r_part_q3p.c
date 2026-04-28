@@ -684,7 +684,7 @@ static void Q3P_SetStageTexMatrixUniform (const mat_texmatrix_t *matrix)
 		m[6] = matrix->m[0][2]; m[7] = matrix->m[1][2]; m[8] = matrix->m[2][2];
 	}
 
-	GL_Uniform3fvFunc (1, 3, m);
+	GL_UniformMatrix3fvFunc (1, 1, GL_FALSE, m);
 }
 
 static void Q3P_EvalStageColorMul (const material_stage_t *stage, float particle_alpha, vec4_t out)

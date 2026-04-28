@@ -27,6 +27,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bgmusic.h"
 #include "steam.h"
 #include "fs_internal.h"
+#include "render_dispatch.h"
 #include <time.h>
 #include <errno.h>
 #include <limits.h>
@@ -2470,9 +2471,8 @@ void COM_SwitchGame (const char *paths)
 	Sky_ClearAll();
 	if (!isDedicated)
 	{
-		TexMgr_NewGame ();
-		Draw_NewGame ();
-		R_NewGame ();
+		if (g_rend && g_rend->R_NewGame)
+			g_rend->R_NewGame ();
 		BGM_Stop ();
 	}
 	ExtraMaps_Init ();

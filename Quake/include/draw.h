@@ -65,6 +65,11 @@ void Draw_SetCanvas (canvastype newcanvas);
 void Draw_SetCanvasColor (float r, float g, float b, float a);
 void Draw_PushCanvasColor (float r, float g, float b, float a);
 void Draw_PopCanvasColor (void);
+void GL_SetCanvas (canvastype newcanvas);
+void GL_SetCanvasColor (float r, float g, float b, float a);
+void GL_PushCanvasColor (float r, float g, float b, float a);
+void GL_PopCanvasColor (void);
+void GL_Set2D (void);
 
 #endif	/* _QUAKE_DRAW_H */
 

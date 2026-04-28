@@ -277,6 +277,11 @@ static qboolean SoundDef_ReadValueToken (const char **cursor, sounddef_parse_sta
 
 static qboolean SoundDef_ParseLayerProperty (const char *key, sound_def_layer_desc_t *layer, const char **cursor, sounddef_parse_state_t *state)
 {
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ParseLayerProperty: key=%s def=%s", key, state->current_def_name ? state->current_def_name : "<none>");
+		TexMgr_Trace (tracebuf);
+	}
 	float min_value, max_value, value;
 	int int_value;
 	qboolean bool_value;
@@ -440,6 +445,11 @@ static qboolean SoundDef_ParseLayerProperty (const char *key, sound_def_layer_de
 
 static qboolean SoundDef_ParseDefProperty (const char *key, sound_def_desc_t *desc, const char **cursor, sounddef_parse_state_t *state)
 {
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ParseDefProperty: key=%s def=%s", key, desc->name);
+		TexMgr_Trace (tracebuf);
+	}
 	float value;
 	int int_value;
 	qboolean bool_value;
@@ -629,6 +639,11 @@ static int SoundDef_ParseFileBuffer (const char *path, char *buffer, const char 
 			continue;
 		}
 		q_strlcpy (desc.name, com_token, sizeof (desc.name));
+		{
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ParseFileBuffer: begin def=%s", desc.name);
+			TexMgr_Trace (tracebuf);
+		}
 		state.current_def_name = desc.name;
 
 		cursor = SoundDef_ParseToken (cursor, &state);
@@ -643,10 +658,21 @@ static int SoundDef_ParseFileBuffer (const char *path, char *buffer, const char 
 		{
 			if (!strcmp (com_token, "}"))
 			{
+				{
+					char tracebuf[256];
+					q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ParseFileBuffer: register begin=%s", desc.name);
+					TexMgr_Trace (tracebuf);
+				}
 				if (SoundDef_Register (&desc, state.source_file, (int) state.token_line))
 					parsed_defs++;
 				else
 					state.errors++;
+				{
+					char tracebuf[256];
+					q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ParseFileBuffer: end def=%s", desc.name);
+					TexMgr_Trace (tracebuf);
+				}
+				TexMgr_Trace ("SoundDef_ParseFileBuffer: register end");
 				break;
 			}
 
@@ -741,6 +767,11 @@ static size_t SoundDef_LoadFromDirectory (const searchpath_t *search, sounddef_p
 	if ((size_t) q_snprintf (script_dir, sizeof (script_dir), "%s/sounddefs", search->filename) >= sizeof (script_dir))
 		return 0;
 
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_LoadFromDirectory: scan begin dir=%s", script_dir);
+		TexMgr_Trace (tracebuf);
+	}
 	for (find = Sys_FindFirst (script_dir, "sndshd"); find; find = Sys_FindNext (find))
 	{
 		char fullpath[MAX_OSPATH];
@@ -752,26 +783,44 @@ static size_t SoundDef_LoadFromDirectory (const searchpath_t *search, sounddef_p
 		if (find->attribs & FA_DIRECTORY)
 			continue;
 
+		{
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_LoadFromDirectory: found file=%s", find->name);
+			TexMgr_Trace (tracebuf);
+		}
 		q_snprintf (relpath, sizeof (relpath), "sounddefs/%s", find->name);
 		q_snprintf (fullpath, sizeof (fullpath), "%s/%s", script_dir, find->name);
 
 		size = (int) Sys_FileOpenRead (fullpath, &handle);
 		if (size <= 0)
 		{
+			TexMgr_Trace ("SoundDef_LoadFromDirectory: open failed");
 			if (handle >= 0)
 				Sys_FileClose (handle);
 			continue;
 		}
 
+		{
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_LoadFromDirectory: file open ok=%s", find->name);
+			TexMgr_Trace (tracebuf);
+		}
 		buffer = (byte *) q_malloc (size + 1);
 		if (!buffer)
 		{
+			TexMgr_Trace ("SoundDef_LoadFromDirectory: alloc failed");
 			Sys_FileClose (handle);
 			continue;
 		}
 
+		{
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_LoadFromDirectory: read begin=%s", find->name);
+			TexMgr_Trace (tracebuf);
+		}
 		if (Sys_FileRead (handle, buffer, size) != size)
 		{
+			TexMgr_Trace ("SoundDef_LoadFromDirectory: read failed");
 			q_free (buffer);
 			Sys_FileClose (handle);
 			continue;
@@ -779,10 +828,21 @@ static size_t SoundDef_LoadFromDirectory (const searchpath_t *search, sounddef_p
 
 		Sys_FileClose (handle);
 		buffer[size] = '\0';
+		{
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_LoadFromDirectory: parse begin=%s", relpath);
+			TexMgr_Trace (tracebuf);
+		}
 		parsed_total += (size_t) SoundDef_ReadFile (relpath, buffer, (size_t) size, relpath, totals);
+		{
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_LoadFromDirectory: parse end=%s", relpath);
+			TexMgr_Trace (tracebuf);
+		}
 		q_free (buffer);
 	}
 
+	TexMgr_Trace ("SoundDef_LoadFromDirectory: scan end");
 	return parsed_total;
 }
 
@@ -792,6 +852,7 @@ static size_t SoundDef_LoadFromPack (const searchpath_t *search, sounddef_parse_
 	size_t parsed_total = 0;
 	pack_t *pak = search->pack;
 
+	TexMgr_Trace ("SoundDef_LoadFromPack: begin");
 	for (i = 0; i < pak->numfiles; ++i)
 	{
 		const char *name = pak->files[i].name;
@@ -803,6 +864,7 @@ static size_t SoundDef_LoadFromPack (const searchpath_t *search, sounddef_parse_
 		if (q_strcasecmp (COM_FileGetExtension (name), "sndshd"))
 			continue;
 
+		TexMgr_Trace ("SoundDef_LoadFromPack: found file");
 		if (pak->is_pk3)
 		{
 			size_t extracted_size = 0;
@@ -828,7 +890,9 @@ static size_t SoundDef_LoadFromPack (const searchpath_t *search, sounddef_parse_
 		if (buffer)
 		{
 			buffer[size] = '\0';
+			TexMgr_Trace ("SoundDef_LoadFromPack: parse begin");
 			parsed_total += (size_t) SoundDef_ReadFile (name, buffer, size, name, totals);
+			TexMgr_Trace ("SoundDef_LoadFromPack: parse end");
 			if (pak->is_pk3)
 				MZ_FREE (buffer);
 			else
@@ -836,6 +900,7 @@ static size_t SoundDef_LoadFromPack (const searchpath_t *search, sounddef_parse_
 		}
 	}
 
+	TexMgr_Trace ("SoundDef_LoadFromPack: end");
 	return parsed_total;
 }
 
@@ -850,34 +915,57 @@ void SoundDef_LoadAll (void)
 	int previous_count;
 	qboolean committed;
 
+	TexMgr_Trace ("SoundDef_LoadAll: begin");
 	memset (&totals, 0, sizeof (totals));
 	previous_count = SoundDef_Count ();
 	SoundDef_BeginLoad ();
+	TexMgr_Trace ("SoundDef_LoadAll: begin load");
 
 	for (search = COM_GetSearchPaths (); search; search = search->next)
+	{
+		TexMgr_Trace ("SoundDef_LoadAll: push searchpath");
 		VEC_PUSH (paths, search);
+	}
 
 	count = VEC_SIZE (paths);
+	TexMgr_Trace ("SoundDef_LoadAll: searchpath count collected");
 	for (i = count; i > 0; --i)
 	{
 		search = paths[i - 1];
 		if (*search->filename)
+		{
+			TexMgr_Trace ("SoundDef_LoadAll: load directory begin");
 			parsed_total += SoundDef_LoadFromDirectory (search, &totals);
+			TexMgr_Trace ("SoundDef_LoadAll: load directory end");
+		}
 		else if (search->pack)
+		{
+			TexMgr_Trace ("SoundDef_LoadAll: load pack begin");
 			parsed_total += SoundDef_LoadFromPack (search, &totals);
+			TexMgr_Trace ("SoundDef_LoadAll: load pack end");
+		}
 	}
 
 	VEC_FREE (paths);
+	TexMgr_Trace ("SoundDef_LoadAll: paths freed");
 
 	committed = (totals.errors == 0);
 	SoundDef_FinishLoad (committed);
+	TexMgr_Trace ("SoundDef_LoadAll: finish load");
 
-	Con_Printf ("Sound defs: parsed %llu defs (%llu errors, %llu warnings, %llu files)\n",
-		(unsigned long long)parsed_total,
-		(unsigned long long)totals.errors,
-		(unsigned long long)totals.warnings,
-		(unsigned long long)totals.loaded_files);
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf),
+			"Sound defs: parsed %llu defs (%llu errors, %llu warnings, %llu files)",
+			(unsigned long long)parsed_total,
+			(unsigned long long)totals.errors,
+			(unsigned long long)totals.warnings,
+			(unsigned long long)totals.loaded_files);
+		TexMgr_Trace (tracebuf);
+	}
+	TexMgr_Trace ("SoundDef_LoadAll: summary printed");
 
 	if (!committed && previous_count > 0)
 		Con_Warning ("Sound defs: keeping previous registry (%d defs) because reload had errors\n", previous_count);
+	TexMgr_Trace ("SoundDef_LoadAll: end");
 }

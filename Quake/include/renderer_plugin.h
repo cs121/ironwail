@@ -5,7 +5,7 @@
 #include "renderer_host_bridge.h"
 #include <stddef.h>
 
-#define IW_RENDERER_PLUGIN_ABI_MAJOR 4u
+#define IW_RENDERER_PLUGIN_ABI_MAJOR 5u
 #define IW_RENDERER_PLUGIN_ABI_MINOR 0u
 
 #if defined(_WIN32)
@@ -20,8 +20,7 @@
  * - Major bumps are breaking and require both host+plugin rebuild.
  * - Minor bumps are additive only and must preserve existing fields.
  * - Plugins must gate optional host fields/services using struct_size checks.
- * - Deprecated entrypoints remain available through ABI v3.x and are planned
- *   for removal in ABI v4 (transition path documented on each field below).
+ * - ABI v5 removes legacy built-in backend registration callbacks.
  */
 
 typedef enum iw_renderer_surface_origin_e
@@ -121,20 +120,16 @@ typedef struct iw_renderer_plugin_host_api_s
 	unsigned int struct_size;
 	unsigned int abi_major;
 	unsigned int abi_minor;
-	/* ABI v2+: register a backend implementation directly via vtable. */
+	/* Register a backend implementation directly via vtable. */
 	qboolean (*register_backend)(const IRenderBackend *backend);
-	/* Built-in OpenGL backend interface exposed by host for v2/v3 transitional plugins. */
-	const IRenderBackend *builtin_opengl_backend;
-	/* Deprecated in ABI v3, scheduled for removal in ABI v4. */
-	qboolean (*register_builtin_backend)(const char *backend_name);
 
-	/* ABI v3 host services (all backend-neutral, no GL/D3D/VK native types). */
+	/* Host services (all backend-neutral, no GL/D3D/VK native types). */
 	const iw_renderer_plugin_surface_services_t *surface_services;
 	const iw_renderer_plugin_resource_services_t *resource_services;
 	const iw_renderer_plugin_upload_services_t *upload_services;
 	const iw_renderer_plugin_pipeline_services_t *pipeline_services;
 
-	/* ABI v4: host bridge for full engine services (renderer DLL extraction). */
+	/* Host bridge for full engine services (renderer DLL extraction). */
 	const iw_renderer_host_bridge_t *bridge;
 	qboolean (*register_entry_points)(const iw_renderer_entry_points_t *entry_points);
 } iw_renderer_plugin_host_api_t;
@@ -151,18 +146,12 @@ typedef struct iw_renderer_plugin_descriptor_s
 
 typedef const iw_renderer_plugin_descriptor_t *(*iw_renderer_plugin_query_fn)(void);
 
-#define IW_RENDERER_PLUGIN_HOST_API_V2_SIZE ((unsigned int)(offsetof(iw_renderer_plugin_host_api_t, register_builtin_backend) + sizeof (((iw_renderer_plugin_host_api_t *)0)->register_builtin_backend)))
+#define IW_RENDERER_PLUGIN_HOST_API_V2_SIZE ((unsigned int)(offsetof(iw_renderer_plugin_host_api_t, register_backend) + sizeof (((iw_renderer_plugin_host_api_t *)0)->register_backend)))
 #define IW_RENDERER_PLUGIN_HOST_API_V3_SIZE ((unsigned int)(offsetof(iw_renderer_plugin_host_api_t, pipeline_services) + sizeof (((iw_renderer_plugin_host_api_t *)0)->pipeline_services)))
 #define IW_RENDERER_PLUGIN_HOST_API_V4_SIZE ((unsigned int)(offsetof(iw_renderer_plugin_host_api_t, register_entry_points) + sizeof (((iw_renderer_plugin_host_api_t *)0)->register_entry_points)))
 #define IW_RENDERER_PLUGIN_DESCRIPTOR_MIN_SIZE ((unsigned int)(offsetof(iw_renderer_plugin_descriptor_t, register_plugin) + sizeof (((iw_renderer_plugin_descriptor_t *)0)->register_plugin)))
 
 #define IW_RENDERER_PLUGIN_HOST_HAS_FIELD(host_api, field_name) \
 	((host_api) != NULL && (host_api)->struct_size >= (unsigned int)(offsetof(iw_renderer_plugin_host_api_t, field_name) + sizeof ((host_api)->field_name)))
-
-/*
- * Host-provided accessor for the built-in OpenGL backend interface.
- * Plugins use this to register OpenGL without depending on gl_backend.h.
- */
-const IRenderBackend *IW_RendererPlugin_GetBuiltinOpenGLBackend (void);
 
 #endif

@@ -22,8 +22,7 @@
 
 enum
 {
-	GL_BACKEND_TIMER_QUERY_RING = 3,
-	GL_BACKEND_MAX_RESOURCES = 128
+	GL_BACKEND_TIMER_QUERY_RING = 3
 };
 
 typedef struct gl_backend_timer_slot_s
@@ -46,333 +45,69 @@ typedef struct gl_backend_timer_pass_s
 static gl_backend_timer_pass_t s_timer_passes[R_BACKEND_MAX_PROFILE_SLOTS];
 static RenderBackendCaps s_gl_backend_caps;
 static int s_legacy_pass_resource_fallback_frame = -1;
-static gl_proc_address_loader_t s_gl_proc_loader = NULL;
-static struct gl_backend_state_cache_s
-{
-	qboolean viewport_valid;
-	GLint viewport[4];
-	qboolean color_mask_valid;
-	GLboolean color_mask[4];
-	qboolean depth_mask_valid;
-	GLboolean depth_mask;
-	qboolean depth_func_valid;
-	GLenum depth_func;
-	qboolean stencil_test_valid;
-	qboolean stencil_test_enabled;
-	qboolean stencil_mask_valid;
-	GLuint stencil_mask;
-	qboolean stencil_func_valid;
-	GLenum stencil_func;
-	GLint stencil_ref;
-	GLuint stencil_value_mask;
-	qboolean stencil_op_valid;
-	GLenum stencil_op_sfail;
-	GLenum stencil_op_dpfail;
-	GLenum stencil_op_dppass;
-} s_gl_state_cache;
-static struct gl_backend_resource_table_s
-{
-	struct gl_backend_resource_entry_s
-	{
-		unsigned short opaque_id;
-		unsigned native_id;
-		unsigned char type;
-		unsigned char lifetime;
-		unsigned short slot;
-		unsigned short key;
-	} entries[GL_BACKEND_MAX_RESOURCES];
-	unsigned short next_opaque_id;
-	unsigned short count;
-} s_gl_resources;
 
-void GL_Backend_ResetStateCache (void)
+extern cvar_t r_refgl_debug;
+extern cvar_t r_refgl_log_init;
+extern cvar_t r_refgl_log_passes;
+extern cvar_t r_refgl_log_resources;
+extern cvar_t r_refgl_log_state;
+extern cvar_t r_refgl_validate_state;
+extern cvar_t r_refgl_validate_fbo;
+extern cvar_t r_refgl_validate_lifetime;
+
+void GL_Backend_PopulateResourceRegistry (RenderGraphResourceHandle *out_handles);
+
+ref_gl_stats_t ref_gl_stats;
+static int s_stats_log_frame = -1;
+
+void REFGL_StatsLogSummary (void)
 {
-	memset (&s_gl_state_cache, 0, sizeof (s_gl_state_cache));
+	if (ref_gl_stats.textures_alive < 0) ref_gl_stats.textures_alive = 0;
+	if (ref_gl_stats.fbos_alive < 0) ref_gl_stats.fbos_alive = 0;
+	if (ref_gl_stats.buffers_alive < 0) ref_gl_stats.buffers_alive = 0;
+	if (ref_gl_stats.programs_alive < 0) ref_gl_stats.programs_alive = 0;
+	Con_Printf ("ref_gl resources: tex=%d(%d/%d) fbo=%d(%d/%d) buf=%d(%d/%d) prog=%d(%d/%d) gl_err=%d frames=%d\n",
+		ref_gl_stats.textures_alive, ref_gl_stats.textures_created, ref_gl_stats.textures_destroyed,
+		ref_gl_stats.fbos_alive, ref_gl_stats.fbos_created, ref_gl_stats.fbos_destroyed,
+		ref_gl_stats.buffers_alive, ref_gl_stats.buffers_created, ref_gl_stats.buffers_destroyed,
+		ref_gl_stats.programs_alive, ref_gl_stats.programs_created, ref_gl_stats.programs_destroyed,
+		ref_gl_stats.gl_errors_detected, ref_gl_stats.frames_rendered);
 }
 
-void GL_Backend_SetViewportCached (int x, int y, int width, int height)
+static void REFGL_StatsPeriodicLog (void)
 {
-	if (!s_gl_state_cache.viewport_valid
-		|| s_gl_state_cache.viewport[0] != x
-		|| s_gl_state_cache.viewport[1] != y
-		|| s_gl_state_cache.viewport[2] != width
-		|| s_gl_state_cache.viewport[3] != height)
+	if (r_refgl_log_resources.value == 0.f)
+		return;
+	if (s_stats_log_frame < 0 || r_framecount - s_stats_log_frame >= 120)
 	{
-		glViewport (x, y, width, height);
-		s_gl_state_cache.viewport[0] = x;
-		s_gl_state_cache.viewport[1] = y;
-		s_gl_state_cache.viewport[2] = width;
-		s_gl_state_cache.viewport[3] = height;
-		s_gl_state_cache.viewport_valid = true;
+		s_stats_log_frame = r_framecount;
+		REFGL_StatsLogSummary ();
 	}
 }
 
-void GL_Backend_SetColorMaskCached (int r, int g, int b, int a)
+static unsigned GLBackend_ResolveResourceOpaqueId (const RenderGraphResourceHandle *resources, unsigned short opaque_id)
 {
-	const GLboolean nr = r ? GL_TRUE : GL_FALSE;
-	const GLboolean ng = g ? GL_TRUE : GL_FALSE;
-	const GLboolean nb = b ? GL_TRUE : GL_FALSE;
-	const GLboolean na = a ? GL_TRUE : GL_FALSE;
-
-	if (!s_gl_state_cache.color_mask_valid
-		|| s_gl_state_cache.color_mask[0] != nr
-		|| s_gl_state_cache.color_mask[1] != ng
-		|| s_gl_state_cache.color_mask[2] != nb
-		|| s_gl_state_cache.color_mask[3] != na)
-	{
-		glColorMask (nr, ng, nb, na);
-		s_gl_state_cache.color_mask[0] = nr;
-		s_gl_state_cache.color_mask[1] = ng;
-		s_gl_state_cache.color_mask[2] = nb;
-		s_gl_state_cache.color_mask[3] = na;
-		s_gl_state_cache.color_mask_valid = true;
-	}
-}
-
-void GL_Backend_SetDepthMaskCached (int enabled)
-{
-	const GLboolean mask = enabled ? GL_TRUE : GL_FALSE;
-
-	if (!s_gl_state_cache.depth_mask_valid || s_gl_state_cache.depth_mask != mask)
-	{
-		glDepthMask (mask);
-		s_gl_state_cache.depth_mask = mask;
-		s_gl_state_cache.depth_mask_valid = true;
-	}
-}
-
-void GL_Backend_SetDepthFuncCached (unsigned func)
-{
-	if (!s_gl_state_cache.depth_func_valid || s_gl_state_cache.depth_func != (GLenum)func)
-	{
-		glDepthFunc ((GLenum)func);
-		s_gl_state_cache.depth_func = (GLenum)func;
-		s_gl_state_cache.depth_func_valid = true;
-	}
-}
-
-void GL_Backend_SetStencilTestCached (qboolean enabled)
-{
-	if (!s_gl_state_cache.stencil_test_valid || s_gl_state_cache.stencil_test_enabled != enabled)
-	{
-		if (enabled)
-			glEnable (GL_STENCIL_TEST);
-		else
-			glDisable (GL_STENCIL_TEST);
-		s_gl_state_cache.stencil_test_enabled = enabled;
-		s_gl_state_cache.stencil_test_valid = true;
-	}
-}
-
-void GL_Backend_SetStencilMaskCached (unsigned mask)
-{
-	if (!s_gl_state_cache.stencil_mask_valid || s_gl_state_cache.stencil_mask != (GLuint)mask)
-	{
-		glStencilMask ((GLuint)mask);
-		s_gl_state_cache.stencil_mask = (GLuint)mask;
-		s_gl_state_cache.stencil_mask_valid = true;
-	}
-}
-
-void GL_Backend_SetStencilFuncCached (unsigned func, int ref, unsigned mask)
-{
-	if (!s_gl_state_cache.stencil_func_valid
-		|| s_gl_state_cache.stencil_func != (GLenum)func
-		|| s_gl_state_cache.stencil_ref != (GLint)ref
-		|| s_gl_state_cache.stencil_value_mask != (GLuint)mask)
-	{
-		glStencilFunc ((GLenum)func, (GLint)ref, (GLuint)mask);
-		s_gl_state_cache.stencil_func = (GLenum)func;
-		s_gl_state_cache.stencil_ref = (GLint)ref;
-		s_gl_state_cache.stencil_value_mask = (GLuint)mask;
-		s_gl_state_cache.stencil_func_valid = true;
-	}
-}
-
-void GL_Backend_SetStencilOpCached (unsigned sfail, unsigned dpfail, unsigned dppass)
-{
-	if (!s_gl_state_cache.stencil_op_valid
-		|| s_gl_state_cache.stencil_op_sfail != (GLenum)sfail
-		|| s_gl_state_cache.stencil_op_dpfail != (GLenum)dpfail
-		|| s_gl_state_cache.stencil_op_dppass != (GLenum)dppass)
-	{
-		glStencilOp ((GLenum)sfail, (GLenum)dpfail, (GLenum)dppass);
-		s_gl_state_cache.stencil_op_sfail = (GLenum)sfail;
-		s_gl_state_cache.stencil_op_dpfail = (GLenum)dpfail;
-		s_gl_state_cache.stencil_op_dppass = (GLenum)dppass;
-		s_gl_state_cache.stencil_op_valid = true;
-	}
-}
-
-void GL_Backend_SetProcAddressLoader (gl_proc_address_loader_t loader)
-{
-	s_gl_proc_loader = loader;
-}
-
-void *GL_Backend_GetProcAddress (const char *name)
-{
-	if (!s_gl_proc_loader || !name || !name[0])
-		return NULL;
-	return s_gl_proc_loader (name);
-}
-
-static unsigned GLBackend_ResolveResourceOpaqueId (const RenderGraphResourceHandle *resources, unsigned short opaque_id);
-
-static int GLBackend_FindResourceIndexBySlot (render_backend_resource_slot_t slot)
-{
+	unsigned native_id = GL_Backend_ResolveOpaqueResource (opaque_id);
 	unsigned i;
 
-	if (slot <= R_BACKEND_RESOURCE_SLOT_NONE || slot >= R_BACKEND_RESOURCE_SLOT_COUNT)
-		return -1;
+	if (native_id != 0u || !resources || opaque_id == 0u)
+		return native_id;
 
-	for (i = 0; i < s_gl_resources.count; ++i)
+	/* Cross-module safety: when host and renderer module keep separate opaque-id
+	 * tables, resolve via the per-frame registry snapshot supplied by framegraph. */
+	for (i = 0; i < (unsigned)resources->registry_count; ++i)
 	{
-		if (s_gl_resources.entries[i].slot == (unsigned short)slot)
-			return (int)i;
-	}
-
-	return -1;
-}
-
-static int GLBackend_FindResourceIndexByKey (gl_backend_resource_key_t key)
-{
-	unsigned index;
-
-	if (key <= GL_BACKEND_RESOURCE_KEY_NONE)
-		return -1;
-
-	for (index = 0; index < s_gl_resources.count; ++index)
-	{
-		if (s_gl_resources.entries[index].key == (unsigned short)key)
-			return (int)index;
-	}
-
-	return -1;
-}
-
-void GL_Backend_ResetResources (void)
-{
-	memset (&s_gl_resources, 0, sizeof (s_gl_resources));
-	s_gl_resources.next_opaque_id = 1u;
-	GL_Backend_ResetStateCache ();
-}
-
-static unsigned short GLBackend_RegisterResourceInternal (render_backend_resource_type_t type, render_backend_resource_slot_t slot, gl_backend_resource_key_t key, render_backend_resource_lifetime_t lifetime, unsigned native_id)
-{
-	unsigned short opaque_id;
-	int index;
-
-	if (type == R_BACKEND_RESOURCE_NONE || native_id == 0u)
-		return 0u;
-
-	index = (slot > R_BACKEND_RESOURCE_SLOT_NONE) ? GLBackend_FindResourceIndexBySlot (slot) : GLBackend_FindResourceIndexByKey (key);
-	if (index < 0)
-	{
-		if (s_gl_resources.count >= GL_BACKEND_MAX_RESOURCES)
-			return 0u;
-		index = (int)s_gl_resources.count++;
-		memset (&s_gl_resources.entries[index], 0, sizeof (s_gl_resources.entries[index]));
-		opaque_id = s_gl_resources.next_opaque_id++;
-		if (opaque_id == 0u)
-			opaque_id = s_gl_resources.next_opaque_id++;
-		s_gl_resources.entries[index].opaque_id = opaque_id;
-	}
-
-	s_gl_resources.entries[index].native_id = native_id;
-	s_gl_resources.entries[index].type = (unsigned char)type;
-	s_gl_resources.entries[index].lifetime = (unsigned char)lifetime;
-	s_gl_resources.entries[index].slot = (unsigned short)slot;
-	s_gl_resources.entries[index].key = (unsigned short)key;
-	return s_gl_resources.entries[index].opaque_id;
-}
-
-unsigned short GL_Backend_RegisterResource (render_backend_resource_type_t type, render_backend_resource_slot_t slot, render_backend_resource_lifetime_t lifetime, unsigned native_id)
-{
-	return GLBackend_RegisterResourceInternal (type, slot, GL_BACKEND_RESOURCE_KEY_NONE, lifetime, native_id);
-}
-
-unsigned short GL_Backend_RegisterNamedResource (render_backend_resource_type_t type, gl_backend_resource_key_t key, render_backend_resource_lifetime_t lifetime, unsigned native_id)
-{
-	return GLBackend_RegisterResourceInternal (type, R_BACKEND_RESOURCE_SLOT_NONE, key, lifetime, native_id);
-}
-
-void GL_Backend_UnregisterResourceBySlot (render_backend_resource_slot_t slot)
-{
-	int index = GLBackend_FindResourceIndexBySlot (slot);
-
-	if (index < 0)
-		return;
-
-	s_gl_resources.entries[index] = s_gl_resources.entries[s_gl_resources.count - 1];
-	s_gl_resources.count--;
-}
-
-void GL_Backend_UnregisterNamedResource (gl_backend_resource_key_t key)
-{
-	int index = GLBackend_FindResourceIndexByKey (key);
-
-	if (index < 0)
-		return;
-
-	s_gl_resources.entries[index] = s_gl_resources.entries[s_gl_resources.count - 1];
-	s_gl_resources.count--;
-}
-
-unsigned GL_Backend_ResolveOpaqueResource (unsigned short opaque_id)
-{
-	unsigned i;
-
-	if (opaque_id == 0u)
-		return 0u;
-
-	for (i = 0; i < s_gl_resources.count; ++i)
-	{
-		if (s_gl_resources.entries[i].opaque_id == opaque_id)
-			return s_gl_resources.entries[i].native_id;
+		if (resources->registry[i].resource_id != (unsigned)opaque_id)
+			continue;
+		return resources->registry[i].native_id;
 	}
 
 	return 0u;
 }
 
-static unsigned GLBackend_ResolveResourceOpaqueId (const RenderGraphResourceHandle *resources, unsigned short opaque_id)
-{
-	(void)resources;
-	return GL_Backend_ResolveOpaqueResource (opaque_id);
-}
-
 static void GLBackend_PopulateFrameGraphResources (RenderGraphResourceHandle *out_handles)
 {
-	unsigned i;
-
-	if (!out_handles)
-		return;
-
-	for (i = 0; i < s_gl_resources.count; ++i)
-	{
-		const struct gl_backend_resource_entry_s *entry = &s_gl_resources.entries[i];
-		unsigned registry_index;
-		render_backend_resource_slot_t slot;
-
-		if (entry->slot <= R_BACKEND_RESOURCE_SLOT_NONE || entry->slot >= R_BACKEND_RESOURCE_SLOT_COUNT)
-			continue;
-		if (entry->opaque_id == 0u || entry->native_id == 0u || entry->type == R_BACKEND_RESOURCE_NONE)
-			continue;
-		if (out_handles->registry_count >= (unsigned char)Q_COUNTOF (out_handles->registry))
-			break;
-
-		slot = (render_backend_resource_slot_t)entry->slot;
-		registry_index = out_handles->registry_count++;
-		out_handles->registry[registry_index].resource_id = entry->opaque_id;
-		out_handles->registry[registry_index].native_id = entry->native_id;
-		out_handles->registry[registry_index].type = entry->type;
-		out_handles->registry[registry_index].lifetime = entry->lifetime;
-		out_handles->registry[registry_index].slot = entry->slot;
-
-		out_handles->slot_resource_ids[slot] = entry->opaque_id;
-		out_handles->refs[slot].type = entry->type;
-		out_handles->refs[slot].slot = entry->slot;
-		out_handles->refs[slot].opaque_id = entry->opaque_id;
-	}
+	GL_Backend_PopulateResourceRegistry (out_handles);
 }
 
 static int GLBackend_GetSceneSampleCount (void)
@@ -559,11 +294,15 @@ static GLenum GLBackend_MapDepthFunc (render_backend_depth_func_t depth_func)
 
 static void GLBackend_BeginPass (const char *name)
 {
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: begin pass '%s'\n", name ? name : "<unnamed>");
 	GL_BeginGroup (name);
 }
 
 static void GLBackend_EndPass (void)
 {
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: end pass\n");
 	GL_EndGroup ();
 }
 
@@ -636,9 +375,17 @@ static void GLBackend_ValidatePassState (const char *pass_name, qboolean before_
 	if (r_gl_state_validate.value <= 0.f)
 		return;
 
+	if (r_refgl_validate_state.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: validate pass state %s(%s)\n",
+			before_pass ? "before" : "after",
+			pass_name ? pass_name : "<unnamed>");
+
 	err = glGetError ();
 	if (err != GL_NO_ERROR)
+	{
+		ref_gl_stats.gl_errors_detected++;
 		Con_Warning ("FrameGraph %s(%s): GL error 0x%x\n", before_pass ? "before" : "after", pass_name, (unsigned)err);
+	}
 
 	{
 		GLint draw_fbo = 0;
@@ -676,7 +423,8 @@ static void GLBackend_ValidatePassState (const char *pass_name, qboolean before_
 				before_pass ? "before" : "after",
 				pass_name,
 				viewport[0], viewport[1], viewport[2], viewport[3]);
-		if (draw_fbo && GL_CheckFramebufferStatusFunc)
+		if (draw_fbo && GL_CheckFramebufferStatusFunc
+			&& (r_refgl_validate_fbo.value != 0.f || r_refgl_validate_state.value != 0.f || r_refgl_debug.value != 0.f))
 		{
 			GLenum status = GL_CheckFramebufferStatusFunc (GL_FRAMEBUFFER);
 			if (status != GL_FRAMEBUFFER_COMPLETE)
@@ -1252,20 +1000,28 @@ static qboolean GLBackend_HasRequiredPassCallbacks (void)
 
 static qboolean GLBackend_Init (void)
 {
+	memset (&ref_gl_stats, 0, sizeof (ref_gl_stats));
 	GL_Backend_ResetResources ();
 	GL_Backend_ResetStateCache ();
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_Printf ("ref_gl: backend init complete\n");
 	return true;
 }
 
 static void GLBackend_Shutdown (void)
 {
 	GL_Backend_ResetResources ();
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+	{
+		Con_Printf ("ref_gl: backend shutdown\n");
+		REFGL_StatsLogSummary ();
+	}
 }
 
 static void GLBackend_OnResize (int width, int height)
 {
-	(void)width;
-	(void)height;
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: backend resize %dx%d\n", width, height);
 }
 
 static qboolean GLBackend_CanActivate (qboolean runtime_switch)
@@ -1276,6 +1032,8 @@ static qboolean GLBackend_CanActivate (qboolean runtime_switch)
 
 static void GLBackend_BeginFrame (void)
 {
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: backend begin frame\n");
 	if ((!s_gl_backend_caps.supports_compute && GL_DispatchComputeFunc)
 		|| (!s_gl_backend_caps.supports_draw_instanced && GL_DrawArraysInstancedFunc && GL_DrawElementsInstancedFunc)
 		|| (!s_gl_backend_caps.supports_draw_indirect && GL_DrawElementsIndirectFunc)
@@ -1289,20 +1047,56 @@ static void GLBackend_BeginFrame (void)
 
 	GL_Backend_ResetStateCache ();
 	GL_BackendBeginFrame ();
+	ref_gl_stats.frames_rendered++;
+	REFGL_StatsPeriodicLog ();
 }
 
 static void GLBackend_EndFrame (void)
 {
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: backend end frame\n");
 	GL_BackendEndFrame ();
 }
 
 static void GLBackend_Present (void)
 {
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: backend present\n");
 	GL_BackendPresent ();
+}
+
+static SDL_Window *s_backend_window = NULL;
+
+static qboolean GLBackend_ContextInit (void *window_handle)
+{
+	SDL_Window *window = (SDL_Window *)window_handle;
+	if (!window)
+		return false;
+
+	s_backend_window = window;
+
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_Printf ("ref_gl: context init window=%p\n", (void *)window);
+
+	return true;
+}
+
+static void GLBackend_ContextShutdown (void)
+{
+	s_backend_window = NULL;
+}
+
+static void GLBackend_SwapBuffers (void)
+{
+	if (s_backend_window)
+		SDL_GL_SwapWindow (s_backend_window);
 }
 
 static const IRenderBackend s_gl_backend = {
 	"OpenGL",
+	GLBackend_ContextInit,
+	GLBackend_ContextShutdown,
+	GLBackend_SwapBuffers,
 	GLBackend_Init,
 	GLBackend_Shutdown,
 	GLBackend_OnResize,
@@ -1362,14 +1156,4 @@ const IRenderBackend *GL_Backend_GetInterface (void)
 {
 	GLBackend_DetectCaps ();
 	return &s_gl_backend;
-}
-
-const IRenderBackend *IW_RendererPlugin_GetBuiltinOpenGLBackend (void)
-{
-	return GL_Backend_GetInterface ();
-}
-
-void GL_Backend_Register (void)
-{
-	R_Backend_Register (GL_Backend_GetInterface ());
 }

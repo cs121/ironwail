@@ -24,6 +24,15 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_part_q3p.h"
 #include "devstats.h"
+#include "render_dispatch.h"
+
+#define REND_CALL_VOID(fn, ...) \
+	do { \
+		if (g_rend && g_rend->fn) \
+			g_rend->fn (__VA_ARGS__); \
+		else \
+			Sys_Error ("Renderer entrypoints are not registered (%s).\n", #fn); \
+	} while (0)
 
 extern cvar_t r_particles_mode;
 
@@ -362,7 +371,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 20, 30);
+			REND_CALL_VOID (R_RunParticleEffect, pos, vec3_origin, 20, 30);
 		S_StartSound (-1, 0, cl_sfx_wizhit, pos, 1, 1);
 		break;
 
@@ -370,7 +379,7 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_RunParticleEffect (pos, vec3_origin, 226, 20);
+			REND_CALL_VOID (R_RunParticleEffect, pos, vec3_origin, 226, 20);
 		S_StartSound (-1, 0, cl_sfx_knighthit, pos, 1, 1);
 		break;
 
@@ -379,9 +388,9 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		if (!CL_TEntRunImpactDispatcher (TE_SPIKE, pos))
-			R_RunParticleEffect (pos, vec3_origin, 0, 10);
+			REND_CALL_VOID (R_RunParticleEffect, pos, vec3_origin, 0, 10);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
-			R_SpawnImpactDecal ("bullet", pos, decal_normal);
+			REND_CALL_VOID (R_SpawnImpactDecal, "bullet", pos, decal_normal);
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
 		else
@@ -400,9 +409,9 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		if (!CL_TEntRunImpactDispatcher (TE_SUPERSPIKE, pos))
-			R_RunParticleEffect (pos, vec3_origin, 0, 20);
+			REND_CALL_VOID (R_RunParticleEffect, pos, vec3_origin, 0, 20);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
-			R_SpawnImpactDecal ("bullet", pos, decal_normal);
+			REND_CALL_VOID (R_SpawnImpactDecal, "bullet", pos, decal_normal);
 
 		if ( rand() % 5 )
 			S_StartSound (-1, 0, cl_sfx_tink1, pos, 1, 1);
@@ -423,9 +432,9 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		if (!CL_TEntRunImpactDispatcher (TE_GUNSHOT, pos))
-			R_RunParticleEffect (pos, vec3_origin, 0, 20);
+			REND_CALL_VOID (R_RunParticleEffect, pos, vec3_origin, 0, 20);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
-			R_SpawnImpactDecal ("bullet", pos, decal_normal);
+			REND_CALL_VOID (R_SpawnImpactDecal, "bullet", pos, decal_normal);
 		break;
 
 	case TE_EXPLOSION:                      // rocket explosion
@@ -434,9 +443,9 @@ void CL_ParseTEnt (void)
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		V_AddExplosionVibration (pos);
 		if (!CL_TEntRunImpactDispatcher (TE_EXPLOSION, pos))
-			R_ParticleExplosion (pos);
+			REND_CALL_VOID (R_ParticleExplosion, pos);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
-			R_SpawnImpactDecal ("scorch", pos, decal_normal);
+			REND_CALL_VOID (R_SpawnImpactDecal, "scorch", pos, decal_normal);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;
@@ -453,9 +462,9 @@ void CL_ParseTEnt (void)
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
 		V_AddExplosionVibration (pos);
-		R_BlobExplosion (pos);
+			REND_CALL_VOID (R_BlobExplosion, pos);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
-			R_SpawnImpactDecal ("scorch", pos, decal_normal);
+			REND_CALL_VOID (R_SpawnImpactDecal, "scorch", pos, decal_normal);
 
 		S_StartSound (-1, 0, cl_sfx_r_exp3, pos, 1, 1);
 		break;
@@ -482,14 +491,14 @@ void CL_ParseTEnt (void)
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_LavaSplash (pos);
+			REND_CALL_VOID (R_LavaSplash, pos);
 		break;
 
 	case TE_TELEPORT:
 		pos[0] = MSG_ReadCoord (cl.protocolflags);
 		pos[1] = MSG_ReadCoord (cl.protocolflags);
 		pos[2] = MSG_ReadCoord (cl.protocolflags);
-		R_TeleportSplash (pos);
+			REND_CALL_VOID (R_TeleportSplash, pos);
 		break;
 
 	case TE_EXPLOSION2:				// color mapped explosion
@@ -500,9 +509,9 @@ void CL_ParseTEnt (void)
 		colorStart = MSG_ReadByte ();
 		colorLength = MSG_ReadByte ();
 		if (!CL_TEntRunImpactDispatcher (TE_EXPLOSION2, pos))
-			R_ParticleExplosion2 (pos, colorStart, colorLength);
+			REND_CALL_VOID (R_ParticleExplosion2, pos, colorStart, colorLength);
 		if (CL_DecalNormalForImpact (pos, decal_normal))
-			R_SpawnImpactDecal ("scorch", pos, decal_normal);
+			REND_CALL_VOID (R_SpawnImpactDecal, "scorch", pos, decal_normal);
 		dl = CL_AllocDlight (0);
 		VectorCopy (pos, dl->origin);
 		dl->radius = 350;

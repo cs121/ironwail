@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "r_framegraph.h"
 #include "glquake.h"
+#include "gl_backend.h"
 #include "bc7enc.h"
 #include "gl_ktx2.h"
 #include <ctype.h>
@@ -78,7 +79,10 @@ static byte *lightmap_upload_ptr = NULL;
 
 #define	MAX_GLTEXTURES	4096
 static int numgltextures;
+static gltexture_t gltextures_pool[MAX_GLTEXTURES];
 static gltexture_t	*active_gltextures, *free_gltextures;
+static gltexture_t	*gltextures_pool_start;
+static gltexture_t	*gltextures_pool_end;
 gltexture_t		*notexture, *nulltexture, *whitetexture, *greytexture, *blacktexture;
 gltexture_t		*lavaemissivetexture;
 
@@ -94,6 +98,45 @@ gltexture_t		*lavaemissivetexture;
 uint32_t is_fullbright[256/32];
 
 static void GL_DeleteTexture (gltexture_t *texture);
+
+qboolean TexMgr_IsReady (void)
+{
+	return free_gltextures != NULL || active_gltextures != NULL;
+}
+
+static qboolean TexMgr_PoolPointerValid (const gltexture_t *ptr)
+{
+	return ptr && gltextures_pool_start && gltextures_pool_end &&
+		ptr >= gltextures_pool_start && ptr < gltextures_pool_end;
+}
+
+void TexMgr_Trace (const char *fmt, ...)
+{
+	HMODULE module;
+	char module_name[MAX_OSPATH];
+	FILE *f;
+	va_list ap;
+
+	f = fopen ("texmgr_trace.log", "a");
+	if (!f)
+		return;
+
+	module_name[0] = '\0';
+	module = NULL;
+	if (GetModuleHandleExA (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+		(LPCSTR) &TexMgr_Trace, &module))
+		GetModuleFileNameA (module, module_name, sizeof (module_name));
+
+	if (!module_name[0])
+		q_strlcpy (module_name, "(unknown-module)", sizeof (module_name));
+
+	fprintf (f, "[%s] ", module_name);
+	va_start (ap, fmt);
+	vfprintf (f, fmt, ap);
+	va_end (ap);
+	fputc ('\n', f);
+	fclose (f);
+}
 
 /*
 ================================================================================
@@ -624,6 +667,8 @@ gltexture_t *TexMgr_FindTexture (qmodel_t *owner, const char *name)
 TexMgr_NewTexture
 ================
 */
+void TexMgr_Trace (const char *fmt, ...);
+
 gltexture_t *TexMgr_NewTexture (void)
 {
 	gltexture_t *glt;
@@ -631,6 +676,13 @@ gltexture_t *TexMgr_NewTexture (void)
 	if (numgltextures == MAX_GLTEXTURES)
 		Sys_Error("numgltextures == MAX_GLTEXTURES\n");
 
+	if (!TexMgr_PoolPointerValid (free_gltextures))
+	{
+		TexMgr_Trace ("TexMgr_NewTexture: pool invalid, reinitializing");
+		TexMgr_Init ();
+	}
+
+	TexMgr_Trace ("TexMgr_NewTexture: free=%p active=%p num=%d", (void *)free_gltextures, (void *)active_gltextures, numgltextures);
 	glt = free_gltextures;
 	free_gltextures = glt->next;
 	glt->next = active_gltextures;
@@ -638,6 +690,8 @@ gltexture_t *TexMgr_NewTexture (void)
 
 	glGenTextures(1, &glt->texnum);
 	numgltextures++;
+	ref_gl_stats.textures_created++;
+	ref_gl_stats.textures_alive++;
 	return glt;
 }
 
@@ -1265,38 +1319,48 @@ void TexMgr_Init (void)
 	static byte blacktexture_data[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; //black
 	static byte lavaemissive_data[16] = {255,0,0,255,255,0,0,255,255,0,0,255,255,0,0,255}; //bright red
 	extern texture_t *r_notexture_mip, *r_notexture_mip2;
+#ifndef IW_RENDERER_HOST_FRONTEND
 	cmd_function_t	*cmd;
+#endif
+
+	TexMgr_Trace ("TexMgr_Init: start");
 
 	// init texture list
-	free_gltextures = (gltexture_t *) Hunk_AllocName (MAX_GLTEXTURES * sizeof(gltexture_t), "gltextures");
+	free_gltextures = gltextures_pool;
 	active_gltextures = NULL;
+	gltextures_pool_start = free_gltextures;
+	gltextures_pool_end = free_gltextures + MAX_GLTEXTURES;
 	for (i = 0; i < MAX_GLTEXTURES - 1; i++)
 		free_gltextures[i].next = &free_gltextures[i+1];
 	free_gltextures[i].next = NULL;
 	numgltextures = 0;
+	TexMgr_Trace ("TexMgr_Init: list ready free=%p active=%p", (void *)free_gltextures, (void *)active_gltextures);
 
 	// init texture filter
 	TexMgr_ForceFilterUpdate ();
 	TexMgr_ApplySettings ();
 
 	// palette
+#ifndef IW_RENDERER_HOST_FRONTEND
 	Cvar_RegisterVariable (&gl_legacy_palettes);
+#endif
 	TexMgr_LoadPalette ();
 
-Cvar_RegisterVariable (&gl_max_size);
-Cvar_RegisterVariable (&gl_picmip);
-gl_texturemode.string = glmodes[glmode_idx].name;
-Cvar_RegisterVariable (&gl_texturemode);
-Cvar_SetCallback (&gl_texturemode, &TexMgr_TextureMode_f);
-Cvar_SetCompletion (&gl_texturemode, &TexMgr_TextureMode_Completion_f);
-Cvar_RegisterVariable (&gl_lodbias);
-Cvar_SetCallback (&gl_lodbias, TexMgr_LodBias_f);
-Cvar_RegisterVariable (&r_bc7_compress);
-Cvar_RegisterVariable (&r_softemu);
-Cvar_SetCallback (&r_softemu, TexMgr_SoftEmu_f);
-Cvar_RegisterVariable (&r_softemu_lightmap_banding);
-Cvar_SetCallback (&r_softemu_lightmap_banding, TexMgr_SoftEmu_f);
-Cvar_RegisterVariable (&r_softemu_mdl_warp);
+#ifndef IW_RENDERER_HOST_FRONTEND
+	Cvar_RegisterVariable (&gl_max_size);
+	Cvar_RegisterVariable (&gl_picmip);
+	gl_texturemode.string = glmodes[glmode_idx].name;
+	Cvar_RegisterVariable (&gl_texturemode);
+	Cvar_SetCallback (&gl_texturemode, &TexMgr_TextureMode_f);
+	Cvar_SetCompletion (&gl_texturemode, &TexMgr_TextureMode_Completion_f);
+	Cvar_RegisterVariable (&gl_lodbias);
+	Cvar_SetCallback (&gl_lodbias, TexMgr_LodBias_f);
+	Cvar_RegisterVariable (&r_bc7_compress);
+	Cvar_RegisterVariable (&r_softemu);
+	Cvar_SetCallback (&r_softemu, TexMgr_SoftEmu_f);
+	Cvar_RegisterVariable (&r_softemu_lightmap_banding);
+	Cvar_SetCallback (&r_softemu_lightmap_banding, TexMgr_SoftEmu_f);
+	Cvar_RegisterVariable (&r_softemu_mdl_warp);
 	Cvar_RegisterVariable (&r_softemu_dither_screen);
 	Cvar_RegisterVariable (&r_softemu_dither_texture);
 	Cmd_AddCommand ("gl_describetexturemodes", &TexMgr_DescribeTextureModes_f);
@@ -1306,20 +1370,28 @@ Cvar_RegisterVariable (&r_softemu_mdl_warp);
 	cmd = Cmd_AddCommand ("imagedump", &TexMgr_Imagedump_f);
 	if (cmd)
 		cmd->completion = TexMgr_Imagelist_Completion_f;
+#endif
 
 	// poll max size from hardware
 	glGetIntegerv (GL_MAX_TEXTURE_SIZE, &gl_max_texture_size);
 
 	// load notexture images
+	TexMgr_Trace ("TexMgr_Init: load notexture");
 	notexture = TexMgr_LoadImage (NULL, "notexture", 2, 2, SRC_RGBA, notexture_data, "", (src_offset_t)notexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	TexMgr_Trace ("TexMgr_Init: load nulltexture");
 	nulltexture = TexMgr_LoadImage (NULL, "nulltexture", 2, 2, SRC_RGBA, nulltexture_data, "", (src_offset_t)nulltexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	TexMgr_Trace ("TexMgr_Init: load whitetexture");
 	whitetexture = TexMgr_LoadImage (NULL, "whitetexture", 2, 2, SRC_RGBA, whitetexture_data, "", (src_offset_t)whitetexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	TexMgr_Trace ("TexMgr_Init: load greytexture");
 	greytexture = TexMgr_LoadImage (NULL, "greytexture", 2, 2, SRC_RGBA, greytexture_data, "", (src_offset_t)greytexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	TexMgr_Trace ("TexMgr_Init: load blacktexture");
 	blacktexture = TexMgr_LoadImage (NULL, "blacktexture", 2, 2, SRC_RGBA, blacktexture_data, "", (src_offset_t)blacktexture_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
+	TexMgr_Trace ("TexMgr_Init: load lavaemissive");
 	lavaemissivetexture = TexMgr_LoadImage (NULL, "lavaemissive", 2, 2, SRC_RGBA, lavaemissive_data, "", (src_offset_t)lavaemissive_data, TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP | TEXPREF_BINDLESS);
 
 	//have to assign these here becuase Mod_Init is called before TexMgr_Init
-	r_notexture_mip->gltexture = r_notexture_mip2->gltexture = notexture;
+	if (r_notexture_mip && r_notexture_mip2)
+		r_notexture_mip->gltexture = r_notexture_mip2->gltexture = notexture;
 }
 
 /*
@@ -1839,7 +1911,11 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
         unsigned *base_copy = NULL;
         size_t base_pixels = 0;
 
+        TexMgr_Trace ("LoadImage32 begin: %s target=%u flags=0x%x w=%d h=%d d=%d",
+                glt->name, (unsigned)glt->target, glt->flags, glt->width, glt->height, glt->depth);
         TexMgr_LinearizeWadPixels (glt, data);
+        TexMgr_Trace ("LoadImage32 after linearize: %s w=%d h=%d d=%d",
+                glt->name, glt->width, glt->height, glt->depth);
         srgb = (glt->flags & TEXPREF_SRGB) != 0;
 
         // mipmap down
@@ -1860,6 +1936,8 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
                 if (glt->flags & TEXPREF_ALPHA && glt->target == GL_TEXTURE_2D)
                         TexMgr_AlphaEdgeFix ((byte *)data, glt->width, glt->height);
         }
+        TexMgr_Trace ("LoadImage32 after mip reduce: %s w=%d h=%d d=%d picmip=%d",
+                glt->name, glt->width, glt->height, glt->depth, picmip);
 
         // upload
         bc7_requested = (r_bc7_compress.value != 0) && glt->target == GL_TEXTURE_2D && glt->depth == 1;
@@ -1910,8 +1988,12 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
         {
                 glt->compression = internalformat.ratio;
                 glt->internal_format = internalformat.id;
+                TexMgr_Trace ("LoadImage32 before bind/upload: %s internal=0x%x compress=%d bc7=%d",
+                        glt->name, (unsigned)glt->internal_format, compress, bc7_requested);
                 GL_Bind (GL_TEXTURE0, glt);
+                TexMgr_Trace ("LoadImage32 after bind: %s", glt->name);
                 GL_TexImage (glt, 0, internalformat.id, glt->width, glt->height, GL_RGBA, GL_UNSIGNED_BYTE, data);
+                TexMgr_Trace ("LoadImage32 after level0 upload: %s", glt->name);
 
                 // upload mipmaps
                 if (glt->flags & TEXPREF_MIPMAP)
@@ -1919,6 +2001,7 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
                         if (glt->flags & (TEXPREF_CUBEMAP|TEXPREF_ARRAY))
                         {
                                 GL_GenerateMipmapFunc (glt->target);
+                                TexMgr_Trace ("LoadImage32 after generate mipmap: %s", glt->name);
                         }
                         else
                         {
@@ -1938,6 +2021,7 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
                                                 mipwidth >>= 1;
                                         }
                                         GL_TexImage (glt, miplevel, internalformat.id, mipwidth, mipheight, GL_RGBA, GL_UNSIGNED_BYTE, data);
+                                        TexMgr_Trace ("LoadImage32 mip upload: %s level=%d w=%d h=%d", glt->name, miplevel, mipwidth, mipheight);
                                 }
                         }
                 }
@@ -1947,8 +2031,10 @@ static void TexMgr_LoadImage32 (gltexture_t *glt, unsigned *data)
         if (srgb)
                 glTexParameteri (glt->target, GL_TEXTURE_SRGB_DECODE_EXT, GL_DECODE_EXT);
 #endif
+        TexMgr_Trace ("LoadImage32 after parameters: %s", glt->name);
 
 	TexMgr_LogTextureUpload (glt);
+        TexMgr_Trace ("LoadImage32 end: %s", glt->name);
 
         // set filter modes
         TexMgr_SetFilterModes (glt);
@@ -2185,6 +2271,8 @@ GLuint TexMgr_LoadDDS (const char *path)
 	}
 
 	glGenTextures (1, &texnum);
+	ref_gl_stats.textures_created++;
+	ref_gl_stats.textures_alive++;
 	glBindTexture (GL_TEXTURE_2D, texnum);
 	glPixelStorei (GL_UNPACK_ALIGNMENT, 1);
 
@@ -2216,7 +2304,11 @@ GLuint TexMgr_LoadDDS (const char *path)
 
 	fail:
 	if (texnum)
-	glDeleteTextures (1, &texnum);
+	{
+		glDeleteTextures (1, &texnum);
+		ref_gl_stats.textures_destroyed++;
+		ref_gl_stats.textures_alive--;
+	}
 	if (file_buffer)
 	q_free(file_buffer);
 	return 0;
@@ -2329,9 +2421,6 @@ static void TexMgr_DestroyLightmapUploadBuffer (void)
 	if (!lightmap_upload_pbo)
 	        return;
 
-	GL_BindBuffer (GL_PIXEL_UNPACK_BUFFER, lightmap_upload_pbo);
-	if (lightmap_upload_ptr)
-	        GL_UnmapBufferFunc (GL_PIXEL_UNPACK_BUFFER);
 	lightmap_upload_ptr = NULL;
 
 	GL_DeleteBuffer (lightmap_upload_pbo);
@@ -2474,8 +2563,18 @@ gltexture_t *TexMgr_LoadImageEx (qmodel_t *owner, const char *name, int width, i
 	gltexture_t *glt = NULL;
 	int mark;
 
+	TexMgr_Trace ("TexMgr_LoadImageEx: name=%s owner=%p size=%dx%dx%d fmt=%d flags=0x%x src=%s free=%p active=%p num=%d",
+		name ? name : "(null)", (void *)owner, width, height, depth, format, flags,
+		source_file ? source_file : "(null)", (void *)free_gltextures, (void *)active_gltextures, numgltextures);
+
 	if (isDedicated)
 		return NULL;
+
+	if (!TexMgr_IsReady ())
+	{
+		TexMgr_Trace ("TexMgr_LoadImageEx: lazy init");
+		TexMgr_Init ();
+	}
 
 	// cubemaps/arrays are only partially implemented, disable unsupported flags
 	if (flags & (TEXPREF_ARRAY | TEXPREF_CUBEMAP))
@@ -2699,6 +2798,8 @@ invalid:	Con_Printf ("TexMgr_ReloadImage: invalid source for %s\n", glt->name);
 //
 	GL_DeleteTexture (glt);
 	glGenTextures (1, &glt->texnum);
+	ref_gl_stats.textures_created++;
+	ref_gl_stats.textures_alive++;
 
 	switch (glt->source_format)
 	{
@@ -2747,6 +2848,8 @@ void TexMgr_ReloadImages (void)
 	for (glt = active_gltextures; glt; glt = glt->next)
 	{
 		glGenTextures(1, &glt->texnum);
+		ref_gl_stats.textures_created++;
+		ref_gl_stats.textures_alive++;
 		TexMgr_ReloadImage (glt, -1, -1);
 	}
 
@@ -2785,10 +2888,23 @@ GL_SelectTexture
 */
 static void GL_SelectTexture (GLenum texunit)
 {
+	static qboolean warned_missing_active_texture;
+
 	if (texunit == currenttexunit)
 		return;
 
-	GL_ActiveTextureFunc(texunit);
+	if (!GL_ActiveTextureFunc)
+	{
+		if (!warned_missing_active_texture)
+		{
+			Con_Warning ("GL_SelectTexture: glActiveTexture entry point unavailable; texture unit switching disabled.\n");
+			warned_missing_active_texture = true;
+		}
+		currenttexunit = texunit;
+		return;
+	}
+
+	GL_ActiveTextureFunc (texunit);
 	currenttexunit = texunit;
 }
 
@@ -2800,7 +2916,9 @@ GL_Bind
 qboolean GL_Bind (GLenum texunit, gltexture_t *texture)
 {
 	if (!texture)
-		texture = nulltexture;
+		texture = nulltexture ? nulltexture : notexture;
+	if (!texture)
+		return false;
 	if (!GL_BindNative (texunit, texture->target, texture->texnum))
 		return false;
 	texture->visframe = r_framecount;
@@ -2826,7 +2944,9 @@ void GL_BindTextures (GLuint first, GLsizei count, gltexture_t **textures)
 		{
 			gltexture_t *tex = textures[i];
 			if (!tex)
-				tex = nulltexture;
+				tex = nulltexture ? nulltexture : notexture;
+			if (!tex)
+				continue;
 			tex->visframe = r_framecount;
 			handles[i] = tex->texnum;
 			if (i + first < countof (currenttexture))
@@ -2885,6 +3005,8 @@ void GL_DeleteNativeTexture (GLuint texnum)
 		if (texnum == currenttexture[i])
 			currenttexture[i] = 0;
 	glDeleteTextures (1, &texnum);
+	ref_gl_stats.textures_destroyed++;
+	ref_gl_stats.textures_alive--;
 }
 
 /*
@@ -2915,18 +3037,19 @@ void GL_ClearBindings(void)
 	int i;
 
 	memset (&currenttexture, 0, sizeof (currenttexture));
-	if (gl_multi_bind_able)
+	if (gl_multi_bind_able && GL_BindTexturesFunc && GL_BindSamplersFunc)
 	{
 		GL_BindTexturesFunc (0, countof (currenttexture), NULL);
 		GL_BindSamplersFunc (0, countof (currenttexture), NULL);
 	}
 	else
 		for (i = 0; i < countof (currenttexture); i++)
-		{
-			GL_SelectTexture (GL_TEXTURE0 + i);
-			glBindTexture (GL_TEXTURE_2D, 0);
-			GL_BindSamplerFunc (i, 0);
-		}
+			{
+				GL_SelectTexture (GL_TEXTURE0 + i);
+				glBindTexture (GL_TEXTURE_2D, 0);
+				if (GL_BindSamplerFunc)
+					GL_BindSamplerFunc (i, 0);
+			}
 }
 
 /*
@@ -2983,6 +3106,8 @@ void GLPalette_CreateResources (void)
 	int i;
 
 	glGenTextures (1, &gl_palette_lut);
+	ref_gl_stats.textures_created++;
+	ref_gl_stats.textures_alive++;
 	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_3D, gl_palette_lut);
 	GL_ObjectLabelFunc (GL_TEXTURE, gl_palette_lut, -1, "palette lut");
 	GL_TexImage3DFunc (GL_TEXTURE_3D, 0, GL_R8UI, 128, 128, 128, 0, GL_RED_INTEGER, GL_UNSIGNED_BYTE, NULL);

@@ -96,6 +96,7 @@ typedef enum
 void		*VID_GetWindow (void);
 qboolean	VID_HasMouseOrInputFocus (void);
 qboolean	VID_IsMinimized (void);
+qboolean	VID_EnsureGLContextCurrent (void);
 void		VID_Lock (void);
 void		VID_SetWindowTitle (const char *title);
 void		VID_SetMouseCursor (mousecursor_t cursor);

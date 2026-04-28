@@ -22,6 +22,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 // sbar.c -- status bar code
 
 #include "quakedef.h"
+#include "render_dispatch.h"
 
 static int		sb_updates;		// if >= vid.numpages, no update needed
 
@@ -35,6 +36,31 @@ static qpic_t		*sb_colon, *sb_slash;
 static qpic_t		*sb_ibar;
 static qpic_t		*sb_sbar;
 static qpic_t		*sb_scorebar;
+
+static void Sbar_GetCanvasMetricsCompat (int *out_x, int *out_y, int *out_width, int *out_height)
+{
+	if (g_rend && g_rend->R_GetCanvasMetrics)
+	{
+		g_rend->R_GetCanvasMetrics (out_x, out_y, out_width, out_height);
+		return;
+	}
+
+	if (out_x)
+		*out_x = 0;
+	if (out_y)
+		*out_y = 0;
+	if (out_width)
+		*out_width = q_max (1, vid.width);
+	if (out_height)
+		*out_height = q_max (1, vid.height);
+}
+
+static qboolean Sbar_IsClearEnabledCompat (void)
+{
+	if (g_rend && g_rend->R_IsClearEnabled)
+		return g_rend->R_IsClearEnabled ();
+	return false;
+}
 
 static qpic_t		*sb_weapons[7][8];   // 0 is active, 1 is owned, 2-5 are flashes
 static qpic_t		*sb_ammo[4];
@@ -258,8 +284,6 @@ void Sbar_Init (void)
 {
 	Cmd_AddCommand ("+showscores", Sbar_ShowScores);
 	Cmd_AddCommand ("-showscores", Sbar_DontShowScores);
-
-	Sbar_LoadPics ();
 }
 
 
@@ -540,7 +564,7 @@ int Sbar_MiniScoreboardSizeCheck(void)
 	int canvas_width;
 	float scale;
 
-	R_GetCanvasMetrics (NULL, NULL, &canvas_width, NULL);
+	Sbar_GetCanvasMetricsCompat (NULL, NULL, &canvas_width, NULL);
 	scale = CLAMP(1.0f, scr_sbarscale.value, (float)canvas_width / 320.0f); //johnfitz
 
 	//MAX_SCOREBOARDNAME = 32, so total width for this overlay plus sbar is 632, but we can cut off some i guess
@@ -1669,7 +1693,7 @@ void Sbar_Draw (void)
 	if (cl.intermission)
 		return; //johnfitz -- never draw sbar during intermission
 
-	if (sb_updates >= vid.numpages && !R_IsClearEnabled () && scr_sbaralpha.value >= 1 //johnfitz -- gl_clear, scr_sbaralpha
+	if (sb_updates >= vid.numpages && !Sbar_IsClearEnabledCompat () && scr_sbaralpha.value >= 1 //johnfitz -- gl_clear, scr_sbaralpha
         && vid_gamma.value == 1)                         //ericw -- must draw sbar every frame if doing glsl gamma
 		return;
 
@@ -1678,7 +1702,7 @@ void Sbar_Draw (void)
 	Draw_SetCanvas (CANVAS_DEFAULT); //johnfitz
 
 	//johnfitz -- don't waste fillrate by clearing the area behind the sbar
-	R_GetCanvasMetrics (NULL, NULL, &canvas_width, &canvas_height);
+	Sbar_GetCanvasMetricsCompat (NULL, NULL, &canvas_width, &canvas_height);
 	w = CLAMP (320.0f, scr_sbarscale.value * 320.0f, (float)canvas_width);
 	if (sb_lines && canvas_width > w)
 	{

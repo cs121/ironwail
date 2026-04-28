@@ -25,6 +25,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "glquake.h"
+#include "ref_gl_bridge.h"
 #include "steam.h"
 #include <time.h>
 
@@ -156,6 +157,7 @@ hudstyle_t	hudstyle;
 
 void SCR_ScreenShot_f (void);
 
+#ifndef IW_RENDERER_HOST_FRONTEND
 /*
 ===============================================================================
 
@@ -2321,9 +2323,10 @@ void SCR_UpdateScreen (void)
 		SCR_DrawSaving ();
 	}
 
-	Draw_Flush ();
+	Bridge_DrawFlush ();
 
 	GL_EndGroup ();
 
 	GL_EndRendering ();
 }
+#endif

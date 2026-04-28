@@ -260,6 +260,9 @@ typedef struct render_pass_context_s RenderPassContext;
 typedef struct i_render_backend_s
 {
 	const char *name;
+	qboolean (*context_init)(void *window_handle);
+	void (*context_shutdown)(void);
+	void (*swap_buffers)(void);
 	qboolean (*init)(void);
 	void (*shutdown)(void);
 	void (*on_resize)(int width, int height);

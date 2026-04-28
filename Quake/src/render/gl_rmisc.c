@@ -24,6 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "glquake.h"
+#include "gl_backend.h"
 #include "gl_lightgrid.h"
 #include "mat_material.h"
 #include "r_dlight_pool.h"
@@ -136,6 +137,7 @@ extern cvar_t r_caustics_debug;
 extern void TexMgr_SRGBTextures_f (cvar_t *var);
 extern void TexMgr_LightmapColorspace_f (cvar_t *var);
 extern void TexMgr_LightmapLinearCompat_f (cvar_t *var);
+extern void TexMgr_Init (void);
 extern cvar_t r_bloom_threshold;
 extern cvar_t r_vignette;
 extern cvar_t r_vignette_radius_inner;
@@ -178,6 +180,7 @@ extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_log;
 extern cvar_t r_godrays_decay;
 extern cvar_t r_godrays_density;
+extern void TexMgr_Trace (const char *fmt, ...);
 
 #if defined(USE_SIMD)
 extern cvar_t r_simd;
@@ -494,6 +497,21 @@ void R_Init (void)
 {
         cmd_function_t *cmd;
 
+        TexMgr_Trace ("R_Init: begin");
+#ifdef RENDERER_PLUGIN_BUILD
+	/* Host owns context creation; plugin must initialize its own GL dispatch/state. */
+	GL_RuntimeInitContext ();
+#endif
+
+	TexMgr_Trace ("R_Init: TexMgr_Init");
+	TexMgr_Init ();
+#ifndef IW_RENDERER_HOST_FRONTEND
+	TexMgr_Trace ("R_Init: Draw_Init");
+	Draw_Init ();
+	TexMgr_Trace ("R_Init: SCR_Init");
+	SCR_Init ();
+#endif
+
         Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
         Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
         cmd = Cmd_AddCommand ("r_showbboxes_filter", R_ShowbboxesFilter_f);
@@ -501,9 +519,13 @@ void R_Init (void)
                 cmd->completion = R_ShowbboxesFilter_Completion_f;
         Cmd_AddCommand ("r_showbboxes_filter_clear", R_ShowbboxesFilterClear_f);
 
+        TexMgr_Trace ("R_Init: Lightgrid_Init");
 	Lightgrid_Init ();
+        TexMgr_Trace ("R_Init: R_SkyVis_Init");
 	R_SkyVis_Init ();
+        TexMgr_Trace ("R_Init: Material_Init");
 	Material_Init ();
+        TexMgr_Trace ("R_Init: R_Backend_Init");
 	R_Backend_Init ();
 
 	{
@@ -539,6 +561,8 @@ void R_Init (void)
 		R_RegisterCvarTable (water_cvars, Q_COUNTOF (water_cvars));
 		R_RegisterCvarTable (color_pipeline_cvars, Q_COUNTOF (color_pipeline_cvars));
 	}
+
+        TexMgr_Trace ("R_Init: end");
 
         Cvar_RegisterVariable (&r_debug_itemlight);
         Cvar_RegisterVariable (&r_minlight_models);
@@ -728,12 +752,19 @@ Cvar_RegisterVariable (&r_vignette);
 	R_Quality_Init ();
 	R_PostFX_Init ();
 
+        TexMgr_Trace ("R_Init: R_InitParticles");
 	R_InitParticles ();
+        TexMgr_Trace ("R_Init: R_InitDecals");
 	R_InitDecals ();
+        TexMgr_Trace ("R_Init: R_SetClearColor_f");
 	R_SetClearColor_f (&r_clearcolor); //johnfitz
 
+	TexMgr_Trace ("R_Init: Sky_Init");
 	Sky_Init (); //johnfitz
+        TexMgr_Trace ("R_Init: Sky_Init done");
+	TexMgr_Trace ("R_Init: Fog_Init");
 	Fog_Init (); //johnfitz
+        TexMgr_Trace ("R_Init: Fog_Init done");
 }
 
 /*
@@ -995,6 +1026,9 @@ void R_NewGame (void)
 {
 	int i;
 
+	TexMgr_NewGame ();
+	Draw_NewGame ();
+
 	//clear playertexture pointers (the textures themselves were freed by texmgr_newgame)
 	for (i=0; i<MAX_SCOREBOARD; i++)
 		playertextures[i] = NULL;
@@ -1151,6 +1185,8 @@ GLuint GL_CreateBuffer (GLenum target, GLenum usage, const char *name, size_t si
 {
 	GLuint buffer;
 	GL_GenBuffersFunc (1, &buffer);
+	ref_gl_stats.buffers_created++;
+	ref_gl_stats.buffers_alive++;
 	GL_BindBuffer (target, buffer);
 	if (name)
 		GL_ObjectLabelFunc (GL_BUFFER, buffer, -1, name);
@@ -1168,6 +1204,12 @@ glBindBuffer wrapper
 void GL_BindBuffer (GLenum target, GLuint buffer)
 {
 	GLuint *cache;
+
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "GL_BindBuffer: target=0x%x buffer=%u", (unsigned)target, (unsigned)buffer);
+		TexMgr_Trace (tracebuf);
+	}
 
 	switch (target)
 	{
@@ -1286,9 +1328,9 @@ void GL_DeleteBuffer (GLuint buffer)
 			ssbo_ranges[i].buffer = 0;
 
 	GL_DeleteBuffersFunc (1, &buffer);
-}
-
-/*
+	ref_gl_stats.buffers_destroyed++;
+	ref_gl_stats.buffers_alive--;
+}/*
 ====================
 GL_ClearBufferBindings
 
@@ -1364,6 +1406,12 @@ GL_AllocFrameResources
 static void GL_AllocFrameResources (frameres_bits_t bits)
 {
 	int i;
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "GL_AllocFrameResources: begin bits=0x%x host_size=%llu device_size=%llu", bits,
+			(unsigned long long) frameres_host_buffer_size, (unsigned long long) frameres_device_buffer_size);
+		TexMgr_Trace (tracebuf);
+	}
 	for (i = 0; i < countof (frameres); i++)
 	{
 		char name[64];
@@ -1371,33 +1419,24 @@ static void GL_AllocFrameResources (frameres_bits_t bits)
 
 		if (bits & FRAMERES_HOST_BUFFER_BIT)
 		{
-			GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT;
-
 			if (frame->host_buffer)
 			{
 				if (frame->host_ptr)
-				{
-					GL_BindBuffer (GL_ARRAY_BUFFER, frame->host_buffer);
-					GL_UnmapBufferFunc (GL_ARRAY_BUFFER);
-				}
+					frame->host_ptr = NULL;
 				GL_AddGarbageBuffer (frame->host_buffer);
 			}
 
-			GL_GenBuffersFunc (1, &frame->host_buffer);
-			GL_BindBuffer (GL_ARRAY_BUFFER, frame->host_buffer);
-			q_snprintf (name, sizeof (name), "dynamic host buffer %d", i);
+		GL_GenBuffersFunc (1, &frame->host_buffer);
+		ref_gl_stats.buffers_created++;
+		ref_gl_stats.buffers_alive++;
+		GL_BindBuffer (GL_ARRAY_BUFFER, frame->host_buffer);
+		q_snprintf (name, sizeof (name), "dynamic host buffer %d", i);
 			GL_ObjectLabelFunc (GL_BUFFER, frame->host_buffer, -1, name);
-			if (gl_buffer_storage_able)
-			{
-				GL_BufferStorageFunc (GL_ARRAY_BUFFER, frameres_host_buffer_size, NULL, flags);
-				frame->host_ptr = GL_MapBufferRangeFunc (GL_ARRAY_BUFFER, 0, frameres_host_buffer_size, flags);
-				if (!frame->host_ptr)
-					Sys_Error ("GL_AllocFrameResources: MapBufferRange failed on %" SDL_PRIu64 " bytes", (uint64_t)frameres_host_buffer_size);
-			}
-			else
-			{
-				GL_BufferDataFunc (GL_ARRAY_BUFFER, frameres_host_buffer_size, NULL, GL_STREAM_DRAW);
-			}
+			/* Keep the host upload path conservative for now. Persistent mapped
+			 * uploads are faster, but the legacy 2D path still shares this buffer
+			 * with hot startup drawing, so avoid driver-sensitive map/storage code. */
+			GL_BufferDataFunc (GL_ARRAY_BUFFER, frameres_host_buffer_size, NULL, GL_STREAM_DRAW);
+			frame->host_ptr = NULL;
 		}
 
 		if (bits & FRAMERES_DEVICE_BUFFER_BIT)
@@ -1405,8 +1444,10 @@ static void GL_AllocFrameResources (frameres_bits_t bits)
 			if (frame->device_buffer)
 				GL_AddGarbageBuffer (frame->device_buffer);
 
-			GL_GenBuffersFunc (1, &frame->device_buffer);
-			GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, frame->device_buffer);
+		GL_GenBuffersFunc (1, &frame->device_buffer);
+		ref_gl_stats.buffers_created++;
+		ref_gl_stats.buffers_alive++;
+		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, frame->device_buffer);
 			q_snprintf (name, sizeof (name), "dynamic device buffer %d", i);
 			GL_ObjectLabelFunc (GL_BUFFER, frame->device_buffer, -1, name);
 			GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, frameres_device_buffer_size, NULL, GL_STREAM_DRAW);
@@ -1417,6 +1458,14 @@ static void GL_AllocFrameResources (frameres_bits_t bits)
 		frameres_host_offset = 0;
 	if (bits & FRAMERES_DEVICE_BUFFER_BIT)
 		frameres_device_offset = 0;
+
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "GL_AllocFrameResources: end idx=%d host_buf=%u host_ptr=%p device_buf=%u",
+			frameres_idx, frameres[frameres_idx].host_buffer, (void *) frameres[frameres_idx].host_ptr,
+			frameres[frameres_idx].device_buffer);
+		TexMgr_Trace (tracebuf);
+	}
 }
 
 /*
@@ -1455,11 +1504,7 @@ void GL_DeleteFrameResources (void)
 		VEC_CLEAR (frame->garbage);
 
 		if (frame->host_ptr)
-		{
-			GL_BindBuffer (GL_ARRAY_BUFFER, frame->host_buffer);
-			GL_UnmapBufferFunc (GL_ARRAY_BUFFER);
 			frame->host_ptr = NULL;
-		}
 
 		if (frame->host_buffer)
 		{
@@ -1562,6 +1607,12 @@ void GL_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf
 	size_t align;
 	frameres_t *frame;
 
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "GL_Upload: target=0x%x bytes=%llu", (unsigned)target, (unsigned long long)numbytes);
+		TexMgr_Trace (tracebuf);
+	}
+
 	align = (target == GL_UNIFORM_BUFFER) ? ubo_align : ssbo_align;
 	frameres_host_offset = (frameres_host_offset + align) & ~align;
 
@@ -1573,10 +1624,31 @@ void GL_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf
 	}
 
 	frame = &frameres[frameres_idx];
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "GL_Upload: frame idx=%d host_buf=%u host_ptr=%p host_off=%llu",
+			frameres_idx, frame->host_buffer, (void *)frame->host_ptr, (unsigned long long) frameres_host_offset);
+		TexMgr_Trace (tracebuf);
+	}
+	if (!frame->host_buffer)
+	{
+		TexMgr_Trace ("GL_Upload: missing host buffer, allocating frame resources");
+		GL_CreateFrameResources ();
+		frame = &frameres[frameres_idx];
+		{
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "GL_Upload: after alloc frame idx=%d host_buf=%u host_ptr=%p host_off=%llu",
+				frameres_idx, frame->host_buffer, (void *)frame->host_ptr, (unsigned long long) frameres_host_offset);
+			TexMgr_Trace (tracebuf);
+		}
+	}
+	if (!frame->host_buffer)
+		Sys_Error ("GL_Upload: frame upload buffer unavailable");
 	if (frame->host_ptr)
 		memcpy (frame->host_ptr + frameres_host_offset, data, numbytes);
 	else
 	{
+		TexMgr_Trace ("GL_Upload: via BufferSubData");
 		GL_BindBuffer (target, frame->host_buffer);
 		GL_BufferSubDataFunc (target, frameres_host_offset, numbytes, data);
 	}

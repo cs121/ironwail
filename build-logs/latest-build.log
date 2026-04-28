@@ -1,12 +1,5 @@
 MSBuild-Version 18.4.0+6e61e96ac für .NET Framework
 
-  host.c
-     Bibliothek "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.lib" und Objekt "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exp" werden erstellt.
-  Code wird generiert.
-  14 of 4492 functions ( 0.3%) were compiled, the rest were copied from previous compilation.
-    0 functions were new in current compilation
-    99 functions had inline decision re-evaluated but remain unchanged
-  Codegenerierung ist abgeschlossen.
   ironwail.vcxproj -> C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exe
   C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libFLAC-8.dll
   C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libmad-0.dll
@@ -29,4 +22,8 @@ MSBuild-Version 18.4.0+6e61e96ac für .NET Framework
      Bibliothek "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_vk.lib" und Objekt "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_vk.exp" werden erstellt.
   ref_dx12_plugin.c
      Bibliothek "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_dx12.lib" und Objekt "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_dx12.exp" werden erstellt.
-  ref_gl.vcxproj -> C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_gl.dll
+     Bibliothek "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_gl.lib" und Objekt "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_gl.exp" werden erstellt.
+gl_vidsdl.obj : error LNK2001: Nicht aufgelöstes externes Symbol "R_Backend_ContextInit". [C:\Quake\source\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+gl_vidsdl.obj : error LNK2001: Nicht aufgelöstes externes Symbol "R_Backend_ContextShutdown". [C:\Quake\source\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+gl_vidsdl.obj : error LNK2001: Nicht aufgelöstes externes Symbol "R_Backend_SwapBuffers". [C:\Quake\source\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_gl.dll : fatal error LNK1120: 3 nicht aufgelöste Externe [C:\Quake\source\ironwail\Windows\VisualStudio\ref_gl.vcxproj]

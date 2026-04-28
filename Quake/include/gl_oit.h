@@ -5,8 +5,8 @@
 
 typedef struct framesetup_s
 {
-	GLuint		scene_fbo;
-	GLuint		oit_fbo;
+	unsigned int	scene_fbo;
+	unsigned int	oit_fbo;
 	qboolean	composite_ready;
 } framesetup_t;
 

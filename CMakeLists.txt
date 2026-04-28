@@ -40,6 +40,11 @@ set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/thirdparty/bc7
 
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/thirdparty/lodepng.c)
 list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render/renderer_builtin_gl_plugin.c)
+list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render/ref_gl_plugin.c)
+list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render/ref_gl_bridge_stubs.c)
+list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render/ref_vk_plugin.c)
+list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render/ref_dx12_plugin.c)
+list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render/gl_backend.c)
 
 if (UNIX)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/platform/pl_win.c)
@@ -114,9 +119,63 @@ if (ENABLE_USERDIRS)
 	target_compile_definitions(ironwail PRIVATE DO_USERDIRS=1)
 endif()
 
-add_library(ironwail_renderer_opengl MODULE Quake/src/render/renderer_builtin_gl_plugin.c)
-set_target_properties(ironwail_renderer_opengl PROPERTIES PREFIX "")
-target_include_directories(ironwail_renderer_opengl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Quake/include)
+set(REF_GL_SRC
+	Quake/src/render/ref_gl_plugin.c
+	Quake/src/render/ref_gl_bridge_stubs.c
+	Quake/src/render/gl_backend.c
+	Quake/src/render/gl_backend_runtime.c
+	Quake/src/render/gl_backend_resources.c
+	Quake/src/render/gl_draw.c
+	Quake/src/render/gl_rmain.c
+	Quake/src/render/gl_rmisc.c
+	Quake/src/render/gl_screen.c
+	Quake/src/platform/gl_vidsdl.c
+	Quake/src/render/gl_model.c
+	Quake/src/render/gl_mesh.c
+	Quake/src/render/gl_sky.c
+	Quake/src/render/gl_warp.c
+	Quake/src/render/gl_texmgr.c
+	Quake/src/render/gl_shaders.c
+	Quake/src/render/gl_shadow.c
+	Quake/src/render/gl_shadow_runtime.c
+	Quake/src/render/gl_oit.c
+	Quake/src/render/gl_lightgrid.c
+	Quake/src/render/gl_ktx2.c
+	Quake/src/render/gl_refrag.c
+	Quake/src/render/gl_rlight.c
+	Quake/src/render/gl_fog.c
+	Quake/src/render/gl_dlight.c
+	Quake/src/render/r_world.c
+	Quake/src/render/r_alias.c
+	Quake/src/render/r_entitylight.c
+	Quake/src/render/r_part.c
+	Quake/src/render/r_part_q3p.c
+	Quake/src/render/r_decals.c
+	Quake/src/render/r_sprite.c
+	Quake/src/render/r_brush.c
+	Quake/src/render/r_resources_gl.c
+	Quake/src/render/r_quality.c
+	Quake/src/render/r_sanitize.c
+	Quake/src/render/r_ssao.c
+	Quake/src/render/r_tonemap.c
+	Quake/src/render/r_postfx.c
+)
+
+add_library(ref_gl MODULE ${REF_GL_SRC})
+set_target_properties(ref_gl PROPERTIES PREFIX "" OUTPUT_NAME "ref_gl")
+target_include_directories(ref_gl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Quake/include)
+target_compile_definitions(ref_gl PRIVATE RENDERER_PLUGIN_BUILD USE_SDL2)
+if (MSVC)
+	target_compile_options(ref_gl PRIVATE /FIref_gl_bridge.h)
+else()
+	target_compile_options(ref_gl PRIVATE -include ref_gl_bridge.h)
+endif()
+if (OpenGL::OpenGL)
+	target_link_libraries(ref_gl PRIVATE OpenGL::OpenGL)
+else()
+	target_link_libraries(ref_gl PRIVATE OpenGL::GL)
+endif()
+target_link_libraries(ref_gl PRIVATE SDL2::SDL2)
 
 if (PC_MPG123_FOUND)
 	target_compile_definitions(ironwail PRIVATE USE_CODEC_MP3)
@@ -194,6 +253,6 @@ if (WIN32)
 				COMMAND_EXPAND_LISTS)
 	endif()
 
-	add_custom_command(TARGET ironwail_renderer_opengl POST_BUILD
-		COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ironwail_renderer_opengl> $<TARGET_FILE_DIR:ironwail>)
+	add_custom_command(TARGET ref_gl POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:ref_gl> $<TARGET_FILE_DIR:ironwail>)
 endif()

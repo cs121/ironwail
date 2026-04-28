@@ -571,8 +571,8 @@ typedef struct qmodel_s
 // alias model
 //
 
-	GLuint		meshvbo;
-	GLuint		meshindexesvbo;
+	unsigned int	meshvbo;
+	unsigned int	meshindexesvbo;
 
 //
 // additional model data

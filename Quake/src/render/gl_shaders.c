@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "glquake.h"
+#include "gl_backend.h"
 #include "q_ctype.h"
 #include <assert.h>
 #include <setjmp.h>
@@ -471,6 +472,7 @@ static GLuint GL_CreateShader (GLenum type, const char *source, const char *extr
 	strings[numstrings++] = source;
 
 	shader = GL_CreateShaderFunc (type);
+	ref_gl_stats.shaders_created++;
 	GL_ObjectLabelFunc (GL_SHADER, shader, -1, name);
 	GL_ShaderSourceFunc (shader, numstrings, strings, NULL);
 	GL_CompileShaderFunc (shader);
@@ -498,12 +500,15 @@ static GLuint GL_CreateProgramFromShaders (const GLuint *shaders, int numshaders
 	GLint status;
 
 	program = GL_CreateProgramFunc ();
+	ref_gl_stats.programs_created++;
+	ref_gl_stats.programs_alive++;
 	GL_ObjectLabelFunc (GL_PROGRAM, program, -1, name);
 
 	while (numshaders-- > 0)
 	{
 		GL_AttachShaderFunc (program, *shaders);
 		GL_DeleteShaderFunc (*shaders);
+		ref_gl_stats.shaders_destroyed++;
 		++shaders;
 	}
 
@@ -1107,8 +1112,15 @@ void GL_ClearCachedProgram (void)
 	GL_UseProgramFunc (0);
 }
 
+void GL_EnsureGUIShader (void)
+{
+	if (glprogs.gui)
+		return;
+	glprogs.gui = GL_CreateProgram (GLSL_PATH("gui.vert"), GLSL_PATH("gui.frag"), "gui");
+}
+
 /*
-=============
+============
 GL_CreateShaders
 =============
 */
@@ -1297,6 +1309,8 @@ void GL_DeleteShaders (void)
         for (i = 0; i < gl_num_programs; i++)
         {
                 GL_DeleteProgramFunc (gl_programs[i]);
+		ref_gl_stats.programs_destroyed++;
+		ref_gl_stats.programs_alive--;
 		q_free (gl_program_debug_names ? gl_program_debug_names[i] : NULL);
 		q_free (gl_program_stages ? gl_program_stages[i] : NULL);
         }

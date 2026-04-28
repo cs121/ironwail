@@ -109,6 +109,11 @@ qboolean SoundDef_Register (const sound_def_desc_t *desc, const char *source_fil
 	sound_def_registry_t *registry = SoundDef_TargetRegistry ();
 	sound_def_t def;
 
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_Register: begin name=%s", desc ? desc->name : "<null>");
+		TexMgr_Trace (tracebuf);
+	}
 	if (!desc)
 	{
 		Con_Warning ("sounddef %s:%d: null definition descriptor\n",
@@ -123,12 +128,21 @@ qboolean SoundDef_Register (const sound_def_desc_t *desc, const char *source_fil
 		return false;
 	}
 
+	TexMgr_Trace ("SoundDef_Register: before validate");
 	if (!SoundDef_ValidateAndCopy (&def, desc, source_file, source_line, registry))
+	{
+		TexMgr_Trace ("SoundDef_Register: validate failed");
 		return false;
+	}
+	TexMgr_Trace ("SoundDef_Register: after validate");
 
+	TexMgr_Trace ("SoundDef_Register: assign id");
 	def.id = registry->count + 1;
+	TexMgr_Trace ("SoundDef_Register: copy to registry");
 	registry->defs[registry->count] = def;
+	TexMgr_Trace ("SoundDef_Register: increment count");
 	registry->count++;
+	TexMgr_Trace ("SoundDef_Register: end");
 	return true;
 }
 
@@ -201,6 +215,11 @@ static qboolean SoundDef_ValidateAndCopy (sound_def_t *out_def, const sound_def_
 {
 	int layer_index;
 
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ValidateAndCopy: begin name=%s", desc->name);
+		TexMgr_Trace (tracebuf);
+	}
 	memset (out_def, 0, sizeof (*out_def));
 
 	if (!desc->name || !desc->name[0])
@@ -267,11 +286,17 @@ static qboolean SoundDef_ValidateAndCopy (sound_def_t *out_def, const sound_def_
 
 	for (layer_index = 0; layer_index < desc->layer_count; layer_index++)
 	{
+		{
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ValidateAndCopy: layer=%d name=%s", layer_index, desc->name);
+			TexMgr_Trace (tracebuf);
+		}
 		if (!SoundDef_ValidateLayer (&out_def->layers[layer_index], &desc->layers[layer_index],
 			desc->name, layer_index, source_file, source_line))
 			return false;
 	}
 
+	TexMgr_Trace ("SoundDef_ValidateAndCopy: end");
 	return true;
 }
 
@@ -279,6 +304,11 @@ static qboolean SoundDef_ValidateLayer (sound_def_layer_t *out_layer, const soun
 {
 	int sample_index;
 
+	{
+		char tracebuf[256];
+		q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ValidateLayer: begin def=%s layer=%d", def_name, layer_index);
+		TexMgr_Trace (tracebuf);
+	}
 	memset (out_layer, 0, sizeof (*out_layer));
 
 	if (layer_desc->sample_count <= 0 || layer_desc->sample_count > SOUNDDEF_MAX_SAMPLES_PER_LAYER)
@@ -364,11 +394,21 @@ static qboolean SoundDef_ValidateLayer (sound_def_layer_t *out_layer, const soun
 		char asset_path[256];
 		sfx_t *sfx;
 
+		{
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ValidateLayer: sample=%d raw=%s", sample_index, layer_desc->samples[sample_index]);
+			TexMgr_Trace (tracebuf);
+		}
 		if (!SoundDef_NormalizeSamplePath (layer_desc->samples[sample_index], sample_path, sizeof (sample_path)))
 		{
 			Con_Warning ("sounddef %s:%d: definition '%s' layer %d has invalid sample path\n",
 				SoundDef_SourceFileOrRuntime (source_file), source_line, def_name, layer_index);
 			return false;
+		}
+		{
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ValidateLayer: sample=%d normalized=%s", sample_index, sample_path);
+			TexMgr_Trace (tracebuf);
 		}
 
 		if (!SoundDef_BuildAssetPath (sample_path, asset_path, sizeof (asset_path)))
@@ -378,12 +418,10 @@ static qboolean SoundDef_ValidateLayer (sound_def_layer_t *out_layer, const soun
 				sample_index, layer_desc->samples[sample_index]);
 			return false;
 		}
-
-		if (!COM_FileExists (asset_path, NULL))
 		{
-			Con_Warning ("sounddef %s:%d: definition '%s' layer %d sample '%s' was not found\n",
-				SoundDef_SourceFileOrRuntime (source_file), source_line, def_name, layer_index, asset_path);
-			return false;
+			char tracebuf[256];
+			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ValidateLayer: sample=%d asset=%s", sample_index, asset_path);
+			TexMgr_Trace (tracebuf);
 		}
 
 		sfx = S_PrecacheSound (sample_path);
@@ -393,6 +431,7 @@ static qboolean SoundDef_ValidateLayer (sound_def_layer_t *out_layer, const soun
 				SoundDef_SourceFileOrRuntime (source_file), source_line, def_name, layer_index, sample_path);
 			return false;
 		}
+		TexMgr_Trace ("SoundDef_ValidateLayer: precache ok");
 
 		if (!Host_AsyncAssetsEnabled () && !S_LoadSound (sfx))
 		{
@@ -400,10 +439,12 @@ static qboolean SoundDef_ValidateLayer (sound_def_layer_t *out_layer, const soun
 				SoundDef_SourceFileOrRuntime (source_file), source_line, def_name, layer_index, asset_path);
 			return false;
 		}
+		TexMgr_Trace ("SoundDef_ValidateLayer: load ok");
 		q_strlcpy (out_layer->samples[sample_index].path, sample_path, sizeof (out_layer->samples[sample_index].path));
 		out_layer->samples[sample_index].sfx = sfx;
 	}
 
+	TexMgr_Trace ("SoundDef_ValidateLayer: end");
 	return true;
 }
 

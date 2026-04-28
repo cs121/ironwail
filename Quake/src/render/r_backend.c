@@ -39,10 +39,14 @@ static qboolean s_backend_active = false;
 static qboolean s_backend_audit_cmd_registered = false;
 static qboolean s_backend_vulkan_status_cmd_registered = false;
 static qboolean s_backend_dx12_status_cmd_registered = false;
-static qboolean s_warned_deprecated_builtin_register = false;
+static qboolean s_ref_gl_plugin_candidate_found = false;
+static qboolean s_ref_gl_plugin_loaded = false;
+static qboolean s_ref_gl_plugin_load_failed = false;
 static int s_missing_resource_warn_frame[R_BACKEND_RESOURCE_SLOT_COUNT];
 static void *s_plugin_libs[R_BACKEND_MAX_PLUGIN_LIBS];
 static int s_plugin_lib_count = 0;
+static int s_renderer_plugin_search_dir_count = 0;
+static char s_renderer_plugin_search_dirs[3][MAX_OSPATH];
 static qboolean s_command_encoder_recording = false;
 static int s_command_encoder_frame = -1;
 static RenderGraphResourceHandle s_last_populated_resources;
@@ -125,8 +129,15 @@ static const iw_renderer_plugin_pipeline_services_t s_plugin_pipeline_services =
 
 cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
 cvar_t r_backend_api = { "r_backend_api", "gl", CVAR_ARCHIVE };
-cvar_t r_backend_allow_builtin_gl = { "r_backend_allow_builtin_gl", "1", CVAR_ARCHIVE };
-cvar_t r_refgl_debug = { "r_refgl_debug", "0", CVAR_ARCHIVE };
+extern cvar_t r_refgl_debug;
+
+extern cvar_t r_refgl_log_init;
+extern cvar_t r_refgl_log_passes;
+extern cvar_t r_refgl_log_resources;
+extern cvar_t r_refgl_log_state;
+extern cvar_t r_refgl_validate_state;
+extern cvar_t r_refgl_validate_fbo;
+extern cvar_t r_refgl_validate_lifetime;
 
 /*
 ================
@@ -802,13 +813,7 @@ static void R_Backend_PrintApiHelp (void)
 	render_backend_runtime_status_t gl_status = R_BACKEND_RUNTIME_STUB;
 
 	if (gl_backend)
-	{
 		gl_status = R_Backend_GetRuntimeStatusForBackend (gl_backend);
-	}
-	else if (IW_RendererPlugin_GetBuiltinOpenGLBackend ())
-	{
-		gl_status = R_BACKEND_RUNTIME_IMPLEMENTED;
-	}
 
 	Con_Printf ("r_backend_api help: gl=%s, vulkan=%s, dx12=%s\n",
 		R_Backend_GetRuntimeStatusLabel (gl_status),
@@ -824,30 +829,70 @@ void R_Backend_FillHostBridge (iw_renderer_host_bridge_t *out);
 
 static qboolean R_Backend_RegisterEntryPoints (const iw_renderer_entry_points_t *entry_points)
 {
-	RenderDispatch_SetEntryPoints (entry_points);
-	return true;
-}
+#define IW_REQUIRE_RENDER_ENTRY(fn_name) \
+	do \
+	{ \
+		if (!entry_points->fn_name) \
+		{ \
+			Con_Warning ("Renderer plugin entry-point table is missing required callback '%s'.\n", #fn_name); \
+			return false; \
+		} \
+	} while (0)
 
-static qboolean R_Backend_RegisterBuiltinByName (const char *backend_name)
-{
-	const IRenderBackend *backend;
-
-	if (!backend_name || !backend_name[0])
+	if (!entry_points || entry_points->struct_size < sizeof (*entry_points))
+	{
+		Con_Warning ("Renderer plugin entry-point table is missing or invalid.\n");
 		return false;
-
-	if (!s_warned_deprecated_builtin_register)
-	{
-		Con_DWarning ("Renderer plugin used deprecated host callback register_builtin_backend(); switch to register_backend().\n");
-		s_warned_deprecated_builtin_register = true;
 	}
 
-	if (!q_strcasecmp (backend_name, "OpenGL"))
-	{
-		backend = IW_RendererPlugin_GetBuiltinOpenGLBackend ();
-		return R_Backend_RegisterViaHostApi (backend);
-	}
-
-	return false;
+	IW_REQUIRE_RENDER_ENTRY (R_Init);
+	IW_REQUIRE_RENDER_ENTRY (R_RenderView);
+	IW_REQUIRE_RENDER_ENTRY (R_NewMap);
+	IW_REQUIRE_RENDER_ENTRY (R_ClearEfrags);
+	IW_REQUIRE_RENDER_ENTRY (R_CheckEfrags);
+	IW_REQUIRE_RENDER_ENTRY (R_AddEfrags);
+	IW_REQUIRE_RENDER_ENTRY (R_ParseParticleEffect);
+	IW_REQUIRE_RENDER_ENTRY (R_RunParticleEffect);
+	IW_REQUIRE_RENDER_ENTRY (R_RocketTrail);
+	IW_REQUIRE_RENDER_ENTRY (R_EntityParticles);
+	IW_REQUIRE_RENDER_ENTRY (R_BlobExplosion);
+	IW_REQUIRE_RENDER_ENTRY (R_ParticleExplosion);
+	IW_REQUIRE_RENDER_ENTRY (R_ParticleExplosion2);
+	IW_REQUIRE_RENDER_ENTRY (R_LavaSplash);
+	IW_REQUIRE_RENDER_ENTRY (R_TeleportSplash);
+	IW_REQUIRE_RENDER_ENTRY (R_SpawnImpactDecal);
+	IW_REQUIRE_RENDER_ENTRY (R_SpawnImpactDecalEx);
+	IW_REQUIRE_RENDER_ENTRY (R_TranslatePlayerSkin);
+	IW_REQUIRE_RENDER_ENTRY (R_TranslateNewPlayerSkin);
+	IW_REQUIRE_RENDER_ENTRY (R_ClearBoundingBoxes);
+	IW_REQUIRE_RENDER_ENTRY (R_ClearParticles);
+	IW_REQUIRE_RENDER_ENTRY (R_ClearDecals);
+	IW_REQUIRE_RENDER_ENTRY (R_ReloadDecals);
+	IW_REQUIRE_RENDER_ENTRY (R_InitDecals);
+	IW_REQUIRE_RENDER_ENTRY (R_StorePrevFrameState);
+	IW_REQUIRE_RENDER_ENTRY (R_GetParticleDebugStats);
+	IW_REQUIRE_RENDER_ENTRY (R_SetAlphaMode);
+	IW_REQUIRE_RENDER_ENTRY (R_GetAlphaMode);
+	IW_REQUIRE_RENDER_ENTRY (R_GetEffectiveAlphaMode);
+	IW_REQUIRE_RENDER_ENTRY (R_AddStaticModels);
+	IW_REQUIRE_RENDER_ENTRY (R_PushDlights);
+	IW_REQUIRE_RENDER_ENTRY (R_ParseDlightEntities);
+	IW_REQUIRE_RENDER_ENTRY (R_GetLightgridSample);
+	IW_REQUIRE_RENDER_ENTRY (R_DrawPolyblendOverlay);
+	IW_REQUIRE_RENDER_ENTRY (R_GetCanvasMetrics);
+	IW_REQUIRE_RENDER_ENTRY (R_GetSceneSampleCount);
+	IW_REQUIRE_RENDER_ENTRY (R_GetMaxSampleCount);
+	IW_REQUIRE_RENDER_ENTRY (R_GetMaxAnisotropy);
+	IW_REQUIRE_RENDER_ENTRY (R_IsClearEnabled);
+	IW_REQUIRE_RENDER_ENTRY (R_NewGame);
+	IW_REQUIRE_RENDER_ENTRY (R_CreateFrameBuffers);
+	IW_REQUIRE_RENDER_ENTRY (R_DeleteFrameBuffers);
+	IW_REQUIRE_RENDER_ENTRY (R_ResetDRSState);
+	IW_REQUIRE_RENDER_ENTRY (R_ResetGodraysStabilization);
+	/* Host keeps ownership of screen/UI orchestration; plugin callback is optional. */
+	RenderDispatch_SetEntryPoints (entry_points);
+#undef IW_REQUIRE_RENDER_ENTRY
+	return true;
 }
 
 static qboolean R_Backend_Host_GetSurfaceInfo (iw_renderer_host_surface_info_t *out_info)
@@ -1054,10 +1099,10 @@ ABI/service contract issues are deterministic and easy to diagnose in logs.
 */
 static qboolean R_Backend_ValidatePluginHostApi (const iw_renderer_plugin_host_api_t *host_api, qboolean emit_warning)
 {
-	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V2_SIZE)
+	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V4_SIZE)
 	{
 		if (emit_warning)
-			Con_Warning ("Renderer plugin host API is invalid (missing v2 fields).\n");
+			Con_Warning ("Renderer plugin host API is invalid (missing v4 fields).\n");
 		return false;
 	}
 
@@ -1136,8 +1181,6 @@ static void R_Backend_FillPluginHostApi (iw_renderer_plugin_host_api_t *host_api
 	host_api->abi_major = IW_RENDERER_PLUGIN_ABI_MAJOR;
 	host_api->abi_minor = IW_RENDERER_PLUGIN_ABI_MINOR;
 	host_api->register_backend = R_Backend_RegisterViaHostApi;
-	host_api->builtin_opengl_backend = IW_RendererPlugin_GetBuiltinOpenGLBackend ();
-	host_api->register_builtin_backend = R_Backend_RegisterBuiltinByName;
 	host_api->surface_services = &s_plugin_surface_services;
 	host_api->resource_services = &s_plugin_resource_services;
 	host_api->upload_services = &s_plugin_upload_services;
@@ -1149,21 +1192,6 @@ static void R_Backend_FillPluginHostApi (iw_renderer_plugin_host_api_t *host_api
 	}
 	host_api->register_entry_points = R_Backend_RegisterEntryPoints;
 	SDL_assert (R_Backend_ValidatePluginHostApi (host_api, true));
-}
-
-static qboolean R_Backend_RegisterBuiltinPluginOpenGL (const iw_renderer_plugin_host_api_t *host_api)
-{
-	const IRenderBackend *backend;
-
-	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V2_SIZE)
-		return false;
-
-	backend = host_api->builtin_opengl_backend;
-	if (backend && host_api->register_backend)
-		return host_api->register_backend (backend);
-	if (host_api->register_builtin_backend)
-		return host_api->register_builtin_backend ("OpenGL");
-	return false;
 }
 
 static void R_Backend_RecordPluginLibrary (void *lib)
@@ -1281,6 +1309,8 @@ static qboolean R_Backend_LoadPluginFromPath (const char *path)
 	}
 
 	Con_Printf ("Renderer plugin loaded: %s (%s)\n", plugin_name, path);
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("R_Backend_LoadPluginFromPath: registered plugin '%s'\n", plugin_name);
 	R_Backend_RecordPluginLibrary (lib);
 	return true;
 }
@@ -1296,6 +1326,12 @@ static void R_Backend_LoadRendererPlugins (void)
 	int plugin_candidates = 0;
 	int plugin_failed = 0;
 	const qboolean plugin_debug = (r_refgl_debug.value != 0.0f || COM_CheckParm ("-refgl_debug") > 0);
+
+	s_ref_gl_plugin_candidate_found = false;
+	s_ref_gl_plugin_loaded = false;
+	s_ref_gl_plugin_load_failed = false;
+	s_renderer_plugin_search_dir_count = 0;
+	memset (s_renderer_plugin_search_dirs, 0, sizeof (s_renderer_plugin_search_dirs));
 
 #ifdef _WIN32
 	ext_find = "dll";
@@ -1322,6 +1358,14 @@ static void R_Backend_LoadRendererPlugins (void)
 			continue;
 		if (i > 0 && search_dirs[0] && !q_strcasecmp (dir, search_dirs[0]))
 			continue;
+		if (s_renderer_plugin_search_dir_count < (int)Q_COUNTOF (s_renderer_plugin_search_dirs))
+		{
+			q_strlcpy (
+				s_renderer_plugin_search_dirs[s_renderer_plugin_search_dir_count],
+				dir,
+				sizeof (s_renderer_plugin_search_dirs[s_renderer_plugin_search_dir_count]));
+			++s_renderer_plugin_search_dir_count;
+		}
 
 		Con_DPrintf ("R_Backend_LoadRendererPlugins: scanning '%s' for *.%s\n", dir, ext_find);
 
@@ -1340,10 +1384,20 @@ static void R_Backend_LoadRendererPlugins (void)
 				continue;
 
 			++plugin_candidates;
+			if (!q_strcasecmp (find->name, s_ref_gl_plugin_filename))
+				s_ref_gl_plugin_candidate_found = true;
 			if (R_Backend_LoadPluginFromPath (plugin_path))
+			{
 				++plugins_loaded;
+				if (!q_strcasecmp (find->name, s_ref_gl_plugin_filename))
+					s_ref_gl_plugin_loaded = true;
+			}
 			else
+			{
 				++plugin_failed;
+				if (!q_strcasecmp (find->name, s_ref_gl_plugin_filename))
+					s_ref_gl_plugin_load_failed = true;
+			}
 		}
 	}
 
@@ -1436,6 +1490,10 @@ static qboolean R_VulkanStub_CanActivate (qboolean runtime_switch)
 	return false;
 }
 
+static qboolean R_VulkanStub_ContextInit (void *window_handle) { (void)window_handle; return false; }
+static void R_VulkanStub_ContextShutdown (void) {}
+static void R_VulkanStub_SwapBuffers (void) {}
+
 static qboolean R_VulkanStub_Init (void)
 {
 	return false;
@@ -1494,6 +1552,9 @@ static int R_VulkanStub_GetSceneSampleCount (void) { return 1; }
 
 static const IRenderBackend s_vulkan_stub_backend = {
 	"Vulkan",
+	R_VulkanStub_ContextInit,
+	R_VulkanStub_ContextShutdown,
+	R_VulkanStub_SwapBuffers,
 	R_VulkanStub_Init,
 	R_VulkanStub_Shutdown,
 	R_VulkanStub_OnResize,
@@ -1597,6 +1658,9 @@ static void R_Backend_VulkanStatus_f (void)
 
 static const IRenderBackend s_dx12_stub_backend = {
 	"DX12",
+	R_VulkanStub_ContextInit,
+	R_VulkanStub_ContextShutdown,
+	R_VulkanStub_SwapBuffers,
 	R_VulkanStub_Init,
 	R_VulkanStub_Shutdown,
 	R_VulkanStub_OnResize,
@@ -1863,8 +1927,14 @@ void R_Backend_Init (void)
 	memset (s_missing_resource_warn_frame, 0xff, sizeof (s_missing_resource_warn_frame));
 	Cvar_RegisterVariable (&r_backend);
 	Cvar_RegisterVariable (&r_backend_api);
-	Cvar_RegisterVariable (&r_backend_allow_builtin_gl);
 	Cvar_RegisterVariable (&r_refgl_debug);
+	Cvar_RegisterVariable (&r_refgl_log_init);
+	Cvar_RegisterVariable (&r_refgl_log_passes);
+	Cvar_RegisterVariable (&r_refgl_log_resources);
+	Cvar_RegisterVariable (&r_refgl_log_state);
+	Cvar_RegisterVariable (&r_refgl_validate_state);
+	Cvar_RegisterVariable (&r_refgl_validate_fbo);
+	Cvar_RegisterVariable (&r_refgl_validate_lifetime);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
 	Cvar_SetCallback (&r_backend_api, R_Backend_ApiChanged_f);
 	if (!s_backend_audit_cmd_registered)
@@ -1885,24 +1955,59 @@ void R_Backend_Init (void)
 
 	R_Backend_Register (&s_vulkan_stub_backend);
 	R_Backend_Register (&s_dx12_stub_backend);
-	if (r_refgl_debug.value != 0.0f || COM_CheckParm ("-refgl_debug") > 0)
-		R_Backend_LoadRendererPlugins ();
+	R_Backend_LoadRendererPlugins ();
 
 	if (!R_Backend_HasRegisteredName ("OpenGL"))
 	{
-		if (r_backend_allow_builtin_gl.value != 0.0f)
+		if (!s_ref_gl_plugin_candidate_found)
 		{
-			iw_renderer_plugin_host_api_t host_api;
-			R_Backend_FillPluginHostApi (&host_api);
-			if (!R_Backend_RegisterBuiltinPluginOpenGL (&host_api))
+			if (s_renderer_plugin_search_dir_count > 0)
 			{
-				Sys_Error ("Failed to register built-in OpenGL backend fallback.\n");
+				Con_Warning (
+					"No OpenGL renderer backend is available: required plugin '%s' was not found.\n"
+					"Searched directories: '%s'%s%s%s%s\n",
+					s_ref_gl_plugin_filename,
+					s_renderer_plugin_search_dirs[0][0] ? s_renderer_plugin_search_dirs[0] : "<none>",
+					s_renderer_plugin_search_dir_count > 1 ? ", '" : "",
+					s_renderer_plugin_search_dir_count > 1 ? s_renderer_plugin_search_dirs[1] : "",
+					s_renderer_plugin_search_dir_count > 1 ? "'" : "",
+					s_renderer_plugin_search_dir_count > 2 ? ", ..." : "");
+				Sys_Error (
+					"No OpenGL renderer backend is available: required plugin '%s' was not found.\n"
+					"Searched directories: '%s'%s%s%s%s\n",
+					s_ref_gl_plugin_filename,
+					s_renderer_plugin_search_dirs[0][0] ? s_renderer_plugin_search_dirs[0] : "<none>",
+					s_renderer_plugin_search_dir_count > 1 ? ", '" : "",
+					s_renderer_plugin_search_dir_count > 1 ? s_renderer_plugin_search_dirs[1] : "",
+					s_renderer_plugin_search_dir_count > 1 ? "'" : "",
+					s_renderer_plugin_search_dir_count > 2 ? ", ..." : "");
 			}
-			Con_Warning ("No external OpenGL renderer plugin is available; using built-in OpenGL fallback (set r_backend_allow_builtin_gl 0 to require external renderer DLLs).\n");
+			else
+			{
+				Con_Warning ("No OpenGL renderer backend is available: required plugin '%s' was not found.\n",
+					s_ref_gl_plugin_filename);
+				Sys_Error ("No OpenGL renderer backend is available: required plugin '%s' was not found.\n",
+					s_ref_gl_plugin_filename);
+			}
+		}
+		else if (s_ref_gl_plugin_load_failed || !s_ref_gl_plugin_loaded)
+		{
+			Con_Warning (
+				"No OpenGL renderer backend is available: required plugin '%s' was discovered but failed to load/register.\n"
+				"Check earlier renderer plugin warnings for ABI/export/registration details.\n",
+				s_ref_gl_plugin_filename);
+			Sys_Error (
+				"No OpenGL renderer backend is available: required plugin '%s' was discovered but failed to load/register.\n"
+				"Check earlier renderer plugin warnings for ABI/export/registration details.\n",
+				s_ref_gl_plugin_filename);
 		}
 		else
 		{
-			Sys_Error ("No OpenGL renderer backend is available; external plugin '%s' was not loaded and r_backend_allow_builtin_gl=0.\n",
+			Con_Warning (
+				"No OpenGL renderer backend is available: plugin '%s' loaded but did not register backend name 'OpenGL'.\n",
+				s_ref_gl_plugin_filename);
+			Sys_Error (
+				"No OpenGL renderer backend is available: plugin '%s' loaded but did not register backend name 'OpenGL'.\n",
 				s_ref_gl_plugin_filename);
 		}
 	}
@@ -1916,11 +2021,48 @@ void R_Backend_Init (void)
 			R_Backend_ApplySelectionToCvar ();
 	}
 
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+	{
+		Con_DPrintf ("R_Backend_Init: active backend='%s' api='%s' registered=%d plugins_loaded=%d\n",
+			s_active_backend && s_active_backend->name ? s_active_backend->name : "<none>",
+			r_backend_api.string ? r_backend_api.string : "<null>",
+			s_registered_backend_count,
+			s_plugin_lib_count);
+	}
+
 	R_Backend_PrintApiHelp ();
+}
+
+qboolean R_Backend_ContextInit (void *window_handle)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (!backend || !backend->context_init)
+		return false;
+	return backend->context_init (window_handle);
+}
+
+void R_Backend_ContextShutdown (void)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->context_shutdown)
+		backend->context_shutdown ();
+}
+
+void R_Backend_SwapBuffers (void)
+{
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->swap_buffers)
+		backend->swap_buffers ();
 }
 
 void R_Backend_Shutdown (void)
 {
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+	{
+		Con_DPrintf ("R_Backend_Shutdown: active backend='%s' plugins=%d\n",
+			s_active_backend && s_active_backend->name ? s_active_backend->name : "<none>",
+			s_plugin_lib_count);
+	}
 	if (s_backend_active && s_active_backend && s_active_backend->shutdown)
 		s_active_backend->shutdown ();
 	s_backend_active = false;
@@ -1934,6 +2076,11 @@ void R_Backend_Shutdown (void)
 	s_registered_backend_count = 0;
 	s_active_backend = NULL;
 	s_gl_backend = NULL;
+	s_ref_gl_plugin_candidate_found = false;
+	s_ref_gl_plugin_loaded = false;
+	s_ref_gl_plugin_load_failed = false;
+	s_renderer_plugin_search_dir_count = 0;
+	memset (s_renderer_plugin_search_dirs, 0, sizeof (s_renderer_plugin_search_dirs));
 	R_Backend_ClearExternalResourceRegistry ();
 	R_Backend_ClearPipelineMetadataRegistry ();
 	s_backend_initialized = false;
@@ -1951,6 +2098,11 @@ void R_Backend_Shutdown (void)
 void R_Backend_OnResize (int width, int height)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
+
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("R_Backend_OnResize: %dx%d backend='%s'\n",
+			width, height,
+			backend && backend->name ? backend->name : "<none>");
 
 	if (backend && backend->on_resize)
 		backend->on_resize (width, height);
@@ -1978,6 +2130,10 @@ const RenderBackendCaps *R_Backend_GetCaps (void)
 void R_Backend_BeginFrame (void)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("R_Backend_BeginFrame: frame=%d backend='%s'\n",
+			r_framecount,
+			backend && backend->name ? backend->name : "<none>");
 	if (s_upload_last_begin_frame != r_framecount)
 	{
 		s_upload_last_begin_frame = r_framecount;
@@ -1993,6 +2149,10 @@ void R_Backend_EndFrame (void)
 	const IRenderBackend *backend = R_GetRenderBackend ();
 	if (backend && backend->end_frame)
 		backend->end_frame ();
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("R_Backend_EndFrame: frame=%d backend='%s'\n",
+			r_framecount,
+			backend && backend->name ? backend->name : "<none>");
 	if (s_upload_transient_epoch > 0u)
 		s_upload_completed_epoch = s_upload_transient_epoch - 1u;
 	else
@@ -2002,6 +2162,10 @@ void R_Backend_EndFrame (void)
 void R_Backend_Present (void)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("R_Backend_Present: frame=%d backend='%s'\n",
+			r_framecount,
+			backend && backend->name ? backend->name : "<none>");
 	if (backend && backend->present)
 		backend->present ();
 }

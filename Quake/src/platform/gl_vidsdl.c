@@ -27,6 +27,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "r_framegraph.h"
 #include "cfgfile.h"
 #include "bgmusic.h"
+#ifndef RENDERER_PLUGIN_BUILD
+#include "render_dispatch.h"
+#endif
 #include "resource.h"
 #include "gl_lightgrid.h"
 #include "gl_backend.h"
@@ -34,6 +37,26 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include <SDL2/SDL.h>
 #else
 #include "SDL.h"
+#endif
+
+static SDL_Window *draw_context;
+
+#ifdef RENDERER_PLUGIN_BUILD
+qboolean R_Backend_ContextInit (void *window_handle)
+{
+	(void)window_handle;
+	return true;
+}
+
+void R_Backend_ContextShutdown (void)
+{
+}
+
+void R_Backend_SwapBuffers (void)
+{
+	if (draw_context)
+		SDL_GL_SwapWindow (draw_context);
+}
 #endif
 
 #ifdef RENDERER_PLUGIN_BUILD
@@ -88,11 +111,28 @@ extern cvar_t r_color_midtone;
 extern cvar_t r_color_contrast;
 extern cvar_t r_viewmodel_light_boost;
 extern cvar_t r_viewmodel_minlight;
+cvar_t r_refgl_debug = { "r_refgl_debug", "0", CVAR_ARCHIVE };
+cvar_t r_refgl_log_init = { "r_refgl_log_init", "0", CVAR_NONE };
+cvar_t r_refgl_log_passes = { "r_refgl_log_passes", "0", CVAR_NONE };
+cvar_t r_refgl_log_resources = { "r_refgl_log_resources", "0", CVAR_NONE };
+cvar_t r_refgl_log_state = { "r_refgl_log_state", "0", CVAR_NONE };
+cvar_t r_refgl_validate_state = { "r_refgl_validate_state", "0", CVAR_NONE };
+cvar_t r_refgl_validate_fbo = { "r_refgl_validate_fbo", "0", CVAR_NONE };
+cvar_t r_refgl_validate_lifetime = { "r_refgl_validate_lifetime", "0", CVAR_NONE };
 
 static void ClearAllStates (void);
 static void GL_Init (void);
 static void GL_SetupState (void); //johnfitz
 static void *VID_GetGLProcAddress (const char *name);
+
+static qboolean VID_RefGlTraceEnabled (void)
+{
+	return (r_refgl_debug.value != 0.f
+		|| r_refgl_log_init.value != 0.f
+		|| r_refgl_log_passes.value != 0.f
+		|| r_refgl_log_resources.value != 0.f
+		|| r_refgl_log_state.value != 0.f);
+}
 
 viddef_t	vid;				// global video state
 modestate_t	modestate = MS_UNINIT;
@@ -188,6 +228,62 @@ extern cvar_t r_dynamic;
 extern cvar_t host_maxfps;
 extern cvar_t scr_showfps;
 extern cvar_t scr_pixelaspect;
+
+static int VID_GetEffectiveAlphaModeCompat (void)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	return (int)R_GetEffectiveAlphaMode ();
+#else
+	if (g_rend && g_rend->R_GetEffectiveAlphaMode)
+		return g_rend->R_GetEffectiveAlphaMode ();
+	return ALPHAMODE_BASIC;
+#endif
+}
+
+static void VID_CreateFrameBuffersCompat (void)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	GL_CreateFrameBuffers ();
+#else
+	GL_CreateFrameBuffers ();
+#endif
+}
+
+static void VID_DeleteFrameBuffersCompat (void)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	GL_DeleteFrameBuffers ();
+#else
+	GL_DeleteFrameBuffers ();
+#endif
+}
+
+static void VID_ResetDRSStateCompat (void)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	R_ResetDRSState ();
+#else
+	R_ResetDRSState ();
+#endif
+}
+
+static void VID_ResetGodraysStabilizationCompat (void)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	R_ResetGodraysStabilization ();
+#else
+	R_ResetGodraysStabilization ();
+#endif
+}
+
+static void VID_SetRenderFramePlanCompat (const void *plan)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	R_FrameGraph_SetRenderFramePlan ((const RenderFramePlan *)plan);
+#else
+	R_FrameGraph_SetRenderFramePlan ((const RenderFramePlan *)plan);
+#endif
+}
 
 //==========================================================================
 //
@@ -415,6 +511,20 @@ qboolean VID_IsMinimized (void)
 {
 	return !(SDL_GetWindowFlags(draw_context) & SDL_WINDOW_SHOWN);
 }
+
+#ifndef RENDERER_PLUGIN_BUILD
+/*
+====================
+VID_EnsureGLContextCurrent
+====================
+*/
+qboolean VID_EnsureGLContextCurrent (void)
+{
+	if (!draw_context || !gl_context)
+		return false;
+	return SDL_GL_MakeCurrent (draw_context, gl_context) == 0;
+}
+#endif
 
 /*
 ================
@@ -687,6 +797,11 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fu
 	if (!VID_ApplyWindowMode (width, height, refreshrate, fullscreen))
 		return false;
 	VID_EnsureGLContext ();
+#ifndef RENDERER_PLUGIN_BUILD
+	/* The host executable still owns legacy 2D draw helpers, so it must initialize
+	 * its own GL dispatch/state before any host-side Draw_* code can upload data. */
+	GL_RuntimeInitContext ();
+#endif
 	{
 		int srgb_capable = 0;
 		if (SDL_GL_GetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, &srgb_capable) == 0)
@@ -753,20 +868,30 @@ VID_RecreateRenderTargets
 */
 static void VID_RecreateRenderTargets (const char *reason, qboolean delete_existing)
 {
+	if (VID_RefGlTraceEnabled ())
+		Con_DPrintf ("ref_gl: VID_RecreateRenderTargets reason='%s' delete_existing=%d\n",
+			(reason && reason[0]) ? reason : "<none>",
+			delete_existing ? 1 : 0);
 	if (reason && *reason)
 		Con_DPrintf ("Recreating render targets (%s)\n", reason);
 
 	/* Drop cached frame-plan decisions before/after RT rebuilds so AA
 	 * toggles cannot reuse stale pass selection from the previous layout. */
-	R_FrameGraph_SetRenderFramePlan (NULL);
+	VID_SetRenderFramePlanCompat (NULL);
 
-	R_ResetDRSState ();
+	VID_ResetDRSStateCompat ();
 
 	if (delete_existing)
-		GL_DeleteFrameBuffers ();
+	{
+		VID_DeleteFrameBuffersCompat ();
+		if (VID_RefGlTraceEnabled ())
+			Con_DPrintf ("ref_gl: deleted framebuffers\n");
+	}
 
-	GL_CreateFrameBuffers ();
-	R_FrameGraph_SetRenderFramePlan (NULL);
+	VID_CreateFrameBuffersCompat ();
+	if (VID_RefGlTraceEnabled ())
+		Con_DPrintf ("ref_gl: created framebuffers\n");
+	VID_SetRenderFramePlanCompat (NULL);
 }
 
 static void VID_ApplySampleShadingState (void)
@@ -842,10 +967,19 @@ void VID_Changed_f (cvar_t *var)
 
 void VID_RecalcConsoleSize (void)
 {
+#ifdef RENDERER_PLUGIN_BUILD
+	if (vid.guiwidth <= 0 || vid.guiheight <= 0)
+	{
+		if (g_bridge_fn && g_bridge_fn->vid_recalc_console_size)
+			g_bridge_fn->vid_recalc_console_size ();
+		return;
+	}
+#endif
+
 	vid.conwidth = (scr_conwidth.value > 0) ? (int)scr_conwidth.value : (scr_conscale.value > 0) ? (int)(vid.guiwidth/scr_conscale.value) : vid.guiwidth;
 	vid.conwidth = CLAMP (320, vid.conwidth, vid.guiwidth);
 	vid.conwidth &= 0xFFFFFFF8;
-	vid.conheight = vid.conwidth * vid.guiheight / vid.guiwidth;
+	vid.conheight = (vid.guiwidth > 0) ? (vid.conwidth * vid.guiheight / vid.guiwidth) : vid.guiheight;
 }
 
 void VID_RecalcInterfaceSize (void)
@@ -896,7 +1030,7 @@ static void VID_Restart (void)
 		return;
 	}
 
-	GL_DeleteFrameBuffers ();
+	VID_DeleteFrameBuffersCompat ();
 
 //
 // set new mode
@@ -1272,6 +1406,8 @@ GL_SetStateEx
 static void GL_SetStateEx (unsigned mask, unsigned force)
 {
 	unsigned diff = (mask ^ glstate) | force;
+	static qboolean warned_missing_vertex_attrib;
+	static qboolean warned_missing_attrib_divisor;
 
 	if (diff & GLS_MASK_BLEND)
 	{
@@ -1281,13 +1417,13 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
                         case GLS_BLEND_OPAQUE:
                                 glBlendFunc(GL_ONE, GL_ZERO);
                                 break;
-                        case GLS_BLEND_ALPHA_OIT:
-                                if (R_GetEffectiveAlphaMode () == ALPHAMODE_OIT)
-                                {
-                                        GL_BlendFunciFunc(0, GL_ONE, GL_ONE); // accum
-                                        GL_BlendFunciFunc(1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR); // revealage
-                                        break;
-                                }
+			case GLS_BLEND_ALPHA_OIT:
+				if (VID_GetEffectiveAlphaModeCompat () == ALPHAMODE_OIT && GL_BlendFunciFunc)
+				{
+					GL_BlendFunciFunc (0, GL_ONE, GL_ONE); // accum
+					GL_BlendFunciFunc (1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR); // revealage
+					break;
+				}
                                 // fallthrough!
                         case GLS_BLEND_ALPHA:
                                 glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -1295,7 +1431,7 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
                                  * Keep attachment 0 alpha-blended, but write attachment 1
                                  * (velocity/material mask) with replace semantics so
                                  * postprocess tags are not diluted by alpha blending. */
-                                if (GL_BlendFunciFunc && R_GetEffectiveAlphaMode () != ALPHAMODE_OIT)
+				if (GL_BlendFunciFunc && VID_GetEffectiveAlphaModeCompat () != ALPHAMODE_OIT)
                                         GL_BlendFunciFunc(1, GL_ONE, GL_ZERO);
                                 break;
                         case GLS_BLEND_MULTIPLY:
@@ -1345,7 +1481,15 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
 		int newattribs = (mask    & GLS_MASK_ATTRIBS) >> GLS_ATTRIBS_SHIFT;
 		int i;
 
-		if (force & GLS_MASK_ATTRIBS)
+		if (!GL_EnableVertexAttribArrayFunc || !GL_DisableVertexAttribArrayFunc)
+		{
+			if (!warned_missing_vertex_attrib)
+			{
+				Con_Warning ("GL_SetStateEx: vertex attrib array entry points unavailable; skipping attrib state updates.\n");
+				warned_missing_vertex_attrib = true;
+			}
+		}
+		else if (force & GLS_MASK_ATTRIBS)
 		{
 			for (i = 0; i < GLS_ATTRIBS_MAXCOUNT; i++)
 				if (i < newattribs)
@@ -1368,7 +1512,15 @@ static void GL_SetStateEx (unsigned mask, unsigned force)
 		int newattribs = (mask    & GLS_MASK_INSTANCED_ATTRIBS) >> GLS_INSTANCED_ATTRIBS_SHIFT;
 		int i;
 
-		if (force & GLS_MASK_INSTANCED_ATTRIBS)
+		if (!GL_VertexAttribDivisorFunc)
+		{
+			if (!warned_missing_attrib_divisor)
+			{
+				Con_Warning ("GL_SetStateEx: glVertexAttribDivisor entry point unavailable; skipping instanced attrib state updates.\n");
+				warned_missing_attrib_divisor = true;
+			}
+		}
+		else if (force & GLS_MASK_INSTANCED_ATTRIBS)
 		{
 			for (i = 0; i < GLS_ATTRIBS_MAXCOUNT; i++)
 				GL_VertexAttribDivisorFunc(i, i < newattribs);
@@ -1551,7 +1703,66 @@ static void GL_Init (void)
 
 	GL_ClearBufferBindings ();
 	GL_CreateFrameResources ();
-	R_ResetGodraysStabilization ();
+	VID_ResetGodraysStabilizationCompat ();
+}
+
+/*
+=================
+GL_RuntimeInitContext
+
+Initialize OpenGL function pointers and renderer state for the currently
+active context in this module instance.
+=================
+*/
+void GL_RuntimeInitContext (void)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	if (VID_RefGlTraceEnabled ())
+		Con_DPrintf ("ref_gl: GL_RuntimeInitContext begin\n");
+#endif
+#ifdef RENDERER_PLUGIN_BUILD
+	if (!VID_EnsureGLContextCurrent ())
+		Sys_Error ("GL_RuntimeInitContext: failed to make host GL context current");
+#endif
+
+#ifdef RENDERER_PLUGIN_BUILD
+	if (g_bridge_fn && g_bridge_fn->vid_get_window)
+	{
+		SDL_Window *window = (SDL_Window *)g_bridge_fn->vid_get_window ();
+		if (window)
+		{
+			draw_context = window;
+			int w = 0, h = 0;
+			SDL_GetWindowSize (window, &w, &h);
+			if (w > 0 && h > 0)
+			{
+				vid.width = w;
+				vid.height = h;
+				vid.guiwidth = w;
+				vid.guiheight = h;
+				vid.conwidth = (w & 0xFFFFFFF8);
+				vid.conheight = (w > 0) ? (vid.conwidth * h / w) : h;
+			}
+		}
+	}
+#endif
+
+	GL_Backend_SetProcAddressLoader (VID_GetGLProcAddress);
+#ifdef RENDERER_PLUGIN_BUILD
+	if (VID_RefGlTraceEnabled ())
+		Con_DPrintf ("ref_gl: GL_RuntimeInitContext loader set\n");
+#endif
+	R_Backend_ContextInit (draw_context);
+	GL_Init ();
+#ifdef RENDERER_PLUGIN_BUILD
+	if (VID_RefGlTraceEnabled ())
+		Con_DPrintf ("ref_gl: GL_RuntimeInitContext GL_Init done\n");
+#endif
+	GL_SetupState ();
+#ifdef RENDERER_PLUGIN_BUILD
+	if (VID_RefGlTraceEnabled ())
+		Con_DPrintf ("ref_gl: GL_RuntimeInitContext GL_SetupState done\n");
+#endif
 }
 
 /*
@@ -1561,6 +1772,35 @@ GL_BeginRendering -- sets values of glx, gly, glwidth, glheight
 */
 void GL_BeginRendering (int *x, int *y, int *width, int *height)
 {
+#ifdef RENDERER_PLUGIN_BUILD
+	if (g_bridge_fn && g_bridge_fn->vid_get_window)
+	{
+		SDL_Window *window = (SDL_Window *)g_bridge_fn->vid_get_window ();
+		if (window)
+		{
+			int w = 0, h = 0;
+			draw_context = window;
+			SDL_GL_GetDrawableSize (window, &w, &h);
+			if (w <= 0 || h <= 0)
+				SDL_GetWindowSize (window, &w, &h);
+
+			if (w > 0 && h > 0 && (w != vid.width || h != vid.height))
+			{
+				vid.width = w;
+				vid.height = h;
+				vid.maxscale = q_max (4, h / 240);
+				vid.refreshrate = VID_GetCurrentRefreshRate ();
+				vid.conwidth = w & 0xFFFFFFF8;
+				vid.conheight = (w > 0) ? (vid.conwidth * h / w) : h;
+				vid.guiwidth = w;
+				vid.guiheight = h;
+				vid.resized = true;
+			}
+		}
+	}
+
+#endif
+
 	if (vid.resized)
 	{
 		vid.resized = false;
@@ -1580,6 +1820,8 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 	*x = *y = 0;
 	*width = vid.width;
 	*height = vid.height;
+	if (VID_RefGlTraceEnabled () && r_refgl_log_passes.value != 0.f)
+		Con_DPrintf ("ref_gl: GL_BeginRendering %dx%d\n", *width, *height);
 	R_Backend_BeginFrame ();
 }
 
@@ -1590,8 +1832,34 @@ VID_PresentFrame
 */
 static void VID_PresentFrame (void)
 {
-	if (!scr_skipupdate)
-		SDL_GL_SwapWindow (draw_context);
+	TexMgr_Trace ("VID_PresentFrame: begin");
+	if (scr_skipupdate)
+	{
+		TexMgr_Trace ("VID_PresentFrame: skipped");
+		return;
+	}
+
+#ifdef RENDERER_PLUGIN_BUILD
+	if (!draw_context && g_bridge_fn && g_bridge_fn->vid_get_window)
+		draw_context = (SDL_Window *)g_bridge_fn->vid_get_window ();
+
+	if (!draw_context)
+	{
+		static qboolean warned_missing_window = false;
+		if (!warned_missing_window)
+		{
+			Con_Warning ("VID_PresentFrame: missing host window handle, skipping frame present\n");
+			warned_missing_window = true;
+		}
+		TexMgr_Trace ("VID_PresentFrame: missing host window handle");
+		return;
+	}
+#endif
+
+	if (VID_RefGlTraceEnabled () && r_refgl_log_passes.value != 0.f)
+		Con_DPrintf ("ref_gl: VID_PresentFrame swap window=%p\n", (void *)draw_context);
+	R_Backend_SwapBuffers ();
+	TexMgr_Trace ("VID_PresentFrame: end");
 }
 
 /*
@@ -1605,6 +1873,8 @@ lifecycle callbacks.
 */
 void GL_BackendBeginFrame (void)
 {
+	if (VID_RefGlTraceEnabled () && r_refgl_log_passes.value != 0.f)
+		Con_DPrintf ("ref_gl: GL_BackendBeginFrame\n");
 	// reset state/bindings, just in case some other process
 	// injects code that makes changes without cleaning up
 	GL_ResetState ();
@@ -1626,12 +1896,18 @@ void GL_BackendBeginFrame (void)
 
 void GL_BackendEndFrame (void)
 {
+	if (VID_RefGlTraceEnabled () && r_refgl_log_passes.value != 0.f)
+		Con_DPrintf ("ref_gl: GL_BackendEndFrame\n");
 	GL_ReleaseFrameResources ();
 }
 
 void GL_BackendPresent (void)
 {
+	TexMgr_Trace ("GL_BackendPresent: begin");
+	if (VID_RefGlTraceEnabled () && r_refgl_log_passes.value != 0.f)
+		Con_DPrintf ("ref_gl: GL_BackendPresent\n");
 	VID_PresentFrame ();
+	TexMgr_Trace ("GL_BackendPresent: end");
 }
 
 /*
@@ -1641,8 +1917,10 @@ GL_EndRendering
 */
 void GL_EndRendering (void)
 {
+	TexMgr_Trace ("GL_EndRendering: begin");
 	R_Backend_EndFrame ();
 	R_Backend_Present ();
+	TexMgr_Trace ("GL_EndRendering: end");
 }
 
 
@@ -1650,6 +1928,7 @@ void	VID_Shutdown (void)
 {
 	if (vid_initialized)
 	{
+		R_Backend_ContextShutdown ();
 		if (globalvao_resource_id)
 		{
 			GL_Backend_UnregisterNamedResource (GL_BACKEND_RESOURCE_KEY_GLOBAL_VAO);
@@ -2004,9 +2283,6 @@ void	VID_Init (void)
 	VID_ApplyVSync ();
 
 	PL_SetWindowIcon();
-
-	GL_Init ();
-	GL_SetupState ();
 	cmd = Cmd_AddCommand ("gl_info", GL_Info_f); //johnfitz
 	if (cmd)
 		cmd->completion = GL_Info_Completion_f;

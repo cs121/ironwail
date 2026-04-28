@@ -1,6 +1,7 @@
 #include "quakedef.h"
 #include "devstats.h"
 #include "renderer_host_bridge.h"
+#include "render_dispatch.h"
 #include "render.h"
 #include "client.h"
 #include "server.h"
@@ -55,34 +56,44 @@ extern qboolean SV_BoxInPVS (vec3_t mins, vec3_t maxs, byte *pvs, mnode_t *node)
 extern byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 extern qboolean SV_EdictInPVS (edict_t *test, byte *pvs);
 
+static const char *bridge_format_va (const char *fmt, va_list args)
+{
+	static char buffer[8192];
+	va_list copy;
+	va_copy (copy, args);
+	q_vsnprintf (buffer, sizeof (buffer), fmt, copy);
+	va_end (copy);
+	return buffer;
+}
+
 static void bridge_con_vprintf (const char *fmt, va_list args)
 {
-	Con_Printf ("%s", va (fmt, args));
+	Con_Printf ("%s", bridge_format_va (fmt, args));
 }
 
 static void bridge_con_vdprintf (const char *fmt, va_list args)
 {
-	Con_DPrintf ("%s", va (fmt, args));
+	Con_DPrintf ("%s", bridge_format_va (fmt, args));
 }
 
 static void bridge_con_vwarning (const char *fmt, va_list args)
 {
-	Con_Warning ("%s", va (fmt, args));
+	Con_Warning ("%s", bridge_format_va (fmt, args));
 }
 
 static void bridge_con_vdwaring (const char *fmt, va_list args)
 {
-	Con_DWarning ("%s", va (fmt, args));
+	Con_DWarning ("%s", bridge_format_va (fmt, args));
 }
 
 static void bridge_con_vsafe_printf (const char *fmt, va_list args)
 {
-	Con_SafePrintf ("%s", va (fmt, args));
+	Con_SafePrintf ("%s", bridge_format_va (fmt, args));
 }
 
 static void bridge_con_vlink_printf (const char *addr, const char *fmt, va_list args)
 {
-	Con_LinkPrintf (addr, "%s", va (fmt, args));
+	Con_LinkPrintf (addr, "%s", bridge_format_va (fmt, args));
 }
 
 static void bridge_con_add_to_tab_list (const char *name, const char *partial, const char *type)
@@ -92,22 +103,84 @@ static void bridge_con_add_to_tab_list (const char *name, const char *partial, c
 
 static void bridge_cvar_register (cvar_t *variable)
 {
+	cvar_t *existing;
+
+	if (!variable || !variable->name || !variable->name[0])
+		return;
+
+	existing = Cvar_FindVar (variable->name);
+	if (existing)
+	{
+		/* Host and plugin may both define renderer cvars while migration is in
+		 * flight. Mirror host runtime values into plugin-side storage so direct
+		 * var->value reads in renderer code remain valid. */
+		variable->string = existing->string;
+		variable->default_string = existing->default_string;
+		variable->value = existing->value;
+		variable->flags |= CVAR_REGISTERED;
+		return;
+	}
+
 	Cvar_RegisterVariable (variable);
 }
 
 static void bridge_cvar_set_callback (cvar_t *var, void (*func)(cvar_t *))
 {
-	Cvar_SetCallback (var, func);
+	cvar_t *target = var;
+
+	if (var && var->name && var->name[0])
+	{
+		cvar_t *existing = Cvar_FindVar (var->name);
+		if (existing)
+			target = existing;
+	}
+
+	if (target)
+		Cvar_SetCallback (target, func);
 }
 
 static void bridge_cvar_set_quick (cvar_t *var, const char *value)
 {
-	Cvar_SetQuick (var, value);
+	cvar_t *target = var;
+
+	if (var && var->name && var->name[0])
+	{
+		cvar_t *existing = Cvar_FindVar (var->name);
+		if (existing)
+			target = existing;
+	}
+
+	if (target)
+		Cvar_SetQuick (target, value);
+
+	if (var && target)
+	{
+		var->string = target->string;
+		var->default_string = target->default_string;
+		var->value = target->value;
+	}
 }
 
 static void bridge_cvar_set_value_quick (cvar_t *var, float value)
 {
-	Cvar_SetValueQuick (var, value);
+	cvar_t *target = var;
+
+	if (var && var->name && var->name[0])
+	{
+		cvar_t *existing = Cvar_FindVar (var->name);
+		if (existing)
+			target = existing;
+	}
+
+	if (target)
+		Cvar_SetValueQuick (target, value);
+
+	if (var && target)
+	{
+		var->string = target->string;
+		var->default_string = target->default_string;
+		var->value = target->value;
+	}
 }
 
 static cvar_t *bridge_cvar_find_var (const char *var_name)
@@ -232,7 +305,7 @@ static char *bridge_com_tint_substring (const char *in, const char *substr, char
 
 static char *bridge_va_list_fn (const char *format, va_list args)
 {
-	return va (format, args);
+	return (char *)bridge_format_va (format, args);
 }
 
 static int bridge_q_snprintf (char *str, size_t size, const char *format, ...)
@@ -281,12 +354,12 @@ static int bridge_q_strncasecmp (const char *s1, const char *s2, size_t n)
 
 static FUNC_NORETURN void bridge_sys_verror (const char *error, va_list args)
 {
-	Sys_Error ("%s", va (error, args));
+	Sys_Error ("%s", bridge_format_va (error, args));
 }
 
 static void bridge_sys_vprintf (const char *fmt, va_list args)
 {
-	Sys_Printf ("%s", va (fmt, args));
+	Sys_Printf ("%s", bridge_format_va (fmt, args));
 }
 
 static double bridge_sys_double_time (void)
@@ -392,20 +465,45 @@ static qboolean bridge_sv_edict_in_pvs (edict_t *test, byte *pvs) { return SV_Ed
 
 static qboolean bridge_cl_in_cutscene (void) { return CL_InCutscene (); }
 static qboolean bridge_cl_is_player_ent (const entity_t *ent) { return CL_IsPlayerEnt (ent); }
+static void bridge_cl_postfx_reset (void) { CL_PostFX_Reset (); }
 
 static int bridge_msg_read_byte (void) { return MSG_ReadByte (); }
 static int bridge_msg_read_short (void) { return MSG_ReadShort (); }
 
-static void bridge_m_draw (void) { M_Draw (); }
+#ifdef RENDERER_PLUGIN_BUILD
+void Bridge_DrawFlush (void)
+{
+	TexMgr_Trace ("Bridge_DrawFlush: begin");
+	if (g_bridge_fn && g_bridge_fn->draw_flush)
+		g_bridge_fn->draw_flush ();
+	else
+		Draw_Flush ();
+	TexMgr_Trace ("Bridge_DrawFlush: end");
+}
+void Bridge_DrawInit (void)
+{
+	TexMgr_Trace ("Bridge_DrawInit: begin");
+	if (g_bridge_fn && g_bridge_fn->draw_init)
+		g_bridge_fn->draw_init ();
+	else
+		Draw_Init ();
+	TexMgr_Trace ("Bridge_DrawInit: end");
+}
+static void bridge_m_draw (void) { M_Draw (); Bridge_DrawFlush (); }
+#else
+void Bridge_DrawFlush (void) { Draw_Flush (); }
+void Bridge_DrawInit (void) { Draw_Init (); }
+static void bridge_m_draw (void) { M_Draw (); Draw_Flush (); }
+#endif
 static qboolean bridge_m_wants_console (float *alpha) { return M_WantsConsole (alpha); }
 static qboolean bridge_m_forced_center_print (float *alpha) { return M_ForcedCenterPrint (alpha); }
 static qboolean bridge_m_forced_underwater (void) { return M_ForcedUnderwater (); }
-static void bridge_m_draw_text_box (int x, int y, int width, int lines) { M_DrawTextBox (x, y, width, lines); }
+static void bridge_m_draw_text_box (int x, int y, int width, int lines) { M_DrawTextBox (x, y, width, lines); Bridge_DrawFlush (); }
 static void bridge_v_polyblend (void) { V_PolyBlend (); }
 
 static FUNC_NORETURN void bridge_host_verror (const char *error, va_list args)
 {
-	Host_Error ("%s", va (error, args));
+	Host_Error ("%s", bridge_format_va (error, args));
 }
 
 static qboolean bridge_image_write_tga (const char *name, byte *data, int width, int height, int bpp, qboolean upsidedown)
@@ -426,6 +524,7 @@ static qboolean bridge_image_write_jpg (const char *name, byte *data, int width,
 static void *bridge_vid_get_window (void) { return VID_GetWindow (); }
 static qboolean bridge_vid_has_mouse_focus (void) { return VID_HasMouseOrInputFocus (); }
 static qboolean bridge_vid_is_minimized (void) { return VID_IsMinimized (); }
+static qboolean bridge_vid_ensure_gl_context_current (void) { return VID_EnsureGLContextCurrent (); }
 static void bridge_vid_set_window_title (const char *title) { VID_SetWindowTitle (title); }
 static void bridge_vid_recalc_console_size (void) { VID_RecalcConsoleSize (); }
 static void bridge_vid_recalc_interface_size (void) { VID_RecalcInterfaceSize (); }
@@ -436,7 +535,17 @@ static int bridge_scr_modal_message (const char *text, float timeout) { return S
 
 static void bridge_cvar_set_completion (cvar_t *var, void (*func)(cvar_t *, const char *))
 {
-	Cvar_SetCompletion (var, (cvarcompletion_t)func);
+	cvar_t *target = var;
+
+	if (var && var->name && var->name[0])
+	{
+		cvar_t *existing = Cvar_FindVar (var->name);
+		if (existing)
+			target = existing;
+	}
+
+	if (target)
+		Cvar_SetCompletion (target, (cvarcompletion_t)func);
 }
 
 static void bridge_cbuf_add_text (const char *text)
@@ -511,15 +620,25 @@ static void bridge_r_backend_configure_postfx_lut_texture (unsigned tid) { R_Bac
 static unsigned bridge_r_backend_create_postfx_lut_texture (void) { return R_Backend_CreatePostFXLUTTexture (); }
 
 static void bridge_sbar_changed (void) { Sbar_Changed (); }
-static void bridge_sbar_draw (void) { Sbar_Draw (); }
+static void bridge_sbar_draw (void) { Sbar_Draw (); Bridge_DrawFlush (); }
 static void bridge_sbar_load_pics (void) { Sbar_LoadPics (); }
 static void bridge_sbar_intermission_overlay (void) { Sbar_IntermissionOverlay (); }
 static void bridge_sbar_finale_overlay (void) { Sbar_FinaleOverlay (); }
 static void bridge_con_clear_notify (void) { Con_ClearNotify (); }
-static void bridge_con_draw_console (int lines, qboolean drawbg, qboolean drawinput) { Con_DrawConsole (lines, drawbg, drawinput); }
-static void bridge_con_draw_notify (void) { Con_DrawNotify (); }
+static void bridge_con_draw_console (int lines, qboolean drawbg, qboolean drawinput)
+{
+	extern void Con_DrawConsole (int lines, qboolean drawbg, qboolean drawinput);
+	Con_DrawConsole (lines, drawbg, drawinput);
+	Bridge_DrawFlush ();
+}
+static void bridge_con_draw_notify (void)
+{
+	extern void Con_DrawNotify (void);
+	Con_DrawNotify ();
+	Bridge_DrawFlush ();
+}
 static void bridge_con_check_resize (void) { Con_CheckResize (); }
-static void bridge_con_vdprintf2 (const char *fmt, va_list args) { Con_DPrintf2 ("%s", va (fmt, args)); }
+static void bridge_con_vdprintf2 (const char *fmt, va_list args) { Con_DPrintf2 ("%s", bridge_format_va (fmt, args)); }
 static void bridge_key_get_grabbed_input (int *lastkey, int *lastchar) { Key_GetGrabbedInput (lastkey, lastchar); }
 static void bridge_key_begin_input_grab (void) { Key_BeginInputGrab (); }
 static void bridge_key_end_input_grab (void) { Key_EndInputGrab (); }
@@ -542,8 +661,8 @@ static void bridge_pr_reload_pics (qboolean purge) { PR_ReloadPics (purge); }
 static void bridge_w_load_wad_file (void) { W_LoadWadFile (); }
 static void *bridge_z_malloc (int size) { return Z_Malloc (size); }
 static void bridge_z_free_fn (void *ptr) { Z_Free (ptr); }
-static FUNC_NORETURN void bridge_sys_report_verror (const char *error, va_list args) { Sys_ReportError ("%s", va (error, args)); }
-static FUNC_NORETURN void bridge_host_report_verror (const char *error, va_list args) { Host_ReportError ("%s", va (error, args)); }
+static FUNC_NORETURN void bridge_sys_report_verror (const char *error, va_list args) { Sys_ReportError ("%s", bridge_format_va (error, args)); }
+static FUNC_NORETURN void bridge_host_report_verror (const char *error, va_list args) { Host_ReportError ("%s", bridge_format_va (error, args)); }
 static void bridge_host_begin_asset_loading (void) { Host_BeginAssetLoading (); }
 static void bridge_host_end_asset_loading (void) { Host_EndAssetLoading (); }
 static qboolean bridge_host_is_saving (void) { return Host_IsSaving (); }
@@ -633,291 +752,295 @@ static void bridge_vec_clear (void **pv) { Vec_Clear (pv); }
 static void bridge_vec_free (void **pv) { Vec_Free (pv); }
 
 static const iw_renderer_host_bridge_functions_t s_bridge_functions = {
-	sizeof (iw_renderer_host_bridge_functions_t),
-	bridge_con_vprintf,
-	bridge_con_vdprintf,
-	bridge_con_vwarning,
-	bridge_con_vdwaring,
-	bridge_con_vsafe_printf,
-	bridge_con_vlink_printf,
-	bridge_con_add_to_tab_list,
-	bridge_cvar_register,
-	bridge_cvar_set_callback,
-	bridge_cvar_set_quick,
-	bridge_cvar_set_value_quick,
-	bridge_cvar_find_var,
-	bridge_cvar_set_value,
-	bridge_cvar_set,
-	bridge_cvar_variable_value,
-	bridge_cmd_add_command,
-	bridge_cmd_argc,
-	bridge_cmd_argv,
-	bridge_com_parse,
-	bridge_com_parse_ex,
-	bridge_com_check_parm,
-	bridge_com_strip_extension,
-	bridge_com_file_base,
-	bridge_com_add_extension,
-	bridge_com_file_get_extension,
-	bridge_com_has_extension,
-	bridge_com_tint_string,
-	bridge_com_hash_block,
-	bridge_com_load_hunk_file,
-	bridge_com_load_malloc_file,
-	bridge_com_fopen_file,
-	bridge_com_file_exists,
-	bridge_com_skip_path,
-	bridge_com_parse_line,
-	bridge_com_tint_substring,
-	bridge_va_list_fn,
-	bridge_q_snprintf,
-	bridge_q_vsnprintf,
-	bridge_q_atoi,
-	bridge_q_atof,
-	bridge_q_strlcpy,
-	bridge_q_strlcat,
-	bridge_q_strcasecmp,
-	bridge_q_strncasecmp,
-	bridge_sys_verror,
-	bridge_sys_vprintf,
-	bridge_sys_double_time,
-	bridge_sys_send_key_events,
-	bridge_sys_sleep,
-	bridge_sys_fopen,
-	bridge_sys_get_file_time,
-	bridge_sys_file_type,
-	bridge_sys_ftell,
-	bridge_sys_find_first,
-	bridge_sys_find_next,
-	bridge_sys_find_close,
-	bridge_mod_init,
-	bridge_mod_clear_all,
-	bridge_mod_reset_all,
-	bridge_mod_for_name,
-	bridge_mod_extradata,
-	bridge_mod_touch_model,
-	bridge_mod_point_in_leaf,
-	bridge_mod_leaf_pvs,
-	bridge_mod_no_vis_pvs,
-	bridge_mod_set_extra_flags,
-	bridge_mod_is_known_model,
-	bridge_hunk_alloc,
-	bridge_hunk_alloc_name,
-	bridge_hunk_low_mark,
-	bridge_hunk_free_to_low_mark,
-	bridge_cache_check,
-	bridge_cache_free,
-	bridge_cache_alloc,
-	bridge_w_get_lump_name,
-	bridge_pr_switch_qcvm,
-	bridge_pr_push_qcvm,
-	bridge_pr_pop_qcvm,
-	bridge_sv_fat_pvs,
-	bridge_sv_edict_in_pvs,
-	bridge_cl_in_cutscene,
-	bridge_cl_is_player_ent,
-	bridge_msg_read_byte,
-	bridge_msg_read_short,
-	bridge_m_draw,
-	bridge_m_wants_console,
-	bridge_m_forced_center_print,
-	bridge_m_forced_underwater,
-	bridge_m_draw_text_box,
-	bridge_v_polyblend,
-	bridge_host_verror,
-	bridge_image_write_tga,
-	bridge_image_write_png,
-	bridge_image_write_jpg,
-	bridge_vid_get_window,
-	bridge_vid_has_mouse_focus,
-	bridge_vid_is_minimized,
-	bridge_vid_set_window_title,
-	bridge_vid_recalc_console_size,
-	bridge_vid_recalc_interface_size,
-	bridge_vid_lock,
-	bridge_scr_center_print,
-	bridge_scr_modal_message,
-	bridge_sys_load_library,
-	bridge_sys_get_library_function,
-	bridge_sys_close_library,
-	bridge_sys_is_debugger_present,
-	bridge_cvar_set_completion,
-	bridge_hunk_alloc_no_fill,
-	bridge_hunk_alloc_name_no_fill,
-	bridge_cbuf_add_text,
-	bridge_vector_ma,
-	bridge_vector_normalize,
-	bridge_vector_compare,
-	bridge_vector_length,
-	bridge_vector_lerp,
-	bridge_cross_product,
-	bridge_angle_vectors,
-	bridge_distance_fn,
-	bridge_vector_scale,
-	bridge_vector_inverse,
-	bridge_project_vector,
-	bridge_matrix_multiply,
-	bridge_rotation_matrix,
-	bridge_translation_matrix,
-	bridge_matrix_transpose_4x3,
-	bridge_mat4_inverse,
-	bridge_r_concat_transforms,
-	bridge_apply_translation,
-	bridge_apply_scale,
-	bridge_interleave,
-	bridge_ray_vs_box,
-	bridge_box_on_plane_side,
-	bridge_q_next_pow2,
-	bridge_q_log2,
-	bridge_get_fraction,
-	bridge_crc_block,
-	bridge_swap_pic,
-	bridge_q_strcmp,
-	bridge_q_strncmp,
-	bridge_q_strncpy,
-	bridge_q_strlen,
-	bridge_q_strcasestr,
-	bridge_q_malloc_fn,
-	bridge_q_free_fn,
-	bridge_q_realloc_fn,
-	bridge_q_calloc_fn,
-	bridge_r_backend_register,
-	bridge_r_backend_init,
-	bridge_r_backend_shutdown,
-	bridge_r_backend_memory_barrier,
-	bridge_r_backend_set_dynamic_state,
-	bridge_r_backend_draw_indexed,
-	bridge_r_backend_bind_pipeline,
-	bridge_r_backend_set_viewport,
-	bridge_r_backend_finish,
-	bridge_r_backend_draw_fn,
-	bridge_r_backend_dispatch,
-	bridge_r_backend_present,
-	bridge_r_backend_begin_frame,
-	bridge_r_backend_end_frame,
-	bridge_r_backend_on_resize,
-	bridge_r_backend_get_scene_sample_count,
-	bridge_r_backend_draw_indexed_indirect,
-	bridge_r_backend_multi_draw_indexed_indirect,
-	bridge_r_backend_draw_indexed_instanced,
-	bridge_r_backend_draw_instanced,
-	bridge_r_backend_draw_packet,
-	bridge_r_backend_bind_descriptors,
-	bridge_r_backend_set_blend_factors,
-	bridge_r_backend_set_depth_func,
-	bridge_r_backend_get_caps,
-	bridge_r_backend_configure_postfx_lut_texture,
-	bridge_r_backend_create_postfx_lut_texture,
-	bridge_sbar_changed,
-	bridge_sbar_draw,
-	bridge_sbar_load_pics,
-	bridge_sbar_intermission_overlay,
-	bridge_sbar_finale_overlay,
-	bridge_con_clear_notify,
-	bridge_con_draw_console,
-	bridge_con_draw_notify,
-	bridge_con_check_resize,
-	bridge_con_vdprintf2,
-	bridge_key_get_grabbed_input,
-	bridge_key_begin_input_grab,
-	bridge_key_end_input_grab,
-	bridge_key_clear_states,
-	bridge_in_deactivate_for_console,
-	bridge_in_deactivate_for_menu,
-	bridge_in_clear_states,
-	bridge_m_print,
-	bridge_v_render_view,
-	bridge_v_calc_blend,
-	bridge_v_update_blend,
-	bridge_v_set_contents_color,
-	bridge_cl_postfx_set_contents,
-	bridge_cl_postfx_get_state,
-	bridge_ed_is_relevant_field,
-	bridge_ed_field_value_string,
-	bridge_pr_get_string,
-	bridge_num_for_edict,
-	bridge_pr_reload_pics,
-	bridge_w_load_wad_file,
-	bridge_z_malloc,
-	bridge_z_free_fn,
-	bridge_sys_report_verror,
-	bridge_host_report_verror,
-	bridge_host_begin_asset_loading,
-	bridge_host_end_asset_loading,
-	bridge_host_is_saving,
-	bridge_cfg_open_config,
-	bridge_cfg_close_config,
-	bridge_cfg_read_cvars,
-	bridge_cfg_read_cvar_overrides,
-	bridge_cmd_add_command2,
-	bridge_pl_set_window_icon,
-	bridge_pl_vid_shutdown,
-	bridge_vid_menu_init,
-	bridge_image_load_image,
-	bridge_steam_save_screenshot,
-	bridge_s_extra_update,
-	bridge_s_clear_buffer,
-	bridge_s_stop_all_sounds,
-	bridge_cdaudio_pause,
-	bridge_cdaudio_resume,
-	bridge_bgm_pause,
-	bridge_bgm_resume,
-	bridge_utf8_from_quake,
-	bridge_utf8_to_quake,
-	bridge_multi_string_append,
-	bridge_multi_string_append_n,
-	bridge_msg_read_coord,
-	bridge_msg_read_char,
-	bridge_sv_move,
-	bridge_sv_recursive_hull_check,
-	bridge_sv_box_in_pvs,
-	bridge_material_init,
-	bridge_material_shutdown,
-	bridge_material_apply_to_texture,
-	bridge_material_find,
-	bridge_material_find_for_texture_name,
-	bridge_material_canonicalize,
-	bridge_material_classify_particle_stage,
-	bridge_material_stage_supports_particle_mvp,
-	bridge_material_stage_eval_tex_matrix,
-	bridge_material_stage_get_anim_map_path,
-	bridge_material_eval_wave_value,
-	bridge_dlight_pool_clear_persistent,
-	bridge_dlight_pool_collect_for_render,
-	bridge_dlight_pool_get_active_list,
-	bridge_dlight_pool_get_budget,
-	bridge_dlight_pool_get_or_create_persistent,
-	bridge_dlight_pool_new_frame,
-	bridge_r_ppdlights_collect_frame,
-	bridge_r_ppdlights_build_model_gpu_lights,
-	bridge_r_ppdlights_build_world_gpu_lights,
-	bridge_r_ppdlights_get_frame_lights,
-	bridge_r_skyvis_get_resolved_cap,
-	bridge_r_skyvis_get_tint,
-	bridge_r_skyvis_get_resolved_scale,
-	bridge_r_skyvis_active,
-	bridge_r_skyvis_init,
-	bridge_r_skyvis_new_map,
-	bridge_r_skyvis_sample,
-	bridge_r_ssao_sanitize_value,
-	bridge_r_ssao_capture_fog_state,
-	bridge_r_ssao_register_cvars,
-	bridge_r_quality_init,
-	bridge_r_quality_update,
-	bridge_r_framegraph_render_view,
-	bridge_r_framegraph_get_timing_summary,
-	bridge_r_framegraph_set_render_frame_plan,
-	bridge_r_framegraph_resolve_required_resource_by_slot,
-	bridge_r_framegraph_get_render_frame_plan,
-	bridge_r_framegraph_add_pass,
-	bridge_r_tonemap_tempered_overbright,
-	bridge_bc7enc_compress_block_init,
-	bridge_bc7enc_compress_block_fn,
-	bridge_lightgrid_free,
-	bridge_vec_grow,
-	bridge_vec_append,
-	bridge_vec_clear,
-	bridge_vec_free,
+	.struct_size = sizeof (iw_renderer_host_bridge_functions_t),
+	.con_vprintf = bridge_con_vprintf,
+	.con_vdprintf = bridge_con_vdprintf,
+	.con_vwarning = bridge_con_vwarning,
+	.con_vdwaring = bridge_con_vdwaring,
+	.con_vsafe_printf = bridge_con_vsafe_printf,
+	.con_vlink_printf = bridge_con_vlink_printf,
+	.con_add_to_tab_list = bridge_con_add_to_tab_list,
+	.cvar_register = bridge_cvar_register,
+	.cvar_set_callback = bridge_cvar_set_callback,
+	.cvar_set_quick = bridge_cvar_set_quick,
+	.cvar_set_value_quick = bridge_cvar_set_value_quick,
+	.cvar_find_var = bridge_cvar_find_var,
+	.cvar_set_value = bridge_cvar_set_value,
+	.cvar_set = bridge_cvar_set,
+	.cvar_variable_value = bridge_cvar_variable_value,
+	.cmd_add_command = bridge_cmd_add_command,
+	.cmd_argc = bridge_cmd_argc,
+	.cmd_argv = bridge_cmd_argv,
+	.com_parse = bridge_com_parse,
+	.com_parse_ex = bridge_com_parse_ex,
+	.com_check_parm = bridge_com_check_parm,
+	.com_strip_extension = bridge_com_strip_extension,
+	.com_file_base = bridge_com_file_base,
+	.com_add_extension = bridge_com_add_extension,
+	.com_file_get_extension = bridge_com_file_get_extension,
+	.com_has_extension = bridge_com_has_extension,
+	.com_tint_string = bridge_com_tint_string,
+	.com_hash_block = bridge_com_hash_block,
+	.com_load_hunk_file = bridge_com_load_hunk_file,
+	.com_load_malloc_file = bridge_com_load_malloc_file,
+	.com_fopen_file = bridge_com_fopen_file,
+	.com_file_exists = bridge_com_file_exists,
+	.com_skip_path = bridge_com_skip_path,
+	.com_parse_line = bridge_com_parse_line,
+	.com_tint_substring = bridge_com_tint_substring,
+	.va_list_fn = bridge_va_list_fn,
+	.q_snprintf = bridge_q_snprintf,
+	.q_vsnprintf = bridge_q_vsnprintf,
+	.q_atoi = bridge_q_atoi,
+	.q_atof = bridge_q_atof,
+	.q_strlcpy = bridge_q_strlcpy,
+	.q_strlcat = bridge_q_strlcat,
+	.q_strcasecmp = bridge_q_strcasecmp,
+	.q_strncasecmp = bridge_q_strncasecmp,
+	.sys_verror = bridge_sys_verror,
+	.sys_vprintf = bridge_sys_vprintf,
+	.sys_double_time = bridge_sys_double_time,
+	.sys_send_key_events = bridge_sys_send_key_events,
+	.sys_sleep = bridge_sys_sleep,
+	.sys_fopen = bridge_sys_fopen,
+	.sys_get_file_time = bridge_sys_get_file_time,
+	.sys_file_type = bridge_sys_file_type,
+	.sys_ftell = bridge_sys_ftell,
+	.sys_find_first = bridge_sys_find_first,
+	.sys_find_next = bridge_sys_find_next,
+	.sys_find_close = bridge_sys_find_close,
+	.mod_init = bridge_mod_init,
+	.mod_clear_all = bridge_mod_clear_all,
+	.mod_reset_all = bridge_mod_reset_all,
+	.mod_for_name = bridge_mod_for_name,
+	.mod_extradata = bridge_mod_extradata,
+	.mod_touch_model = bridge_mod_touch_model,
+	.mod_point_in_leaf = bridge_mod_point_in_leaf,
+	.mod_leaf_pvs = bridge_mod_leaf_pvs,
+	.mod_no_vis_pvs = bridge_mod_no_vis_pvs,
+	.mod_set_extra_flags = bridge_mod_set_extra_flags,
+	.mod_is_known_model = bridge_mod_is_known_model,
+	.hunk_alloc = bridge_hunk_alloc,
+	.hunk_alloc_name = bridge_hunk_alloc_name,
+	.hunk_low_mark = bridge_hunk_low_mark,
+	.hunk_free_to_low_mark = bridge_hunk_free_to_low_mark,
+	.cache_check = bridge_cache_check,
+	.cache_free = bridge_cache_free,
+	.cache_alloc = bridge_cache_alloc,
+	.w_get_lump_name = bridge_w_get_lump_name,
+	.pr_switch_qcvm = bridge_pr_switch_qcvm,
+	.pr_push_qcvm = bridge_pr_push_qcvm,
+	.pr_pop_qcvm = bridge_pr_pop_qcvm,
+	.sv_fat_pvs = bridge_sv_fat_pvs,
+	.sv_edict_in_pvs = bridge_sv_edict_in_pvs,
+	.cl_in_cutscene = bridge_cl_in_cutscene,
+	.cl_is_player_ent = bridge_cl_is_player_ent,
+	.cl_postfx_reset = bridge_cl_postfx_reset,
+	.msg_read_byte = bridge_msg_read_byte,
+	.msg_read_short = bridge_msg_read_short,
+	.m_draw = bridge_m_draw,
+	.m_wants_console = bridge_m_wants_console,
+	.m_forced_center_print = bridge_m_forced_center_print,
+	.m_forced_underwater = bridge_m_forced_underwater,
+	.m_draw_text_box = bridge_m_draw_text_box,
+	.draw_init = Bridge_DrawInit,
+	.draw_flush = Bridge_DrawFlush,
+	.v_polyblend = bridge_v_polyblend,
+	.host_verror = bridge_host_verror,
+	.image_write_tga = bridge_image_write_tga,
+	.image_write_png = bridge_image_write_png,
+	.image_write_jpg = bridge_image_write_jpg,
+	.vid_get_window = bridge_vid_get_window,
+	.vid_has_mouse_focus = bridge_vid_has_mouse_focus,
+	.vid_is_minimized = bridge_vid_is_minimized,
+	.vid_ensure_gl_context_current = bridge_vid_ensure_gl_context_current,
+	.vid_set_window_title = bridge_vid_set_window_title,
+	.vid_recalc_console_size = bridge_vid_recalc_console_size,
+	.vid_recalc_interface_size = bridge_vid_recalc_interface_size,
+	.vid_lock = bridge_vid_lock,
+	.scr_center_print = bridge_scr_center_print,
+	.scr_modal_message = bridge_scr_modal_message,
+	.sys_load_library = bridge_sys_load_library,
+	.sys_get_library_function = bridge_sys_get_library_function,
+	.sys_close_library = bridge_sys_close_library,
+	.sys_is_debugger_present = bridge_sys_is_debugger_present,
+	.cvar_set_completion = bridge_cvar_set_completion,
+	.hunk_alloc_no_fill = bridge_hunk_alloc_no_fill,
+	.hunk_alloc_name_no_fill = bridge_hunk_alloc_name_no_fill,
+	.cbuf_add_text = bridge_cbuf_add_text,
+	.vector_ma = bridge_vector_ma,
+	.vector_normalize = bridge_vector_normalize,
+	.vector_compare = bridge_vector_compare,
+	.vector_length = bridge_vector_length,
+	.vector_lerp = bridge_vector_lerp,
+	.cross_product = bridge_cross_product,
+	.angle_vectors = bridge_angle_vectors,
+	.distance_fn = bridge_distance_fn,
+	.vector_scale = bridge_vector_scale,
+	.vector_inverse = bridge_vector_inverse,
+	.project_vector = bridge_project_vector,
+	.matrix_multiply = bridge_matrix_multiply,
+	.rotation_matrix = bridge_rotation_matrix,
+	.translation_matrix = bridge_translation_matrix,
+	.matrix_transpose_4x3 = bridge_matrix_transpose_4x3,
+	.mat4_inverse = bridge_mat4_inverse,
+	.r_concat_transforms = bridge_r_concat_transforms,
+	.apply_translation = bridge_apply_translation,
+	.apply_scale = bridge_apply_scale,
+	.interleave = bridge_interleave,
+	.ray_vs_box = bridge_ray_vs_box,
+	.box_on_plane_side = bridge_box_on_plane_side,
+	.q_next_pow2 = bridge_q_next_pow2,
+	.q_log2 = bridge_q_log2,
+	.get_fraction = bridge_get_fraction,
+	.crc_block = bridge_crc_block,
+	.swap_pic = bridge_swap_pic,
+	.q_strcmp = bridge_q_strcmp,
+	.q_strncmp = bridge_q_strncmp,
+	.q_strncpy = bridge_q_strncpy,
+	.q_strlen = bridge_q_strlen,
+	.q_strcasestr = bridge_q_strcasestr,
+	.q_malloc_fn = bridge_q_malloc_fn,
+	.q_free_fn = bridge_q_free_fn,
+	.q_realloc_fn = bridge_q_realloc_fn,
+	.q_calloc_fn = bridge_q_calloc_fn,
+	.r_backend_register = bridge_r_backend_register,
+	.r_backend_init = bridge_r_backend_init,
+	.r_backend_shutdown = bridge_r_backend_shutdown,
+	.r_backend_memory_barrier = bridge_r_backend_memory_barrier,
+	.r_backend_set_dynamic_state = bridge_r_backend_set_dynamic_state,
+	.r_backend_draw_indexed = bridge_r_backend_draw_indexed,
+	.r_backend_bind_pipeline = bridge_r_backend_bind_pipeline,
+	.r_backend_set_viewport = bridge_r_backend_set_viewport,
+	.r_backend_finish = bridge_r_backend_finish,
+	.r_backend_draw_fn = bridge_r_backend_draw_fn,
+	.r_backend_dispatch = bridge_r_backend_dispatch,
+	.r_backend_present = bridge_r_backend_present,
+	.r_backend_begin_frame = bridge_r_backend_begin_frame,
+	.r_backend_end_frame = bridge_r_backend_end_frame,
+	.r_backend_on_resize = bridge_r_backend_on_resize,
+	.r_backend_get_scene_sample_count = bridge_r_backend_get_scene_sample_count,
+	.r_backend_draw_indexed_indirect = bridge_r_backend_draw_indexed_indirect,
+	.r_backend_multi_draw_indexed_indirect = bridge_r_backend_multi_draw_indexed_indirect,
+	.r_backend_draw_indexed_instanced = bridge_r_backend_draw_indexed_instanced,
+	.r_backend_draw_instanced = bridge_r_backend_draw_instanced,
+	.r_backend_draw_packet = bridge_r_backend_draw_packet,
+	.r_backend_bind_descriptors = bridge_r_backend_bind_descriptors,
+	.r_backend_set_blend_factors = bridge_r_backend_set_blend_factors,
+	.r_backend_set_depth_func = bridge_r_backend_set_depth_func,
+	.r_backend_get_caps = bridge_r_backend_get_caps,
+	.r_backend_configure_postfx_lut_texture = bridge_r_backend_configure_postfx_lut_texture,
+	.r_backend_create_postfx_lut_texture = bridge_r_backend_create_postfx_lut_texture,
+	.sbar_changed = bridge_sbar_changed,
+	.sbar_draw = bridge_sbar_draw,
+	.sbar_load_pics = bridge_sbar_load_pics,
+	.sbar_intermission_overlay = bridge_sbar_intermission_overlay,
+	.sbar_finale_overlay = bridge_sbar_finale_overlay,
+	.con_clear_notify = bridge_con_clear_notify,
+	.con_draw_console = bridge_con_draw_console,
+	.con_draw_notify = bridge_con_draw_notify,
+	.con_check_resize = bridge_con_check_resize,
+	.con_vdprintf2 = bridge_con_vdprintf2,
+	.key_get_grabbed_input = bridge_key_get_grabbed_input,
+	.key_begin_input_grab = bridge_key_begin_input_grab,
+	.key_end_input_grab = bridge_key_end_input_grab,
+	.key_clear_states = bridge_key_clear_states,
+	.in_deactivate_for_console = bridge_in_deactivate_for_console,
+	.in_deactivate_for_menu = bridge_in_deactivate_for_menu,
+	.in_clear_states = bridge_in_clear_states,
+	.m_print = bridge_m_print,
+	.v_render_view = bridge_v_render_view,
+	.v_calc_blend = bridge_v_calc_blend,
+	.v_update_blend = bridge_v_update_blend,
+	.v_set_contents_color = bridge_v_set_contents_color,
+	.cl_postfx_set_contents = bridge_cl_postfx_set_contents,
+	.cl_postfx_get_state = bridge_cl_postfx_get_state,
+	.ed_is_relevant_field = bridge_ed_is_relevant_field,
+	.ed_field_value_string = bridge_ed_field_value_string,
+	.pr_get_string = bridge_pr_get_string,
+	.num_for_edict = bridge_num_for_edict,
+	.pr_reload_pics = bridge_pr_reload_pics,
+	.w_load_wad_file = bridge_w_load_wad_file,
+	.z_malloc = bridge_z_malloc,
+	.z_free_fn = bridge_z_free_fn,
+	.sys_report_verror = bridge_sys_report_verror,
+	.host_report_verror = bridge_host_report_verror,
+	.host_begin_asset_loading = bridge_host_begin_asset_loading,
+	.host_end_asset_loading = bridge_host_end_asset_loading,
+	.host_is_saving = bridge_host_is_saving,
+	.cfg_open_config = bridge_cfg_open_config,
+	.cfg_close_config = bridge_cfg_close_config,
+	.cfg_read_cvars = bridge_cfg_read_cvars,
+	.cfg_read_cvar_overrides = bridge_cfg_read_cvar_overrides,
+	.cmd_add_command2 = bridge_cmd_add_command2,
+	.pl_set_window_icon = bridge_pl_set_window_icon,
+	.pl_vid_shutdown = bridge_pl_vid_shutdown,
+	.vid_menu_init = bridge_vid_menu_init,
+	.image_load_image = bridge_image_load_image,
+	.steam_save_screenshot = bridge_steam_save_screenshot,
+	.s_extra_update = bridge_s_extra_update,
+	.s_clear_buffer = bridge_s_clear_buffer,
+	.s_stop_all_sounds = bridge_s_stop_all_sounds,
+	.cdaudio_pause = bridge_cdaudio_pause,
+	.cdaudio_resume = bridge_cdaudio_resume,
+	.bgm_pause = bridge_bgm_pause,
+	.bgm_resume = bridge_bgm_resume,
+	.utf8_from_quake = bridge_utf8_from_quake,
+	.utf8_to_quake = bridge_utf8_to_quake,
+	.multi_string_append = bridge_multi_string_append,
+	.multi_string_append_n = bridge_multi_string_append_n,
+	.msg_read_coord = bridge_msg_read_coord,
+	.msg_read_char = bridge_msg_read_char,
+	.sv_move = bridge_sv_move,
+	.sv_recursive_hull_check = bridge_sv_recursive_hull_check,
+	.sv_box_in_pvs = bridge_sv_box_in_pvs,
+	.material_init = bridge_material_init,
+	.material_shutdown = bridge_material_shutdown,
+	.material_apply_to_texture = bridge_material_apply_to_texture,
+	.material_find = bridge_material_find,
+	.material_find_for_texture_name = bridge_material_find_for_texture_name,
+	.material_canonicalize = bridge_material_canonicalize,
+	.material_classify_particle_stage = bridge_material_classify_particle_stage,
+	.material_stage_supports_particle_mvp = bridge_material_stage_supports_particle_mvp,
+	.material_stage_eval_tex_matrix = bridge_material_stage_eval_tex_matrix,
+	.material_stage_get_anim_map_path = bridge_material_stage_get_anim_map_path,
+	.material_eval_wave_value = bridge_material_eval_wave_value,
+	.dlight_pool_clear_persistent = bridge_dlight_pool_clear_persistent,
+	.dlight_pool_collect_for_render = bridge_dlight_pool_collect_for_render,
+	.dlight_pool_get_active_list = bridge_dlight_pool_get_active_list,
+	.dlight_pool_get_budget = bridge_dlight_pool_get_budget,
+	.dlight_pool_get_or_create_persistent = bridge_dlight_pool_get_or_create_persistent,
+	.dlight_pool_new_frame = bridge_dlight_pool_new_frame,
+	.r_ppdlights_collect_frame = bridge_r_ppdlights_collect_frame,
+	.r_ppdlights_build_model_gpu_lights = bridge_r_ppdlights_build_model_gpu_lights,
+	.r_ppdlights_build_world_gpu_lights = bridge_r_ppdlights_build_world_gpu_lights,
+	.r_ppdlights_get_frame_lights = bridge_r_ppdlights_get_frame_lights,
+	.r_skyvis_get_resolved_cap = bridge_r_skyvis_get_resolved_cap,
+	.r_skyvis_get_tint = bridge_r_skyvis_get_tint,
+	.r_skyvis_get_resolved_scale = bridge_r_skyvis_get_resolved_scale,
+	.r_skyvis_active = bridge_r_skyvis_active,
+	.r_skyvis_init = bridge_r_skyvis_init,
+	.r_skyvis_new_map = bridge_r_skyvis_new_map,
+	.r_skyvis_sample = bridge_r_skyvis_sample,
+	.r_ssao_sanitize_value = bridge_r_ssao_sanitize_value,
+	.r_ssao_capture_fog_state = bridge_r_ssao_capture_fog_state,
+	.r_ssao_register_cvars = bridge_r_ssao_register_cvars,
+	.r_quality_init = bridge_r_quality_init,
+	.r_quality_update = bridge_r_quality_update,
+	.r_framegraph_render_view = bridge_r_framegraph_render_view,
+	.r_framegraph_get_timing_summary = bridge_r_framegraph_get_timing_summary,
+	.r_framegraph_set_render_frame_plan = bridge_r_framegraph_set_render_frame_plan,
+	.r_framegraph_resolve_required_resource_by_slot = bridge_r_framegraph_resolve_required_resource_by_slot,
+	.r_framegraph_get_render_frame_plan = bridge_r_framegraph_get_render_frame_plan,
+	.r_framegraph_add_pass = bridge_r_framegraph_add_pass,
+	.r_tonemap_tempered_overbright = bridge_r_tonemap_tempered_overbright,
+	.bc7enc_compress_block_init = bridge_bc7enc_compress_block_init,
+	.bc7enc_compress_block_fn = bridge_bc7enc_compress_block_fn,
+	.lightgrid_free = bridge_lightgrid_free,
+	.vec_grow = bridge_vec_grow,
+	.vec_append = bridge_vec_append,
+	.vec_clear = bridge_vec_clear,
+	.vec_free = bridge_vec_free,
 };
 
 static iw_renderer_host_bridge_data_t s_bridge_data;
@@ -929,6 +1052,7 @@ void R_Backend_FillHostBridge (iw_renderer_host_bridge_t *out)
 	s_bridge_data.realtime = &realtime;
 	s_bridge_data.host_frametime = &host_frametime;
 	s_bridge_data.host_rawframetime = &host_rawframetime;
+	s_bridge_data.r_refdef = &r_refdef;
 	s_bridge_data.host_initialized = &host_initialized;
 	s_bridge_data.host_colormap = &host_colormap;
 	s_bridge_data.cl = &cl;

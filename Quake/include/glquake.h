@@ -30,6 +30,7 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height);
 void GL_EndRendering (void);
 void GL_Set2D (void);
 void GL_SetScissorEnabled (qboolean enabled);
+void GL_RuntimeInitContext (void);
 void GL_BackendBeginFrame (void);
 void GL_BackendEndFrame (void);
 void GL_BackendPresent (void);
@@ -262,6 +263,7 @@ extern	const char	*gl_version;
 	x(void,			Uniform4f, (GLint location, GLfloat v0, GLfloat v1, GLfloat v2, GLfloat v3))\
 	x(void,			Uniform3fv, (GLint location, GLsizei count, const GLfloat *value))\
 	x(void,			Uniform4fv, (GLint location, GLsizei count, const GLfloat *value))\
+	x(void,			UniformMatrix3fv, (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value))\
 	x(void,			UniformMatrix4fv, (GLint location, GLsizei count, GLboolean transpose, const GLfloat *value))\
 	x(void,			ActiveTexture, (GLenum texture))\
 	x(void,			GenerateMipmap, (GLenum target))\
@@ -792,6 +794,7 @@ GLuint GL_GetCurrentProgram (void);
 qboolean GL_QueryProgramMetadata (GLuint program, const char **out_debug_name, const char **out_entry_point, const char **out_stage, unsigned *out_permutation_key);
 void GL_ClearCachedProgram (void);
 void GL_CreateShaders (void);
+void GL_EnsureGUIShader (void);
 void GL_DeleteShaders (void);
 void GL_RegisterShaderCommands (void);
 void GL_PollShaderHotReload (void);

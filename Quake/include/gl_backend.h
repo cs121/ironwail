@@ -29,6 +29,29 @@ void GL_Backend_SetStencilMaskCached (unsigned mask);
 void GL_Backend_SetStencilFuncCached (unsigned func, int ref, unsigned mask);
 void GL_Backend_SetStencilOpCached (unsigned sfail, unsigned dpfail, unsigned dppass);
 const IRenderBackend *GL_Backend_GetInterface (void);
-void GL_Backend_Register (void);
+
+typedef struct ref_gl_stats_s
+{
+	int textures_created;
+	int textures_destroyed;
+	int textures_alive;
+	int fbos_created;
+	int fbos_destroyed;
+	int fbos_alive;
+	int buffers_created;
+	int buffers_destroyed;
+	int buffers_alive;
+	int shaders_created;
+	int shaders_destroyed;
+	int programs_created;
+	int programs_destroyed;
+	int programs_alive;
+	int gl_errors_detected;
+	int frames_rendered;
+} ref_gl_stats_t;
+
+extern ref_gl_stats_t ref_gl_stats;
+
+void REFGL_StatsLogSummary (void);
 
 #endif

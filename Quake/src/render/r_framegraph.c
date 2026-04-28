@@ -1,6 +1,9 @@
 #include "quakedef.h"
 
 #include "r_framegraph.h"
+#include <stdlib.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 extern cvar_t r_gl_state_validate;
 extern cvar_t r_framegraph_autobind;
@@ -54,6 +57,39 @@ static qboolean s_pass_registration_locked = false;
 static unsigned s_cycle_warning_signature = 0u;
 static qboolean s_cycle_warning_emitted = false;
 static int s_pass_baseline_autobind_warn_frame = -1;
+
+static qboolean FG_AutobindEnabled (void)
+{
+	const float value = Cvar_VariableValue ("r_framegraph_autobind");
+	return value > 0.f;
+}
+
+static void FG_FatalErrorLogAndExit (const char *fmt, ...)
+{
+	char message[1024];
+	va_list args;
+	FILE *f = NULL;
+
+	va_start (args, fmt);
+	q_vsnprintf (message, sizeof (message), fmt, args);
+	va_end (args);
+
+#if defined(_WIN32)
+	if (fopen_s (&f, "C:\\Quake\\rerelease\\framegraph_fatal.log", "a") != 0)
+		f = NULL;
+#else
+	f = fopen ("C:\\Quake\\rerelease\\framegraph_fatal.log", "a");
+#endif
+	if (f)
+	{
+		fprintf (f, "FrameGraph fatal: %s\n", message);
+		fclose (f);
+	}
+
+	Sys_Printf ("FrameGraph fatal: %s\n", message);
+	Host_Shutdown ();
+	exit (1);
+}
 
 static qboolean FG_AddRuntimePassInternal (const RenderPassDesc *pass_desc);
 static int FG_FindOrCreateProfileSlot (const RenderPassDesc *pass_desc);
@@ -488,8 +524,8 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 			if (emit_warning)
 				Con_Warning ("FrameGraph: pass '%s' uses unmapped resource bit 0x%x\n",
 					pass_desc->name ? pass_desc->name : "<unnamed>", bit);
-			SDL_assert (!"FrameGraph pass uses unmapped resource bit");
-			return false;
+			FG_FatalErrorLogAndExit ("pass '%s' uses unmapped resource bit 0x%x",
+				pass_desc->name ? pass_desc->name : "<unnamed>", bit);
 		}
 	}
 
@@ -509,8 +545,9 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 					pass_desc->name ? pass_desc->name : "<unnamed>",
 					FG_GetResourceBitName (bit));
 			}
-			SDL_assert (!"FrameGraph pass writes backend resource without pass attachment declaration");
-			return false;
+			FG_FatalErrorLogAndExit ("pass '%s' writes '%s' without pass attachment declaration",
+				pass_desc->name ? pass_desc->name : "<unnamed>",
+				FG_GetResourceBitName (bit));
 		}
 	}
 
@@ -529,16 +566,16 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 				if (emit_warning)
 					Con_Warning ("FrameGraph: pass '%s' color attachment[%u] does not map to backend resource\n",
 						pass_desc->name ? pass_desc->name : "<unnamed>", i);
-				SDL_assert (!"FrameGraph pass attachment requires backend resource mapping");
-				return false;
+				FG_FatalErrorLogAndExit ("pass '%s' color attachment[%u] has no backend resource mapping",
+					pass_desc->name ? pass_desc->name : "<unnamed>", i);
 			}
 			if ((pass_desc->writes & resource_bit) == 0u)
 			{
 				if (emit_warning)
 					Con_Warning ("FrameGraph: pass '%s' color attachment[%u] must be declared in writes mask\n",
 						pass_desc->name ? pass_desc->name : "<unnamed>", i);
-				SDL_assert (!"FrameGraph pass attachment must be declared in writes mask");
-				return false;
+				FG_FatalErrorLogAndExit ("pass '%s' color attachment[%u] missing in writes mask",
+					pass_desc->name ? pass_desc->name : "<unnamed>", i);
 			}
 			if ((pass_desc->reads & resource_bit) != 0u
 				&& pass_desc->color_attachments[i].load_op == R_BACKEND_LOAD_OP_DONT_CARE)
@@ -548,8 +585,8 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 						pass_desc->name ? pass_desc->name : "<unnamed>",
 						i,
 						FG_GetResourceBitName (resource_bit));
-				SDL_assert (!"FrameGraph read/write attachment cannot use DONT_CARE load_op");
-				return false;
+				FG_FatalErrorLogAndExit ("pass '%s' color attachment[%u] has invalid DONT_CARE load_op for read/write",
+					pass_desc->name ? pass_desc->name : "<unnamed>", i);
 			}
 		}
 	}
@@ -567,16 +604,16 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 			if (emit_warning)
 				Con_Warning ("FrameGraph: pass '%s' depth attachment does not map to backend resource\n",
 					pass_desc->name ? pass_desc->name : "<unnamed>");
-			SDL_assert (!"FrameGraph pass depth attachment requires backend resource mapping");
-			return false;
+			FG_FatalErrorLogAndExit ("pass '%s' depth attachment has no backend resource mapping",
+				pass_desc->name ? pass_desc->name : "<unnamed>");
 		}
 		if ((pass_desc->writes & resource_bit) == 0u)
 		{
 			if (emit_warning)
 				Con_Warning ("FrameGraph: pass '%s' depth attachment must be declared in writes mask\n",
 					pass_desc->name ? pass_desc->name : "<unnamed>");
-			SDL_assert (!"FrameGraph pass depth attachment must be declared in writes mask");
-			return false;
+			FG_FatalErrorLogAndExit ("pass '%s' depth attachment missing in writes mask",
+				pass_desc->name ? pass_desc->name : "<unnamed>");
 		}
 		if ((pass_desc->reads & resource_bit) != 0u
 			&& pass_desc->depth_attachment->load_op == R_BACKEND_LOAD_OP_DONT_CARE)
@@ -585,8 +622,8 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 				Con_Warning ("FrameGraph: pass '%s' depth attachment reads and writes '%s' but load_op is DONT_CARE\n",
 					pass_desc->name ? pass_desc->name : "<unnamed>",
 					FG_GetResourceBitName (resource_bit));
-			SDL_assert (!"FrameGraph read/write depth attachment cannot use DONT_CARE load_op");
-			return false;
+			FG_FatalErrorLogAndExit ("pass '%s' depth attachment has invalid DONT_CARE load_op for read/write",
+				pass_desc->name ? pass_desc->name : "<unnamed>");
 		}
 	}
 
@@ -1060,7 +1097,7 @@ static void FG_ApplyPassBaseline (const RenderPassDesc *pass, const RenderPassCo
 		baseline_bits = pass->baseline_bits;
 
 	if ((baseline_bits & FG_PASS_BASELINE_REQUIRE_AUTOBIND) != 0u
-		&& r_framegraph_autobind.value <= 0.f
+		&& !FG_AutobindEnabled ()
 		&& s_pass_baseline_autobind_warn_frame != host_framecount)
 	{
 		Con_DWarning ("FrameGraph: pass baseline requires r_framegraph_autobind 1, but it is disabled\n");
@@ -1079,7 +1116,7 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, RenderPassCon
 	int view_x, view_y, view_w, view_h;
 	unsigned output_target;
 	unsigned viewport_mode;
-	qboolean autobind_enabled = (r_framegraph_autobind.value > 0.f);
+	qboolean autobind_enabled = FG_AutobindEnabled ();
 	qboolean bind_backbuffer = false;
 	qboolean bind_target = false;
 
@@ -1205,8 +1242,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 		if (!FG_QueryResourceBinding (bit, &slot, &requires_backend_resource))
 		{
 			Con_DWarning ("FrameGraph: pass '%s' uses unmapped resource bit 0x%x\n", pass->name, bit);
-			SDL_assert (!"FrameGraph pass uses unmapped resource bit");
-			continue;
+			FG_FatalErrorLogAndExit ("pass '%s' uses unmapped resource bit 0x%x", pass->name, bit);
 		}
 		if (bit == RENDER_RES_SHADOW_SUN_DEPTH)
 		{
@@ -1224,7 +1260,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 			|| !ctx->backend->is_resource_valid (ctx->resources, resource_ref))
 		{
 			Con_DWarning ("FrameGraph: pass '%s' read slot %d resolved invalid resource\n", pass->name, (int)slot);
-			SDL_assert (!"FrameGraph pass declares read dependency on invalid resource");
+			FG_FatalErrorLogAndExit ("pass '%s' read slot %d resolved invalid resource", pass->name, (int)slot);
 		}
 	}
 
@@ -1253,7 +1289,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 				&& !ctx->backend->is_resource_valid (ctx->resources, color_attachments[i].resource)))
 			{
 				Con_DWarning ("FrameGraph: pass '%s' color attachment[%u] resolved invalid resource\n", pass->name, i);
-				SDL_assert (!"FrameGraph pass color attachment resolved invalid resource");
+				FG_FatalErrorLogAndExit ("pass '%s' color attachment[%u] resolved invalid resource", pass->name, i);
 			}
 			color_attachments[i].load_op = pass->color_attachments[i].load_op;
 			color_attachments[i].store_op = pass->color_attachments[i].store_op;
@@ -1272,7 +1308,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 				&& !ctx->backend->is_resource_valid (ctx->resources, depth_attachment.resource)))
 			{
 				Con_DWarning ("FrameGraph: pass '%s' depth attachment resolved invalid resource\n", pass->name);
-				SDL_assert (!"FrameGraph pass depth attachment resolved invalid resource");
+				FG_FatalErrorLogAndExit ("pass '%s' depth attachment resolved invalid resource", pass->name);
 			}
 			depth_attachment.load_op = pass->depth_attachment->load_op;
 			depth_attachment.store_op = pass->depth_attachment->store_op;
