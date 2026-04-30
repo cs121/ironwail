@@ -729,10 +729,18 @@ static float IN_FovScale (void)
 
 void IN_MouseMotion(int dx, int dy)
 {
+	static double next_drop_log_time = 0.0;
 	if (!windowhasfocus)
 		dx = dy = 0;	//don't change view angles etc while unfocused.
 	if (cls.state != ca_connected || cls.signon != SIGNONS || key_dest != key_game || CL_InCutscene ())
 	{
+		double now = Sys_DoubleTime ();
+		if (now >= next_drop_log_time)
+		{
+			next_drop_log_time = now + 0.5;
+			Con_Printf ("[input] mouse drop: state=%d signon=%d key_dest=%d demoplayback=%d intermission=%d cutscene=%d\n",
+				(int)cls.state, (int)cls.signon, (int)key_dest, (int)cls.demoplayback, (int)cl.intermission, (int)CL_InCutscene ());
+		}
 		total_dx = 0;
 		total_dy = 0;
 		return;
@@ -1461,6 +1469,36 @@ static inline int IN_SDL2_ScancodeToQuakeKey(SDL_Scancode scancode)
 	}
 }
 
+static inline int IN_SDL2_KeycodeToQuakeKey (SDL_Keycode keycode)
+{
+	switch (keycode)
+	{
+	case SDLK_TAB: return K_TAB;
+	case SDLK_RETURN: return K_ENTER;
+	case SDLK_KP_ENTER: return K_KP_ENTER;
+	case SDLK_ESCAPE: return K_ESCAPE;
+	case SDLK_SPACE: return K_SPACE;
+	case SDLK_BACKSPACE: return K_BACKSPACE;
+	case SDLK_UP: return K_UPARROW;
+	case SDLK_DOWN: return K_DOWNARROW;
+	case SDLK_LEFT: return K_LEFTARROW;
+	case SDLK_RIGHT: return K_RIGHTARROW;
+	case SDLK_LALT:
+	case SDLK_RALT: return K_ALT;
+	case SDLK_LCTRL:
+	case SDLK_RCTRL: return K_CTRL;
+	case SDLK_LSHIFT:
+	case SDLK_RSHIFT: return K_SHIFT;
+	default:
+		break;
+	}
+
+	if (keycode >= 32 && keycode <= 126)
+		return (int)keycode;
+
+	return 0;
+}
+
 static void IN_DebugTextEvent(SDL_Event *event)
 {
 	Con_Printf ("SDL_TEXTINPUT '%s' time: %g\n", event->text.text, Sys_DoubleTime());
@@ -1657,6 +1695,8 @@ void IN_SendKeyEvents (void)
 		// SDL2: we interpret the keyboard as the US layout, so keybindings
 		// are based on key position, not the label on the key cap.
 			key = IN_SDL2_ScancodeToQuakeKey(event.key.keysym.scancode);
+			if (!key)
+				key = IN_SDL2_KeycodeToQuakeKey (event.key.keysym.sym);
 
 		// also pass along the underlying keycode using the proper current layout for Y/N prompts.
 			Key_EventWithKeycode (key, down, event.key.keysym.sym);

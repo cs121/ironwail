@@ -255,7 +255,9 @@ CL_InCutscene
 */
 qboolean CL_InCutscene (void)
 {
-	return cl.fixangle && !cl.viewent.model;
+	/* Input gating must not depend on viewmodel availability.
+	 * A missing/late weapon model is a renderer/content issue, not a control lock. */
+	return cl.fixangle && (cls.demoplayback || cl.intermission);
 }
 
 /*

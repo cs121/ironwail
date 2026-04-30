@@ -505,12 +505,10 @@ void R_Init (void)
 
 	TexMgr_Trace ("R_Init: TexMgr_Init");
 	TexMgr_Init ();
-#ifndef IW_RENDERER_HOST_FRONTEND
 	TexMgr_Trace ("R_Init: Draw_Init");
 	Draw_Init ();
 	TexMgr_Trace ("R_Init: SCR_Init");
 	SCR_Init ();
-#endif
 
         Cmd_AddCommand ("timerefresh", R_TimeRefresh_f);
         Cmd_AddCommand ("pointfile", R_ReadPointFile_f);
@@ -1205,12 +1203,6 @@ void GL_BindBuffer (GLenum target, GLuint buffer)
 {
 	GLuint *cache;
 
-	{
-		char tracebuf[256];
-		q_snprintf (tracebuf, sizeof (tracebuf), "GL_BindBuffer: target=0x%x buffer=%u", (unsigned)target, (unsigned)buffer);
-		TexMgr_Trace (tracebuf);
-	}
-
 	switch (target)
 	{
 		case GL_ARRAY_BUFFER:
@@ -1406,12 +1398,6 @@ GL_AllocFrameResources
 static void GL_AllocFrameResources (frameres_bits_t bits)
 {
 	int i;
-	{
-		char tracebuf[256];
-		q_snprintf (tracebuf, sizeof (tracebuf), "GL_AllocFrameResources: begin bits=0x%x host_size=%llu device_size=%llu", bits,
-			(unsigned long long) frameres_host_buffer_size, (unsigned long long) frameres_device_buffer_size);
-		TexMgr_Trace (tracebuf);
-	}
 	for (i = 0; i < countof (frameres); i++)
 	{
 		char name[64];
@@ -1458,14 +1444,6 @@ static void GL_AllocFrameResources (frameres_bits_t bits)
 		frameres_host_offset = 0;
 	if (bits & FRAMERES_DEVICE_BUFFER_BIT)
 		frameres_device_offset = 0;
-
-	{
-		char tracebuf[256];
-		q_snprintf (tracebuf, sizeof (tracebuf), "GL_AllocFrameResources: end idx=%d host_buf=%u host_ptr=%p device_buf=%u",
-			frameres_idx, frameres[frameres_idx].host_buffer, (void *) frameres[frameres_idx].host_ptr,
-			frameres[frameres_idx].device_buffer);
-		TexMgr_Trace (tracebuf);
-	}
 }
 
 /*
@@ -1607,12 +1585,6 @@ void GL_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf
 	size_t align;
 	frameres_t *frame;
 
-	{
-		char tracebuf[256];
-		q_snprintf (tracebuf, sizeof (tracebuf), "GL_Upload: target=0x%x bytes=%llu", (unsigned)target, (unsigned long long)numbytes);
-		TexMgr_Trace (tracebuf);
-	}
-
 	align = (target == GL_UNIFORM_BUFFER) ? ubo_align : ssbo_align;
 	frameres_host_offset = (frameres_host_offset + align) & ~align;
 
@@ -1624,23 +1596,10 @@ void GL_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf
 	}
 
 	frame = &frameres[frameres_idx];
-	{
-		char tracebuf[256];
-		q_snprintf (tracebuf, sizeof (tracebuf), "GL_Upload: frame idx=%d host_buf=%u host_ptr=%p host_off=%llu",
-			frameres_idx, frame->host_buffer, (void *)frame->host_ptr, (unsigned long long) frameres_host_offset);
-		TexMgr_Trace (tracebuf);
-	}
 	if (!frame->host_buffer)
 	{
-		TexMgr_Trace ("GL_Upload: missing host buffer, allocating frame resources");
 		GL_CreateFrameResources ();
 		frame = &frameres[frameres_idx];
-		{
-			char tracebuf[256];
-			q_snprintf (tracebuf, sizeof (tracebuf), "GL_Upload: after alloc frame idx=%d host_buf=%u host_ptr=%p host_off=%llu",
-				frameres_idx, frame->host_buffer, (void *)frame->host_ptr, (unsigned long long) frameres_host_offset);
-			TexMgr_Trace (tracebuf);
-		}
 	}
 	if (!frame->host_buffer)
 		Sys_Error ("GL_Upload: frame upload buffer unavailable");
@@ -1648,7 +1607,6 @@ void GL_Upload (GLenum target, const void *data, size_t numbytes, GLuint *outbuf
 		memcpy (frame->host_ptr + frameres_host_offset, data, numbytes);
 	else
 	{
-		TexMgr_Trace ("GL_Upload: via BufferSubData");
 		GL_BindBuffer (target, frame->host_buffer);
 		GL_BufferSubDataFunc (target, frameres_host_offset, numbytes, data);
 	}

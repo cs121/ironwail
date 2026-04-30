@@ -3261,7 +3261,7 @@ LOC_Init
 */
 void LOC_Init(void)
 {
-	Con_Printf("\nLanguage initialization\n");
+	Con_SafePrintf("\nLanguage initialization\n");
 
 	Cvar_RegisterVariable (&language);
 	Cvar_SetCallback (&language, LOC_Language_f);

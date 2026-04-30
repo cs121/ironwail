@@ -317,11 +317,11 @@ void Cmd_Exec_f (void)
 	}
 	if (!f)
 	{
-		Con_Printf ("couldn't exec %s\n", path);
+		Con_SafePrintf ("couldn't exec %s\n", path);
 		return;
 	}
 exec:
-	Con_Printf ("execing %s\n", path);
+	Con_SafePrintf ("execing %s\n", path);
 
 	if (!in_cfg_exec)
 	{
@@ -921,7 +921,7 @@ qboolean Cmd_ExecuteString (const char *text, cmd_source_t src)
 	if (!Cvar_Command ())
 	{
 		if (in_cfg_exec)
-			Con_Printf ("Unknown command \"%s\"\n", Cmd_Argv(0));
+			Con_SafePrintf ("Unknown command \"%s\"\n", Cmd_Argv(0));
 		else
 			Cmd_ListAllContaining (Cmd_Argv(0));
 	}

@@ -998,9 +998,11 @@ Sys_GetProcList
 */
 static procinfo_t *Sys_GetProcList (void)
 {
+	enum { MAX_PROC_LIST_ENTRIES = 4096 };
 	HANDLE				snapshot;
 	PROCESSENTRY32W		proc_entry;
 	procinfo_t			*result = NULL;
+	int					count = 0;
 
 	snapshot = CreateToolhelp32Snapshot (TH32CS_SNAPPROCESS, 0);
 	if (snapshot == INVALID_HANDLE_VALUE)
@@ -1017,7 +1019,8 @@ static procinfo_t *Sys_GetProcList (void)
 			info.id = proc_entry.th32ProcessID;
 			info.parent_id = proc_entry.th32ParentProcessID;
 			VEC_PUSH (result, info);
-		} while (Process32NextW (snapshot, &proc_entry));
+			count++;
+		} while (count < MAX_PROC_LIST_ENTRIES && Process32NextW (snapshot, &proc_entry));
 	}
 
 	CloseHandle (snapshot);
@@ -1050,6 +1053,7 @@ Returns true if the process was started from TrenchBroom, JACK, ne_q1spCompiling
 */
 qboolean Sys_IsStartedFromMapEditor (void)
 {
+	enum { MAX_PARENT_HOPS = 16 };
 	qboolean from_editor = false;
 	procinfo_t *proclist = Sys_GetProcList ();
 
@@ -1057,9 +1061,17 @@ qboolean Sys_IsStartedFromMapEditor (void)
 	{
 		procinfo_t *current = Sys_FindProc (GetCurrentProcessId (), proclist);
 		procinfo_t *parent = current ? Sys_FindProc (current->parent_id, proclist) : NULL;
+		int hops = 0;
 
-		while (parent && _wcsicmp (parent->name, L"cmd.exe") == 0)
+		while (parent && _wcsicmp (parent->name, L"cmd.exe") == 0 && hops++ < MAX_PARENT_HOPS)
+		{
+			if (parent->parent_id == parent->id)
+			{
+				parent = NULL;
+				break;
+			}
 			parent = Sys_FindProc (parent->parent_id, proclist);
+		}
 
 		if (parent)
 		{

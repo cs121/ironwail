@@ -59,6 +59,7 @@ LDFLAGS?=
 DFLAGS ?=
 CFLAGS ?= -Wall -Wno-trigraphs
 CFLAGS += -D_FILE_OFFSET_BITS=64
+CFLAGS += -DIW_RENDERER_HOST_FRONTEND=1
 CFLAGS += $(call check_gcc,-std=gnu11,)
 CFLAGS += $(call check_gcc,-Werror=format,)
 CFLAGS += $(CPUFLAGS)
@@ -219,6 +220,8 @@ GLOBJS = \
 	gl_refrag.o \
 	gl_rlight.o \
 	gl_rmain.o \
+	gl_backend.o \
+	renderer_builtin_gl_plugin.o \
 	gl_backend_runtime.o \
 	gl_backend_resources.o \
 	r_framegraph.o \

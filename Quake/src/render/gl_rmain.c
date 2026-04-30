@@ -1415,6 +1415,23 @@ static GLuint GL_CreateTexture2D (GLenum format, int width, int height, GLenum f
 	return texnum;
 }
 
+static void R_GetSceneRenderTargetAllocationSize (int native_w, int native_h, int scene_w, int scene_h, int *out_alloc_w, int *out_alloc_h)
+{
+	int alloc_w = q_max (1, scene_w);
+	int alloc_h = q_max (1, scene_h);
+
+	if (r_drs.value > 0.f)
+	{
+		alloc_w = q_max (alloc_w, q_max (1, native_w));
+		alloc_h = q_max (alloc_h, q_max (1, native_h));
+	}
+
+	if (out_alloc_w)
+		*out_alloc_w = alloc_w;
+	if (out_alloc_h)
+		*out_alloc_h = alloc_h;
+}
+
 static GLuint GL_CreateFBO (GLenum target, const GLuint* colors, int numcolors, GLuint depth, GLuint stencil, const char* name)
 {
 	GLenum status;
@@ -1513,11 +1530,7 @@ void GL_CreateFrameBuffers (void)
 		Con_DPrintf ("ref_gl: GL_CreateFrameBuffers native=%dx%d scene=%dx%d\n",
 			native_w, native_h, scene_w, scene_h);
 
-	if (r_drs.value > 0.f)
-	{
-		alloc_w = q_max (alloc_w, native_w);
-		alloc_h = q_max (alloc_h, native_h);
-	}
+	R_GetSceneRenderTargetAllocationSize (native_w, native_h, scene_w, scene_h, &alloc_w, &alloc_h);
 
 	framebufs.ssao.valid = false;
 	r_ssao_invalid_warned = false;
@@ -2142,7 +2155,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 {
 	if ((r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f) && r_ssao_debug.value <= 0.f)
 		return 0;
-	if (!glprogs.ssao || !framebufs.composite.depth_stencil_tex || !framebufs.ssao.noise_tex)
+	if (!glprogs.ssao || !framebufs.ssao.noise_tex
+		|| (!framebufs.scene.depth_stencil_tex && !framebufs.composite.depth_stencil_tex))
 		return 0;
 	if (!framebufs.ssao.valid)
 	{
@@ -2165,11 +2179,25 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	float power = R_SSAO_SanitizeValue (r_ssao_power.value, 1.f, 0.01f, 8.f);
 	float min_ao = CLAMP (0.f, r_ssao_min.value, 1.f);
 	qboolean use_halfres = (r_ssao_halfres.value > 0.f && r_ssao_force_fullres.value <= 0.f);
+	scene_size_info_t scene_size;
+	int scene_w;
+	int scene_h;
 	int index = use_halfres ? 1 : 0;
-	int width = framebufs.ssao.width[index];
-	int height = framebufs.ssao.height[index];
+	int width;
+	int height;
+
+	R_GetSceneSizeInfo (&scene_size);
+	scene_w = q_max (1, scene_size.scene_width);
+	scene_h = q_max (1, scene_size.scene_height);
+	width = use_halfres ? q_max (1, scene_w / 2) : scene_w;
+	height = use_halfres ? q_max (1, scene_h / 2) : scene_h;
 	if (width <= 0 || height <= 0)
 		return 0;
+
+	view_min_x = (glx + r_refdef.vrect.x) / (float)scene_w;
+	view_min_y = (gly + glheight - r_refdef.vrect.y - r_refdef.vrect.height) / (float)scene_h;
+	view_max_x = view_min_x + r_refdef.vrect.width / (float)scene_w;
+	view_max_y = view_min_y + r_refdef.vrect.height / (float)scene_h;
 
 	r_ssao_invalid_warned = false;
 
@@ -2244,7 +2272,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		GL_ClearBufferfvFunc (GL_COLOR, 0, clear);
 	}
 
-	GL_LogSSAODepthInfo (framebufs.composite.depth_stencil_tex, framebufs.ssao.ao_tex[index], width, height, view_min_x, view_min_y, view_max_x, view_max_y);
+	GL_LogSSAODepthInfo (framebufs.scene.samples > 1 ? framebufs.composite.depth_stencil_tex : framebufs.scene.depth_stencil_tex,
+		framebufs.ssao.ao_tex[index], width, height, view_min_x, view_min_y, view_max_x, view_max_y);
 
 	GL_UseProgram (glprogs.ssao);
 	{
@@ -2260,7 +2289,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		R_Backend_BindPipeline (&pipeline_desc);
 		R_Backend_SetDynamicState (&dynamic_state);
 	}
-	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D, framebufs.scene.samples > 1 ? framebufs.composite.depth_stencil_tex : framebufs.scene.depth_stencil_tex);
 	GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.ssao.noise_tex);
 	GL_UniformMatrix4fvFunc (0, 1, GL_FALSE, r_matproj);
 	GL_UniformMatrix4fvFunc (1, 1, GL_FALSE, r_matinvproj);
@@ -2268,7 +2297,8 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	{
 		float inv_out_w = 0.f;
 		float inv_out_h = 0.f;
-		R_GetOutputTexelSize (&inv_out_w, &inv_out_h);
+		inv_out_w = 1.f / (float)scene_w;
+		inv_out_h = 1.f / (float)scene_h;
 		GL_Uniform4fFunc (3, inv_out_w, inv_out_h, 1.f / inv_out_w, 1.f / inv_out_h);
 	}
 	GL_Uniform4fFunc (4,
@@ -2308,11 +2338,12 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 		float blur_bilateral = (r_ssao_blur_bilateral.value > 0.f) ? 1.f : 0.f;
 
 		GL_UseProgram (glprogs.ssao_blur);
-		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.composite.depth_stencil_tex);
+		GL_BindNative (GL_TEXTURE1, GL_TEXTURE_2D, framebufs.scene.samples > 1 ? framebufs.composite.depth_stencil_tex : framebufs.scene.depth_stencil_tex);
 		{
 			float inv_out_w = 0.f;
 			float inv_out_h = 0.f;
-			R_GetOutputTexelSize (&inv_out_w, &inv_out_h);
+			inv_out_w = 1.f / (float)scene_w;
+			inv_out_h = 1.f / (float)scene_h;
 			GL_Uniform4fFunc (0, inv_out_w, inv_out_h, 1.f / inv_out_w, 1.f / inv_out_h);
 		}
 		GL_Uniform4fFunc (1,
@@ -2380,6 +2411,7 @@ static void R_InvalidateTemporalHistoryOnSceneResize (void)
 {
 	R_ResetGodraysStabilization ();
 	R_InvalidateGodraysFrameCache ();
+	CL_PostFX_Reset ();
 	r_prev_frame_valid = false;
 	r_motionblur_shutter_scale_valid = false;
 	r_motionblur_shutter_scale_filtered = 1.f;
@@ -3613,6 +3645,11 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 		float drs_ratio = scene_size->resolution_ratio;
 		GL_Uniform4fFunc (27, drs_sharpen, drs_ratio, 0.f, 0.f);
 	}
+	GL_Uniform4fFunc (28,
+		1.f / (float)q_max (1, scene_size->width),
+		1.f / (float)q_max (1, scene_size->height),
+		(float)q_max (1, scene_size->width),
+		(float)q_max (1, scene_size->height));
 	{
 		GLint godrays_params_loc = GL_GetUniformLocationFunc ? GL_GetUniformLocationFunc (glprogs.postprocess[variant], "GodraysParams") : -1;
 		if (godrays_params_loc >= 0)
@@ -4332,7 +4369,7 @@ static qboolean GL_NeedsPostprocess_Internal (void)
 
 qboolean GL_NeedsSceneEffects (void)
 {
-	if (framebufs.scene.samples > 1 || water_warp || R_GetSceneRenderScale () != 1)
+	if (framebufs.scene.samples > 1 || water_warp || R_GetSceneRenderScale () != 1 || R_GetSceneResolutionRatio () < 0.999f)
 		return true;
 
 	/* Bloom enabled: keep scene-effects path active for a full-frame bloom extract/composite pass. */
@@ -4395,10 +4432,15 @@ static void R_EnsureRenderTargetSampleState (void)
 	int current_samples = framebufs.scene.samples > 0 ? framebufs.scene.samples : 1;
 	int desired_scene_w = R_GetSceneRenderWidth ();
 	int desired_scene_h = R_GetSceneRenderHeight ();
+	int native_w = R_GetNativeRenderWidth ();
+	int native_h = R_GetNativeRenderHeight ();
 	int current_scene_w = framebufs.scene.width > 0 ? framebufs.scene.width : desired_scene_w;
 	int current_scene_h = framebufs.scene.height > 0 ? framebufs.scene.height : desired_scene_h;
+	int desired_alloc_w = desired_scene_w;
+	int desired_alloc_h = desired_scene_h;
 	qboolean sample_changed = (current_samples != desired_samples);
-	qboolean size_grow_required = (current_scene_w < desired_scene_w || current_scene_h < desired_scene_h);
+	R_GetSceneRenderTargetAllocationSize (native_w, native_h, desired_scene_w, desired_scene_h, &desired_alloc_w, &desired_alloc_h);
+	qboolean size_changed = (current_scene_w != desired_alloc_w || current_scene_h != desired_alloc_h);
 
 	if (r_scene_resize_pending_invalidation)
 	{
@@ -4406,11 +4448,11 @@ static void R_EnsureRenderTargetSampleState (void)
 		r_scene_resize_pending_invalidation = false;
 	}
 
-	if (!sample_changed && !size_grow_required)
+	if (!sample_changed && !size_changed)
 		return;
 
-	Con_DPrintf ("Recreating render targets (scene %dx%d -> %dx%d, samples %d -> %d)\n",
-		current_scene_w, current_scene_h, desired_scene_w, desired_scene_h,
+	Con_DPrintf ("Recreating render targets (alloc %dx%d -> %dx%d, samples %d -> %d)\n",
+		current_scene_w, current_scene_h, desired_alloc_w, desired_alloc_h,
 		current_samples, desired_samples);
 	GL_DeleteFrameBuffers ();
 	GL_CreateFrameBuffers ();

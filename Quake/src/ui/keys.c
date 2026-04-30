@@ -1153,6 +1153,7 @@ void Key_EventWithKeycode (int key, qboolean down, int keycode)
 	char	*kb;
 	char	cmd[1024];
 	qboolean wasdown;
+	static int dbg_keydown_logs = 0;
 
 	if (key < 0 || key >= MAX_KEYS)
 		return;
@@ -1186,6 +1187,14 @@ void Key_EventWithKeycode (int key, qboolean down, int keycode)
 
 	wasdown = keydown[key];
 	keydown[key] = down;
+
+	if (down && dbg_keydown_logs < 64)
+	{
+		dbg_keydown_logs++;
+		kb = keybindings[key];
+		Con_Printf ("[keydbg] down key=%d keycode=%d dest=%d forcedup=%d grab=%d bind=%s\n",
+			key, keycode, (int)key_dest, (int)con_forcedup, (int)key_inputgrab.active, kb ? kb : "<none>");
+	}
 
 	if (key_inputgrab.active)
 	{

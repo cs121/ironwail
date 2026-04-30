@@ -136,6 +136,7 @@ layout(location=24) uniform vec4 PostFXFogColor; // rgb: underwater fog color, w
 layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: time, z: unused, w: unused
 layout(location=26) uniform vec4 DamageDirParams; // xy: damage dir in view space (screen), z: dir strength, w: unused
 layout(location=27) uniform vec4 DRSParams; // x: sharpen amount, y: resolution ratio, zw: unused
+layout(location=28) uniform vec4 SceneParams; // xy: inv scene size, zw: scene size
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -230,7 +231,7 @@ float FogTransmittanceFromGlobalFog(float depth)
 
 float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)
 {
-        vec2 ssaoSize = vec2(textureSize(SSAOTexture, 0));
+        vec2 ssaoSize = max(SceneParams.zw, vec2(1.0));
         vec2 colorSize = vec2(textureSize(GammaTexture, 0));
         if (all(lessThan(abs(ssaoSize - colorSize), vec2(0.5))))
                 return texture(SSAOTexture, uv).r;
@@ -591,7 +592,7 @@ void main()
                                 }
                                 else if (ssaoDebugMode == 11)
                                 {
-                                        vec2 ssaoSize = vec2(textureSize(SSAOTexture, 0));
+                                        vec2 ssaoSize = max(SceneParams.zw, vec2(1.0));
                                         vec2 colorSize = vec2(textureSize(GammaTexture, 0));
                                         vec2 ssaoCoord = uv * ssaoSize;
                                         ivec2 ssaoPixel = ivec2(clamp(floor(ssaoCoord), vec2(0.0), ssaoSize - vec2(1.0)));

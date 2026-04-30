@@ -1013,6 +1013,16 @@ void V_CalcRefdef (void)
 	view->frame = cl.stats[STAT_WEAPONFRAME];
 	view->colormap = vid.colormap;
 	view->scale = ENTSCALE_DEFAULT;
+	if (!view->model)
+	{
+		static qboolean logged_null_weapon = false;
+		if (!logged_null_weapon)
+		{
+			logged_null_weapon = true;
+			Con_Printf ("[view] null weapon model: stat_weapon=%d signon=%d demoplayback=%d intermission=%d\n",
+				cl.stats[STAT_WEAPON], (int)cls.signon, (int)cls.demoplayback, (int)cl.intermission);
+		}
+	}
 
 	//johnfitz -- v_gunkick
 	if (v_gunkick.value == 1) //original quake kick

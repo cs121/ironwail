@@ -1392,6 +1392,27 @@ void _Host_Frame (double time)
 		vid.recalc_refdef = true;
 	}
 
+	/* Keep gameplay input focus sane after signon.
+	 * Migration changes around renderer/menu ownership can occasionally leave
+	 * key_dest stale after level load, which blocks movement/look input. */
+	if (cls.state == ca_connected && cls.signon == SIGNONS && !cls.demoplayback && !cl.intermission)
+	{
+		static qboolean input_activated_for_game = false;
+
+		if (key_dest == key_game)
+		{
+			if (!input_activated_for_game)
+			{
+				IN_Activate ();
+				input_activated_for_game = true;
+			}
+		}
+		else
+		{
+			input_activated_for_game = false;
+		}
+	}
+
 	CL_AccumulateCmd ();
 
 	//Run the server+networking (client->server->client), at a different rate from everyt
@@ -1604,7 +1625,7 @@ void Host_Init (void)
 	host_hunklevel = Hunk_LowMark ();
 
 	host_initialized = true;
-	Con_Printf ("\n========= Quake Initialized =========\n\n");
+	Con_SafePrintf ("\n========= Quake Initialized =========\n\n");
 
 	if (!COM_CheckParm ("-nomapchecks"))
 	{

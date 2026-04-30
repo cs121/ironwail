@@ -42,6 +42,7 @@ static qboolean s_backend_dx12_status_cmd_registered = false;
 static qboolean s_ref_gl_plugin_candidate_found = false;
 static qboolean s_ref_gl_plugin_loaded = false;
 static qboolean s_ref_gl_plugin_load_failed = false;
+static qboolean s_renderer_plugins_scanned = false;
 static int s_missing_resource_warn_frame[R_BACKEND_RESOURCE_SLOT_COUNT];
 static void *s_plugin_libs[R_BACKEND_MAX_PLUGIN_LIBS];
 static int s_plugin_lib_count = 0;
@@ -97,6 +98,7 @@ static qboolean R_Backend_Host_IsTransientResourceAlive (unsigned int resource_i
 static qboolean R_Backend_Host_GetShaderMetadata (unsigned int shader_id, iw_renderer_host_shader_metadata_t *out_metadata);
 static qboolean R_Backend_Host_GetPipelineMetadata (unsigned int pipeline_id, iw_renderer_host_pipeline_metadata_t *out_metadata);
 static qboolean R_Backend_ValidatePluginHostApi (const iw_renderer_plugin_host_api_t *host_api, qboolean emit_warning);
+extern qboolean IW_RendererBuiltinGL_RegisterInternal (const iw_renderer_plugin_host_api_t *host_api);
 static qboolean R_VulkanStub_Init (void);
 static qboolean R_VulkanStub_HasRequiredPassCallbacks (void);
 static void R_VulkanStub_Present (void);
@@ -690,6 +692,8 @@ static void R_Backend_ValidateDescriptorBindings (const RenderBackendDescriptorB
 }
 
 static const char *R_Backend_ApiToCanonicalName (const char *api_name);
+static qboolean R_Backend_IsExternalRendererRequest (const char *name);
+static void R_Backend_LoadRendererPlugins (void);
 
 static const IRenderBackend *R_Backend_FindByName (const char *backend_name)
 {
@@ -722,12 +726,31 @@ static const char *R_Backend_ApiToCanonicalName (const char *api_name)
 
 	if (!q_strcasecmp (api_name, "gl") || !q_strcasecmp (api_name, "opengl"))
 		return "OpenGL";
+	if (!q_strcasecmp (api_name, "ref_gl") || !q_strcasecmp (api_name, s_ref_gl_plugin_filename))
+		return "OpenGL";
 	if (!q_strcasecmp (api_name, "vk") || !q_strcasecmp (api_name, "vulkan"))
+		return "Vulkan";
+	if (!q_strcasecmp (api_name, "ref_vk") || !q_strcasecmp (api_name, s_ref_vk_plugin_filename))
 		return "Vulkan";
 	if (!q_strcasecmp (api_name, "dx12") || !q_strcasecmp (api_name, "d3d12"))
 		return "DX12";
+	if (!q_strcasecmp (api_name, "ref_dx12") || !q_strcasecmp (api_name, s_ref_dx12_plugin_filename))
+		return "DX12";
 
 	return api_name;
+}
+
+static qboolean R_Backend_IsExternalRendererRequest (const char *name)
+{
+	if (!name || !name[0])
+		return false;
+
+	return !q_strcasecmp (name, "ref_gl")
+		|| !q_strcasecmp (name, s_ref_gl_plugin_filename)
+		|| !q_strcasecmp (name, "ref_vk")
+		|| !q_strcasecmp (name, s_ref_vk_plugin_filename)
+		|| !q_strcasecmp (name, "ref_dx12")
+		|| !q_strcasecmp (name, s_ref_dx12_plugin_filename);
 }
 
 static const char *R_Backend_CanonicalNameToApi (const char *backend_name)
@@ -1330,6 +1353,7 @@ static void R_Backend_LoadRendererPlugins (void)
 	s_ref_gl_plugin_candidate_found = false;
 	s_ref_gl_plugin_loaded = false;
 	s_ref_gl_plugin_load_failed = false;
+	s_renderer_plugins_scanned = true;
 	s_renderer_plugin_search_dir_count = 0;
 	memset (s_renderer_plugin_search_dirs, 0, sizeof (s_renderer_plugin_search_dirs));
 
@@ -1431,20 +1455,31 @@ static void R_Backend_ApplySelectionToCvar (void)
 	if (!s_active_backend || !s_active_backend->name)
 		return;
 
-	s_applying_backend_cvar = true;
-	Cvar_SetQuick (&r_backend, s_active_backend->name);
-	s_applying_backend_cvar = false;
+	if (!(R_Backend_IsExternalRendererRequest (r_backend.string)
+		&& !q_strcasecmp (R_Backend_ApiToCanonicalName (r_backend.string), s_active_backend->name)))
+	{
+		s_applying_backend_cvar = true;
+		Cvar_SetQuick (&r_backend, s_active_backend->name);
+		s_applying_backend_cvar = false;
+	}
 
 	api_name = R_Backend_CanonicalNameToApi (s_active_backend->name);
-	s_applying_backend_api_cvar = true;
-	Cvar_SetQuick (&r_backend_api, api_name);
-	s_applying_backend_api_cvar = false;
+	if (!(R_Backend_IsExternalRendererRequest (r_backend_api.string)
+		&& !q_strcasecmp (R_Backend_ApiToCanonicalName (r_backend_api.string), s_active_backend->name)))
+	{
+		s_applying_backend_api_cvar = true;
+		Cvar_SetQuick (&r_backend_api, api_name);
+		s_applying_backend_api_cvar = false;
+	}
 }
 
 static void R_Backend_Changed_f (cvar_t *var)
 {
 	if (!var || s_applying_backend_cvar)
 		return;
+
+	if (!s_renderer_plugins_scanned && R_Backend_IsExternalRendererRequest (var->string))
+		R_Backend_LoadRendererPlugins ();
 
 	if (!R_Backend_Select (var->string))
 	{
@@ -1462,6 +1497,9 @@ static void R_Backend_ApiChanged_f (cvar_t *var)
 
 	if (!var || s_applying_backend_api_cvar)
 		return;
+
+	if (!s_renderer_plugins_scanned && R_Backend_IsExternalRendererRequest (var->string))
+		R_Backend_LoadRendererPlugins ();
 
 	canonical_name = R_Backend_ApiToCanonicalName (var->string);
 	status = R_Backend_GetRuntimeStatusForName (canonical_name);
@@ -1786,7 +1824,9 @@ static qboolean R_Backend_RegisterViaHostApi (const IRenderBackend *backend)
 					(const void *)backend);
 			}
 			s_registered_backends[i] = backend;
-			if (s_active_backend && !q_strcasecmp (s_active_backend->name, backend->name))
+			if (s_active_backend
+				&& !s_backend_active
+				&& !q_strcasecmp (s_active_backend->name, backend->name))
 				s_active_backend = backend;
 			if (!q_strcasecmp (backend->name, "OpenGL"))
 				s_gl_backend = backend;
@@ -1955,7 +1995,17 @@ void R_Backend_Init (void)
 
 	R_Backend_Register (&s_vulkan_stub_backend);
 	R_Backend_Register (&s_dx12_stub_backend);
-	R_Backend_LoadRendererPlugins ();
+	{
+		iw_renderer_plugin_host_api_t host_api;
+
+		R_Backend_FillPluginHostApi (&host_api);
+		if (!IW_RendererBuiltinGL_RegisterInternal (&host_api))
+			Con_Warning ("Internal OpenGL renderer fallback failed to register.\n");
+	}
+
+	if (R_Backend_IsExternalRendererRequest (r_backend_api.string)
+		|| R_Backend_IsExternalRendererRequest (r_backend.string))
+		R_Backend_LoadRendererPlugins ();
 
 	if (!R_Backend_HasRegisteredName ("OpenGL"))
 	{
@@ -2079,6 +2129,7 @@ void R_Backend_Shutdown (void)
 	s_ref_gl_plugin_candidate_found = false;
 	s_ref_gl_plugin_loaded = false;
 	s_ref_gl_plugin_load_failed = false;
+	s_renderer_plugins_scanned = false;
 	s_renderer_plugin_search_dir_count = 0;
 	memset (s_renderer_plugin_search_dirs, 0, sizeof (s_renderer_plugin_search_dirs));
 	R_Backend_ClearExternalResourceRegistry ();

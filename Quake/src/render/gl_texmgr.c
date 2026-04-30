@@ -112,30 +112,6 @@ static qboolean TexMgr_PoolPointerValid (const gltexture_t *ptr)
 
 void TexMgr_Trace (const char *fmt, ...)
 {
-	HMODULE module;
-	char module_name[MAX_OSPATH];
-	FILE *f;
-	va_list ap;
-
-	f = fopen ("texmgr_trace.log", "a");
-	if (!f)
-		return;
-
-	module_name[0] = '\0';
-	module = NULL;
-	if (GetModuleHandleExA (GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-		(LPCSTR) &TexMgr_Trace, &module))
-		GetModuleFileNameA (module, module_name, sizeof (module_name));
-
-	if (!module_name[0])
-		q_strlcpy (module_name, "(unknown-module)", sizeof (module_name));
-
-	fprintf (f, "[%s] ", module_name);
-	va_start (ap, fmt);
-	vfprintf (f, fmt, ap);
-	va_end (ap);
-	fputc ('\n', f);
-	fclose (f);
 }
 
 /*

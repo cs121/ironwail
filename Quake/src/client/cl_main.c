@@ -253,7 +253,11 @@ void CL_SignonReply (void)
 
 	case 4:
 		cl.spawntime = cl.mtime[0];
+		cl.intermission = 0;
+		cls.demopaused = false;
 		SCR_EndLoadingPlaque ();		// allow normal screen updates
+		key_dest = key_game;
+		IN_Activate ();
 		break;
 	}
 

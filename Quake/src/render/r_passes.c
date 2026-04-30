@@ -11,8 +11,17 @@
 
 static qboolean R_FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
 {
-	return ctx && ctx->frame_plan
-		&& ctx->frame_plan->run_shadowmaps;
+	const render_backend_resource_ref_t *shadow_depth;
+
+	if (!ctx || !ctx->frame_plan || !ctx->frame_plan->run_shadowmaps || !R_Shadow_SunEnabled ())
+		return false;
+
+	shadow_depth = R_FrameGraph_GetResourceRef (ctx->resources, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);
+	if (!shadow_depth)
+		return false;
+
+	return !ctx->backend || !ctx->backend->is_resource_valid
+		|| ctx->backend->is_resource_valid (ctx->resources, shadow_depth);
 }
 
 static qboolean R_FG_PassWhenPostprocessEnabled (const RenderPassContext *ctx)

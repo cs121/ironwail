@@ -27,6 +27,44 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "render_dispatch.h"
 #include "glquake.h"
 
+#if defined(IW_RENDERER_HOST_FRONTEND) && !defined(RENDERER_PLUGIN_BUILD)
+#define Draw_PicFromWad2 GL_Draw_PicFromWad2
+#define Draw_PicFromWad GL_Draw_PicFromWad
+#define Draw_CachePic GL_Draw_CachePic
+#define Draw_TryCachePic GL_Draw_TryCachePic
+#define Draw_NewGame GL_Draw_NewGame
+#define Draw_Init GL_Draw_Init
+#define Draw_Flush GL_Draw_Flush
+#define Draw_Character GL_Draw_Character
+#define Draw_CharacterEx GL_Draw_CharacterEx
+#define Draw_String GL_Draw_String
+#define Draw_StringEx GL_Draw_StringEx
+#define Draw_Pic GL_Draw_Pic
+#define Draw_SubPic GL_Draw_SubPic
+#define Draw_TransPicTranslate GL_Draw_TransPicTranslate
+#define Draw_ConsoleBackground GL_Draw_ConsoleBackground
+#define Draw_TileClear GL_Draw_TileClear
+#define Draw_Fill GL_Draw_Fill
+#define Draw_SetCanvas GL_Draw_SetCanvas
+#define Draw_SetCanvasColor GL_Draw_SetCanvasColor
+#define Draw_PushCanvasColor GL_Draw_PushCanvasColor
+#define Draw_PopCanvasColor GL_Draw_PopCanvasColor
+#define Draw_SetClipRect GL_Draw_SetClipRect
+#define Draw_ResetClipping GL_Draw_ResetClipping
+#define Draw_FadeScreen GL_Draw_FadeScreen
+#define Draw_FillEx GL_Draw_FillEx
+#define Draw_PartialFadeScreen GL_Draw_PartialFadeScreen
+#define Draw_GetCanvasTransform GL_Draw_GetCanvasTransform
+#define Draw_GetTransformBounds GL_Draw_GetTransformBounds
+#define GL_SetCanvas GL_Draw_SetGLCanvas
+#define GL_SetCanvasColor GL_Draw_SetGLCanvasColor
+#define GL_PushCanvasColor GL_Draw_PushGLCanvasColor
+#define GL_PopCanvasColor GL_Draw_PopGLCanvasColor
+#define GL_Set2D GL_Draw_Set2D
+#endif
+
+void GL_Draw_SetGLCanvas (canvastype newcanvas);
+
 const vec3_t	rgb_black = {0.f, 0.f, 0.f};
 const vec3_t	rgb_white = {1.f, 1.f, 1.f};
 
@@ -285,7 +323,7 @@ Draw_PicFromWad
 */
 qpic_t *Draw_PicFromWad2 (const char *name, unsigned int texflags)
 {
-#ifndef RENDERER_PLUGIN_BUILD
+#if !defined(RENDERER_PLUGIN_BUILD) && !defined(IW_RENDERER_HOST_FRONTEND)
 	if (g_rend && g_rend->Draw_PicFromWad2)
 		return g_rend->Draw_PicFromWad2 (name, texflags);
 #endif
@@ -353,7 +391,7 @@ qpic_t *Draw_PicFromWad2 (const char *name, unsigned int texflags)
 
 qpic_t *Draw_PicFromWad (const char *name)
 {
-#ifndef RENDERER_PLUGIN_BUILD
+#if !defined(RENDERER_PLUGIN_BUILD) && !defined(IW_RENDERER_HOST_FRONTEND)
 	if (g_rend && g_rend->Draw_PicFromWad)
 		return g_rend->Draw_PicFromWad (name);
 #endif
@@ -426,7 +464,7 @@ qpic_t	*Draw_TryCachePic (const char *path, unsigned int texflags)
 
 qpic_t	*Draw_CachePic (const char *path)
 {
-#ifndef RENDERER_PLUGIN_BUILD
+#if !defined(RENDERER_PLUGIN_BUILD) && !defined(IW_RENDERER_HOST_FRONTEND)
 	if (g_rend && g_rend->Draw_CachePic)
 		return g_rend->Draw_CachePic (path);
 #endif
@@ -600,6 +638,7 @@ void Draw_Init (void)
 
 	// load game pics
 	Draw_LoadPics ();
+	Sbar_LoadPics ();
 
 	draw_initialized = true;
 }

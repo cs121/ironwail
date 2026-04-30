@@ -1479,6 +1479,8 @@ void R_FrameGraph_RenderView (void)
 	}
 	i = setup_pass_count;
 
+	FG_BuildResourceHandles (&resources);
+
 	R_FrameGraph_BuildRenderFramePlan (&frame_plan);
 	R_FrameGraph_SetRenderFramePlan (&frame_plan);
 	pass_count = s_runtime_pass_count;

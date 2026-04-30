@@ -79,9 +79,9 @@ extern void GL_PushCanvasColor (float r, float g, float b, float a);
 extern void GL_PopCanvasColor (void);
 extern void GL_Set2D (void);
 extern void SCR_CenterPrint (const char *str);
-extern void SCR_BeginLoadingPlaque (void);
-extern void SCR_EndLoadingPlaque (void);
-extern int SCR_ModalMessage (const char *text, float timeout);
+extern void GL_SCR_BeginLoadingPlaque (void);
+extern void GL_SCR_EndLoadingPlaque (void);
+extern int GL_SCR_ModalMessage (const char *text, float timeout);
 extern void Bridge_DrawFlush (void);
 extern void Bridge_DrawInit (void);
 extern void SCR_Init (void);
@@ -168,9 +168,9 @@ static void REFGL_FillEntryPoints (void)
 	s_entry_points.GL_PopCanvasColor = GL_PopCanvasColor;
 	s_entry_points.GL_Set2D = GL_Set2D;
 	s_entry_points.SCR_CenterPrint = SCR_CenterPrint;
-	s_entry_points.SCR_BeginLoadingPlaque = SCR_BeginLoadingPlaque;
-	s_entry_points.SCR_EndLoadingPlaque = SCR_EndLoadingPlaque;
-	s_entry_points.SCR_ModalMessage = SCR_ModalMessage;
+	s_entry_points.SCR_BeginLoadingPlaque = GL_SCR_BeginLoadingPlaque;
+	s_entry_points.SCR_EndLoadingPlaque = GL_SCR_EndLoadingPlaque;
+	s_entry_points.SCR_ModalMessage = GL_SCR_ModalMessage;
 	s_entry_points.Draw_Flush = Bridge_DrawFlush;
 	s_entry_points.Draw_Init = Bridge_DrawInit;
 	s_entry_points.SCR_Init = SCR_Init;
@@ -180,9 +180,9 @@ static void REFGL_RenderView_Entry (void)
 {
 	if (g_bridge_data && g_bridge_data->r_refdef)
 	{
-		/* Host view code owns camera transforms; plugin SCR path owns view rect/FOV/scale.
-		 * Copying the full struct can clobber plugin-computed viewport state and produce
-		 * black/invalid 3D output with only 2D overlays visible. */
+		/* Host view code owns camera transforms; plugin screen code owns vrect/FOV/scale.
+		 * Copying the full refdef can clobber the plugin-computed viewport state and produce
+		 * black / invalid 3D output with only 2D overlays visible. */
 		VectorCopy (g_bridge_data->r_refdef->vieworg, r_refdef.vieworg);
 		VectorCopy (g_bridge_data->r_refdef->viewangles, r_refdef.viewangles);
 	}

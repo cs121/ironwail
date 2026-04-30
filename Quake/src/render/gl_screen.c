@@ -29,6 +29,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "steam.h"
 #include <time.h>
 
+#if defined(IW_RENDERER_HOST_FRONTEND) && !defined(RENDERER_PLUGIN_BUILD)
+#define SCR_CenterPrint GL_SCR_CenterPrint
+#define SCR_Init GL_SCR_Init
+#define SCR_PixelAspect_f GL_SCR_PixelAspect_f
+#define SCR_UpdateZoom GL_SCR_UpdateZoom
+#endif
+
 extern cvar_t r_autoexposure;
 extern cvar_t r_exposure_debug;
 extern cvar_t r_particles_debug;
@@ -157,7 +164,7 @@ hudstyle_t	hudstyle;
 
 void SCR_ScreenShot_f (void);
 
-#ifndef IW_RENDERER_HOST_FRONTEND
+#if !defined(IW_RENDERER_HOST_FRONTEND) || !defined(RENDERER_PLUGIN_BUILD)
 /*
 ===============================================================================
 
@@ -2034,7 +2041,7 @@ SCR_BeginLoadingPlaque
 
 ================
 */
-void SCR_BeginLoadingPlaque (void)
+void GL_SCR_BeginLoadingPlaque (void)
 {
 	S_StopAllSounds (true);
 
@@ -2057,7 +2064,12 @@ void SCR_BeginLoadingPlaque (void)
 
 	scr_centertime_off = 0;
 	Sbar_Changed ();
+#ifdef RENDERER_PLUGIN_BUILD
 	SCR_UpdateScreen ();
+#else
+	if (host_framecount > 0)
+		SCR_UpdateScreen ();
+#endif
 	scr_drawloading = false;
 
 	scr_disabled_for_loading = true;
@@ -2070,7 +2082,7 @@ SCR_EndLoadingPlaque
 
 ================
 */
-void SCR_EndLoadingPlaque (void)
+void GL_SCR_EndLoadingPlaque (void)
 {
 	Host_EndAssetLoading ();
 	scr_disabled_for_loading = false;
@@ -2124,7 +2136,7 @@ Displays a text string in the center of the screen and waits for a Y or N
 keypress.
 ==================
 */
-int SCR_ModalMessage (const char *text, float timeout) //johnfitz -- timeout
+int GL_SCR_ModalMessage (const char *text, float timeout) //johnfitz -- timeout
 {
 	double time1, time2; //johnfitz -- timeout
 	int lastkey, lastchar;
@@ -2229,7 +2241,7 @@ WARNING: be very careful calling this from elsewhere, because the refresh
 needs almost the entire 256k of stack space!
 ==================
 */
-void SCR_UpdateScreen (void)
+void GL_SCR_UpdateScreen (void)
 {
 	vid.numpages = (gl_triplebuffer.value) ? 3 : 2;
 
@@ -2329,4 +2341,26 @@ void SCR_UpdateScreen (void)
 
 	GL_EndRendering ();
 }
+
+#ifdef RENDERER_PLUGIN_BUILD
+void SCR_UpdateScreen (void)
+{
+	GL_SCR_UpdateScreen ();
+}
+
+void SCR_BeginLoadingPlaque (void)
+{
+	GL_SCR_BeginLoadingPlaque ();
+}
+
+void SCR_EndLoadingPlaque (void)
+{
+	GL_SCR_EndLoadingPlaque ();
+}
+
+int SCR_ModalMessage (const char *text, float timeout)
+{
+	return GL_SCR_ModalMessage (text, timeout);
+}
+#endif
 #endif

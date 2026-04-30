@@ -897,6 +897,15 @@ void CL_ParseClientdata (void)
 	CL_SetHudStat (STAT_ROCKETS);
 	CL_SetHudStat (STAT_CELLS);
 
+	/* Keep the weapon entity in sync as soon as the server updates clientdata.
+	 * The render path will overwrite these fields again during V_CalcRefdef(),
+	 * but input gating and other logic should not wait for the next frame to
+	 * discover the current weapon model. */
+	cl.viewent.model = cl.model_precache[cl.stats[STAT_WEAPON]];
+	cl.viewent.frame = cl.stats[STAT_WEAPONFRAME];
+	cl.viewent.colormap = vid.colormap;
+	cl.viewent.scale = ENTSCALE_DEFAULT;
+
 	//johnfitz -- lerping
 	//ericw -- this was done before the upper 8 bits of cl.stats[STAT_WEAPON] were filled in, breaking on large maps like zendar.bsp
 	if (cl.viewent.model != cl.model_precache[cl.stats[STAT_WEAPON]])

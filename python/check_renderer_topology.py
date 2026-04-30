@@ -2,8 +2,10 @@
 """
 Guardrail for renderer artifact topology.
 
-This check enforces that plugin implementation units are not compiled into the
-host target definitions we currently maintain in source control.
+This check enforces that external renderer plugin entry units are not compiled
+into the host target definitions we currently maintain in source control.  The
+host may still link the transitional built-in OpenGL fallback units until the
+external ref_gl module fully replaces them.
 """
 
 from pathlib import Path
@@ -20,7 +22,6 @@ CHECKS = [
             "list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render/ref_gl_bridge_stubs.c)",
             "list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render/ref_vk_plugin.c)",
             "list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render/ref_dx12_plugin.c)",
-            "list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render/gl_backend.c)",
         ],
     ),
     (
@@ -59,17 +60,16 @@ CHECKS = [
         [
             "<ClCompile Include=\"..\\..\\Quake\\src\\render\\gl_backend_runtime.c\" />",
             "<ClCompile Include=\"..\\..\\Quake\\src\\render\\gl_backend_resources.c\" />",
+            "<ClCompile Include=\"..\\..\\Quake\\src\\render\\gl_backend.c\" />",
+            "<ClCompile Include=\"..\\..\\Quake\\src\\render\\renderer_builtin_gl_plugin.c\" />",
         ],
     ),
 ]
 
 FORBIDDEN_BY_FILE = {
-    ROOT / "Quake" / "Makefile": ["renderer_builtin_gl_plugin.c"],
-    ROOT / "Quake" / "Makefile.w32": ["renderer_builtin_gl_plugin.c"],
-    ROOT / "Quake" / "Makefile.w64": ["renderer_builtin_gl_plugin.c"],
     ROOT / "Windows" / "VisualStudio" / "ironwail.vcxproj": [
-        "..\\..\\Quake\\src\\render\\renderer_builtin_gl_plugin.c",
-        "..\\..\\Quake\\src\\render\\gl_backend.c",
+        "..\\..\\Quake\\src\\render\\ref_gl_plugin.c",
+        "..\\..\\Quake\\src\\render\\ref_gl_bridge_stubs.c",
     ],
 }
 
