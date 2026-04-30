@@ -131,11 +131,9 @@ vec2 ComputeVelocity(vec4 curr_clip, vec4 prev_clip)
 
 float DepthToCanonical(float depth)
 {
-#if REVERSED_Z
-	return 1.0 - depth;
-#else
-	return depth;
-#endif
+	/* Shadow maps are written in the shadow-pass convention: NDC z in [-1,1]
+	 * mapped to depth in [0,1], independent of the scene's reversed-Z mode. */
+	return depth * 0.5 + 0.5;
 }
 
 vec3 UchimuraTonemap(vec3 x)
@@ -281,6 +279,7 @@ float SampleSunShadow(vec3 worldPos)
 
 	vec3 ndc = clip.xyz / clip.w;
 	vec2 uv = ndc.xy * 0.5 + 0.5;
+	// Convert from shadow clip-space NDC to the stored shadow-map depth range.
 	float depth = DepthToCanonical(ndc.z);
 	if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || depth < 0.0 || depth > 1.0)
 		return 1.0;
