@@ -163,6 +163,8 @@ static const char *R_EntityTypeName (const qmodel_t *model)
 			return "alias/iqm";
 		return "alias";
 	}
+	case mod_glb:
+		return "glb";
 	case mod_sprite:
 		return "sprite";
 	case mod_brush:
@@ -621,7 +623,7 @@ qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo
 	int sample_count = 0;
 	double start_time = Sys_DoubleTime ();
 	const qboolean force_viewmodel_multisample = (e == &cl.viewent);
-	const qboolean force_alias_multisample = (e->model && e->model->type == mod_alias);
+	const qboolean force_alias_multisample = (e->model && (e->model->type == mod_alias || e->model->type == mod_glb));
 	const qboolean use_multisample = force_alias_multisample || force_viewmodel_multisample || (r_model_light_multisample.value > 0.f && e->model);
 	const qboolean legacy_compatible = (!use_multisample && r_model_lightgrid_assist.value <= 0.f);
 	qmodel_t *lightmodel = cl.worldmodel ? cl.worldmodel : e->model;

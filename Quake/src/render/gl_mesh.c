@@ -24,7 +24,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "glquake.h"
 
-static void GLMesh_BuildTangents (float (*tangents)[4], const float (*xyz)[3], const float (*normals)[3], const float (*st)[2], int numverts, const unsigned short *indexes, int numindexes)
+void GLMesh_BuildTangents (float (*tangents)[4], const float (*xyz)[3], const float (*normals)[3], const float (*st)[2], int numverts, const unsigned short *indexes, int numindexes)
 {
 	int i;
 	vec3_t *tan1 = (vec3_t *) q_calloc (numverts, sizeof (vec3_t));
@@ -517,7 +517,7 @@ void GLMesh_LoadVertexBuffers (void)
 	for (j = 1; j < MAX_MODELS; j++)
 	{
 		if (!(m = cl.model_precache[j])) break;
-		if (m->type != mod_alias) continue;
+		if (m->type != mod_alias && m->type != mod_glb) continue;
 
 		hdr = (aliashdr_t *) Mod_Extradata (m);
 		
@@ -543,7 +543,7 @@ void GLMesh_DeleteVertexBuffers (void)
 	for (j = 1; j < MAX_MODELS; j++)
 	{
 		if (!(m = cl.model_precache[j])) break;
-		if (m->type != mod_alias) continue;
+		if (m->type != mod_alias && m->type != mod_glb) continue;
 		
 		GL_DeleteBuffersFunc (1, &m->meshvbo);
 		m->meshvbo = 0;

@@ -709,6 +709,7 @@ void R_ResetGodraysStabilization (void);
 void GLMesh_LoadVertexBuffer (qmodel_t *m, aliashdr_t *hdr);
 void GLMesh_LoadVertexBuffers (void);
 void GLMesh_DeleteVertexBuffers (void);
+void GLMesh_BuildTangents (float (*tangents)[4], const float (*xyz)[3], const float (*normals)[3], const float (*st)[2], int numverts, const unsigned short *indexes, int numindexes);
 
 int R_LightPoint (qmodel_t *model, vec3_t p, float ofs, lightcache_t *cache);
 qboolean R_EntityStaticLight (entity_t *e, vec3_t out_color255, entity_lightinfo_t *info);

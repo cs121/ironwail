@@ -404,7 +404,7 @@ extern	trivertx_t			*poseverts[MAXALIASFRAMES];
 // Whole model
 //
 
-typedef enum {mod_brush, mod_alias, mod_sprite, mod_ext_invalid, mod_numtypes} modtype_t;
+typedef enum {mod_brush, mod_alias, mod_sprite, mod_glb, mod_ext_invalid, mod_numtypes} modtype_t;
 
 #define	EF_ROCKET	1			// leave a trail
 #define	EF_GRENADE	2			// leave a trail

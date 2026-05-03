@@ -1038,6 +1038,7 @@ static void R_RenderSunShadowMap (void)
 	int cascade;
 	vec3_t dummy = { 0.f, 0.f, 0.f };
 	qboolean shadow_mark = (r_shadow_draw_ctx.brush_count > 0);
+	qboolean use_frustum_cull = (r_shadow_cull_frustum.value > 0.f);
 
 	if (!R_Shadow_SunEnabled () || !framebufs.shadow.sun_fbo || !framebufs.shadow.sun_depth_tex)
 		return;
@@ -1050,8 +1051,17 @@ static void R_RenderSunShadowMap (void)
 		shadow_draw_context_t pass_ctx;
 		const shadow_draw_context_t *ctx = &r_shadow_draw_ctx;
 
-		R_Shadow_FilterDrawContext (&r_shadow_draw_ctx, &pass_ctx, NULL, r_shadow_state.sun_frustum[cascade]);
+		R_Shadow_FilterDrawContext (&r_shadow_draw_ctx, &pass_ctx, NULL,
+			use_frustum_cull ? r_shadow_state.sun_frustum[cascade] : NULL);
 		ctx = &pass_ctx;
+		if (r_shadow_log.value > 1.f)
+		{
+			Con_Printf ("Shadow sun c%d: src(b=%d a=%d) -> culled(b=%d a=%d) frustum=%d\n",
+				cascade,
+				r_shadow_draw_ctx.brush_count, r_shadow_draw_ctx.alias_count,
+				ctx->brush_count, ctx->alias_count,
+				use_frustum_cull ? 1 : 0);
+		}
 		if (ctx->brush_count <= 0 && ctx->alias_count <= 0)
 			continue;
 
@@ -1061,9 +1071,9 @@ static void R_RenderSunShadowMap (void)
 				r_shadow_state.sun_eye[cascade],
 				r_shadow_state.sun_frustum[cascade],
 				NULL,
-				false,
-				false,
-				true);
+				(r_shadow_cull_vis.value > 0.f),
+				(r_shadow_cull_backface.value > 0.f),
+				use_frustum_cull);
 		}
 
 		GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.sun_depth_tex, 0, cascade);
@@ -1082,6 +1092,8 @@ static void R_RenderDLightShadowMaps (void)
 {
 	int slot, face;
 	qboolean shadow_mark = (r_shadow_draw_ctx.brush_count > 0);
+	qboolean use_frustum_cull = (r_shadow_cull_frustum.value > 0.f);
+	qboolean use_sphere_cull = (r_shadow_cull_sphere.value > 0.f);
 
 	if (!R_Shadow_DlightEnabled () || !framebufs.shadow.dlight_fbo || !framebufs.shadow.dlight_depth_tex)
 		return;
@@ -1106,9 +1118,18 @@ static void R_RenderDLightShadowMaps (void)
 			sphere[2] = (*light)[2];
 			sphere[3] = (*light)[3];
 			R_Shadow_FilterDrawContext (&r_shadow_draw_ctx, &pass_ctx,
-				&sphere,
-				r_shadow_state.dlight_frustum[slot][face]);
+				use_sphere_cull ? &sphere : NULL,
+				use_frustum_cull ? r_shadow_state.dlight_frustum[slot][face] : NULL);
 			ctx = &pass_ctx;
+			if (r_shadow_log.value > 1.f)
+			{
+				Con_Printf ("Shadow dl s%d f%d: src(b=%d a=%d) -> culled(b=%d a=%d) sphere=%d frustum=%d\n",
+					slot, face,
+					r_shadow_draw_ctx.brush_count, r_shadow_draw_ctx.alias_count,
+					ctx->brush_count, ctx->alias_count,
+					use_sphere_cull ? 1 : 0,
+					use_frustum_cull ? 1 : 0);
+			}
 			if (ctx->brush_count <= 0 && ctx->alias_count <= 0)
 				continue;
 
@@ -1121,10 +1142,10 @@ static void R_RenderDLightShadowMaps (void)
 				R_MarkSurfaces_Shadow (
 					*light,
 					r_shadow_state.dlight_frustum[slot][face],
-					&sphere,
-					false,
-					false,
-					true);
+					use_sphere_cull ? &sphere : NULL,
+					(r_shadow_cull_vis.value > 0.f),
+					(r_shadow_cull_backface.value > 0.f),
+					use_frustum_cull);
 			}
 
 			GL_FramebufferTextureLayerFunc (GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, framebufs.shadow.dlight_depth_tex, 0, layer);
@@ -1193,7 +1214,8 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 	}
 	if (profile_enabled)
 		cpu_begin = Sys_DoubleTime ();
-	if (r_shadow_log.value > 0.f && r_framecount >= r_shadow_log_last_frame + 60)
+	if ((r_shadow_log.value > 1.f)
+		|| (r_shadow_log.value > 0.f && r_framecount >= r_shadow_log_last_frame + 60))
 	{
 		Con_Printf ("Shadow frame: sun=%d dlight=%d cascades=%d casters(brush=%d alias=%d) selected_dlights=%d\n",
 			want_sun_shadow ? 1 : 0,

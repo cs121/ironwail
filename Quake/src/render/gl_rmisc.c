@@ -81,6 +81,7 @@ extern cvar_t r_bmodel_relight;
 extern cvar_t r_model_light_stats;
 extern cvar_t r_model_light_samples_max;
 //johnfitz
+extern cvar_t r_glb_debug;
 extern cvar_t gl_zfix; // QuakeSpasm z-fighting fix
 extern cvar_t r_alphasort;
 extern cvar_t r_oit;
@@ -610,6 +611,7 @@ void R_Init (void)
 	Cvar_RegisterVariable (&r_rimlight_dlight);
 	Cvar_RegisterVariable (&r_rimlight_shadow);
         Cvar_RegisterVariable (&r_novis);
+	Cvar_RegisterVariable (&r_glb_debug);
 #if defined(USE_SIMD)
         Cvar_RegisterVariable (&r_simd);
         Cvar_SetCallback (&r_simd, R_SIMD_f);

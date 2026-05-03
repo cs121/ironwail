@@ -2,6 +2,8 @@
 
 #include "r_framegraph.h"
 
+qboolean R_Shadow_DlightEnabled (void);
+
 #define FG_PASS_BASELINE_DETERMINISTIC_STATE ( \
 	FG_PASS_BASELINE_RESET_SCISSOR | \
 	FG_PASS_BASELINE_RESET_BLEND | \
@@ -12,8 +14,9 @@
 static qboolean R_FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
 {
 	const render_backend_resource_ref_t *shadow_depth;
+	const qboolean want_any_shadow = (R_Shadow_SunEnabled () || R_Shadow_DlightEnabled ());
 
-	if (!ctx || !ctx->frame_plan || !ctx->frame_plan->run_shadowmaps || !R_Shadow_SunEnabled ())
+	if (!ctx || !ctx->frame_plan || !ctx->frame_plan->run_shadowmaps || !want_any_shadow)
 		return false;
 
 	shadow_depth = R_FrameGraph_GetResourceRef (ctx->resources, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);

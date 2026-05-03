@@ -30,6 +30,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_ktx2.h"
 #include "mat_material.h"
 #include "lightgrid.h"
+#include "gl_model_glb.h"
 
 #define INVALID_LIGHTSTYLE_OLD 255
 
@@ -341,7 +342,7 @@ void Mod_ClearAll (void)
 
 	for (i=0 , mod=mod_known ; i<mod_numknown ; i++, mod++)
 	{
-		if (mod->type != mod_alias)
+		if (mod->type != mod_alias && mod->type != mod_glb)
 		{
 			mod->needload = true;
 			TexMgr_FreeTexturesForOwner (mod); //johnfitz
@@ -417,7 +418,7 @@ void Mod_TouchModel (const char *name)
 
 	if (!mod->needload)
 	{
-		if (mod->type == mod_alias)
+		if (mod->type == mod_alias || mod->type == mod_glb)
 			Cache_Check (&mod->cache);
 	}
 }
@@ -436,7 +437,7 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 
 	if (!mod->needload)
 	{
-		if (mod->type == mod_alias)
+		if (mod->type == mod_alias || mod->type == mod_glb)
 		{
 			if (Cache_Check (&mod->cache))
 				return mod;
@@ -496,6 +497,10 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 
 	case IDSPRITEHEADER:
 		Mod_LoadSpriteModel (mod, buf);
+		break;
+
+	case 0x46546C67u:
+		Mod_LoadGLBModel (mod, buf);
 		break;
 
 	default:

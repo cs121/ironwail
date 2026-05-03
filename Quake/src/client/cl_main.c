@@ -507,7 +507,9 @@ static void CL_SetDlightColorForEntity (dlight_t *dl, const entity_t *ent)
          * Some projectiles (e.g. lavaball variants) can carry tracer flags;
          * evaluating tracer flags first would incorrectly tint them blue/purple.
          */
-        if (name && q_strcasestr (name, "lava"))
+        if (name && (q_strcasestr (name, "lava")
+                || q_strcasestr (name, "lavaball")
+                || q_strcasestr (name, "fireball")))
         {
                 dl->color[0] = 1.00f; dl->color[1] = 0.15f; dl->color[2] = 0.05f;
                 dl->type = DLIGHT_LAVA;

@@ -39,6 +39,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_lightgrid.h"
 #include "gl_backend.h"
 #include "r_resources_gl.h"
+#include "gl_model_glb.h"
 
 extern cvar_t r_refgl_debug;
 extern cvar_t r_refgl_log_init;
@@ -681,6 +682,8 @@ cvar_t	r_ssao_fog_strength = { "r_ssao_fog_strength", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_fog_power = { "r_ssao_fog_power", "1.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_max_distance = { "r_ssao_max_distance", "1024", CVAR_ARCHIVE };
 cvar_t	r_ssao_validate = { "r_ssao_validate", "0", CVAR_ARCHIVE };
+
+cvar_t	r_glb_debug = { "r_glb_debug", "0", CVAR_NONE };
 
 cvar_t	r_godrays = { "r_godrays", "0", CVAR_ARCHIVE };
 cvar_t	r_godrays_sky_threshold = { "r_godrays_sky_threshold", "0.05", CVAR_ARCHIVE };
@@ -5020,6 +5023,7 @@ void R_DrawEntitiesOnList (qboolean alphapass) //johnfitz -- added parameter
 	ofs = cl_modtype_ofs + (alphapass ? 1 : 0);
 	R_DrawBrushModels (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 1] - ofs[2 * mod_brush]);
 	R_DrawAliasModels (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 1] - ofs[2 * mod_alias]);
+	R_DrawGLBModels (entlist + ofs[2 * mod_glb], ofs[2 * mod_glb + 1] - ofs[2 * mod_glb]);
 	if (!alphapass)
 		R_DrawSpriteModels (entlist + cl_modtype_ofs[2 * mod_sprite], cl_modtype_ofs[2 * mod_sprite + 2] - cl_modtype_ofs[2 * mod_sprite]);
 
@@ -5770,6 +5774,7 @@ static void R_ShowBoundingBoxes (void)
 				case mod_brush:  color = 0x7fff8080; break;
 				case mod_alias:  color = 0x7f408080; break;
 				case mod_sprite: color = 0x7f4040ff; break;
+				case mod_glb:    color = 0x7f80ff80; break;
 				default:
 					break;
 				}
@@ -5964,6 +5969,7 @@ void R_ShowTris (void)
 	ofs = cl_modtype_ofs;
 	R_DrawBrushModels_ShowTris (entlist + ofs[2 * mod_brush], ofs[2 * mod_brush + 2] - ofs[2 * mod_brush]);
 	R_DrawAliasModels_ShowTris (entlist + ofs[2 * mod_alias], ofs[2 * mod_alias + 2] - ofs[2 * mod_alias]);
+	R_DrawGLBModels_ShowTris (entlist + ofs[2 * mod_glb], ofs[2 * mod_glb + 2] - ofs[2 * mod_glb]);
 	R_DrawSpriteModels_ShowTris (entlist + ofs[2 * mod_sprite], ofs[2 * mod_sprite + 2] - ofs[2 * mod_sprite]);
 
 	// viewmodel

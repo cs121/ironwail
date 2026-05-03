@@ -265,6 +265,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile Include="..\..\Quake\src\render\gl_lightgrid.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_mesh.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_model.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_model_glb.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_refrag.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_rlight.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_dlight.c" />

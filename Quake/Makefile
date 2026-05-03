@@ -324,8 +324,9 @@ RENDERER_PLUGIN_SRCS = \
 	src/render/gl_rmisc.c \
 	src/render/gl_screen.c \
 	src/platform/gl_vidsdl.c \
-	src/render/gl_model.c \
-	src/render/gl_mesh.c \
+ 	src/render/gl_model.c \
+ 	src/render/gl_model_glb.c \
+ 	src/render/gl_mesh.c \
 	src/render/gl_sky.c \
 	src/render/gl_warp.c \
 	src/render/gl_texmgr.c \

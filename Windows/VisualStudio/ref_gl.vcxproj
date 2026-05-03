@@ -207,6 +207,7 @@
     <ClCompile Include="..\..\Quake\src\render\gl_screen.c" />
     <ClCompile Include="..\..\Quake\src\platform\gl_vidsdl.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_model.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_model_glb.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_mesh.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_sky.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_warp.c" />

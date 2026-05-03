@@ -81,6 +81,9 @@
     <ClCompile Include="..\..\Quake\src\render\gl_model.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\Quake\src\render\gl_model_glb.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\Quake\src\render\gl_refrag.c">
       <Filter>Source Files</Filter>
     </ClCompile>
