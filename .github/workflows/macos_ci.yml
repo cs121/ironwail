@@ -12,6 +12,8 @@ jobs:
       run: python3 python/check_no_raw_gl_calls.py
     - name: Enforce GL Symbol Boundaries
       run: python3 python/check_gl_symbol_boundaries.py
+    - name: Check Renderer Topology
+      run: python3 python/check_renderer_topology.py
     - name: Check Renderer Plugin ABI Contract
       run: python3 python/check_renderer_plugin_abi.py
     - name: Check FrameGraph Pass Contracts
