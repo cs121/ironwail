@@ -9,16 +9,18 @@ SCAN_ROOTS = (
     pathlib.Path("Quake/src"),
 )
 
+RENDER_TREE_PREFIX = "Quake/src/render/"
+
 FILE_EXTENSIONS = {".c", ".h"}
 
 # Global renderer-boundary rule:
 # - GL symbols must stay in renderer/backend-owned files.
 # - Transitional UI/console callsites are explicitly allowlisted until moved.
 ALLOWED_GLOBS = (
-    "Quake/src/render/*.c",
-    "Quake/src/render/gl*.h",
+    "Quake/src/render/ref_gl_*",
+    "Quake/src/render/gl_backend*",
+    "Quake/src/render/r_resources_gl.*",
     "Quake/src/platform/gl_vidsdl.c",
-    "Quake/src/render/r_resources_gl.h",
 )
 
 # Transitional non-render files that still use GL canvas helpers.
@@ -39,6 +41,8 @@ INCLUDE_PATTERNS = (
 )
 
 STRING_LITERAL_RE = re.compile(r'"(?:\\.|[^"\\])*"')
+HOST_PATH_RE = re.compile(r"^Quake/src/(core|client|server|network|ui|audio|physics|gamecode|bot|platform)/(?!gl_vidsdl\\.c).+")
+HOST_GL_PATTERN = re.compile(r"\b(?:GL_[A-Za-z0-9_]+|SDL_GL_[A-Za-z0-9_]+)\b")
 
 
 def sanitize_code_line(line: str) -> str:
@@ -67,6 +71,8 @@ def main() -> int:
                 continue
 
             rel_path = path.relative_to(repo_root).as_posix()
+            if rel_path.startswith(RENDER_TREE_PREFIX) and not is_allowed(rel_path):
+                continue
             if is_allowed(rel_path):
                 continue
 
@@ -78,6 +84,11 @@ def main() -> int:
 
             for line_no, line in enumerate(lines, start=1):
                 stripped = line.strip()
+                if HOST_PATH_RE.match(rel_path):
+                    code_line = sanitize_code_line(line)
+                    if HOST_GL_PATTERN.search(code_line):
+                        failures.append((rel_path, line_no, line.strip()))
+                        continue
                 if re.match(r"^\s*#\s*(ifdef|ifndef|if|elif|define|undef|endif)\b.*\bGL_[A-Za-z0-9_]+\b", stripped):
                     continue
                 code_line = sanitize_code_line(line)
