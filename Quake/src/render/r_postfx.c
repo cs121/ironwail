@@ -21,6 +21,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 
 #include "quakedef.h"
 #include "glquake.h"
+#include "gl_backend.h"
 #include "r_framegraph.h"
 #include "r_postfx.h"
 #include "cl_postfx.h"
@@ -176,8 +177,7 @@ static void R_PostFX_ReloadLUTs (void)
 		return;
 	}
 	R_Backend_ConfigurePostFXLUTTexture (r_postfx_lut_tex);
-	GL_TexImage3DFunc (GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, size * size, size, PFX_LUT_COUNT, 0, GL_RGBA, GL_UNSIGNED_BYTE, lut_storage);
-	GL_ObjectLabelFunc (GL_TEXTURE, r_postfx_lut_tex, -1, "postfx lut");
+	GL_Backend_UploadPostFXLUTData (r_postfx_lut_tex, lut_storage, size * size, size, PFX_LUT_COUNT);
 
 	q_free(lut_storage);
 	r_postfx_lut_size = size;

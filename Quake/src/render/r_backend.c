@@ -3,8 +3,8 @@
 #include "renderer_plugin.h"
 #include "renderer_host_bridge.h"
 #include "render_dispatch.h"
-#include "gl_backend.h"
-#include "glquake.h"
+#include "gl_backend.h" /* obsolete migration seam: compile-time symbols only */
+#include "glquake.h"    /* required legacy state constants/types until Phase 7 cleanup */
 
 enum
 {
@@ -98,7 +98,6 @@ static qboolean R_Backend_Host_IsTransientResourceAlive (unsigned int resource_i
 static qboolean R_Backend_Host_GetShaderMetadata (unsigned int shader_id, iw_renderer_host_shader_metadata_t *out_metadata);
 static qboolean R_Backend_Host_GetPipelineMetadata (unsigned int pipeline_id, iw_renderer_host_pipeline_metadata_t *out_metadata);
 static qboolean R_Backend_ValidatePluginHostApi (const iw_renderer_plugin_host_api_t *host_api, qboolean emit_warning);
-extern qboolean IW_RendererBuiltinGL_RegisterInternal (const iw_renderer_plugin_host_api_t *host_api);
 static qboolean R_VulkanStub_Init (void);
 static qboolean R_VulkanStub_HasRequiredPassCallbacks (void);
 static void R_VulkanStub_Present (void);
@@ -129,8 +128,8 @@ static const iw_renderer_plugin_pipeline_services_t s_plugin_pipeline_services =
 	R_Backend_Host_GetPipelineMetadata
 };
 
-cvar_t r_backend = { "r_backend", "OpenGL", CVAR_ARCHIVE };
-cvar_t r_backend_api = { "r_backend_api", "gl", CVAR_ARCHIVE };
+cvar_t r_backend = { "r_backend", "ref_gl", CVAR_ARCHIVE };
+cvar_t r_backend_api = { "r_backend_api", "ref_gl", CVAR_ARCHIVE };
 extern cvar_t r_refgl_debug;
 
 extern cvar_t r_refgl_log_init;
@@ -140,6 +139,10 @@ extern cvar_t r_refgl_log_state;
 extern cvar_t r_refgl_validate_state;
 extern cvar_t r_refgl_validate_fbo;
 extern cvar_t r_refgl_validate_lifetime;
+extern cvar_t r_ref_enable_postfx;
+extern cvar_t r_ref_enable_shadows;
+extern cvar_t r_ref_enable_fog;
+extern cvar_t r_ref_enable_lighting;
 
 /*
 ================
@@ -152,10 +155,11 @@ planned around backend-neutral pipeline/descriptors/dynamic-state APIs.
 static void R_Backend_WrapperAudit_f (void)
 {
 	Con_Printf ("Renderer wrapper migration priorities:\n");
-	Con_Printf ("  P0: explicit bind_pipeline + set_dynamic_state migration complete in current draw paths (legacy bridge retained for compatibility only)\n");
+	Con_Printf ("  P0: explicit bind_pipeline + set_dynamic_state migration complete in current draw paths\n");
 	Con_Printf ("  P1: direct glDraw*/GL_Draw* draw-path migration complete (dedicated backend files only; non-draw utility calls like glDrawPixels remain explicitly scoped)\n");
 	Con_Printf ("  P2: bind-time texture/program glue in legacy passes (move to descriptor sets + explicit pipeline binding)\n");
 	Con_Printf ("  P3: optional compute/dispatch paths (already abstracted via R_Backend_Dispatch where available)\n");
+	Con_Printf ("  note: internal builtin OpenGL registration path is obsolete; external ref_gl renderer is the default runtime path.\n");
 }
 
 /*
@@ -176,6 +180,8 @@ static qboolean R_Backend_ValidateContract (const IRenderBackend *backend, qbool
 {
 	const qboolean has_required_pass_callbacks =
 		backend
+		&& backend->begin_pass_ex
+		&& backend->end_pass_ex
 		&& backend->pass_setup_view
 		&& backend->pass_shadowmaps
 		&& backend->pass_render_scene
@@ -183,10 +189,6 @@ static qboolean R_Backend_ValidateContract (const IRenderBackend *backend, qbool
 		&& backend->pass_postprocess
 		&& backend->pass_overlay_viewmodel
 		&& backend->pass_overlay_polyblend;
-	const qboolean has_legacy_pass_bridge =
-		backend
-		&& backend->begin_pass
-		&& backend->end_pass;
 
 	if (!backend)
 		return false;
@@ -210,32 +212,26 @@ static qboolean R_Backend_ValidateContract (const IRenderBackend *backend, qbool
 	}
 
 	if (backend->has_required_pass_callbacks
-		&& !backend->has_required_pass_callbacks ()
-		&& !has_legacy_pass_bridge)
+		&& !backend->has_required_pass_callbacks ())
 	{
 		if (emit_warning)
 		{
-			Con_Warning ("Renderer backend '%s' does not advertise required pass callback support and has no legacy pass bridge.\n",
+			Con_Warning ("Renderer backend '%s' does not advertise required pass callback support.\n",
 				backend->name ? backend->name : "<unnamed>");
 		}
 		SDL_assert (!"Renderer backend pass callback contract violation");
 		return false;
 	}
 
-	if (!has_required_pass_callbacks && !has_legacy_pass_bridge)
+	if (!has_required_pass_callbacks)
 	{
 		if (emit_warning)
 		{
-			Con_Warning ("Renderer backend '%s' is missing required render-pass callbacks and lacks begin_pass/end_pass fallback.\n",
+			Con_Warning ("Renderer backend '%s' is missing required render-pass callbacks (begin/end pass ex + pass callbacks).\n",
 				backend->name ? backend->name : "<unnamed>");
 		}
 		SDL_assert (!"Renderer backend required pass callback missing");
 		return false;
-	}
-	if (!has_required_pass_callbacks && has_legacy_pass_bridge && emit_warning)
-	{
-		Con_DWarning ("Renderer backend '%s' is running through legacy pass bridge callbacks (begin_pass/end_pass).\n",
-			backend->name ? backend->name : "<unnamed>");
 	}
 
 	return true;
@@ -1975,6 +1971,10 @@ void R_Backend_Init (void)
 	Cvar_RegisterVariable (&r_refgl_validate_state);
 	Cvar_RegisterVariable (&r_refgl_validate_fbo);
 	Cvar_RegisterVariable (&r_refgl_validate_lifetime);
+	Cvar_RegisterVariable (&r_ref_enable_postfx);
+	Cvar_RegisterVariable (&r_ref_enable_shadows);
+	Cvar_RegisterVariable (&r_ref_enable_fog);
+	Cvar_RegisterVariable (&r_ref_enable_lighting);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
 	Cvar_SetCallback (&r_backend_api, R_Backend_ApiChanged_f);
 	if (!s_backend_audit_cmd_registered)
@@ -1995,17 +1995,9 @@ void R_Backend_Init (void)
 
 	R_Backend_Register (&s_vulkan_stub_backend);
 	R_Backend_Register (&s_dx12_stub_backend);
-	{
-		iw_renderer_plugin_host_api_t host_api;
-
-		R_Backend_FillPluginHostApi (&host_api);
-		if (!IW_RendererBuiltinGL_RegisterInternal (&host_api))
-			Con_Warning ("Internal OpenGL renderer fallback failed to register.\n");
-	}
-
-	if (R_Backend_IsExternalRendererRequest (r_backend_api.string)
-		|| R_Backend_IsExternalRendererRequest (r_backend.string))
-		R_Backend_LoadRendererPlugins ();
+	/* OBSOLETE (Phase 6): internal builtin OpenGL renderer registration path.
+	 * External renderer plugins are now authoritative; ref_gl is the default. */
+	R_Backend_LoadRendererPlugins ();
 
 	if (!R_Backend_HasRegisteredName ("OpenGL"))
 	{
@@ -2181,6 +2173,10 @@ const RenderBackendCaps *R_Backend_GetCaps (void)
 void R_Backend_BeginFrame (void)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
+	/* External renderer plugins maintain their own render globals; keep host-side
+	 * frame-indexed backend state monotonic by syncing to host_framecount. */
+	if (host_framecount > r_framecount)
+		r_framecount = host_framecount;
 	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
 		Con_DPrintf ("R_Backend_BeginFrame: frame=%d backend='%s'\n",
 			r_framecount,
@@ -2224,27 +2220,38 @@ void R_Backend_Present (void)
 void R_Backend_BeginPassEx (const RenderBackendPassDesc *pass_desc)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
+	static int warned_missing_begin_pass_ex_frame = -1;
 
 	if (!backend)
 		return;
 
 	if (backend->begin_pass_ex)
 		backend->begin_pass_ex (pass_desc);
-	else if (backend->begin_pass)
-		backend->begin_pass ((pass_desc && pass_desc->name) ? pass_desc->name : "<unnamed>");
+	else if (warned_missing_begin_pass_ex_frame != r_framecount)
+	{
+		Con_DWarning ("Renderer backend '%s' missing required begin_pass_ex callback; pass '%s' setup skipped.\n",
+			backend->name ? backend->name : "<unnamed>",
+			(pass_desc && pass_desc->name) ? pass_desc->name : "<unnamed>");
+		warned_missing_begin_pass_ex_frame = r_framecount;
+	}
 }
 
 void R_Backend_EndPassEx (void)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
+	static int warned_missing_end_pass_ex_frame = -1;
 
 	if (!backend)
 		return;
 
 	if (backend->end_pass_ex)
 		backend->end_pass_ex ();
-	else if (backend->end_pass)
-		backend->end_pass ();
+	else if (warned_missing_end_pass_ex_frame != r_framecount)
+	{
+		Con_DWarning ("Renderer backend '%s' missing required end_pass_ex callback; pass teardown skipped.\n",
+			backend->name ? backend->name : "<unnamed>");
+		warned_missing_end_pass_ex_frame = r_framecount;
+	}
 }
 
 void R_Backend_ResourceBarrier (const RenderGraphResourceHandle *resources, const RenderBackendResourceBarrier *barriers, unsigned count)

@@ -19,6 +19,7 @@ extern cvar_t r_shadow_sun_cascades;
 extern cvar_t r_shadow_profile;
 extern cvar_t r_shadow_debug;
 extern cvar_t r_shadow_log;
+extern cvar_t r_ref_enable_shadows;
 extern cvar_t r_rimlight;
 extern cvar_t r_rimlight_models;
 extern cvar_t r_rimlight_intensity;
@@ -157,7 +158,7 @@ static void R_Shadow_BuildSplitRatios (int cascade_count, float sun_dist, float 
 
 qboolean R_Shadow_Enabled (void)
 {
-	return r_shadow.value > 0.f;
+	return (r_ref_enable_shadows.value != 0.f) && r_shadow.value > 0.f;
 }
 
 qboolean R_Shadow_SunEnabled (void)

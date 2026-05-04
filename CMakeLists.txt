@@ -129,6 +129,7 @@ set(REF_GL_SRC
 	Quake/src/render/gl_screen.c
 	Quake/src/platform/gl_vidsdl.c
 	Quake/src/render/gl_model.c
+	Quake/src/render/gl_model_glb.c
 	Quake/src/render/gl_mesh.c
 	Quake/src/render/gl_sky.c
 	Quake/src/render/gl_warp.c

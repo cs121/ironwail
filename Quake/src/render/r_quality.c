@@ -1,5 +1,4 @@
 #include "quakedef.h"
-#include "glquake.h"
 
 #include "r_quality.h"
 #include "cl_postfx.h"

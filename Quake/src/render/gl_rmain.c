@@ -46,6 +46,9 @@ extern cvar_t r_refgl_log_init;
 extern cvar_t r_refgl_log_passes;
 extern cvar_t r_refgl_log_resources;
 extern cvar_t r_refgl_validate_fbo;
+extern cvar_t r_ref_enable_postfx;
+extern cvar_t r_ref_enable_fog;
+extern cvar_t r_ref_enable_lighting;
 
 #ifdef RENDERER_PLUGIN_BUILD
 #define IW_PARSE_FSCANF fscanf_s
@@ -3216,7 +3219,7 @@ static qboolean GL_PostFXBloomBoostActive (void)
 {
 	postfx_state_t state;
 
-	if (r_postfx.value <= 0.f)
+	if (r_ref_enable_postfx.value == 0.f || r_postfx.value <= 0.f)
 		return false;
 
 	R_PostFX_GetState (&state);
@@ -3349,6 +3352,24 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 		return;
 	if (composite_fbo == 0 || composite_color_tex == 0)
 		return;
+
+	if (r_ref_enable_postfx.value == 0.f)
+	{
+		GL_BeginGroup ("Postprocess disabled blit");
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, composite_fbo);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, 0);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		glDrawBuffer (GL_BACK);
+		GL_BlitFramebufferFunc (0, 0, R_GetNativeRenderWidth (), R_GetNativeRenderHeight (),
+			0, 0, R_GetNativeRenderWidth (), R_GetNativeRenderHeight (),
+			GL_COLOR_BUFFER_BIT, GL_NEAREST);
+		GL_BindFramebufferFunc (GL_FRAMEBUFFER, 0);
+		glReadBuffer (GL_BACK);
+		glDrawBuffer (GL_BACK);
+		GL_EndGroup ();
+		return;
+	}
+
 	if (!composite_written_this_frame)
 	{
 		GL_BeginGroup ("Postprocess backbuffer copy");
@@ -3482,6 +3503,14 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 		ssao_intensity = 0.f;
 	ssao_fog_strength = CLAMP (0.f, r_ssao_fog_strength.value, 1.f);
 	ssao_fog_power = q_max (0.01f, r_ssao_fog_power.value);
+	if (r_ref_enable_fog.value == 0.f)
+	{
+		ssao_fog_strength = 0.f;
+		ssao_fog_power = 1.f;
+		fog_r = 0.f;
+		fog_g = 0.f;
+		fog_b = 0.f;
+	}
 
 	motion_strength = q_max (0.f, r_motionblur.value);
 	if (!GL_ShouldApplyMotionBlur ())
@@ -3632,7 +3661,7 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 	GL_Uniform4fFunc (22,
 		postfx_lut_strength,
 		postfx_state.underwater_postfx_active ? postfx_state.underwater_grade_strength : 0.f,
-		postfx_state.underwater_postfx_active ? postfx_state.underwater_fog_strength : 0.f,
+		(postfx_state.underwater_postfx_active && r_ref_enable_fog.value != 0.f) ? postfx_state.underwater_fog_strength : 0.f,
 		postfx_vignette_softness);
 	GL_Uniform4fFunc (23, (float)postfx_lut_size, (float)postfx_lut_id, 0.f, 0.f);
 	/* Postprocess SSAO damping uses the cached global fog density instead of
@@ -4352,7 +4381,7 @@ static qboolean GL_NeedsPostprocess_Internal (void)
 	qboolean godrays_medium;
 
 	saturation = CLAMP (0.9f, r_color_saturation.value, 1.2f);
-	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_DoFEnabled ())
+	if (softemu || R_GetEffectiveAlphaMode () == ALPHAMODE_OIT || R_PostFX_DoFEnabledEffective ())
 		return true;
 	if (r_debug_colorspace.value > 0.f)
 		return true;
@@ -4376,13 +4405,13 @@ qboolean GL_NeedsSceneEffects (void)
 		return true;
 
 	/* Bloom enabled: keep scene-effects path active for a full-frame bloom extract/composite pass. */
-	if (r_bloom.value > 0.f || GL_PostFXBloomBoostActive ())
+	if ((r_ref_enable_postfx.value != 0.f && r_bloom.value > 0.f) || GL_PostFXBloomBoostActive ())
 		return true;
 
         if (GL_ShouldApplyMotionBlur ())
 		return true;
 
-	if (R_DoFEnabled ())
+	if (r_ref_enable_postfx.value != 0.f && R_PostFX_DoFEnabledEffective ())
 		return true;
 
 	return false;
@@ -4395,6 +4424,8 @@ GL_NeedsPostprocess
 */
 qboolean GL_NeedsPostprocess (void)
 {
+	if (r_ref_enable_postfx.value == 0.f)
+		return false;
 	return GL_NeedsPostprocess_Internal ();
 }
 
@@ -4444,6 +4475,7 @@ static void R_EnsureRenderTargetSampleState (void)
 	qboolean sample_changed = (current_samples != desired_samples);
 	R_GetSceneRenderTargetAllocationSize (native_w, native_h, desired_scene_w, desired_scene_h, &desired_alloc_w, &desired_alloc_h);
 	qboolean size_changed = (current_scene_w != desired_alloc_w || current_scene_h != desired_alloc_h);
+	qboolean targets_uninitialized = (framebufs.scene.fbo == 0u || framebufs.scene.color_tex == 0u || framebufs.scene.depth_stencil_tex == 0u);
 
 	if (r_scene_resize_pending_invalidation)
 	{
@@ -4451,10 +4483,11 @@ static void R_EnsureRenderTargetSampleState (void)
 		r_scene_resize_pending_invalidation = false;
 	}
 
-	if (!sample_changed && !size_changed)
+	if (!sample_changed && !size_changed && !targets_uninitialized)
 		return;
 
-	Con_DPrintf ("Recreating render targets (alloc %dx%d -> %dx%d, samples %d -> %d)\n",
+	Con_DPrintf ("%s render targets (alloc %dx%d -> %dx%d, samples %d -> %d)\n",
+		targets_uninitialized ? "Initializing" : "Recreating",
 		current_scene_w, current_scene_h, desired_alloc_w, desired_alloc_h,
 		current_samples, desired_samples);
 	GL_DeleteFrameBuffers ();
@@ -4901,12 +4934,18 @@ void R_SetupView (void)
 
 	R_SortEntities ();
 
-
-	R_PushDlights ();
-	/* Build one shared light-collection list for this frame; forward world/model
-	 * passes consume it later. This is scene-light plumbing,
-	 * not a fullscreen postprocess lighting pass. */
-	R_PPdlights_CollectFrame ();
+	if (r_ref_enable_lighting.value != 0.f)
+	{
+		R_PushDlights ();
+		/* Build one shared light-collection list for this frame; forward world/model
+		 * passes consume it later. This is scene-light plumbing,
+		 * not a fullscreen postprocess lighting pass. */
+		R_PPdlights_CollectFrame ();
+	}
+	else if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+	{
+		Con_DPrintf ("ref_gl: scene setup skipping dynamic light collection (r_ref_enable_lighting=0)\n");
+	}
 
 	//johnfitz -- cheat-protect some draw modes
 	r_fullbright_cheatsafe = r_lightmap_cheatsafe = false;
@@ -4945,7 +4984,16 @@ void R_StorePrevFrameState (void)
 
 void R_CaptureSSAOFogHandoffState (void)
 {
-	R_SSAO_CaptureFogState (&r_framedata, &r_ssao_fog_state);
+	if (r_ref_enable_fog.value != 0.f)
+	{
+		R_SSAO_CaptureFogState (&r_framedata, &r_ssao_fog_state);
+	}
+	else
+	{
+		memset (&r_ssao_fog_state, 0, sizeof (r_ssao_fog_state));
+		if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+			Con_DPrintf ("ref_gl: fog handoff disabled (r_ref_enable_fog=0)\n");
+	}
 }
 
 void R_MarkFrameRenderedThisUpdate (void)
@@ -6024,7 +6072,10 @@ void R_RenderScene (const r_render_scene_input_t *input)
 	 * world dlight pass to make these exclusions explicit by construction. */
 	R_DrawEntitiesOnList (false); //johnfitz -- false means this is the pass for nonalpha entities
 	R_DrawDecals ();
-	R_DrawDLightPass ();
+	if (r_ref_enable_lighting.value != 0.f)
+		R_DrawDLightPass ();
+	else if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		Con_DPrintf ("ref_gl: skipping dynamic light pass (r_ref_enable_lighting=0)\n");
 	R_DrawParticles (false);
 	Sky_DrawSky (); //johnfitz
 	R_DrawWater (false);

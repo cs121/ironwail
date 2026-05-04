@@ -54,4 +54,6 @@ extern ref_gl_stats_t ref_gl_stats;
 
 void REFGL_StatsLogSummary (void);
 
+void GL_Backend_UploadPostFXLUTData (unsigned texture_id, const void *data, int width, int height, int layer_count);
+
 #endif

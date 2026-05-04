@@ -118,6 +118,17 @@ static unsigned int updates_countdown = 0;
 static qboolean gyro_present = false;
 static qboolean gyro_button_pressed = false;
 
+static qboolean IN_EventMatchesMainWindow (Uint32 event_window_id)
+{
+	SDL_Window *window = (SDL_Window *)VID_GetWindow ();
+
+	if (!window)
+		return true;
+	if (event_window_id == 0u)
+		return true;
+	return event_window_id == SDL_GetWindowID (window);
+}
+
 static struct
 {
 	float	yaw;
@@ -1648,6 +1659,8 @@ void IN_SendKeyEvents (void)
 		switch (event.type)
 		{
 		case SDL_WINDOWEVENT:
+			if (!IN_EventMatchesMainWindow (event.window.windowID))
+				break;
 			if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED)
 			{
 				Sys_ActivateKeyFilter(true);

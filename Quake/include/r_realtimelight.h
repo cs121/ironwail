@@ -1,6 +1,8 @@
 #ifndef R_REALTIMELIGHT_H
 #define R_REALTIMELIGHT_H
 
+#include "glquake.h"
+
 /*
  * Shared realtime light collection for forward surface + volumetric consumers.
  *

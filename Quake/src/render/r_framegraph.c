@@ -10,7 +10,7 @@ extern cvar_t r_framegraph_autobind;
 extern cvar_t r_framegraph_debug;
 extern cvar_t r_framegraph_pass_debug;
 extern cvar_t r_speeds;
-extern cvar_t r_shadow;
+qboolean R_Shadow_Enabled (void);
 
 void R_RegisterFrameGraphPasses (void);
 
@@ -57,6 +57,7 @@ static qboolean s_pass_registration_locked = false;
 static unsigned s_cycle_warning_signature = 0u;
 static qboolean s_cycle_warning_emitted = false;
 static int s_pass_baseline_autobind_warn_frame = -1;
+static int s_frameplan_log_frame = -1;
 
 static qboolean FG_AutobindEnabled (void)
 {
@@ -1220,7 +1221,6 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	RenderBackendPassAttachmentDesc depth_attachment;
 	RenderBackendPassDesc backend_pass_desc;
 	qboolean has_depth_attachment = false;
-	qboolean has_legacy_validation = false;
 
 	if (!pass || !ctx)
 		return;
@@ -1233,7 +1233,6 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 
 	for (bit = 1u; bit != 0; bit <<= 1)
 	{
-		qboolean read_required = true;
 		qboolean requires_backend_resource = false;
 		render_backend_resource_slot_t slot = R_BACKEND_RESOURCE_SLOT_NONE;
 		const render_backend_resource_ref_t *resource_ref;
@@ -1244,14 +1243,6 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 			Con_DWarning ("FrameGraph: pass '%s' uses unmapped resource bit 0x%x\n", pass->name, bit);
 			FG_FatalErrorLogAndExit ("pass '%s' uses unmapped resource bit 0x%x", pass->name, bit);
 		}
-		if (bit == RENDER_RES_SHADOW_SUN_DEPTH)
-		{
-			/* Sun-shadow reads are optional when sun shadows are inactive
-			 * (e.g. maps without sun), even if other shadow paths still run. */
-			read_required = (ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps && R_Shadow_SunEnabled ());
-		}
-		if (!read_required)
-			continue;
 		if (!requires_backend_resource)
 			continue;
 
@@ -1322,9 +1313,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	FG_EmitPassBarriers (pass, ctx);
 	FG_DebugPrintResolvedSlots (pass, ctx);
 
-	has_legacy_validation = (ctx->backend && ctx->backend->validate_pass_state
-		&& !ctx->backend->begin_pass_ex);
-	if (has_legacy_validation)
+	if (ctx->backend && ctx->backend->validate_pass_state)
 		ctx->backend->validate_pass_state (pass->name, true);
 	R_Backend_BeginPassEx (&backend_pass_desc);
 	if (ctx->frame_plan && ctx->frame_plan->run_gpu_timers && ctx->backend && ctx->backend->begin_timer)
@@ -1339,7 +1328,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	if (ctx->frame_plan && ctx->frame_plan->run_gpu_timers && ctx->backend && ctx->backend->end_timer)
 		ctx->backend->end_timer (profile_slot);
 	R_Backend_EndPassEx ();
-	if (has_legacy_validation)
+	if (ctx->backend && ctx->backend->validate_pass_state)
 		ctx->backend->validate_pass_state (pass->name, false);
 }
 
@@ -1356,13 +1345,23 @@ void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan)
 	R_Backend_QuerySurfaceInfo (&surface_info);
 	out_plan->needs_scene_effects = surface_info.needs_scene_effects;
 	out_plan->needs_postprocess = surface_info.needs_postprocess;
-	out_plan->run_shadowmaps = (r_shadow.value > 0.f);
+	out_plan->run_shadowmaps = R_Shadow_Enabled ();
 	out_plan->run_postprocess = out_plan->needs_postprocess;
 	out_plan->run_viewmodel = true;
 	out_plan->run_polyblend = true;
 	out_plan->run_store_prev = true;
 	caps = R_Backend_GetCaps ();
 	out_plan->run_gpu_timers = (caps && caps->supports_timestamps);
+
+	if (r_framegraph_debug.value > 0.f && s_frameplan_log_frame != host_framecount)
+	{
+		s_frameplan_log_frame = host_framecount;
+		Con_DPrintf ("frameplan: scenefx=%d postfx=%d run_shadow=%d run_post=%d\n",
+			out_plan->needs_scene_effects ? 1 : 0,
+			out_plan->needs_postprocess ? 1 : 0,
+			out_plan->run_shadowmaps ? 1 : 0,
+			out_plan->run_postprocess ? 1 : 0);
+	}
 }
 
 void R_FrameGraph_SetRenderFramePlan (const RenderFramePlan *plan)

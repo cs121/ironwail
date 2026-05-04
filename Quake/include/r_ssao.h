@@ -1,7 +1,7 @@
 #ifndef R_SSAO_H
 #define R_SSAO_H
 
-#include "quakedef.h"
+#include "glquake.h"
 
 typedef struct r_ssao_fog_state_s
 {

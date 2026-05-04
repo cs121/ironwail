@@ -119,6 +119,10 @@ cvar_t r_refgl_log_state = { "r_refgl_log_state", "0", CVAR_NONE };
 cvar_t r_refgl_validate_state = { "r_refgl_validate_state", "0", CVAR_NONE };
 cvar_t r_refgl_validate_fbo = { "r_refgl_validate_fbo", "0", CVAR_NONE };
 cvar_t r_refgl_validate_lifetime = { "r_refgl_validate_lifetime", "0", CVAR_NONE };
+cvar_t r_ref_enable_postfx = { "r_ref_enable_postfx", "1", CVAR_ARCHIVE };
+cvar_t r_ref_enable_shadows = { "r_ref_enable_shadows", "1", CVAR_ARCHIVE };
+cvar_t r_ref_enable_fog = { "r_ref_enable_fog", "1", CVAR_ARCHIVE };
+cvar_t r_ref_enable_lighting = { "r_ref_enable_lighting", "1", CVAR_ARCHIVE };
 
 static void ClearAllStates (void);
 static void GL_Init (void);

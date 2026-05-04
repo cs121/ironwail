@@ -2,6 +2,7 @@
 #include "glquake.h"
 #include "gl_backend.h"
 #include "r_framegraph.h"
+#include "r_resources_gl.h"
 
 enum
 {
@@ -146,6 +147,10 @@ void GL_Backend_PopulateResourceRegistry (RenderGraphResourceHandle *out_handles
 	if (!out_handles)
 		return;
 
+	/* Keep backend registry resilient against init-order differences between
+	 * host and plugin paths by re-registering active GL slots on demand. */
+	GL_ResourceRegistry_RegisterFrameGraphSlots ();
+
 	for (i = 0; i < s_gl_resources.count; ++i)
 	{
 		const struct gl_backend_resource_entry_s *entry = &s_gl_resources.entries[i];
@@ -173,4 +178,3 @@ void GL_Backend_PopulateResourceRegistry (RenderGraphResourceHandle *out_handles
 		out_handles->refs[slot].opaque_id = entry->opaque_id;
 	}
 }
-

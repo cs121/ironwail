@@ -2,7 +2,15 @@
 
 #include "r_framegraph.h"
 
-qboolean R_Shadow_DlightEnabled (void);
+extern int r_framecount;
+extern cvar_t r_refgl_log_passes;
+extern cvar_t r_refgl_debug;
+
+static int s_shadow_skip_log_frame = -1;
+static int s_postfx_skip_log_frame = -1;
+static int s_viewmodel_skip_log_frame = -1;
+static int s_polyblend_skip_log_frame = -1;
+static int s_storeprev_skip_log_frame = -1;
 
 #define FG_PASS_BASELINE_DETERMINISTIC_STATE ( \
 	FG_PASS_BASELINE_RESET_SCISSOR | \
@@ -14,14 +22,29 @@ qboolean R_Shadow_DlightEnabled (void);
 static qboolean R_FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
 {
 	const render_backend_resource_ref_t *shadow_depth;
-	const qboolean want_any_shadow = (R_Shadow_SunEnabled () || R_Shadow_DlightEnabled ());
+	const qboolean log_skips = (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f);
 
-	if (!ctx || !ctx->frame_plan || !ctx->frame_plan->run_shadowmaps || !want_any_shadow)
+	if (!ctx || !ctx->frame_plan || !ctx->frame_plan->run_shadowmaps)
+	{
+		if (log_skips && s_shadow_skip_log_frame != r_framecount)
+		{
+			Con_DPrintf ("ref_gl: skip FG pass Shadow maps (run_shadowmaps=%d)\n",
+				(ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps) ? 1 : 0);
+			s_shadow_skip_log_frame = r_framecount;
+		}
 		return false;
+	}
 
 	shadow_depth = R_FrameGraph_GetResourceRef (ctx->resources, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);
 	if (!shadow_depth)
+	{
+		if (log_skips && s_shadow_skip_log_frame != r_framecount)
+		{
+			Con_DPrintf ("ref_gl: skip FG pass Shadow maps (missing shadow depth resource ref)\n");
+			s_shadow_skip_log_frame = r_framecount;
+		}
 		return false;
+	}
 
 	return !ctx->backend || !ctx->backend->is_resource_valid
 		|| ctx->backend->is_resource_valid (ctx->resources, shadow_depth);
@@ -29,23 +52,59 @@ static qboolean R_FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
 
 static qboolean R_FG_PassWhenPostprocessEnabled (const RenderPassContext *ctx)
 {
-	return ctx && ctx->frame_plan
+	const qboolean enabled = ctx && ctx->frame_plan
 		&& ctx->frame_plan->run_postprocess;
+
+	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		&& s_postfx_skip_log_frame != r_framecount)
+	{
+		Con_DPrintf ("ref_gl: skip FG pass Postprocess (run_postprocess=0)\n");
+		s_postfx_skip_log_frame = r_framecount;
+	}
+
+	return enabled;
 }
 
 static qboolean R_FG_PassWhenViewmodelEnabled (const RenderPassContext *ctx)
 {
-	return ctx && ctx->frame_plan && ctx->frame_plan->run_viewmodel;
+	const qboolean enabled = ctx && ctx->frame_plan && ctx->frame_plan->run_viewmodel;
+
+	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		&& s_viewmodel_skip_log_frame != r_framecount)
+	{
+		Con_DPrintf ("ref_gl: skip FG pass Overlay viewmodel (run_viewmodel=0)\n");
+		s_viewmodel_skip_log_frame = r_framecount;
+	}
+
+	return enabled;
 }
 
 static qboolean R_FG_PassWhenPolyblendEnabled (const RenderPassContext *ctx)
 {
-	return ctx && ctx->frame_plan && ctx->frame_plan->run_polyblend;
+	const qboolean enabled = ctx && ctx->frame_plan && ctx->frame_plan->run_polyblend;
+
+	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		&& s_polyblend_skip_log_frame != r_framecount)
+	{
+		Con_DPrintf ("ref_gl: skip FG pass Overlay polyblend (run_polyblend=0)\n");
+		s_polyblend_skip_log_frame = r_framecount;
+	}
+
+	return enabled;
 }
 
 static qboolean R_FG_PassWhenStorePrevEnabled (const RenderPassContext *ctx)
 {
-	return ctx && ctx->frame_plan && ctx->frame_plan->run_store_prev;
+	const qboolean enabled = ctx && ctx->frame_plan && ctx->frame_plan->run_store_prev;
+
+	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		&& s_storeprev_skip_log_frame != r_framecount)
+	{
+		Con_DPrintf ("ref_gl: skip FG pass Store previous state (run_store_prev=0)\n");
+		s_storeprev_skip_log_frame = r_framecount;
+	}
+
+	return enabled;
 }
 
 static void R_Pass_RunBackendCallback (RenderPassContext *ctx, const char *pass_name, void (*callback)(RenderPassContext *))
@@ -190,7 +249,9 @@ static const RenderPassDesc s_shadowmaps_framegraph_pass = {
 
 static const RenderPassDesc s_scene_framegraph_pass = {
 	.name = "Render scene",
-	.reads = RENDER_RES_DECALS | RENDER_RES_SHADOW_SUN_DEPTH,
+	/* Shadow depth is sampled opportunistically by runtime/backend shadow code;
+	 * keep scene pass framegraph reads strict to always-bound resources only. */
+	.reads = RENDER_RES_DECALS,
 	.writes = RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_VELOCITY,
 	.side_effects = 0,
 	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE | FG_PASS_BASELINE_REQUIRE_AUTOBIND,

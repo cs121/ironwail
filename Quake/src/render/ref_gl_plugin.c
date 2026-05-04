@@ -178,13 +178,22 @@ static void REFGL_FillEntryPoints (void)
 
 static void REFGL_RenderView_Entry (void)
 {
+	static qboolean warned_missing_bridge_refdef = false;
+
 	if (g_bridge_data && g_bridge_data->r_refdef)
 	{
-		/* Host view code owns camera transforms; plugin screen code owns vrect/FOV/scale.
-		 * Copying the full refdef can clobber the plugin-computed viewport state and produce
-		 * black / invalid 3D output with only 2D overlays visible. */
+		/* Keep camera/FOV in lockstep with host view build, but preserve plugin-side
+		 * viewport/scale ownership to avoid clobbering runtime render-target setup. */
 		VectorCopy (g_bridge_data->r_refdef->vieworg, r_refdef.vieworg);
 		VectorCopy (g_bridge_data->r_refdef->viewangles, r_refdef.viewangles);
+		r_refdef.basefov = g_bridge_data->r_refdef->basefov;
+		r_refdef.fov_x = g_bridge_data->r_refdef->fov_x;
+		r_refdef.fov_y = g_bridge_data->r_refdef->fov_y;
+	}
+	else if (!warned_missing_bridge_refdef)
+	{
+		Con_DWarning ("ref_gl: missing host refdef bridge in RenderView entry; using local refdef fallback.\n");
+		warned_missing_bridge_refdef = true;
 	}
 
 	R_RenderView ();

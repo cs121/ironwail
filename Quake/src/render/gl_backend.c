@@ -44,7 +44,13 @@ typedef struct gl_backend_timer_pass_s
 
 static gl_backend_timer_pass_t s_timer_passes[R_BACKEND_MAX_PROFILE_SLOTS];
 static RenderBackendCaps s_gl_backend_caps;
-static int s_legacy_pass_resource_fallback_frame = -1;
+static int s_missing_pass_resource_log_frame = -1;
+static int s_refgl_feature_log_frame = -1;
+static int s_backend_shadow_skip_log_frame = -1;
+static int s_backend_postfx_skip_log_frame = -1;
+static int s_backend_viewmodel_skip_log_frame = -1;
+static int s_backend_polyblend_skip_log_frame = -1;
+static int s_backend_missing_frameplan_log_frame = -1;
 
 extern cvar_t r_refgl_debug;
 extern cvar_t r_refgl_log_init;
@@ -54,6 +60,38 @@ extern cvar_t r_refgl_log_state;
 extern cvar_t r_refgl_validate_state;
 extern cvar_t r_refgl_validate_fbo;
 extern cvar_t r_refgl_validate_lifetime;
+extern cvar_t r_ref_enable_postfx;
+extern cvar_t r_ref_enable_shadows;
+extern cvar_t r_ref_enable_fog;
+extern cvar_t r_ref_enable_lighting;
+
+static qboolean GLBackend_ShouldLogPasses (void)
+{
+	return (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f);
+}
+
+static qboolean GLBackend_LogOncePerFrame (int *last_frame)
+{
+	if (!last_frame || !GLBackend_ShouldLogPasses ())
+		return false;
+	if (*last_frame == r_framecount)
+		return false;
+	*last_frame = r_framecount;
+	return true;
+}
+
+static qboolean GLBackend_RequireFramePlan (const RenderPassContext *ctx, const char *pass_name)
+{
+	if (ctx && ctx->frame_plan)
+		return true;
+
+	if (GLBackend_LogOncePerFrame (&s_backend_missing_frameplan_log_frame))
+	{
+		Con_DWarning ("FrameGraph contract: backend pass '%s' missing frame plan; skipping callback\n",
+			pass_name ? pass_name : "<unnamed>");
+	}
+	return false;
+}
 
 void GL_Backend_PopulateResourceRegistry (RenderGraphResourceHandle *out_handles);
 
@@ -876,6 +914,14 @@ static void GLBackend_ConfigurePostFXLUTTexture (unsigned texture_id)
 	glTexParameteri (GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 }
 
+void GL_Backend_UploadPostFXLUTData (unsigned texture_id, const void *data, int width, int height, int layer_count)
+{
+	GL_BindNative (GL_TEXTURE0, GL_TEXTURE_2D_ARRAY, (GLuint)texture_id);
+	GL_TexImage3DFunc (GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, width, height, layer_count, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+	if (GL_ObjectLabelFunc)
+		GL_ObjectLabelFunc (GL_TEXTURE, (GLuint)texture_id, -1, "postfx lut");
+}
+
 static void GLBackend_Finish (void)
 {
 	glFinish ();
@@ -889,6 +935,24 @@ static void GLBackend_PassSetupView (RenderPassContext *ctx)
 
 static void GLBackend_PassShadowMaps (RenderPassContext *ctx)
 {
+	if (!GLBackend_RequireFramePlan (ctx, "Shadow maps"))
+		return;
+
+	if (!ctx->frame_plan->run_shadowmaps)
+	{
+		if (GLBackend_LogOncePerFrame (&s_backend_shadow_skip_log_frame))
+		{
+			Con_DPrintf ("ref_gl: skipping backend Shadow maps callback (run_shadowmaps=0)\n");
+		}
+		return;
+	}
+
+	if (r_ref_enable_shadows.value == 0.f)
+	{
+		if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+			Con_DPrintf ("ref_gl: skipping pass Shadow maps (r_ref_enable_shadows=0)\n");
+		return;
+	}
 	(void)ctx;
 	R_RenderShadowMaps ();
 }
@@ -897,6 +961,9 @@ static void GLBackend_PassRenderScene (RenderPassContext *ctx)
 {
 	r_render_scene_input_t input;
 	scene_size_info_t scene_size;
+
+	if (!GLBackend_RequireFramePlan (ctx, "Render scene"))
+		return;
 
 	memset (&input, 0, sizeof (input));
 	R_GetSceneSizeInfo (&scene_size);
@@ -910,34 +977,44 @@ static void GLBackend_PassRenderScene (RenderPassContext *ctx)
 	input.scene_size.scale = scene_size.scene_scale;
 	input.scene_size.resolution_ratio = scene_size.resolution_ratio;
 	input.has_worldmodel = (cl.worldmodel != NULL);
+	if ((r_ref_enable_fog.value == 0.f || r_ref_enable_lighting.value == 0.f)
+		&& (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f))
+	{
+		Con_DPrintf ("ref_gl: render scene flags fog=%d lighting=%d (informational; full scene-pass split pending)\n",
+			r_ref_enable_fog.value != 0.f,
+			r_ref_enable_lighting.value != 0.f);
+	}
 
 	R_RenderScene (&input);
 }
 
-static const RenderGraphResourceHandle *GLBackend_GetPassResourcesOrFallback (const RenderPassContext *ctx, RenderGraphResourceHandle *fallback_resources, const char *pass_name)
+static const RenderGraphResourceHandle *GLBackend_GetPassResourcesStrict (const RenderPassContext *ctx, const char *pass_name)
 {
 	if (ctx && ctx->resources)
 		return ctx->resources;
-	if (!fallback_resources)
-		return NULL;
-
-	memset (fallback_resources, 0, sizeof (*fallback_resources));
-	GLBackend_PopulateFrameGraphResources (fallback_resources);
-	if (r_framegraph_debug.value > 0.f && s_legacy_pass_resource_fallback_frame != r_framecount)
+	if (r_framegraph_debug.value > 0.f && s_missing_pass_resource_log_frame != r_framecount)
 	{
-		Con_DWarning ("FrameGraph seam: '%s' ran without pass resources; using backend fallback handles\n",
+		Con_DWarning ("FrameGraph contract: '%s' ran without pass resources; skipping pass callback\n",
 			pass_name ? pass_name : "<unnamed>");
-		s_legacy_pass_resource_fallback_frame = r_framecount;
+		s_missing_pass_resource_log_frame = r_framecount;
 	}
-	return fallback_resources;
+	return NULL;
 }
 
 static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
 {
-	RenderGraphResourceHandle fallback_resources;
-	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesOrFallback (ctx, &fallback_resources, "Warp/resolve");
+	const RenderGraphResourceHandle *resources;
+	qboolean frameplan_needs_postprocess;
 	r_warp_resolve_input_t input;
 	scene_size_info_t scene_size;
+
+	if (!GLBackend_RequireFramePlan (ctx, "Warp/resolve"))
+		return;
+	frameplan_needs_postprocess = ctx->frame_plan->needs_postprocess;
+
+	resources = GLBackend_GetPassResourcesStrict (ctx, "Warp/resolve");
+	if (!resources)
+		return;
 
 	memset (&input, 0, sizeof (input));
 	R_GetSceneSizeInfo (&scene_size);
@@ -950,9 +1027,9 @@ static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
 	input.scene_size.height = scene_size.scene_height;
 	input.scene_size.scale = scene_size.scene_scale;
 	input.scene_size.resolution_ratio = scene_size.resolution_ratio;
-	input.needs_postprocess = GL_NeedsPostprocess ();
-	input.dof_enabled = R_PostFX_DoFEnabledEffective ();
-	input.ssao_enabled = R_SSAO_EnabledEffective ();
+	input.needs_postprocess = frameplan_needs_postprocess;
+	input.dof_enabled = frameplan_needs_postprocess && R_PostFX_DoFEnabledEffective ();
+	input.ssao_enabled = frameplan_needs_postprocess && R_SSAO_EnabledEffective ();
 	input.godrays_preview = R_PostFX_GodraysPreviewEnabledEffective ();
 
 	R_WarpScaleView (&input);
@@ -960,10 +1037,24 @@ static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
 
 static void GLBackend_PassPostProcess (RenderPassContext *ctx)
 {
-	RenderGraphResourceHandle fallback_resources;
-	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesOrFallback (ctx, &fallback_resources, "Postprocess");
+	if (!GLBackend_RequireFramePlan (ctx, "Postprocess"))
+		return;
+
+	if (!ctx->frame_plan->run_postprocess)
+	{
+		if (GLBackend_LogOncePerFrame (&s_backend_postfx_skip_log_frame))
+		{
+			Con_DPrintf ("ref_gl: skipping backend Postprocess callback (run_postprocess=0)\n");
+		}
+		return;
+	}
+
+	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesStrict (ctx, "Postprocess");
 	r_postprocess_input_t input;
 	scene_size_info_t scene_size;
+
+	if (!resources)
+		return;
 
 	memset (&input, 0, sizeof (input));
 	R_GetSceneSizeInfo (&scene_size);
@@ -977,25 +1068,57 @@ static void GLBackend_PassPostProcess (RenderPassContext *ctx)
 	input.scene_size.scale = scene_size.scene_scale;
 	input.scene_size.resolution_ratio = scene_size.resolution_ratio;
 	input.composite_written_this_frame = ctx ? ctx->composite_written_this_frame : false;
+	if (!input.composite_written_this_frame && GLBackend_ShouldLogPasses ())
+		Con_DPrintf ("ref_gl: postprocess running without composite_written flag (fallback path)\n");
+	if (r_ref_enable_postfx.value == 0.f && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f))
+		Con_DPrintf ("ref_gl: postprocess disabled, presenting composite via blit fallback\n");
 
 	GL_PostProcess (&input);
 }
 
 static void GLBackend_PassOverlayViewmodel (RenderPassContext *ctx)
 {
+	if (!GLBackend_RequireFramePlan (ctx, "Overlay viewmodel"))
+		return;
+
+	if (!ctx->frame_plan->run_viewmodel)
+	{
+		if (GLBackend_LogOncePerFrame (&s_backend_viewmodel_skip_log_frame))
+		{
+			Con_DPrintf ("ref_gl: skipping backend Overlay viewmodel callback (run_viewmodel=0)\n");
+		}
+		return;
+	}
 	(void)ctx;
 	R_DrawViewModel ();
 }
 
 static void GLBackend_PassOverlayPolyblend (RenderPassContext *ctx)
 {
+	if (!GLBackend_RequireFramePlan (ctx, "Overlay polyblend"))
+		return;
+
+	if (!ctx->frame_plan->run_polyblend)
+	{
+		if (GLBackend_LogOncePerFrame (&s_backend_polyblend_skip_log_frame))
+		{
+			Con_DPrintf ("ref_gl: skipping backend Overlay polyblend callback (run_polyblend=0)\n");
+		}
+		return;
+	}
 	(void)ctx;
 	V_PolyBlend ();
 }
 
 static qboolean GLBackend_HasRequiredPassCallbacks (void)
 {
-	return true;
+	return (GLBackend_PassSetupView != NULL
+		&& GLBackend_PassShadowMaps != NULL
+		&& GLBackend_PassRenderScene != NULL
+		&& GLBackend_PassWarpResolve != NULL
+		&& GLBackend_PassPostProcess != NULL
+		&& GLBackend_PassOverlayViewmodel != NULL
+		&& GLBackend_PassOverlayPolyblend != NULL);
 }
 
 static qboolean GLBackend_Init (void)
@@ -1047,6 +1170,16 @@ static void GLBackend_BeginFrame (void)
 
 	GL_Backend_ResetStateCache ();
 	GL_BackendBeginFrame ();
+	if ((r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+		&& s_refgl_feature_log_frame != r_framecount)
+	{
+		s_refgl_feature_log_frame = r_framecount;
+		Con_DPrintf ("ref_gl flags: postfx=%d shadows=%d fog=%d lighting=%d\n",
+			r_ref_enable_postfx.value != 0.f,
+			r_ref_enable_shadows.value != 0.f,
+			r_ref_enable_fog.value != 0.f,
+			r_ref_enable_lighting.value != 0.f);
+	}
 	ref_gl_stats.frames_rendered++;
 	REFGL_StatsPeriodicLog ();
 }
