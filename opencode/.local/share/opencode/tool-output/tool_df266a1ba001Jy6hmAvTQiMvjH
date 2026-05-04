@@ -1,0 +1,1271 @@
+MSBuild-Version 18.5.4+cb4e32d21 für .NET Framework
+Der Buildvorgang wurde am 04.05.2026 11:51:29 gestartet.
+
+Projekt "C:\Projects\ironwail\Windows\VisualStudio\ironwail.sln" auf Knoten "1", Build Ziel(e).
+ValidateSolutionConfiguration:
+  Die Projektmappenkonfiguration "Release|Win32" wird erstellt.
+Das Projekt "C:\Projects\ironwail\Windows\VisualStudio\ironwail.sln" (1) erstellt "C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj" (2) auf Knoten "1" (Standardziele).
+PrepareForBuild:
+  Die strukturierte Ausgabe ist aktiviert. Die Formatierung der Compilerdiagnose spiegelt die Fehlerhierarchie wider. Weitere Informationen finden Sie unter https://aka.ms/cpp/structured-output.
+InitializeBuildStatus:
+  "Build-ironwail\x86\Release\ironwail.tlog\unsuccessfulbuild" wird erstellt, da "AlwaysCreate" angegeben wurde.
+  Aktualisieren des Timestamps von "Build-ironwail\x86\Release\ironwail.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\bin\HostX86\x86\CL.exe /c /I..\curl\include /I..\SDL2\include /I..\codecs\include /I..\misc\include /I..\..\Quake\src\assets /I..\..\Quake\src\audio /I..\..\Quake\src\bot /I..\..\Quake\src\client /I..\..\Quake\src\core /I..\..\Quake\src\gamecode /I..\..\Quake\src\network /I..\..\Quake\src\physics /I..\..\Quake\src\platform /I..\..\Quake\src\render /I..\..\Quake\src\server /I..\..\Quake\src\thirdparty /I..\..\Quake\src\ui /Zi /nologo /W4 /WX- /diagnostics:column /MP /O2 /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _WINDOWS /D _CRT_NONSTDC_NO_DEPRECATE /D _WINSOCK_DEPRECATED_NO_WARNINGS /D IRONWAIL_ENFORCE_SAFE_CRT=1 /D USE_SDL2 /D USE_CODEC_MP3 /D USE_CODEC_VORBIS /D USE_CODEC_WAVE /D USE_CODEC_FLAC /D USE_CODEC_OPUS /D USE_CODEC_XMP /D USE_CODEC_UMX /D IW_RENDERER_HOST_FRONTEND=1 /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /std:c11 /Yc"quakedef.h" /Fp"Build-ironwail\x86\Release\ironwail.pch" /Fo"Build-ironwail\x86\Release\\" /Fd"Build-ironwail\x86\Release\vc145.pdb" /external:W4 /Gd /TC /analyze- /FC /errorReport:queue ..\..\Quake\src\core\quakedef.c
+  quakedef.c
+  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\bin\HostX86\x86\CL.exe /c /I..\curl\include /I..\SDL2\include /I..\codecs\include /I..\misc\include /I..\..\Quake\src\assets /I..\..\Quake\src\audio /I..\..\Quake\src\bot /I..\..\Quake\src\client /I..\..\Quake\src\core /I..\..\Quake\src\gamecode /I..\..\Quake\src\network /I..\..\Quake\src\physics /I..\..\Quake\src\platform /I..\..\Quake\src\render /I..\..\Quake\src\server /I..\..\Quake\src\thirdparty /I..\..\Quake\src\ui /Zi /nologo /W4 /WX- /diagnostics:column /MP /O2 /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _WINDOWS /D _CRT_NONSTDC_NO_DEPRECATE /D _WINSOCK_DEPRECATED_NO_WARNINGS /D IRONWAIL_ENFORCE_SAFE_CRT=1 /D USE_SDL2 /D USE_CODEC_MP3 /D USE_CODEC_VORBIS /D USE_CODEC_WAVE /D USE_CODEC_FLAC /D USE_CODEC_OPUS /D USE_CODEC_XMP /D USE_CODEC_UMX /D IW_RENDERER_HOST_FRONTEND=1 /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /std:c11 /Yu"quakedef.h" /Fp"Build-ironwail\x86\Release\ironwail.pch" /Fo"Build-ironwail\x86\Release\\" /Fd"Build-ironwail\x86\Release\vc145.pdb" /external:W4 /Gd /TC /analyze- /FC /errorReport:queue ..\..\Quake\src\core\async.c ..\..\Quake\src\audio\bgmusic.c ..\..\Quake\src\audio\cd_null.c ..\..\Quake\src\core\cfgfile.c ..\..\Quake\src\core\bootstrap.c ..\..\Quake\src\client\chase.c ..\..\Quake\src\client\cl_demo.c ..\..\Quake\src\client\cl_input.c ..\..\Quake\src\client\cl_iwmusic.c ..\..\Quake\src\client\cl_main.c ..\..\Quake\src\client\cl_parse.c ..\..\Quake\src\client\cl_postfx.c ..\..\Quake\src\client\cl_tent.c ..\..\Quake\src\core\cmd.c ..\..\Quake\src\core\common.c ..\..\Quake\src\core\console.c ..\..\Quake\src\core\crc.c ..\..\Quake\src\core\cvar.c ..\..\Quake\src\core\fs_pack.c ..\..\Quake\src\core\fs_searchpath.c ..\..\Quake\src\render\gl_fog.c ..\..\Quake\src\render\gl_lightgrid.c ..\..\Quake\src\render\gl_mesh.c ..\..\Quake\src\render\gl_model.c ..\..\Quake\src\render\gl_model_glb.c ..\..\Quake\src\render\gl_refrag.c ..\..\Quake\src\render\gl_rlight.c ..\..\Quake\src\render\gl_dlight.c ..\..\Quake\src\render\gl_oit.c ..\..\Quake\src\render\gl_shadow.c ..\..\Quake\src\render\gl_shadow_runtime.c ..\..\Quake\src\render\gl_backend.c ..\..\Quake\src\render\renderer_builtin_gl_plugin.c ..\..\Quake\src\render\gl_backend_runtime.c ..\..\Quake\src\render\gl_backend_resources.c ..\..\Quake\src\render\gl_draw.c ..\..\Quake\src\render\gl_rmain.c ..\..\Quake\src\render\gl_rmisc.c ..\..\Quake\src\render\gl_screen.c ..\..\Quake\src\render\r_skyvis.c ..\..\Quake\src\render\r_decals.c ..\..\Quake\src\render\gl_shaders.c ..\..\Quake\src\render\gl_sky.c ..\..\Quake\src\render\gl_texmgr.c ..\..\Quake\src\render\gl_ktx2.c ..\..\Quake\src\assets\ktx2_write.c ..\..\Quake\src\platform\gl_vidsdl.c ..\..\Quake\src\render\gl_warp.c ..\..\common\lightgrid.c ..\..\Quake\src\core\host.c ..\..\Quake\src\core\host_cmd.c ..\..\Quake\src\bot\bot_main.c ..\..\Quake\src\bot\bot_ai.c ..\..\Quake\src\bot\bot_combat.c ..\..\Quake\src\bot\bot_nav2.c ..\..\Quake\src\assets\image.c ..\..\Quake\src\platform\in_sdl.c ..\..\Quake\src\assets\json.c ..\..\Quake\src\ui\keys.c ..\..\Quake\src\platform\main_sdl.c ..\..\Quake\src\core\mathlib.c ..\..\Quake\src\render\mat_material.c ..\..\Quake\src\render\mat_material_parse.c ..\..\Quake\src\ui\menu_common.c ..\..\Quake\src\ui\menu_main.c ..\..\Quake\src\ui\menu_options.c ..\..\Quake\src\ui\menu_multiplayer.c ..\..\Quake\src\ui\menu_mods.c ..\..\Quake\src\ui\menu_video.c ..\..\Quake\src\network\net_dgrm.c ..\..\Quake\src\network\net_loop.c ..\..\Quake\src\network\net_main.c ..\..\Quake\src\network\net_win.c ..\..\Quake\src\network\net_wins.c ..\..\Quake\src\platform\pl_win.c ..\..\Quake\src\gamecode\pr_cmds.c ..\..\Quake\src\gamecode\pr_edict.c ..\..\Quake\src\gamecode\pr_exec.c ..\..\Quake\src\physics\phys_interact.c ..\..\Quake\src\render\r_entitylight.c ..\..\Quake\src\render\r_alias.c ..\..\Quake\src\render\r_brush.c ..\..\Quake\src\render\r_dlight_pool.c ..\..\Quake\src\render\r_backend.c ..\..\Quake\src\render\r_framegraph.c ..\..\Quake\src\render\r_resources_gl.c ..\..\Quake\src\render\r_passes.c ..\..\Quake\src\render\r_quality.c ..\..\Quake\src\render\r_sanitize.c ..\..\Quake\src\render\r_postfx.c ..\..\Quake\src\render\r_realtimelight.c ..\..\Quake\src\render\r_part.c ..\..\Quake\src\render\r_part_q3p.c ..\..\Quake\src\render\r_ssao.c ..\..\Quake\src\render\r_sprite.c ..\..\Quake\src\render\r_tonemap.c ..\..\Quake\src\render\r_world.c ..\..\Quake\src\render\ref_gl_host_bridge.c ..\..\Quake\src\render\render_dispatch.c ..\..\Quake\src\ui\sbar.c ..\..\Quake\src\audio\snd_codec.c ..\..\Quake\src\audio\snd_dma.c ..\..\Quake\src\audio\snd_flac.c ..\..\Quake\src\audio\snd_mem.c ..\..\Quake\src\audio\snd_mikmod.c ..\..\Quake\src\audio\snd_mix.c ..\..\Quake\src\audio\snd_modplug.c ..\..\Quake\src\audio\sounddef_parser.c ..\..\Quake\src\audio\sounddef_registry.c ..\..\Quake\src\audio\snd_mp3tag.c ..\..\Quake\src\audio\snd_mpg123.c ..\..\Quake\src\audio\snd_opus.c ..\..\Quake\src\audio\snd_sdl.c ..\..\Quake\src\audio\snd_umx.c ..\..\Quake\src\audio\snd_vorbis.c ..\..\Quake\src\audio\snd_wave.c ..\..\Quake\src\audio\snd_xmp.c ..\..\Quake\src\core\steam.c ..\..\Quake\src\server\sv_main.c ..\..\Quake\src\server\sv_move.c ..\..\Quake\src\server\sv_phys.c ..\..\Quake\src\server\sv_user.c ..\..\Quake\src\platform\sys_sdl_win.c ..\..\Quake\src\client\view.c ..\..\Quake\src\assets\wad.c ..\..\Quake\src\server\world.c ..\..\Quake\src\core\zone.c
+  async.c
+  bgmusic.c
+  cd_null.c
+  cfgfile.c
+  bootstrap.c
+  chase.c
+  cl_demo.c
+  cl_input.c
+  cl_iwmusic.c
+  cl_main.c
+  cl_parse.c
+  cl_postfx.c
+  cl_tent.c
+  cmd.c
+  common.c
+  console.c
+  crc.c
+  cvar.c
+  fs_pack.c
+  fs_searchpath.c
+  gl_fog.c
+  gl_lightgrid.c
+  gl_mesh.c
+  gl_model.c
+  gl_model_glb.c
+  gl_refrag.c
+  gl_rlight.c
+  gl_dlight.c
+  gl_oit.c
+  gl_shadow.c
+  gl_shadow_runtime.c
+  gl_backend.c
+  renderer_builtin_gl_plugin.c
+  gl_backend_runtime.c
+  gl_backend_resources.c
+  gl_draw.c
+  gl_rmain.c
+  gl_rmisc.c
+  gl_screen.c
+  r_skyvis.c
+  r_decals.c
+  gl_shaders.c
+  gl_sky.c
+  gl_texmgr.c
+  gl_ktx2.c
+  ktx2_write.c
+  gl_vidsdl.c
+  gl_warp.c
+  lightgrid.c
+  host.c
+  host_cmd.c
+  bot_main.c
+  bot_ai.c
+  bot_combat.c
+  bot_nav2.c
+  image.c
+  in_sdl.c
+  json.c
+  keys.c
+  main_sdl.c
+  mathlib.c
+  mat_material.c
+  mat_material_parse.c
+  menu_common.c
+  menu_main.c
+  menu_options.c
+  menu_multiplayer.c
+  menu_mods.c
+  menu_video.c
+  net_dgrm.c
+  net_loop.c
+  net_main.c
+  net_win.c
+  net_wins.c
+  pl_win.c
+  pr_cmds.c
+  pr_edict.c
+  pr_exec.c
+  phys_interact.c
+  r_entitylight.c
+  r_alias.c
+  r_brush.c
+  r_dlight_pool.c
+  r_backend.c
+  r_framegraph.c
+  r_resources_gl.c
+  r_passes.c
+  r_quality.c
+  r_sanitize.c
+  r_postfx.c
+  r_realtimelight.c
+  r_part.c
+  r_part_q3p.c
+  r_ssao.c
+  r_sprite.c
+  r_tonemap.c
+  r_world.c
+  ref_gl_host_bridge.c
+  render_dispatch.c
+  sbar.c
+  snd_codec.c
+  snd_dma.c
+  snd_flac.c
+  snd_mem.c
+  snd_mikmod.c
+  snd_mix.c
+  snd_modplug.c
+  sounddef_parser.c
+  sounddef_registry.c
+  snd_mp3tag.c
+  snd_mpg123.c
+  snd_opus.c
+  snd_sdl.c
+  snd_umx.c
+  snd_vorbis.c
+  snd_wave.c
+  snd_xmp.c
+  steam.c
+  sv_main.c
+  sv_move.c
+C:\Projects\ironwail\Quake\src\core\console.c(2278,41): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  sv_phys.c
+  sv_user.c
+  sys_sdl_win.c
+  view.c
+  wad.c
+  world.c
+  zone.c
+  (Quelldatei „/Quake/src/core/console.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\bot\bot_combat.c(10,8): warning C4459: Deklaration von "skill" blendet globale Deklaration aus [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/bot/bot_combat.c“ wird kompiliert)
+      C:\Projects\ironwail\Quake\src\server\server.h(267,15):
+      Siehe Deklaration von "skill"
+  
+C:\Projects\ironwail\Quake\src\assets\image.c(209,32): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/assets/image.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(742,10): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(766,10): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(783,10): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(799,10): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(814,11): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(814,49): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(814,92): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(821,11): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(836,16): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(843,16): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(864,10): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/gamecode/pr_edict.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\audio\snd_wave.c(240,47): warning C4389: "!=": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  (Quelldatei „/Quake/src/audio/snd_wave.c“ wird kompiliert)
+  
+  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\bin\HostX86\x86\CL.exe /c /I..\curl\include /I..\SDL2\include /I..\codecs\include /I..\misc\include /I..\..\Quake\src\assets /I..\..\Quake\src\audio /I..\..\Quake\src\bot /I..\..\Quake\src\client /I..\..\Quake\src\core /I..\..\Quake\src\gamecode /I..\..\Quake\src\network /I..\..\Quake\src\physics /I..\..\Quake\src\platform /I..\..\Quake\src\render /I..\..\Quake\src\server /I..\..\Quake\src\thirdparty /I..\..\Quake\src\ui /Zi /nologo /W4 /WX- /diagnostics:column /MP /O2 /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _WINDOWS /D _CRT_NONSTDC_NO_DEPRECATE /D _WINSOCK_DEPRECATED_NO_WARNINGS /D IRONWAIL_ENFORCE_SAFE_CRT=1 /D USE_SDL2 /D USE_CODEC_MP3 /D USE_CODEC_VORBIS /D USE_CODEC_WAVE /D USE_CODEC_FLAC /D USE_CODEC_OPUS /D USE_CODEC_XMP /D USE_CODEC_UMX /D IW_RENDERER_HOST_FRONTEND=1 /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"Build-ironwail\x86\Release\\" /Fd"Build-ironwail\x86\Release\vc145.pdb" /external:W4 /Gd /TP /analyze- /FC /errorReport:queue ..\..\Quake\src\thirdparty\bc7enc.c
+  bc7enc.c
+  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\bin\HostX86\x86\CL.exe /c /I..\curl\include /I..\SDL2\include /I..\codecs\include /I..\misc\include /I..\..\Quake\src\assets /I..\..\Quake\src\audio /I..\..\Quake\src\bot /I..\..\Quake\src\client /I..\..\Quake\src\core /I..\..\Quake\src\gamecode /I..\..\Quake\src\network /I..\..\Quake\src\physics /I..\..\Quake\src\platform /I..\..\Quake\src\render /I..\..\Quake\src\server /I..\..\Quake\src\thirdparty /I..\..\Quake\src\ui /Zi /nologo /W4 /WX- /diagnostics:column /MP /O2 /Oi /Oy- /GL /D WIN32 /D NDEBUG /D _WINDOWS /D _CRT_NONSTDC_NO_DEPRECATE /D _WINSOCK_DEPRECATED_NO_WARNINGS /D IRONWAIL_ENFORCE_SAFE_CRT=1 /D USE_SDL2 /D USE_CODEC_MP3 /D USE_CODEC_VORBIS /D USE_CODEC_WAVE /D USE_CODEC_FLAC /D USE_CODEC_OPUS /D USE_CODEC_XMP /D USE_CODEC_UMX /D IW_RENDERER_HOST_FRONTEND=1 /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /std:c11 /Fo"Build-ironwail\x86\Release\\" /Fd"Build-ironwail\x86\Release\vc145.pdb" /external:W4 /Gd /TC /analyze- /FC /errorReport:queue ..\..\Quake\src\thirdparty\miniz.c ..\..\Quake\src\core\strlcat.c ..\..\Quake\src\core\strlcpy.c
+  miniz.c
+  strlcat.c
+  strlcpy.c
+ResourceCompile:
+  C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x86\rc.exe /l"0x0409" /nologo /fo"Build-ironwail\x86\Release\QuakeSpasm.res" ..\QuakeSpasm.rc 
+..\QuakeSpasm.rc(2): fatal error RC1015: cannot open include file '../Quake/include/quakedef.h'. [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  
+Die Erstellung des Projekts "C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj" ist abgeschlossen (Standardziele) -- FEHLER.
+Das Projekt "C:\Projects\ironwail\Windows\VisualStudio\ironwail.sln" (1) erstellt "C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj" (3) auf Knoten "1" (Standardziele).
+PrepareForBuild:
+  Die strukturierte Ausgabe ist aktiviert. Die Formatierung der Compilerdiagnose spiegelt die Fehlerhierarchie wider. Weitere Informationen finden Sie unter https://aka.ms/cpp/structured-output.
+InitializeBuildStatus:
+  Aktualisieren des Timestamps von "Build-ref_gl\x86\Release\ref_gl.tlog\unsuccessfulbuild".
+ClCompile:
+  C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\14.50.35717\bin\HostX86\x86\CL.exe /c /I..\..\Quake\src\assets /I..\..\Quake\src\audio /I..\..\Quake\src\bot /I..\..\Quake\src\client /I..\..\Quake\src\core /I..\..\Quake\src\gamecode /I..\..\Quake\src\network /I..\..\Quake\src\physics /I..\..\Quake\src\platform /I..\..\Quake\src\render /I..\..\Quake\src\server /I..\..\Quake\src\thirdparty /I..\..\Quake\src\ui /I..\SDL2\include /I..\codecs\include /I..\misc\include /Zi /nologo /W4 /WX- /diagnostics:column /MP /O2 /Oi /Oy- /GL /D RENDERER_PLUGIN_BUILD /D WIN32 /D NDEBUG /D _WINDOWS /D USE_SDL2 /D USE_CODEC_MP3 /D USE_CODEC_VORBIS /D USE_CODEC_WAVE /D USE_CODEC_FLAC /D USE_CODEC_OPUS /D USE_CODEC_XMP /D USE_CODEC_UMX /D _WINDLL /Gm- /EHsc /MD /GS /Gy /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /std:c11 /Fo"Build-ref_gl\x86\Release\\" /Fd"Build-ref_gl\x86\Release\vc145.pdb" /external:W4 /Gd /TC /FIref_gl_bridge.h /analyze- /FC /errorReport:queue ..\..\Quake\src\render\ref_gl_plugin.c ..\..\Quake\src\render\ref_gl_bridge_stubs.c ..\..\Quake\src\render\gl_backend.c ..\..\Quake\src\render\gl_backend_runtime.c ..\..\Quake\src\render\gl_backend_resources.c ..\..\Quake\src\render\gl_draw.c ..\..\Quake\src\render\gl_rmain.c ..\..\Quake\src\render\gl_rmisc.c ..\..\Quake\src\render\gl_screen.c ..\..\Quake\src\platform\gl_vidsdl.c ..\..\Quake\src\render\gl_model.c ..\..\Quake\src\render\gl_model_glb.c ..\..\Quake\src\render\gl_mesh.c ..\..\Quake\src\render\gl_sky.c ..\..\Quake\src\render\gl_warp.c ..\..\Quake\src\render\gl_texmgr.c ..\..\Quake\src\render\gl_shaders.c ..\..\Quake\src\render\gl_shadow.c ..\..\Quake\src\render\gl_shadow_runtime.c ..\..\Quake\src\render\gl_oit.c ..\..\Quake\src\render\gl_lightgrid.c ..\..\Quake\src\render\gl_ktx2.c ..\..\Quake\src\render\gl_refrag.c ..\..\Quake\src\render\gl_rlight.c ..\..\Quake\src\render\gl_fog.c ..\..\Quake\src\render\gl_dlight.c ..\..\Quake\src\render\r_world.c ..\..\Quake\src\render\r_alias.c ..\..\Quake\src\render\r_entitylight.c ..\..\Quake\src\render\r_part.c ..\..\Quake\src\render\r_part_q3p.c ..\..\Quake\src\render\r_decals.c ..\..\Quake\src\render\r_sprite.c ..\..\Quake\src\render\r_brush.c ..\..\Quake\src\render\r_resources_gl.c ..\..\Quake\src\render\r_quality.c ..\..\Quake\src\render\r_sanitize.c ..\..\Quake\src\render\r_ssao.c ..\..\Quake\src\render\r_tonemap.c ..\..\Quake\src\render\r_postfx.c
+  ref_gl_plugin.c
+  ref_gl_bridge_stubs.c
+  gl_backend.c
+  gl_backend_runtime.c
+  gl_backend_resources.c
+  gl_draw.c
+  gl_rmain.c
+  gl_rmisc.c
+  gl_screen.c
+  gl_vidsdl.c
+  gl_model.c
+  gl_model_glb.c
+  gl_mesh.c
+  gl_sky.c
+  gl_warp.c
+  gl_texmgr.c
+  gl_shaders.c
+  gl_shadow.c
+  gl_shadow_runtime.c
+  gl_oit.c
+  gl_lightgrid.c
+  gl_ktx2.c
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_bridge_stubs.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_bridge_stubs.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_bridge_stubs.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_bridge_stubs.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_bridge_stubs.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_bridge_stubs.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_draw.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_draw.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_draw.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_draw.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_draw.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_draw.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_plugin.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_plugin.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_plugin.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_plugin.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_plugin.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/ref_gl_plugin.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_resources.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_resources.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_resources.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_resources.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_resources.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_resources.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_backend_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmain.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmain.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmain.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmain.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmain.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmain.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/platform/gl_vidsdl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/platform/gl_vidsdl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/platform/gl_vidsdl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/platform/gl_vidsdl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/platform/gl_vidsdl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/platform/gl_vidsdl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_screen.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_screen.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_screen.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_screen.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_screen.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_screen.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shaders.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shaders.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shaders.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shaders.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shaders.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shaders.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_oit.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_oit.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_oit.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_oit.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_oit.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_oit.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_mesh.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_mesh.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_mesh.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_mesh.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_mesh.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_mesh.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model_glb.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model_glb.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model_glb.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model_glb.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model_glb.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model_glb.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmisc.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmisc.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmisc.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmisc.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmisc.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rmisc.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_warp.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_warp.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_warp.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_warp.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_warp.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_warp.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_ktx2.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_ktx2.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_ktx2.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow_runtime.c“ wird kompiliert)
+  
+  gl_refrag.c
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_ktx2.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_sky.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_ktx2.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_sky.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_ktx2.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_sky.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_sky.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_sky.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_sky.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_shadow_runtime.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_texmgr.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_texmgr.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_texmgr.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_texmgr.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_texmgr.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_texmgr.c“ wird kompiliert)
+  
+C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(141,34): warning C4133: "=": Inkompatible Typen - von "qpic_t *(__cdecl *)(const char *,unsigned int)" zu "qpic_s *(__cdecl *)(const char *,unsigned int)" [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(142,33): warning C4133: "=": Inkompatible Typen - von "qpic_t *(__cdecl *)(const char *)" zu "qpic_s *(__cdecl *)(const char *)" [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(143,31): warning C4133: "=": Inkompatible Typen - von "qpic_t *(__cdecl *)(const char *)" zu "qpic_s *(__cdecl *)(const char *)" [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(144,34): warning C4133: "=": Inkompatible Typen - von "qpic_t *(__cdecl *)(const char *,unsigned int)" zu "qpic_s *(__cdecl *)(const char *,unsigned int)" [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(152,26): warning C4113: "void (__cdecl *)(int,int,qpic_t *)" weicht in der Parameterliste von "void (__cdecl *)(int,int,qpic_s *)" ab [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(153,29): warning C4113: "void (__cdecl *)(float,float,float,float,qpic_t *,float,float,float,float,const float *,float)" weicht in der Parameterliste von "void (__cdecl *)(float,float,float,float,qpic_s *,float,float,float,float,const float *,float)" ab [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(154,40): warning C4113: "void (__cdecl *)(int,int,qpic_t *,int,int)" weicht in der Parameterliste von "void (__cdecl *)(int,int,qpic_s *,int,int)" ab [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(158,32): warning C4113: "void (__cdecl *)(canvastype)" weicht in der Parameterliste von "void (__cdecl *)(int)" ab [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(165,30): warning C4113: "void (__cdecl *)(canvastype)" weicht in der Parameterliste von "void (__cdecl *)(int)" ab [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_lightgrid.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_lightgrid.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_lightgrid.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_lightgrid.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_lightgrid.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_lightgrid.c“ wird kompiliert)
+  
+  gl_rlight.c
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_model.c“ wird kompiliert)
+  
+  gl_fog.c
+  gl_dlight.c
+  r_world.c
+  r_alias.c
+  r_entitylight.c
+  r_part.c
+  r_part_q3p.c
+  r_decals.c
+  r_sprite.c
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_rlight.c“ wird kompiliert)
+  
+  r_brush.c
+  r_resources_gl.c
+  r_quality.c
+  r_sanitize.c
+  r_ssao.c
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_fog.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_fog.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_fog.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_fog.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_fog.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_fog.c“ wird kompiliert)
+  
+  r_tonemap.c
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_refrag.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_refrag.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_refrag.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_refrag.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_refrag.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_refrag.c“ wird kompiliert)
+  
+  r_postfx.c
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_dlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_dlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_dlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_dlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_dlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/gl_dlight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_world.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_world.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_world.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_world.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_world.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_world.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_entitylight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_entitylight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_entitylight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_entitylight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_entitylight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_entitylight.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_decals.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_decals.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_decals.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_decals.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_decals.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_decals.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part_q3p.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part_q3p.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part_q3p.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part_q3p.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part_q3p.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part_q3p.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_part.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sprite.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sprite.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sprite.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sprite.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sprite.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sprite.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_brush.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_brush.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_brush.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_brush.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_brush.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_brush.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_quality.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_quality.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_quality.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_quality.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_quality.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_quality.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_ssao.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_ssao.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_ssao.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_ssao.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_ssao.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_ssao.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_resources_gl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_resources_gl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_resources_gl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_resources_gl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_resources_gl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_resources_gl.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_alias.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_alias.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_alias.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_alias.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_alias.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_alias.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sanitize.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sanitize.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sanitize.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sanitize.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sanitize.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_sanitize.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_tonemap.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_tonemap.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_tonemap.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_tonemap.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_tonemap.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_tonemap.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_postfx.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_postfx.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_postfx.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_postfx.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_postfx.c“ wird kompiliert)
+  
+C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  (Quelldatei „../../Quake/src/render/r_postfx.c“ wird kompiliert)
+  
+Die Erstellung des Projekts "C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj" ist abgeschlossen (Standardziele) -- FEHLER.
+Die Erstellung des Projekts "C:\Projects\ironwail\Windows\VisualStudio\ironwail.sln" ist abgeschlossen, Build Ziel(e) -- FEHLER.
+
+Fehler beim Buildvorgang.
+
+"C:\Projects\ironwail\Windows\VisualStudio\ironwail.sln" (Build Ziel) (1) ->
+"C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj" (Standardziel) (2) ->
+(ClCompile Ziel) -> 
+  C:\Projects\ironwail\Quake\src\core\console.c(2278,41): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\bot\bot_combat.c(10,8): warning C4459: Deklaration von "skill" blendet globale Deklaration aus [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\assets\image.c(209,32): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(742,10): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(766,10): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(783,10): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(799,10): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(814,11): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(814,49): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(814,92): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(821,11): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(836,16): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(843,16): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\gamecode\pr_edict.c(864,10): warning C4389: "==": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+  C:\Projects\ironwail\Quake\src\audio\snd_wave.c(240,47): warning C4389: "!=": Konflikt zwischen "signed" und "unsigned" [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+
+
+"C:\Projects\ironwail\Windows\VisualStudio\ironwail.sln" (Build Ziel) (1) ->
+"C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj" (Standardziel) (3) ->
+  C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(141,34): warning C4133: "=": Inkompatible Typen - von "qpic_t *(__cdecl *)(const char *,unsigned int)" zu "qpic_s *(__cdecl *)(const char *,unsigned int)" [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(142,33): warning C4133: "=": Inkompatible Typen - von "qpic_t *(__cdecl *)(const char *)" zu "qpic_s *(__cdecl *)(const char *)" [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(143,31): warning C4133: "=": Inkompatible Typen - von "qpic_t *(__cdecl *)(const char *)" zu "qpic_s *(__cdecl *)(const char *)" [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(144,34): warning C4133: "=": Inkompatible Typen - von "qpic_t *(__cdecl *)(const char *,unsigned int)" zu "qpic_s *(__cdecl *)(const char *,unsigned int)" [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(152,26): warning C4113: "void (__cdecl *)(int,int,qpic_t *)" weicht in der Parameterliste von "void (__cdecl *)(int,int,qpic_s *)" ab [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(153,29): warning C4113: "void (__cdecl *)(float,float,float,float,qpic_t *,float,float,float,float,const float *,float)" weicht in der Parameterliste von "void (__cdecl *)(float,float,float,float,qpic_s *,float,float,float,float,const float *,float)" ab [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(154,40): warning C4113: "void (__cdecl *)(int,int,qpic_t *,int,int)" weicht in der Parameterliste von "void (__cdecl *)(int,int,qpic_s *,int,int)" ab [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(158,32): warning C4113: "void (__cdecl *)(canvastype)" weicht in der Parameterliste von "void (__cdecl *)(int)" ab [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Projects\ironwail\Quake\src\render\ref_gl_plugin.c(165,30): warning C4113: "void (__cdecl *)(canvastype)" weicht in der Parameterliste von "void (__cdecl *)(int)" ab [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+
+
+"C:\Projects\ironwail\Windows\VisualStudio\ironwail.sln" (Build Ziel) (1) ->
+"C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj" (Standardziel) (2) ->
+(ResourceCompile Ziel) -> 
+  ..\QuakeSpasm.rc(2): fatal error RC1015: cannot open include file '../Quake/include/quakedef.h'. [C:\Projects\ironwail\Windows\VisualStudio\ironwail.vcxproj]
+
+
+"C:\Projects\ironwail\Windows\VisualStudio\ironwail.sln" (Build Ziel) (1) ->
+"C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj" (Standardziel) (3) ->
+(ClCompile Ziel) -> 
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1068,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1069,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1084,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1085,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1100,9): error C2400: Inlineassembler: Syntaxfehler in "Dritter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+  C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\um\winnt.h(1101,9): error C2400: Inlineassembler: Syntaxfehler in "Zweiter Operand"; "*" gefunden [C:\Projects\ironwail\Windows\VisualStudio\ref_gl.vcxproj]
+
+    24 Warnung(en)
+    241 Fehler
+
+Verstrichene Zeit 00:00:16.77
+[31;1mPlatform=x64: [31;1mThe term 'Platform=x64' is not recognized as a name of a cmdlet, function, script file, or executable program.[0m
+[31;1m[31;1mCheck the spelling of the name, or if a path was included, verify that the path is correct and try again.[0m

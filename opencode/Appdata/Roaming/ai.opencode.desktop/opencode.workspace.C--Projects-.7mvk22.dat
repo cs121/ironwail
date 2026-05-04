@@ -1,0 +1,3 @@
+{
+  "workspace:model-selection": "{\"session\":{\"ses_259f20c45ffeMWryV0nVvQRcxQ\":{\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4-mini\"},\"variant\":null}}}"
+}
