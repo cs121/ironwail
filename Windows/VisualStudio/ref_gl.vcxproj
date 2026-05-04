@@ -90,7 +90,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\..\Quake\include;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\Quake\src\assets;..\..\Quake\src\audio;..\..\Quake\src\bot;..\..\Quake\src\client;..\..\Quake\src\core;..\..\Quake\src\gamecode;..\..\Quake\src\network;..\..\Quake\src\physics;..\..\Quake\src\platform;..\..\Quake\src\render;..\..\Quake\src\server;..\..\Quake\src\thirdparty;..\..\Quake\src\ui;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>RENDERER_PLUGIN_BUILD;WIN32;_DEBUG;_WINDOWS;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -115,7 +115,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>..\..\Quake\include;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\Quake\src\assets;..\..\Quake\src\audio;..\..\Quake\src\bot;..\..\Quake\src\client;..\..\Quake\src\core;..\..\Quake\src\gamecode;..\..\Quake\src\network;..\..\Quake\src\physics;..\..\Quake\src\platform;..\..\Quake\src\render;..\..\Quake\src\server;..\..\Quake\src\thirdparty;..\..\Quake\src\ui;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>RENDERER_PLUGIN_BUILD;WIN32;NDEBUG;_WINDOWS;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -144,7 +144,7 @@
     </Midl>
     <ClCompile>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\..\Quake\include;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\Quake\src\assets;..\..\Quake\src\audio;..\..\Quake\src\bot;..\..\Quake\src\client;..\..\Quake\src\core;..\..\Quake\src\gamecode;..\..\Quake\src\network;..\..\Quake\src\physics;..\..\Quake\src\platform;..\..\Quake\src\render;..\..\Quake\src\server;..\..\Quake\src\thirdparty;..\..\Quake\src\ui;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>RENDERER_PLUGIN_BUILD;WIN32;_DEBUG;_WINDOWS;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -172,7 +172,7 @@
     <ClCompile>
       <Optimization>MaxSpeed</Optimization>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <AdditionalIncludeDirectories>..\..\Quake\include;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\Quake\src\assets;..\..\Quake\src\audio;..\..\Quake\src\bot;..\..\Quake\src\client;..\..\Quake\src\core;..\..\Quake\src\gamecode;..\..\Quake\src\network;..\..\Quake\src\physics;..\..\Quake\src\platform;..\..\Quake\src\render;..\..\Quake\src\server;..\..\Quake\src\thirdparty;..\..\Quake\src\ui;..\SDL2\include;..\codecs\include;..\misc\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>RENDERER_PLUGIN_BUILD;WIN32;NDEBUG;_WINDOWS;USE_SDL2;USE_CODEC_MP3;USE_CODEC_VORBIS;USE_CODEC_WAVE;USE_CODEC_FLAC;USE_CODEC_OPUS;USE_CODEC_XMP;USE_CODEC_UMX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>

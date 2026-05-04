@@ -398,247 +398,247 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\..\Quake\include\anorms.h">
+    <ClInclude Include="..\..\Quake\src\render\anorms.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\bc7enc.h">
+    <ClInclude Include="..\..\Quake\src\thirdparty\bc7enc.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\arch_def.h">
+    <ClInclude Include="..\..\Quake\src\core\arch_def.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\bgmusic.h">
+    <ClInclude Include="..\..\Quake\src\audio\bgmusic.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\bspfile.h">
+    <ClInclude Include="..\..\Quake\src\render\bspfile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\cdaudio.h">
+    <ClInclude Include="..\..\Quake\src\audio\cdaudio.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\client.h">
+    <ClInclude Include="..\..\Quake\src\client\client.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\cmd.h">
+    <ClInclude Include="..\..\Quake\src\core\cmd.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\common.h">
+    <ClInclude Include="..\..\Quake\src\core\common.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\console.h">
+    <ClInclude Include="..\..\Quake\src\core\console.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\crc.h">
+    <ClInclude Include="..\..\Quake\src\core\crc.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\cfgfile.h">
+    <ClInclude Include="..\..\Quake\src\core\cfgfile.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\cvar.h">
+    <ClInclude Include="..\..\Quake\src\core\cvar.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\draw.h">
+    <ClInclude Include="..\..\Quake\src\render\draw.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\gl_lightgrid.h">
+    <ClInclude Include="..\..\Quake\src\render\gl_lightgrid.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\gl_model.h">
+    <ClInclude Include="..\..\Quake\src\render\gl_model.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\gl_texmgr.h">
+    <ClInclude Include="..\..\Quake\src\render\gl_texmgr.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\glquake.h">
+    <ClInclude Include="..\..\Quake\src\render\glquake.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\image.h">
+    <ClInclude Include="..\..\Quake\src\assets\image.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\input.h">
+    <ClInclude Include="..\..\Quake\src\platform\input.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\keys.h">
+    <ClInclude Include="..\..\Quake\src\ui\keys.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\mathlib.h">
+    <ClInclude Include="..\..\Quake\src\core\mathlib.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\mat_material.h">
+    <ClInclude Include="..\..\Quake\src\render\mat_material.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\mat_material_parse.h">
+    <ClInclude Include="..\..\Quake\src\render\mat_material_parse.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\menu.h">
+    <ClInclude Include="..\..\Quake\src\ui\menu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\miniz.h">
+    <ClInclude Include="..\..\Quake\src\thirdparty\miniz.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\modelgen.h">
+    <ClInclude Include="..\..\Quake\src\render\modelgen.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\net.h">
+    <ClInclude Include="..\..\Quake\src\network\net.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\net_defs.h">
+    <ClInclude Include="..\..\Quake\src\network\net_defs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\phys_interact.h">
+    <ClInclude Include="..\..\Quake\src\physics\phys_interact.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\net_dgrm.h">
+    <ClInclude Include="..\..\Quake\src\network\net_dgrm.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\net_loop.h">
+    <ClInclude Include="..\..\Quake\src\network\net_loop.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\net_sys.h">
+    <ClInclude Include="..\..\Quake\src\network\net_sys.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\net_wins.h">
+    <ClInclude Include="..\..\Quake\src\network\net_wins.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\platform.h">
+    <ClInclude Include="..\..\Quake\src\core\platform.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\pr_comp.h">
+    <ClInclude Include="..\..\Quake\src\gamecode\pr_comp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\progdefs.h">
+    <ClInclude Include="..\..\Quake\src\gamecode\progdefs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\progs.h">
+    <ClInclude Include="..\..\Quake\src\gamecode\progs.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\protocol.h">
+    <ClInclude Include="..\..\Quake\src\network\protocol.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\q_stdinc.h">
+    <ClInclude Include="..\..\Quake\src\core\q_stdinc.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\qs_bmp.h">
+    <ClInclude Include="..\..\Quake\src\assets\qs_bmp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\quakedef.h">
+    <ClInclude Include="..\..\Quake\src\core\quakedef.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\render.h">
+    <ClInclude Include="..\..\Quake\src\render\render.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\r_realtimelight.h">
+    <ClInclude Include="..\..\Quake\src\render\r_realtimelight.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\r_dlight_pool.h">
+    <ClInclude Include="..\..\Quake\src\render\r_dlight_pool.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\resource.h">
+    <ClInclude Include="..\..\Quake\src\platform\resource.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\sbar.h">
+    <ClInclude Include="..\..\Quake\src\ui\sbar.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\screen.h">
+    <ClInclude Include="..\..\Quake\src\client\screen.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\sidebar.h">
+    <ClInclude Include="..\..\Quake\src\ui\sidebar.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\server.h">
+    <ClInclude Include="..\..\Quake\src\server\server.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\q_sound.h">
+    <ClInclude Include="..\..\Quake\src\audio\q_sound.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_codec.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_codec.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_codeci.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_codeci.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_flac.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_flac.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_mikmod.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_mikmod.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_mp3.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_mp3.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_opus.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_opus.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\sounddef.h">
+    <ClInclude Include="..\..\Quake\src\audio\sounddef.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_umx.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_umx.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_vorbis.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_vorbis.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_wave.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_wave.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_xmp.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_xmp.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\spritegn.h">
+    <ClInclude Include="..\..\Quake\src\render\spritegn.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\strl_fn.h">
+    <ClInclude Include="..\..\Quake\src\core\strl_fn.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\sys.h">
+    <ClInclude Include="..\..\Quake\src\platform\sys.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\vid.h">
+    <ClInclude Include="..\..\Quake\src\platform\vid.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\view.h">
+    <ClInclude Include="..\..\Quake\src\client\view.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\wad.h">
+    <ClInclude Include="..\..\Quake\src\assets\wad.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\bot_main.h">
+    <ClInclude Include="..\..\Quake\src\bot\bot_main.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\bot_ai.h">
+    <ClInclude Include="..\..\Quake\src\bot\bot_ai.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\bot_combat.h">
+    <ClInclude Include="..\..\Quake\src\bot\bot_combat.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\bot_nav2.h">
+    <ClInclude Include="..\..\Quake\src\bot\bot_nav2.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\world.h">
+    <ClInclude Include="..\..\Quake\src\server\world.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\wsaerror.h">
+    <ClInclude Include="..\..\Quake\src\platform\wsaerror.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\zone.h">
+    <ClInclude Include="..\..\Quake\src\core\zone.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\steam.h">
+    <ClInclude Include="..\..\Quake\src\core\steam.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\snd_modplug.h">
+    <ClInclude Include="..\..\Quake\src\audio\snd_modplug.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\json.h">
+    <ClInclude Include="..\..\Quake\src\assets\json.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\jsmn.h">
+    <ClInclude Include="..\..\Quake\src\thirdparty\jsmn.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\gl_backend.h">
+    <ClInclude Include="..\..\Quake\src\render\gl_backend.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\Quake\include\r_backend.h">
+    <ClInclude Include="..\..\Quake\src\render\r_backend.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

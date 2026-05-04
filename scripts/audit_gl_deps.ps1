@@ -68,7 +68,7 @@ Search-GL -Pattern 'opengl32\.lib' -Label "opengl32.lib linkage" -Include "*.vcx
 Write-Host "`n=== Header GL-Type Summary ===" -ForegroundColor Cyan
 $glHeaders = @("glquake.h", "gl_model.h", "gl_texmgr.h", "gl_backend.h", "gl_ktx2.h")
 foreach ($h in $glHeaders) {
-    $path = "$Root\Quake\include\$h"
+    $path = "$Root\Quake\src\render\$h"
     if (Test-Path $path) {
         $GLuint = (Select-String -Pattern 'GLuint' -Path $path).Count
         $GLenum = (Select-String -Pattern 'GLenum' -Path $path).Count

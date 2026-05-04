@@ -316,6 +316,9 @@ typedef struct i_render_backend_s
 	qboolean (*needs_postprocess)(void);
 	void (*populate_framegraph_resources)(RenderGraphResourceHandle *out_handles);
 	int (*get_scene_sample_count)(void);
+	unsigned (*get_active_shader_id)(void);
+	qboolean (*query_shader_metadata)(unsigned shader_id, const char **out_debug_name, const char **out_entry_point, const char **out_stage, unsigned *out_permutation_key);
+	void (*apply_framegraph_baseline)(unsigned baseline_bits);
 } IRenderBackend;
 
 #endif

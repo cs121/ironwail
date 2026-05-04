@@ -66,7 +66,7 @@ endif()
 
 add_executable(ironwail ${IWAIL_SRC} ${COMMON_SRC})
 target_compile_features(ironwail PRIVATE c_std_11 cxx_std_17)
-target_include_directories(ironwail PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Quake/include)
+target_include_directories(ironwail PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/assets;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/audio;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/bot;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/client;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/core;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/gamecode;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/network;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/physics;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/platform;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/server;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/thirdparty;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/ui)
 if (UNIX)
 	target_link_libraries(ironwail PRIVATE m)
 	set(ENABLE_USERDIRS TRUE CACHE STRING "Enable user directories")
@@ -162,7 +162,7 @@ set(REF_GL_SRC
 
 add_library(ref_gl MODULE ${REF_GL_SRC})
 set_target_properties(ref_gl PROPERTIES PREFIX "" OUTPUT_NAME "ref_gl")
-target_include_directories(ref_gl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Quake/include)
+target_include_directories(ref_gl PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/assets;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/audio;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/bot;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/client;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/core;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/gamecode;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/network;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/physics;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/platform;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/server;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/thirdparty;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/ui)
 target_compile_definitions(ref_gl PRIVATE RENDERER_PLUGIN_BUILD USE_SDL2)
 if (MSVC)
 	target_compile_options(ref_gl PRIVATE /FIref_gl_bridge.h)

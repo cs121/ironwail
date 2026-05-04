@@ -1225,6 +1225,52 @@ static void GLBackend_SwapBuffers (void)
 		SDL_GL_SwapWindow (s_backend_window);
 }
 
+static unsigned GLBackend_GetActiveShaderId (void)
+{
+	return (unsigned)GL_GetCurrentProgram ();
+}
+
+static qboolean GLBackend_QueryShaderMetadata (unsigned shader_id, const char **out_debug_name, const char **out_entry_point, const char **out_stage, unsigned *out_permutation_key)
+{
+	return GL_QueryProgramMetadata ((GLuint)shader_id, out_debug_name, out_entry_point, out_stage, out_permutation_key);
+}
+
+static void GLBackend_ApplyFrameGraphBaseline (unsigned baseline_bits)
+{
+	unsigned state_bits = glstate;
+	qboolean apply_pipeline_state = false;
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_BLEND) != 0u)
+	{
+		state_bits = (state_bits & ~GLS_MASK_BLEND) | GLS_BLEND_OPAQUE;
+		apply_pipeline_state = true;
+	}
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_DEPTH) != 0u)
+	{
+		state_bits &= ~(GLS_NO_ZTEST | GLS_NO_ZWRITE);
+		apply_pipeline_state = true;
+	}
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_CULL) != 0u)
+	{
+		state_bits = (state_bits & ~GLS_MASK_CULL) | GLS_CULL_BACK;
+		apply_pipeline_state = true;
+	}
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_PROGRAM_BINDINGS) != 0u)
+	{
+		state_bits &= ~(GLS_MASK_ATTRIBS | GLS_MASK_INSTANCED_ATTRIBS);
+		apply_pipeline_state = true;
+	}
+
+	if (apply_pipeline_state)
+		GLBackend_SetPipelineState (state_bits);
+
+	if ((baseline_bits & FG_PASS_BASELINE_RESET_SCISSOR) != 0u)
+		GLBackend_SetScissor (false, 0, 0, 0, 0);
+}
+
 static const IRenderBackend s_gl_backend = {
 	"OpenGL",
 	GLBackend_ContextInit,
@@ -1282,7 +1328,10 @@ static const IRenderBackend s_gl_backend = {
 	GLBackend_NeedsSceneEffects,
 	GLBackend_NeedsPostprocess,
 	GLBackend_PopulateFrameGraphResources,
-	GLBackend_GetSceneSampleCount
+	GLBackend_GetSceneSampleCount,
+	GLBackend_GetActiveShaderId,
+	GLBackend_QueryShaderMetadata,
+	GLBackend_ApplyFrameGraphBaseline
 };
 
 const IRenderBackend *GL_Backend_GetInterface (void)

@@ -389,7 +389,7 @@ ironwail:	$(OBJS) $(MAKEFILE)
 
 $(RENDERER_PLUGIN_TARGET): $(MAKEFILE)
 	@echo "Linking $@" && \
-	$(CC) -shared $(DFLAGS) $(CFLAGS) $(SDL_CFLAGS) -DUSE_SDL2 -DRENDERER_PLUGIN_BUILD -fPIC -Iinclude -include ref_gl_bridge.h $(RENDERER_PLUGIN_SRCS) $(SDL_LIBS) $(COMMON_LIBS) -o $@
+	$(CC) -shared $(DFLAGS) $(CFLAGS) $(SDL_CFLAGS) -DUSE_SDL2 -DRENDERER_PLUGIN_BUILD -fPIC -Isrc/assets -Isrc/audio -Isrc/bot -Isrc/client -Isrc/core -Isrc/gamecode -Isrc/network -Isrc/physics -Isrc/platform -Isrc/render -Isrc/server -Isrc/thirdparty -Isrc/ui -include ref_gl_bridge.h $(RENDERER_PLUGIN_SRCS) $(SDL_LIBS) $(COMMON_LIBS) -o $@
 
 release:	ironwail
 debug:

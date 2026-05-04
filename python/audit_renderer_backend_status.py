@@ -35,14 +35,14 @@ TARGET_FILES = (
     ROOT / "Windows" / "VisualStudio" / "ref_gl.vcxproj",
     ROOT / "Quake" / "include" / "renderer_plugin.h",
     ROOT / "Quake" / "include" / "render_api.h",
-    ROOT / "Quake" / "include" / "renderer_host_bridge.h",
+    ROOT / "Quake" / "src" / "render" / "renderer_host_bridge.h",
 )
 
 ALLOWED_GL_PATHS = (
     "Quake/src/render/",
     "Quake/src/platform/gl_vidsdl.c",
-    "Quake/include/gl",
-    "Quake/include/r_resources_gl.h",
+    "Quake/src/render/gl",
+    "Quake/src/render/r_resources_gl.h",
 )
 
 IGNORED_OUTSIDE_BOUNDARY = {

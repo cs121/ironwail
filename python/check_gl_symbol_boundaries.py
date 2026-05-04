@@ -7,7 +7,6 @@ import sys
 
 SCAN_ROOTS = (
     pathlib.Path("Quake/src"),
-    pathlib.Path("Quake/include"),
 )
 
 FILE_EXTENSIONS = {".c", ".h"}
@@ -17,14 +16,14 @@ FILE_EXTENSIONS = {".c", ".h"}
 # - Transitional UI/console callsites are explicitly allowlisted until moved.
 ALLOWED_GLOBS = (
     "Quake/src/render/*.c",
+    "Quake/src/render/gl*.h",
     "Quake/src/platform/gl_vidsdl.c",
-    "Quake/include/gl*.h",
-    "Quake/include/r_resources_gl.h",
+    "Quake/src/render/r_resources_gl.h",
 )
 
 # Transitional non-render files that still use GL canvas helpers.
 TRANSITIONAL_ALLOWED_FILES = {
-    "Quake/include/quakedef.h",
+    "Quake/src/core/quakedef.h",
 }
 
 CODE_PATTERNS = (

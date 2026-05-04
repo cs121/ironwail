@@ -1,6 +1,5 @@
 #include "quakedef.h"
 #include "draw.h"
-#include "glquake.h"
 #include "screen.h"
 #include "render_dispatch.h"
 
@@ -395,8 +394,8 @@ static void RenderDispatch_Transform2 (float width, float height, float scalex, 
 	out->scale[1] = scaley * -2.f / scrheight;
 	out->offset[0] = (scrwidth - width * scalex) * alignx / scrwidth * 2.f - 1.f;
 	out->offset[1] = (scrheight - height * scaley) * aligny / scrheight * -2.f + 1.f;
-	out->offset[0] += 0.61803399f / 2.f / glwidth;
-	out->offset[1] += 0.61803399f / 2.f / glheight;
+	out->offset[0] += 0.61803399f / 2.f / vid.width;
+	out->offset[1] += 0.61803399f / 2.f / vid.height;
 }
 
 static void RenderDispatch_Transform (float width, float height, float scale, float alignx, float aligny, drawtransform_t *out)
@@ -418,7 +417,7 @@ void Draw_GetCanvasTransform (canvastype type, drawtransform_t *transform)
 		s = (float)vid.guiwidth / vid.conwidth;
 		s2 = (float)vid.guiheight / vid.conheight;
 		RenderDispatch_Transform2 (vid.conwidth, vid.conheight, s, s2, CANVAS_ALIGN_CENTERX, CANVAS_ALIGN_CENTERY, transform);
-		transform->offset[1] += (1.f - scr_con_current / glheight) * 2.f;
+		transform->offset[1] += (1.f - scr_con_current / vid.height) * 2.f;
 		break;
 	case CANVAS_MENU:
 		s = q_min ((float)vid.guiwidth / 320.0f, (float)vid.guiheight / 200.0f);
@@ -452,7 +451,7 @@ void Draw_GetCanvasTransform (canvastype type, drawtransform_t *transform)
 		s = CLAMP (1.0f, scr_crosshairscale.value, 10.0f);
 		RenderDispatch_Transform (vid.guiwidth / s / 2, vid.guiheight / s / 2, s, CANVAS_ALIGN_LEFT, CANVAS_ALIGN_BOTTOM, transform);
 		transform->offset[0] += 1.f;
-		transform->offset[1] += 1.f - ((scr_vrect.y + scr_vrect.height / 2) * 2 / (float)glheight);
+		transform->offset[1] += 1.f - ((scr_vrect.y + scr_vrect.height / 2) * 2 / (float)vid.height);
 		break;
 	case CANVAS_BOTTOMLEFT:
 		s = (float)vid.guiwidth / vid.conwidth;

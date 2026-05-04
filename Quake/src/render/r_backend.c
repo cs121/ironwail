@@ -3,8 +3,9 @@
 #include "renderer_plugin.h"
 #include "renderer_host_bridge.h"
 #include "render_dispatch.h"
-#include "gl_backend.h" /* obsolete migration seam: compile-time symbols only */
-#include "glquake.h"    /* required legacy state constants/types until Phase 7 cleanup */
+#include "glquake.h"    /* GL-LEAK (B-01/B-08): glstate, GLS_* state bitmask constants, GLuint type.
+                            * Phase 3 target: replace glstate with backend-neutral state tracker.
+                            * Phase 5 target: remove include entirely. */
 
 enum
 {
@@ -492,7 +493,10 @@ static void R_Backend_RecordPipelineMetadata (const RenderBackendPipelineDesc *p
 	if (!entry)
 		return;
 
-	shader_id = (unsigned)GL_GetCurrentProgram ();
+	{
+		const IRenderBackend *backend = R_GetRenderBackend ();
+		shader_id = (backend && backend->get_active_shader_id) ? backend->get_active_shader_id () : 0u;
+	}
 	memset (entry, 0, sizeof (*entry));
 	entry->in_use = true;
 	entry->pipeline_id = pipeline->pipeline_id;
@@ -503,19 +507,22 @@ static void R_Backend_RecordPipelineMetadata (const RenderBackendPipelineDesc *p
 		entry->shader_ids[0] = shader_id;
 	}
 
-	if (shader_id != 0u && GL_QueryProgramMetadata ((GLuint)shader_id, &shader_name, &shader_entry, &shader_stage, &permutation_key))
 	{
-		(void)shader_entry;
-		(void)shader_stage;
-		if (permutation_key != 0u)
-			q_snprintf (entry->debug_name, sizeof (entry->debug_name), "pipeline %u|%s|perm %u", pipeline->pipeline_id, shader_name, permutation_key);
+		const IRenderBackend *backend = R_GetRenderBackend ();
+		if (shader_id != 0u && backend && backend->query_shader_metadata && backend->query_shader_metadata (shader_id, &shader_name, &shader_entry, &shader_stage, &permutation_key))
+		{
+			(void)shader_entry;
+			(void)shader_stage;
+			if (permutation_key != 0u)
+				q_snprintf (entry->debug_name, sizeof (entry->debug_name), "pipeline %u|%s|perm %u", pipeline->pipeline_id, shader_name, permutation_key);
+			else
+				q_snprintf (entry->debug_name, sizeof (entry->debug_name), "pipeline %u|%s", pipeline->pipeline_id, shader_name);
+		}
 		else
-			q_snprintf (entry->debug_name, sizeof (entry->debug_name), "pipeline %u|%s", pipeline->pipeline_id, shader_name);
-	}
-	else
-	{
-		q_snprintf (fallback_name, sizeof (fallback_name), "pipeline %u|state 0x%08x", pipeline->pipeline_id, pipeline->state_bits);
-		q_strlcpy (entry->debug_name, fallback_name, sizeof (entry->debug_name));
+		{
+			q_snprintf (fallback_name, sizeof (fallback_name), "pipeline %u|state 0x%08x", pipeline->pipeline_id, pipeline->state_bits);
+			q_strlcpy (entry->debug_name, fallback_name, sizeof (entry->debug_name));
+		}
 	}
 }
 
@@ -1070,8 +1077,11 @@ static qboolean R_Backend_Host_GetShaderMetadata (unsigned int shader_id, iw_ren
 		return false;
 	if (shader_id == 0u)
 		return false;
-	if (!GL_QueryProgramMetadata ((GLuint)shader_id, &debug_name, &entry_point, &stage, &permutation_key))
-		return false;
+	{
+		const IRenderBackend *backend = R_GetRenderBackend ();
+		if (!backend || !backend->query_shader_metadata || !backend->query_shader_metadata (shader_id, &debug_name, &entry_point, &stage, &permutation_key))
+			return false;
+	}
 
 	memset (out_metadata, 0, sizeof (*out_metadata));
 	out_metadata->struct_size = sizeof (*out_metadata);
@@ -2468,38 +2478,9 @@ void R_Backend_SetPipelineState (unsigned state_bits)
 
 void R_Backend_ApplyFrameGraphBaseline (unsigned baseline_bits)
 {
-	unsigned state_bits = glstate;
-	qboolean apply_pipeline_state = false;
-
-	if ((baseline_bits & FG_PASS_BASELINE_RESET_BLEND) != 0u)
-	{
-		state_bits = (state_bits & ~GLS_MASK_BLEND) | GLS_BLEND_OPAQUE;
-		apply_pipeline_state = true;
-	}
-
-	if ((baseline_bits & FG_PASS_BASELINE_RESET_DEPTH) != 0u)
-	{
-		state_bits &= ~(GLS_NO_ZTEST | GLS_NO_ZWRITE);
-		apply_pipeline_state = true;
-	}
-
-	if ((baseline_bits & FG_PASS_BASELINE_RESET_CULL) != 0u)
-	{
-		state_bits = (state_bits & ~GLS_MASK_CULL) | GLS_CULL_BACK;
-		apply_pipeline_state = true;
-	}
-
-	if ((baseline_bits & FG_PASS_BASELINE_RESET_PROGRAM_BINDINGS) != 0u)
-	{
-		state_bits &= ~(GLS_MASK_ATTRIBS | GLS_MASK_INSTANCED_ATTRIBS);
-		apply_pipeline_state = true;
-	}
-
-	if (apply_pipeline_state)
-		R_Backend_SetPipelineState (state_bits);
-
-	if ((baseline_bits & FG_PASS_BASELINE_RESET_SCISSOR) != 0u)
-		R_Backend_SetScissor (false, 0, 0, 0, 0);
+	const IRenderBackend *backend = R_GetRenderBackend ();
+	if (backend && backend->apply_framegraph_baseline)
+		backend->apply_framegraph_baseline (baseline_bits);
 }
 
 void R_Backend_Draw (render_backend_primitive_t primitive, int first, int count)
