@@ -111,6 +111,7 @@ static entity_t* cl_sorted_visedicts[MAX_VISEDICTS + 1];
 static int cl_modtype_ofs[mod_numtypes * 2 + 1];
 static entity_t* cl_shadow_visedicts[MAX_VISEDICTS];
 static int cl_numshadowedicts = 0;
+static int r_scene_setup_frame = -1;
 static vec3_t	frustum_absnormal[4];
 mplane_t	frustum[4];
 float		r_matview[16];
@@ -6088,6 +6089,14 @@ void R_ShowTris (void)
 
 void R_RenderShadowMaps (void)
 {
+	/* Shadow-map pass runs before Render scene in framegraph mode.
+	 * Ensure dlights/shadow-eligible entities are collected for this frame. */
+	if (r_scene_setup_frame != r_framecount)
+	{
+		R_SetupScene ();
+		r_scene_setup_frame = r_framecount;
+	}
+
 	R_Shadow_RenderMaps (cl_shadow_visedicts, cl_numshadowedicts);
 }
 
@@ -6116,7 +6125,11 @@ void R_RenderScene (const r_render_scene_input_t *input)
 		}
 	}
 	(void)input;
-	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
+	if (r_scene_setup_frame != r_framecount)
+	{
+		R_SetupScene (); //johnfitz -- this does everything that should be done once per eye in stereo mode
+		r_scene_setup_frame = r_framecount;
+	}
 	R_Clear ();
 	
 	// Upload frame data after fog has been set up to ensure fog parameters

@@ -113,6 +113,7 @@ static entity_t *r_shadow_filtered_brush_ents[MAX_VISEDICTS + 1];
 static entity_t *r_shadow_filtered_alias_ents[MAX_VISEDICTS];
 static int r_shadow_log_last_frame = -1024;
 static int r_shadow_profile_last_frame = -1024;
+static qboolean r_shadow_diag_once = false;
 
 static void R_Shadow_BuildSplitRatios (int cascade_count, float sun_dist, float out_ratio[SHADOW_SUN_CASCADE_MAX])
 {
@@ -1182,6 +1183,21 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 	qboolean want_dlight_shadows = false;
 	qboolean marked_for_shadow = false;
 	qboolean have_query_api = false;
+	qboolean log_now = false;
+
+	log_now = (r_shadow_log.value > 1.f)
+		|| (r_shadow_log.value > 0.f && r_framecount >= r_shadow_log_last_frame + 60);
+	if (!r_shadow_diag_once)
+	{
+		r_shadow_diag_once = true;
+		Con_Printf ("Shadow diag: r_shadow=%.2f r_ref_enable_shadows=%.2f r_shadow_dlight=%.2f r_shadow_log=%.2f world=%d drawworld=%d\n",
+			r_shadow.value,
+			r_ref_enable_shadows.value,
+			r_shadow_dlight.value,
+			r_shadow_log.value,
+			cl.worldmodel ? 1 : 0,
+			r_drawworld_cheatsafe ? 1 : 0);
+	}
 
 	R_Shadow_ResetRuntime (&r_shadow_state);
 	R_Shadow_ClearDrawContext ();
@@ -1189,13 +1205,30 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 	R_Shadow_NormalizeSettings ();
 
 	if (!framebufs.shadow.available || !R_Shadow_Enabled ())
+	{
+		if (log_now)
+			Con_Printf ("Shadow skip: unavailable=%d enabled=%d\n",
+				framebufs.shadow.available ? 1 : 0,
+				R_Shadow_Enabled () ? 1 : 0);
 		return;
+	}
 	if (!cl.worldmodel || !r_drawworld_cheatsafe)
+	{
+		if (log_now)
+			Con_Printf ("Shadow skip: worldmodel=%d drawworld=%d\n",
+				cl.worldmodel ? 1 : 0,
+				r_drawworld_cheatsafe ? 1 : 0);
 		return;
+	}
 
 	R_Shadow_BuildDrawContext (shadow_visedicts, numshadowedicts);
 	if (r_shadow_draw_ctx.brush_count <= 0 && r_shadow_draw_ctx.alias_count <= 0)
+	{
+		if (log_now)
+			Con_Printf ("Shadow skip: no casters (brush=%d alias=%d input=%d)\n",
+				r_shadow_draw_ctx.brush_count, r_shadow_draw_ctx.alias_count, numshadowedicts);
 		return;
+	}
 
 	R_Shadow_SelectDlights (&r_shadow_state);
 	want_sun_shadow = (R_Shadow_SunEnabled () && framebufs.shadow.sun_fbo && framebufs.shadow.sun_depth_tex);
@@ -1205,7 +1238,17 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 	if (want_dlight_shadows)
 		R_Shadow_UpdateDlightMatrices (&r_shadow_state);
 	if (!want_sun_shadow && !want_dlight_shadows)
+	{
+		if (log_now)
+			Con_Printf ("Shadow skip: no active maps (sun_en=%d sun_res=%d dl_en=%d numlights=%d selected=%d dl_res=%d)\n",
+				R_Shadow_SunEnabled () ? 1 : 0,
+				(framebufs.shadow.sun_fbo && framebufs.shadow.sun_depth_tex) ? 1 : 0,
+				R_Shadow_DlightEnabled () ? 1 : 0,
+				(int)r_framedata.numlights,
+				r_shadow_state.num_dlights,
+				(framebufs.shadow.dlight_fbo && framebufs.shadow.dlight_depth_tex) ? 1 : 0);
 		return;
+	}
 	marked_for_shadow = (r_shadow_draw_ctx.brush_count > 0);
 
 	have_query_api = (GL_GenQueriesFunc && GL_BeginQueryFunc && GL_EndQueryFunc
@@ -1218,8 +1261,7 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 	}
 	if (profile_enabled)
 		cpu_begin = Sys_DoubleTime ();
-	if ((r_shadow_log.value > 1.f)
-		|| (r_shadow_log.value > 0.f && r_framecount >= r_shadow_log_last_frame + 60))
+	if (log_now)
 	{
 		Con_Printf ("Shadow frame: sun=%d dlight=%d cascades=%d casters(brush=%d alias=%d) selected_dlights=%d\n",
 			want_sun_shadow ? 1 : 0,

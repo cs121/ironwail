@@ -935,6 +935,16 @@ static void GLBackend_PassSetupView (RenderPassContext *ctx)
 
 static void GLBackend_PassShadowMaps (RenderPassContext *ctx)
 {
+	static qboolean shadow_pass_diag_once = false;
+
+	if (!shadow_pass_diag_once)
+	{
+		shadow_pass_diag_once = true;
+		Con_Printf ("Shadow backend diag: entered callback run_shadowmaps=%d r_ref_enable_shadows=%.2f\n",
+			(ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps) ? 1 : 0,
+			r_ref_enable_shadows.value);
+	}
+
 	if (!GLBackend_RequireFramePlan (ctx, "Shadow maps"))
 		return;
 

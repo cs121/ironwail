@@ -24,8 +24,20 @@ static int s_storeprev_skip_log_frame = -1;
 
 static qboolean R_FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
 {
-	const render_backend_resource_ref_t *shadow_depth;
 	const qboolean log_skips = (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f);
+	static qboolean shadow_enabled_diag_once = false;
+
+	if (!shadow_enabled_diag_once)
+	{
+		extern cvar_t r_ref_enable_shadows;
+		extern cvar_t r_shadow;
+		shadow_enabled_diag_once = true;
+		Con_Printf ("Shadow FG enabled diag: plan=%d run_shadowmaps=%d r_ref_enable_shadows=%.2f r_shadow=%.2f\n",
+			ctx && ctx->frame_plan ? 1 : 0,
+			(ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps) ? 1 : 0,
+			r_ref_enable_shadows.value,
+			r_shadow.value);
+	}
 
 	if (!ctx || !ctx->frame_plan || !ctx->frame_plan->run_shadowmaps)
 	{
@@ -38,19 +50,9 @@ static qboolean R_FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
 		return false;
 	}
 
-	shadow_depth = R_FrameGraph_GetResourceRef (ctx->resources, R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);
-	if (!shadow_depth)
-	{
-		if (log_skips && s_shadow_skip_log_frame != r_framecount)
-		{
-			Con_DPrintf ("ref_gl: skip FG pass Shadow maps (missing shadow depth resource ref)\n");
-			s_shadow_skip_log_frame = r_framecount;
-		}
-		return false;
-	}
-
-	return !ctx->backend || !ctx->backend->is_resource_valid
-		|| ctx->backend->is_resource_valid (ctx->resources, shadow_depth);
+	/* Let the backend shadow callback run whenever the frame-plan requests shadows.
+	 * Resource readiness/availability is validated inside R_Shadow_RenderMaps. */
+	return true;
 }
 
 static qboolean R_FG_PassWhenPostprocessEnabled (const RenderPassContext *ctx)
@@ -142,6 +144,13 @@ void R_Pass_SetupView (RenderPassContext *ctx)
 
 void R_Pass_RenderShadowMaps (RenderPassContext *ctx)
 {
+	static qboolean shadow_pass_fg_diag_once = false;
+	if (!shadow_pass_fg_diag_once)
+	{
+		shadow_pass_fg_diag_once = true;
+		Con_Printf ("Shadow FG diag: pass execute run_shadowmaps=%d\n",
+			(ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps) ? 1 : 0);
+	}
 	R_Pass_RunBackendCallback (ctx, "Shadow maps",
 		ctx && ctx->backend ? ctx->backend->pass_shadowmaps : NULL);
 }
