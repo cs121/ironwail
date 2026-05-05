@@ -158,6 +158,11 @@ static qboolean Q3P_GPU_ReadBuffer (GLuint buffer, size_t size, void *dst);
 static qboolean Q3P_GPU_RunSim (float frametime, qboolean collision_enabled);
 static qboolean Q3P_GPU_BuildDrawList (qboolean alpha, qboolean showtris);
 static void Q3P_GPU_BitonicSortEntries (int count);
+/* TODO_RESOURCE_BOUNDARY / PHASE3_BOUNDARY_CANDIDATE:
+ * Q3P GPU buffers are still native GL handles in this unit. Route creation and
+ * bind-range calls through local wrappers to keep ownership boundaries explicit. */
+static qboolean Q3P_GPU_CreateStorageBuffer (GLuint *out_buffer, GLsizeiptr size);
+static inline void Q3P_GPU_BindSSBORange (GLuint slot, GLuint buffer, GLsizeiptr size);
 
 static void Q3P_PRT_Log (q3p_prt_parser_t *parser, int level, const char *fmt, ...)
 {
@@ -985,6 +990,27 @@ static qboolean Q3P_GPU_ComputeAvailable (void)
 		&& glprogs.gpu_bitonic_pairs;
 }
 
+static qboolean Q3P_GPU_CreateStorageBuffer (GLuint *out_buffer, GLsizeiptr size)
+{
+	if (!out_buffer || size <= 0)
+		return false;
+
+	GL_GenBuffersFunc (1, out_buffer);
+	if (!*out_buffer)
+		return false;
+
+	/* LEGACY_GL_HANDLE: native buffer id creation remains local to this module. */
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, *out_buffer);
+	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, size, NULL, GL_DYNAMIC_DRAW);
+	return true;
+}
+
+static inline void Q3P_GPU_BindSSBORange (GLuint slot, GLuint buffer, GLsizeiptr size)
+{
+	/* REF_GL_PRIVATE: GL slot binding is implementation-specific to ref_gl path. */
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, slot, buffer, 0, size);
+}
+
 static void Q3P_GPU_ResetResources (void)
 {
 	if (GL_DeleteBuffersFunc)
@@ -1027,20 +1053,14 @@ static qboolean Q3P_GPU_EnsureBuffers (void)
 
 	if (!q3p_gpu.sort_buffer)
 	{
-		GL_GenBuffersFunc (1, &q3p_gpu.sort_buffer);
-		if (!q3p_gpu.sort_buffer)
+		if (!Q3P_GPU_CreateStorageBuffer (&q3p_gpu.sort_buffer, sort_bytes))
 			return false;
-		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, q3p_gpu.sort_buffer);
-		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sort_bytes, NULL, GL_DYNAMIC_DRAW);
 	}
 
 	if (!q3p_gpu.visible_count_buffer)
 	{
-		GL_GenBuffersFunc (1, &q3p_gpu.visible_count_buffer);
-		if (!q3p_gpu.visible_count_buffer)
+		if (!Q3P_GPU_CreateStorageBuffer (&q3p_gpu.visible_count_buffer, sizeof (unsigned int)))
 			return false;
-		GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, q3p_gpu.visible_count_buffer);
-		GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, sizeof (unsigned int), NULL, GL_DYNAMIC_DRAW);
 	}
 
 	return true;
@@ -1120,7 +1140,7 @@ static void Q3P_GPU_BitonicSortEntries (int count)
 
 	groups = (count + (Q3P_GPU_LOCAL_SIZE - 1)) / Q3P_GPU_LOCAL_SIZE;
 	GL_UseProgram (glprogs.gpu_bitonic_pairs);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, q3p_gpu.sort_buffer, 0, sizeof (q3p_sort_entry_gpu_t) * count);
+	Q3P_GPU_BindSSBORange (0, q3p_gpu.sort_buffer, sizeof (q3p_sort_entry_gpu_t) * count);
 
 	for (k = 2; k <= count; k <<= 1)
 	{

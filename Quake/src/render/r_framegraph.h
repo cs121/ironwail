@@ -95,6 +95,10 @@ typedef struct fg_pass_attachment_config_s
 typedef struct render_pass_desc_s
 {
 	const char *name;
+	/* Declarative contract:
+	 * - reads/writes: logical resource dependencies
+	 * - attachments: load/store policy for backend-managed targets
+	 * - execute: backend callback entry (HOW), not core GL execution. */
 	unsigned reads;
 	unsigned writes;
 	unsigned side_effects;

@@ -462,6 +462,8 @@ static shadow_caster_uniforms_t *R_Shadow_GetCasterUniforms (GLuint program)
 
 void R_Shadow_CreateFrameBuffers (void)
 {
+	/* REF_GL_PRIVATE / LEGACY_GL_HANDLE:
+	 * Shadow map native texture/FBO ids are backend-owned here during migration. */
 	GLenum status;
 	GLfloat border[] = { 1.f, 1.f, 1.f, 1.f };
 	int sun_size = R_Shadow_ClampMapSize (r_shadow_sun_size.value);
@@ -571,6 +573,7 @@ void R_Shadow_CreateFrameBuffers (void)
 
 void R_Shadow_DeleteFrameBuffers (void)
 {
+	/* TODO_RESOURCE_BOUNDARY: keep shadow resource destruction centralized here. */
 	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
 		Con_DPrintf ("ref_gl: R_Shadow_DeleteFrameBuffers sun_fbo=%u dlight_fbo=%u\n",
 			(unsigned)framebufs.shadow.sun_fbo,

@@ -174,7 +174,7 @@ static void R_FlushSpriteInstances (void)
 		dynamic_state.raster_state = state;
 		descriptor.type = R_BACKEND_DESCRIPTOR_TEXTURE;
 		descriptor.slot = 0u;
-		descriptor.resource_id = draw_texture->texnum;
+		descriptor.resource_id = TexMgr_GetNativeHandle (draw_texture);
 		R_Backend_BindPipeline (&pipeline_desc);
 		R_Backend_SetDynamicState (&dynamic_state);
 		R_Backend_BindDescriptors (&descriptor, 1u);

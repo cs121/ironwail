@@ -10,6 +10,10 @@ static const iw_renderer_host_bridge_t *s_bridge = NULL;
 static iw_renderer_entry_points_t s_entry_points;
 static void REFGL_RenderView_Entry (void);
 
+/* LEGACY_COMPAT_ENTRYPOINT:
+ * This file currently wires a broad legacy entrypoint set into the plugin.
+ * Phase-2 objective is visibility and robustness, not large boundary rewrites. */
+
 extern void R_Init (void);
 extern void R_RenderView (void);
 extern void R_NewMap (void);
@@ -91,6 +95,8 @@ extern const IRenderBackend *GL_Backend_GetInterface (void);
 
 static void REFGL_FillEntryPoints (void)
 {
+	/* TODO_RENDER_CONTRACT:
+	 * Keep legacy callbacks grouped here until core contract + compat extension split. */
 	s_entry_points.struct_size = sizeof (iw_renderer_entry_points_t);
 	s_entry_points.R_Init = R_Init;
 	s_entry_points.R_RenderView = REFGL_RenderView_Entry;
@@ -201,22 +207,55 @@ static void REFGL_RenderView_Entry (void)
 
 static qboolean IW_RendererRefGL_Register (const iw_renderer_plugin_host_api_t *host_api)
 {
+	Con_Printf ("ref_gl: plugin register begin\n");
+
 	if (!host_api || host_api->struct_size < IW_RENDERER_PLUGIN_HOST_API_V4_SIZE)
+	{
+		Con_Warning ("ref_gl: host_api missing or too small (got=%u need>=%u)\n",
+			host_api ? host_api->struct_size : 0u,
+			IW_RENDERER_PLUGIN_HOST_API_V4_SIZE);
 		return false;
+	}
+
+	if (host_api->abi_major != IW_RENDERER_PLUGIN_ABI_MAJOR)
+	{
+		Con_Warning ("ref_gl: ABI major mismatch host=%u plugin=%u\n",
+			host_api->abi_major, IW_RENDERER_PLUGIN_ABI_MAJOR);
+		return false;
+	}
+
+	if (host_api->abi_minor < IW_RENDERER_PLUGIN_ABI_MINOR)
+	{
+		Con_Warning ("ref_gl: ABI minor too old host=%u plugin requires >=%u\n",
+			host_api->abi_minor, IW_RENDERER_PLUGIN_ABI_MINOR);
+		return false;
+	}
 
 	if (IW_RENDERER_PLUGIN_HOST_HAS_FIELD (host_api, bridge) && host_api->bridge)
 	{
+		/* TODO_RESOURCE_BOUNDARY:
+		 * Bridge use should shrink as neutral host/resource services mature. */
 		Bridge_Init (host_api->bridge);
 		s_bridge = host_api->bridge;
 		Con_Printf ("ref_gl: bridge initialized (ABI v%u)\n", host_api->bridge->abi_version);
 	}
+	else
+	{
+		Con_DWarning ("ref_gl: host bridge not provided; using direct globals/legacy paths\n");
+	}
 
 	if (!host_api->register_backend)
+	{
+		Con_Warning ("ref_gl: host register_backend callback missing\n");
 		return false;
+	}
 
 	const IRenderBackend *gl_backend = GL_Backend_GetInterface ();
 	if (!gl_backend)
+	{
+		Con_Warning ("ref_gl: GL_Backend_GetInterface returned NULL\n");
 		return false;
+	}
 
 	Con_Printf ("ref_gl: registering backend '%s' (caps: ts=%d compute=%d inst=%d indirect=%d)\n",
 		gl_backend->name,
@@ -226,14 +265,24 @@ static qboolean IW_RendererRefGL_Register (const iw_renderer_plugin_host_api_t *
 		gl_backend->get_caps ? gl_backend->get_caps ()->supports_draw_indirect : 0);
 
 	if (!host_api->register_backend (gl_backend))
+	{
+		Con_Warning ("ref_gl: backend registration rejected by host\n");
 		return false;
+	}
 
 	REFGL_FillEntryPoints ();
 
 	if (IW_RENDERER_PLUGIN_HOST_HAS_FIELD (host_api, register_entry_points) && host_api->register_entry_points)
 	{
 		if (!host_api->register_entry_points (&s_entry_points))
+		{
+			Con_Warning ("ref_gl: register_entry_points callback rejected entry table\n");
 			return false;
+		}
+	}
+	else
+	{
+		Con_DWarning ("ref_gl: host register_entry_points callback unavailable; legacy dispatch may be incomplete\n");
 	}
 
 	Con_Printf ("ref_gl: plugin registered %d entry points\n", (int)(s_entry_points.struct_size));
@@ -243,6 +292,7 @@ static qboolean IW_RendererRefGL_Register (const iw_renderer_plugin_host_api_t *
 
 IW_RENDERER_PLUGIN_EXPORT const iw_renderer_plugin_descriptor_t *IW_RendererPlugin_Query (void)
 {
+	/* REF_GL_PRIVATE: plugin descriptor and register callback are ref_gl-owned ABI surface. */
 	static const iw_renderer_plugin_descriptor_t descriptor = {
 		sizeof (iw_renderer_plugin_descriptor_t),
 		IW_RENDERER_PLUGIN_ABI_MAJOR,
@@ -250,6 +300,11 @@ IW_RENDERER_PLUGIN_EXPORT const iw_renderer_plugin_descriptor_t *IW_RendererPlug
 		"ref_gl",
 		IW_RendererRefGL_Register
 	};
+
+	Con_Printf ("ref_gl: plugin query '%s' abi=%u.%u\n",
+		descriptor.plugin_name ? descriptor.plugin_name : "<unnamed>",
+		descriptor.abi_major,
+		descriptor.abi_minor);
 
 	return &descriptor;
 }

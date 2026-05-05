@@ -1325,6 +1325,9 @@ static void ExtractFrustumPlane (float mvp[16], int axis, float ndcval, qboolean
 //
 //==============================================================================
 
+/* REF_GL_PRIVATE / TODO_RESOURCE_BOUNDARY:
+ * Central owner for ref_gl render targets and framebuffer object ids.
+ * Keep native IDs here; external users should prefer backend resource slots. */
 glframebufs_t framebufs;
 
 #define SSAO_MAX_SAMPLES 32
@@ -3256,6 +3259,7 @@ static GLuint R_ResolveCriticalResourceOrLegacyFallback (const RenderGraphResour
 
 void GL_PostProcess (const r_postprocess_input_t *input)
 {
+	static int postprocess_entry_log_count = 0;
 	int palidx, variant;
 	float saturation;
 	float dither;
@@ -3327,6 +3331,14 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 
 	if (!input)
 		return;
+	if (developer.value != 0.f && postprocess_entry_log_count < 32)
+	{
+		Con_Printf ("ref_gl postfx: composite_written=%d view=(%d,%d %dx%d)\n",
+			input->composite_written_this_frame ? 1 : 0,
+			input->view_rect.x, input->view_rect.y,
+			input->view_rect.width, input->view_rect.height);
+		postprocess_entry_log_count++;
+	}
 
 	resources = input->resources;
 	view_rect = &input->view_rect;
@@ -3486,6 +3498,14 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 	view_min_y = (gly + glheight - view_rect->y - view_rect->height) / (float)R_GetNativeRenderHeight ();
 	view_max_x = view_min_x + view_rect->width / (float)R_GetNativeRenderWidth ();
 	view_max_y = view_min_y + view_rect->height / (float)R_GetNativeRenderHeight ();
+	if (developer.value != 0.f && postprocess_entry_log_count < 32)
+	{
+		Con_Printf ("ref_gl postfx uv: native=%dx%d gl=%dx%d view_min=(%.3f,%.3f) view_max=(%.3f,%.3f) scene=%dx%d scale=%d ratio=%.3f\n",
+			R_GetNativeRenderWidth (), R_GetNativeRenderHeight (),
+			glwidth, glheight,
+			view_min_x, view_min_y, view_max_x, view_max_y,
+			scene_size->width, scene_size->height, scene_size->scale, scene_size->resolution_ratio);
+	}
 
 	ssao_texture = GL_GenerateSSAOTexture (view_min_x, view_min_y, view_max_x, view_max_y);
 	/* Keep SSAO intensity aligned with the cvar's intended tuning range.
@@ -4071,7 +4091,7 @@ static uint16_t visedict_order[2][MAX_VISEDICTS];
 
 static qboolean R_DrawWorldEnabled (void)
 {
-	return Cvar_VariableValue ("r_drawworld") > 0.f;
+	return r_drawworld.value > 0.f;
 }
 
 /*
@@ -4426,6 +4446,10 @@ qboolean GL_NeedsPostprocess (void)
 {
 	if (r_ref_enable_postfx.value == 0.f)
 		return false;
+	/* Scene-effects path renders into HDR scene targets; it must run postprocess
+	 * for correct tone-map/output transfer even when optional effects are off. */
+	if (GL_NeedsSceneEffects ())
+		return true;
 	return GL_NeedsPostprocess_Internal ();
 }
 
@@ -4439,6 +4463,10 @@ static void R_GetFramePlanDecisions (qboolean *out_needs_scene_effects, qboolean
 	{
 		needs_scene_effects = plan.needs_scene_effects;
 		needs_postprocess = plan.needs_postprocess;
+		/* Defensive fallback: keep runtime cvar/feature decisions authoritative
+		 * if frame-plan flags lag behind backend state after renderer refactors. */
+		needs_scene_effects = needs_scene_effects || GL_NeedsSceneEffects ();
+		needs_postprocess = needs_postprocess || GL_NeedsPostprocess ();
 	}
 	else
 	{
@@ -4526,6 +4554,19 @@ void R_SetupGL (void)
 	int scene_height = R_GetSceneRenderHeight ();
 
 	R_GetFramePlanDecisions (&needs_scene_effects, &needs_postprocess);
+	if (developer.value != 0.f)
+	{
+		static int setupgl_log_count = 0;
+		if (setupgl_log_count < 32)
+		{
+			Con_Printf ("ref_gl setupgl: scenefx=%d post=%d vrect=(%d,%d %dx%d) gl=(%d,%d %dx%d)\n",
+			needs_scene_effects ? 1 : 0,
+			needs_postprocess ? 1 : 0,
+			r_refdef.vrect.x, r_refdef.vrect.y, r_refdef.vrect.width, r_refdef.vrect.height,
+			glx, gly, glwidth, glheight);
+			setupgl_log_count++;
+		}
+	}
 
 	if (!needs_scene_effects)
 	{
@@ -4534,8 +4575,8 @@ void R_SetupGL (void)
 
 		GL_BindFramebufferFunc (GL_FRAMEBUFFER, target);
 		GL_SetFramebufferSRGB (srgb_output);
-		framesetup.scene_fbo = framebufs.composite.fbo;
-		framesetup.oit_fbo = framebufs.oit.fbo_composite;
+		framesetup.scene_fbo = target;
+		framesetup.oit_fbo = (target != 0u) ? framebufs.oit.fbo_composite : 0u;
 		if (target)
 		{
 			glDrawBuffer (GL_COLOR_ATTACHMENT0);
@@ -6057,6 +6098,23 @@ R_RenderScene
 */
 void R_RenderScene (const r_render_scene_input_t *input)
 {
+	if (developer.value != 0.f)
+	{
+		static int renderscene_log_count = 0;
+		if (renderscene_log_count < 32)
+		{
+			GLint vp[4] = {0, 0, 0, 0};
+			GLint sc[4] = {0, 0, 0, 0};
+			GLboolean scissor = glIsEnabled (GL_SCISSOR_TEST);
+			glGetIntegerv (GL_VIEWPORT, vp);
+			glGetIntegerv (GL_SCISSOR_BOX, sc);
+			Con_Printf ("ref_gl renderscene: vp=(%d,%d %dx%d) scissor=%d box=(%d,%d %dx%d) vrect=(%d,%d %dx%d)\n",
+				vp[0], vp[1], vp[2], vp[3],
+				scissor ? 1 : 0, sc[0], sc[1], sc[2], sc[3],
+				r_refdef.vrect.x, r_refdef.vrect.y, r_refdef.vrect.width, r_refdef.vrect.height);
+			renderscene_log_count++;
+		}
+	}
 	(void)input;
 	R_SetupScene (); //johnfitz -- this does everything that should be done once per call to RenderScene
 	R_Clear ();
@@ -6165,8 +6223,6 @@ void R_WarpScaleView (const r_warp_resolve_input_t *input)
 	R_ResolveWarpScaleResources (resources, &resolved);
 	needs_postprocess = input->needs_postprocess;
 	R_GetFramePlanDecisions (&needs_scene_effects, NULL);
-	if (!needs_scene_effects)
-		return;
 
 	srcx = glx + view_rect->x;
 	srcy = gly + glheight - view_rect->y - view_rect->height;
@@ -6183,6 +6239,22 @@ void R_WarpScaleView (const r_warp_resolve_input_t *input)
 	}
 	needwarpscale = water_warp && !force_blit_upscale;
 	fbodest = needs_postprocess ? resolved.composite_fbo : 0;
+	if (developer.value != 0.f)
+	{
+		static int warp_log_count = 0;
+		if (warp_log_count < 64)
+		{
+			Con_Printf ("ref_gl warp: view=(%d,%d %dx%d) scene=%dx%d src=(%d,%d %dx%d) fbodest=%u post=%d scenefx=%d msaa=%d\n",
+			view_rect->x, view_rect->y, view_rect->width, view_rect->height,
+			scene_size->width, scene_size->height,
+			srcx, srcy, srcw, srch,
+			(unsigned)fbodest,
+			needs_postprocess ? 1 : 0,
+			needs_scene_effects ? 1 : 0,
+			resolved.msaa ? 1 : 0);
+			warp_log_count++;
+		}
+	}
 	effective_dof_enabled = input->dof_enabled;
 	effective_ssao_enabled = input->ssao_enabled;
 	effective_godrays_preview = input->godrays_preview;
@@ -6220,31 +6292,34 @@ void R_WarpScaleView (const r_warp_resolve_input_t *input)
 		}
 
 		GL_EndGroup ();
+	}
 
-		if (!needwarpscale)
+	if (resolved.msaa && !needwarpscale)
+	{
+		int dstw = force_blit_upscale ? view_rect->width : srcw;
+		int dsth = force_blit_upscale ? view_rect->height : srch;
+		GLbitfield mask = GL_COLOR_BUFFER_BIT;
+
+		GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved.resolved_scene_fbo);
+		glReadBuffer (GL_COLOR_ATTACHMENT0);
+		GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
+		if (fbodest)
+			glDrawBuffer (GL_COLOR_ATTACHMENT0);
+		else
+			glDrawBuffer (GL_BACK);
+
+		if (need_depth_resolve)
+			mask |= GL_DEPTH_BUFFER_BIT;
+
+		if (mask & GL_DEPTH_BUFFER_BIT)
 		{
-			int dstw = force_blit_upscale ? view_rect->width : srcw;
-			int dsth = force_blit_upscale ? view_rect->height : srch;
-			GL_BindFramebufferFunc (GL_READ_FRAMEBUFFER, resolved.resolved_scene_fbo);
-			glReadBuffer (GL_COLOR_ATTACHMENT0);
-			GL_BindFramebufferFunc (GL_DRAW_FRAMEBUFFER, fbodest);
-			if (fbodest)
-				glDrawBuffer (GL_COLOR_ATTACHMENT0);
-			else
-				glDrawBuffer (GL_BACK);
-			{
-				GLbitfield mask = GL_COLOR_BUFFER_BIT;
-				if (need_depth_resolve)
-					mask |= GL_DEPTH_BUFFER_BIT;
-				if (mask & GL_DEPTH_BUFFER_BIT)
-				{
-					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_COLOR_BUFFER_BIT, blit_filter);
-					need_depth_resolve = false;
-				}
-				else
-					GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, mask, blit_filter);
-			}
+			GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+			GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, GL_COLOR_BUFFER_BIT, blit_filter);
+			need_depth_resolve = false;
+		}
+		else
+		{
+			GL_BlitFramebufferFunc (0, 0, srcw, srch, srcx, srcy, srcx + dstw, srcy + dsth, mask, blit_filter);
 		}
 	}
 
@@ -6272,18 +6347,18 @@ void R_WarpScaleView (const r_warp_resolve_input_t *input)
 			glDrawBuffer (GL_COLOR_ATTACHMENT0);
 		else
 			glDrawBuffer (GL_BACK);
-	{
-		if (need_depth_resolve)
 		{
+			if (need_depth_resolve)
+			{
+				GL_BlitFramebufferFunc (0, 0, srcw, srch,
+					srcx, srcy, srcx + dstw, srcy + dsth,
+					GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+				need_depth_resolve = false;
+			}
 			GL_BlitFramebufferFunc (0, 0, srcw, srch,
 				srcx, srcy, srcx + dstw, srcy + dsth,
-				GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-			need_depth_resolve = false;
+				GL_COLOR_BUFFER_BIT, blit_filter);
 		}
-		GL_BlitFramebufferFunc (0, 0, srcw, srch,
-			srcx, srcy, srcx + dstw, srcy + dsth,
-			GL_COLOR_BUFFER_BIT, blit_filter);
-	}
 	}
 
 	GL_BindFramebufferFunc (GL_FRAMEBUFFER, fbodest);

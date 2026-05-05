@@ -2421,6 +2421,40 @@ void Con_NotifyBox (const char *text)
 	realtime = 0;		// put the cursor back to invisible
 }
 
+int Con_GetCurrentLine (void)
+{
+	return con_current;
+}
+
+int Con_GetTotalLines (void)
+{
+	return con_totallines;
+}
+
+size_t Con_CopyLine (int line, char *dst, size_t dstsize)
+{
+	const char *text;
+	size_t len, i;
+
+	if (!dst || dstsize == 0)
+		return 0;
+
+	dst[0] = 0;
+	if (!con_text || line > con_current)
+		return 0;
+
+	text = Con_GetLine (line);
+	len = Con_StrLen (line);
+	if (len >= dstsize)
+		len = dstsize - 1;
+
+	for (i = 0; i < len; ++i)
+		dst[i] = (char)(text[i] & 0x7f);
+	dst[len] = 0;
+
+	return len;
+}
+
 
 void LOG_Init (quakeparms_t *parms)
 {

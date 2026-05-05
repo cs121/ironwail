@@ -277,11 +277,6 @@ static qboolean SoundDef_ReadValueToken (const char **cursor, sounddef_parse_sta
 
 static qboolean SoundDef_ParseLayerProperty (const char *key, sound_def_layer_desc_t *layer, const char **cursor, sounddef_parse_state_t *state)
 {
-	{
-		char tracebuf[256];
-		q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ParseLayerProperty: key=%s def=%s", key, state->current_def_name ? state->current_def_name : "<none>");
-		TexMgr_Trace (tracebuf);
-	}
 	float min_value, max_value, value;
 	int int_value;
 	qboolean bool_value;
@@ -445,11 +440,6 @@ static qboolean SoundDef_ParseLayerProperty (const char *key, sound_def_layer_de
 
 static qboolean SoundDef_ParseDefProperty (const char *key, sound_def_desc_t *desc, const char **cursor, sounddef_parse_state_t *state)
 {
-	{
-		char tracebuf[256];
-		q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ParseDefProperty: key=%s def=%s", key, desc->name);
-		TexMgr_Trace (tracebuf);
-	}
 	float value;
 	int int_value;
 	qboolean bool_value;
@@ -639,11 +629,6 @@ static int SoundDef_ParseFileBuffer (const char *path, char *buffer, const char 
 			continue;
 		}
 		q_strlcpy (desc.name, com_token, sizeof (desc.name));
-		{
-			char tracebuf[256];
-			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ParseFileBuffer: begin def=%s", desc.name);
-			TexMgr_Trace (tracebuf);
-		}
 		state.current_def_name = desc.name;
 
 		cursor = SoundDef_ParseToken (cursor, &state);
@@ -658,21 +643,10 @@ static int SoundDef_ParseFileBuffer (const char *path, char *buffer, const char 
 		{
 			if (!strcmp (com_token, "}"))
 			{
-				{
-					char tracebuf[256];
-					q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ParseFileBuffer: register begin=%s", desc.name);
-					TexMgr_Trace (tracebuf);
-				}
 				if (SoundDef_Register (&desc, state.source_file, (int) state.token_line))
 					parsed_defs++;
 				else
 					state.errors++;
-				{
-					char tracebuf[256];
-					q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_ParseFileBuffer: end def=%s", desc.name);
-					TexMgr_Trace (tracebuf);
-				}
-				TexMgr_Trace ("SoundDef_ParseFileBuffer: register end");
 				break;
 			}
 
@@ -767,11 +741,6 @@ static size_t SoundDef_LoadFromDirectory (const searchpath_t *search, sounddef_p
 	if ((size_t) q_snprintf (script_dir, sizeof (script_dir), "%s/sounddefs", search->filename) >= sizeof (script_dir))
 		return 0;
 
-	{
-		char tracebuf[256];
-		q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_LoadFromDirectory: scan begin dir=%s", script_dir);
-		TexMgr_Trace (tracebuf);
-	}
 	for (find = Sys_FindFirst (script_dir, "sndshd"); find; find = Sys_FindNext (find))
 	{
 		char fullpath[MAX_OSPATH];
@@ -783,11 +752,6 @@ static size_t SoundDef_LoadFromDirectory (const searchpath_t *search, sounddef_p
 		if (find->attribs & FA_DIRECTORY)
 			continue;
 
-		{
-			char tracebuf[256];
-			q_snprintf (tracebuf, sizeof (tracebuf), "SoundDef_LoadFromDirectory: found file=%s", find->name);
-			TexMgr_Trace (tracebuf);
-		}
 		q_snprintf (relpath, sizeof (relpath), "sounddefs/%s", find->name);
 		q_snprintf (fullpath, sizeof (fullpath), "%s/%s", script_dir, find->name);
 

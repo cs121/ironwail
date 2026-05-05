@@ -10,6 +10,8 @@ extern cvar_t r_framegraph_autobind;
 extern cvar_t r_framegraph_debug;
 extern cvar_t r_framegraph_pass_debug;
 extern cvar_t r_speeds;
+extern cvar_t r_ref_enable_postfx;
+extern cvar_t r_srgb_framebuffer;
 qboolean R_Shadow_Enabled (void);
 
 void R_RegisterFrameGraphPasses (void);
@@ -1093,6 +1095,8 @@ static void FG_MaybePrintStats (void)
 static void FG_ApplyPassBaseline (const RenderPassDesc *pass, const RenderPassContext *ctx)
 {
 	unsigned baseline_bits = 0u;
+	/* TODO_STATE_BASELINE:
+	 * Baselines are pass-scoped state expectations delegated to backend. */
 
 	if (pass && pass->baseline_bits != 0u)
 		baseline_bits = pass->baseline_bits;
@@ -1120,6 +1124,9 @@ static void FG_ApplyPassOutputBinding (const RenderPassDesc *pass, RenderPassCon
 	qboolean autobind_enabled = FG_AutobindEnabled ();
 	qboolean bind_backbuffer = false;
 	qboolean bind_target = false;
+	/* TODO_PASS_BOUNDARY:
+	 * Core resolves output intent (backbuffer/scene/composite), backend owns
+	 * native target binding and concrete attachment execution. */
 
 	if (!pass)
 		return;
@@ -1217,6 +1224,8 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	double cpu_start;
 	double cpu_ms;
 	unsigned bit;
+	unsigned output_target = FG_PASS_OUTPUT_KEEP;
+	unsigned viewport_mode = FG_PASS_VIEWPORT_KEEP;
 	RenderBackendPassAttachmentDesc color_attachments[4];
 	RenderBackendPassAttachmentDesc depth_attachment;
 	RenderBackendPassDesc backend_pass_desc;
@@ -1228,6 +1237,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 		return;
 	if (!FG_ValidatePassResourceDecls (pass, false))
 		return;
+	FG_ResolvePassOutputAndViewport (pass, ctx, &output_target, &viewport_mode);
 	FG_ApplyPassBaseline (pass, ctx);
 	FG_DebugPrintPassInfo (pass, ctx);
 
@@ -1262,7 +1272,7 @@ static void FG_RunPass (int profile_slot, const RenderPassDesc *pass, RenderPass
 	memset (&backend_pass_desc, 0, sizeof (backend_pass_desc));
 	backend_pass_desc.name = pass->name;
 	backend_pass_desc.resources = ctx->resources;
-	backend_pass_desc.backbuffer = (pass->output_target == FG_PASS_OUTPUT_BACKBUFFER);
+	backend_pass_desc.backbuffer = (output_target == FG_PASS_OUTPUT_BACKBUFFER);
 
 	if (pass->color_attachments && pass->num_color_attachments > 0)
 	{
@@ -1345,6 +1355,12 @@ void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan)
 	R_Backend_QuerySurfaceInfo (&surface_info);
 	out_plan->needs_scene_effects = surface_info.needs_scene_effects;
 	out_plan->needs_postprocess = surface_info.needs_postprocess;
+	if (out_plan->needs_scene_effects)
+		out_plan->needs_postprocess = true;
+	/* Safety: when rendering to a non-sRGB backbuffer with postfx enabled,
+	 * ensure postprocess runs to apply output transfer/tonemap. */
+	if (r_ref_enable_postfx.value != 0.f && r_srgb_framebuffer.value <= 0.f)
+		out_plan->needs_postprocess = true;
 	out_plan->run_shadowmaps = R_Shadow_Enabled ();
 	out_plan->run_postprocess = out_plan->needs_postprocess;
 	out_plan->run_viewmodel = true;

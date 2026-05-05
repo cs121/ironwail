@@ -760,6 +760,8 @@ GLuint gl_bmodel_ibo = 0;
 size_t gl_bmodel_ibo_size = 0;
 GLuint gl_bmodel_indirect_buffer = 0;
 size_t gl_bmodel_indirect_buffer_size = 0;
+bmodel_draw_indirect_t *gl_bmodel_indirect_cmds_cpu = NULL;
+size_t gl_bmodel_indirect_cmd_count = 0;
 GLuint gl_bmodel_surf_buffer = 0;
 GLuint gl_bmodel_marksurf_buffer = 0;
 GLuint gl_bmodel_marksurf_buffer_size = 0;
@@ -782,6 +784,10 @@ void GL_DeleteBModelBuffers (void)
 	gl_bmodel_ibo_size = 0;
 	gl_bmodel_indirect_buffer = 0;
 	gl_bmodel_indirect_buffer_size = 0;
+	if (gl_bmodel_indirect_cmds_cpu)
+		q_free (gl_bmodel_indirect_cmds_cpu);
+	gl_bmodel_indirect_cmds_cpu = NULL;
+	gl_bmodel_indirect_cmd_count = 0;
 	gl_bmodel_surf_buffer = 0;
 	gl_bmodel_marksurf_buffer = 0;
 	gl_bmodel_marksurf_buffer_size = 0;
@@ -1260,6 +1266,13 @@ void GL_BuildBModelMarkBuffers (void)
 	gl_bmodel_indirect_buffer = GL_CreateBuffer (GL_SHADER_STORAGE_BUFFER, GL_DYNAMIC_DRAW, "bmodel indirect cmds",
 		sizeof (cmds[0]) * numtex, cmds
 	);
+	if (gl_bmodel_indirect_cmds_cpu)
+		q_free (gl_bmodel_indirect_cmds_cpu);
+	gl_bmodel_indirect_cmds_cpu = (bmodel_draw_indirect_t *) q_malloc (sizeof (cmds[0]) * numtex);
+	if (!gl_bmodel_indirect_cmds_cpu)
+		Sys_Error ("GL_BuildBModelMarkBuffers: out of memory (%d cpu cmds)", numtex);
+	memcpy (gl_bmodel_indirect_cmds_cpu, cmds, sizeof (cmds[0]) * numtex);
+	gl_bmodel_indirect_cmd_count = (size_t)numtex;
 	gl_bmodel_ibo = GL_CreateBuffer (GL_ELEMENT_ARRAY_BUFFER, GL_DYNAMIC_DRAW, "bmodel indices",
 		sizeof (idx[0]) * numtris * 3, idx
 	);

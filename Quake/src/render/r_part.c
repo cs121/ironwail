@@ -59,6 +59,10 @@ static vec3_t r_particles_debug_bounds_mins;
 static vec3_t r_particles_debug_bounds_maxs;
 static qboolean r_particles_debug_has_bounds;
 static float r_particles_debug_overdraw_score;
+/* TODO_RESOURCE_BOUNDARY:
+ * Particle draw still binds transient GL buffers directly in this translation
+ * unit. Keep calls funneled through local helpers until backend-only ownership
+ * cleanup happens in a later phase. */
 
 typedef enum
 {
@@ -1336,6 +1340,7 @@ static void R_FlushParticleBatch (void)
 	if (!numpartverts)
 		return;
 
+	/* LEGACY_GL_HANDLE / PHASE3_BOUNDARY_CANDIDATE: localize VBO upload+layout. */
 	GL_Upload (GL_ARRAY_BUFFER, partverts, sizeof(partverts[0]) * numpartverts, &buf, &ofs);
 	GL_BindBuffer (GL_ARRAY_BUFFER, buf);
 	GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof(partverts[0]), ofs + offsetof(particlevert_t, pos));

@@ -50,12 +50,11 @@ typedef enum
 	TEXPREF_HASALPHA		= (TEXPREF_ALPHA|TEXPREF_ALPHABRIGHT), // texture has alpha channel
 } textureflags_t;
 
-enum srcformat {SRC_INDEXED, SRC_LIGHTMAP, SRC_RGBA};
-
-typedef uintptr_t src_offset_t;
-
 typedef struct gltexture_s {
 //managed by texture manager
+	/* LEGACY_GL_HANDLE / REF_GL_PRIVATE:
+	 * These native GL fields are intentionally still visible during migration.
+	 * Phase-3 goal is inventory + accessor candidates, not full opacity yet. */
 	GLenum			target;
 	GLuint			texnum;
 	GLuint64		bindless_handle;
@@ -81,6 +80,17 @@ typedef struct gltexture_s {
 	int			mipmap; //number of mip levels uploaded (0 = unknown)
 	GLenum		internal_format; //GL internal format used for upload
 } gltexture_t;
+
+/* PHASE3_BOUNDARY_CANDIDATE:
+ * Candidate accessor split for future opaque migration:
+ * - keep CPU/metadata fields externally readable,
+ * - route texnum/target/bindless/internal_format via gl_texmgr accessors. */
+/* TODO_RESOURCE_BOUNDARY / TODO_GL_DECONTAMINATION:
+ * Suggested first accessors for opaque migration:
+ * - TexMgr_GetNativeHandle(const gltexture_t*)
+ * - TexMgr_GetTarget(const gltexture_t*)
+ * - TexMgr_GetBindlessHandle(const gltexture_t*)
+ * - TexMgr_GetInternalFormat(const gltexture_t*) */
 
 extern gltexture_t *notexture;
 extern gltexture_t *nulltexture;
@@ -177,6 +187,12 @@ void TexMgr_SRGBTextures_f (cvar_t *var);
 qboolean TexMgr_ShouldUseSRGB (const char *name, enum srcformat format, unsigned flags, const char *source_file);
 qboolean TexMgr_IsReady (void);
 void TexMgr_Trace (const char *fmt, ...);
+/* TODO_RESOURCE_BOUNDARY / REF_GL_PRIVATE:
+ * Accessor-first path for future gltexture_t opacity. */
+GLuint TexMgr_GetNativeHandle (const gltexture_t *glt);
+GLenum TexMgr_GetTarget (const gltexture_t *glt);
+GLuint64 TexMgr_GetBindlessHandle (const gltexture_t *glt);
+GLenum TexMgr_GetInternalFormat (const gltexture_t *glt);
 
 int TexMgr_Pad(int s);
 int TexMgr_SafeTextureSize (int s);

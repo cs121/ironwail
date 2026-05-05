@@ -3,6 +3,10 @@
 #include "screen.h"
 #include "render_dispatch.h"
 
+/* LEGACY_COMPAT_ENTRYPOINT:
+ * Wide Draw/SCR/GL entrypoint forwarding remains intentional during migration.
+ * TODO_RENDER_CONTRACT: split core renderer contract from compatibility block. */
+
 #define CANVAS_ALIGN_LEFT		0.f
 #define CANVAS_ALIGN_CENTERX	0.5f
 #define CANVAS_ALIGN_RIGHT		1.f

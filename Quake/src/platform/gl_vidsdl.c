@@ -54,8 +54,7 @@ void R_Backend_ContextShutdown (void)
 
 void R_Backend_SwapBuffers (void)
 {
-	if (draw_context)
-		SDL_GL_SwapWindow (draw_context);
+	VID_SwapBuffers ();
 }
 #endif
 
@@ -128,6 +127,8 @@ static void ClearAllStates (void);
 static void GL_Init (void);
 static void GL_SetupState (void); //johnfitz
 static void *VID_GetGLProcAddress (const char *name);
+void VID_GetDrawableSize (int *width, int *height);
+void VID_SwapBuffers (void);
 
 static qboolean VID_RefGlTraceEnabled (void)
 {
@@ -486,6 +487,80 @@ void *VID_GetWindow (void)
 	return draw_context;
 }
 
+/* TODO_PLATFORM_SPLIT / LEGACY_GL_COMPAT:
+ * Centralize platform-side GL context operations so they can be moved behind
+ * a host bridge without touching all call-sites again. */
+static SDL_GLContext VID_PlatformCreateGLContext (SDL_Window *window)
+{
+	return window ? SDL_GL_CreateContext (window) : NULL;
+}
+
+/* TODO_PLATFORM_SPLIT / LEGACY_GL_COMPAT:
+ * Transitional platform helper; ref_gl should own context-current policy long-term. */
+static qboolean VID_PlatformMakeContextCurrent (SDL_Window *window, SDL_GLContext context)
+{
+	if (!window || !context)
+		return false;
+	return SDL_GL_MakeCurrent (window, context) == 0;
+}
+
+/* TODO_PLATFORM_SPLIT / LEGACY_GL_COMPAT:
+ * Transitional platform helper for context teardown sequencing. */
+static void VID_PlatformDeleteGLContext (SDL_GLContext context)
+{
+	if (context)
+		SDL_GL_DeleteContext (context);
+}
+
+/* TODO_PLATFORM_SPLIT / LEGACY_GL_COMPAT:
+ * Keep context-attribute control localized for eventual host/ref_gl split. */
+static void VID_PlatformResetGLAttributes (void)
+{
+	SDL_GL_ResetAttributes ();
+}
+
+static void VID_PlatformSetGLAttribute (SDL_GLattr attr, int value)
+{
+	SDL_GL_SetAttribute (attr, value);
+}
+
+static int VID_PlatformGetGLAttribute (SDL_GLattr attr, int *value)
+{
+	return SDL_GL_GetAttribute (attr, value);
+}
+
+/* TODO_PLATFORM_SPLIT / LEGACY_GL_COMPAT:
+ * Host wrapper surface for renderer-plugin context decoupling work. */
+void VID_GetDrawableSize (int *width, int *height)
+{
+	int w = 0, h = 0;
+
+	if (draw_context)
+		SDL_GL_GetDrawableSize (draw_context, &w, &h);
+	if ((w <= 0 || h <= 0) && draw_context)
+		SDL_GetWindowSize (draw_context, &w, &h);
+
+	if (width)
+		*width = w;
+	if (height)
+		*height = h;
+}
+
+/* TODO_PLATFORM_SPLIT / LEGACY_GL_COMPAT:
+ * Kept in platform layer until GL context ownership fully moves to ref_gl. */
+void VID_SwapBuffers (void)
+{
+	if (draw_context)
+		SDL_GL_SwapWindow (draw_context);
+}
+
+/* TODO_PLATFORM_SPLIT / TODO_REQUIRES_LEGACY_GL_REMOVE:
+ * Swap-interval control still assumes active GL context in platform unit. */
+qboolean VID_SetSwapInterval (int interval)
+{
+	return SDL_GL_SetSwapInterval (interval) == 0;
+}
+
 /*
 ====================
 VID_SetWindowTitle
@@ -524,9 +599,7 @@ VID_EnsureGLContextCurrent
 */
 qboolean VID_EnsureGLContextCurrent (void)
 {
-	if (!draw_context || !gl_context)
-		return false;
-	return SDL_GL_MakeCurrent (draw_context, gl_context) == 0;
+	return VID_PlatformMakeContextCurrent (draw_context, gl_context);
 }
 #endif
 
@@ -593,11 +666,11 @@ VID_ConfigureGLContextAttributes
 */
 static void VID_ConfigureGLContextAttributes (void)
 {
-	SDL_GL_SetAttribute (SDL_GL_CONTEXT_MAJOR_VERSION, MIN_GL_VERSION_MAJOR);
-	SDL_GL_SetAttribute (SDL_GL_CONTEXT_MINOR_VERSION, MIN_GL_VERSION_MINOR);
-	SDL_GL_SetAttribute (SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+	VID_PlatformSetGLAttribute (SDL_GL_CONTEXT_MAJOR_VERSION, MIN_GL_VERSION_MAJOR);
+	VID_PlatformSetGLAttribute (SDL_GL_CONTEXT_MINOR_VERSION, MIN_GL_VERSION_MINOR);
+	VID_PlatformSetGLAttribute (SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 #ifndef NDEBUG
-	SDL_GL_SetAttribute (SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
+	VID_PlatformSetGLAttribute (SDL_GL_CONTEXT_FLAGS, SDL_GL_CONTEXT_DEBUG_FLAG);
 #endif
 }
 
@@ -626,7 +699,7 @@ static int VID_CreateWindowIfNeeded (const char *caption, int width, int height)
 	draw_context = SDL_CreateWindow (caption, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, flags);
 	if (!draw_context)
 	{
-		SDL_GL_SetAttribute (SDL_GL_DEPTH_SIZE, 16);
+		VID_PlatformSetGLAttribute (SDL_GL_DEPTH_SIZE, 16);
 		draw_context = SDL_CreateWindow (caption, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, flags);
 	}
 	if (!draw_context)
@@ -711,7 +784,7 @@ static void VID_EnsureGLContext (void)
 {
 	if (!gl_context)
 	{
-		gl_context = SDL_GL_CreateContext (draw_context);
+		gl_context = VID_PlatformCreateGLContext (draw_context);
 		if (!gl_context)
 		{
 			// Couldn't create an OpenGL context with our minimum requirements.
@@ -720,8 +793,8 @@ static void VID_EnsureGLContext (void)
 			int major, minor;
 			const char *version;
 
-			SDL_GL_ResetAttributes ();
-			gl_context = SDL_GL_CreateContext (draw_context);
+			VID_PlatformResetGLAttributes ();
+			gl_context = VID_PlatformCreateGLContext (draw_context);
 			version = gl_context ? (const char *) glGetString (GL_VERSION) : NULL;
 			if (!version || IW_PARSE_SSCANF (version, "%d.%d", &major, &minor) != 2)
 				major = minor = 0;
@@ -768,9 +841,9 @@ static void VID_UpdateWindowMetrics (int *out_depthbits, int *out_stencilbits)
 	VID_RecalcInterfaceSize ();
 	R_Backend_OnResize (vid.width, vid.height);
 
-	if (SDL_GL_GetAttribute (SDL_GL_DEPTH_SIZE, out_depthbits) == -1)
+	if (VID_PlatformGetGLAttribute (SDL_GL_DEPTH_SIZE, out_depthbits) == -1)
 		*out_depthbits = 0;
-	if (SDL_GL_GetAttribute (SDL_GL_STENCIL_SIZE, out_stencilbits) == -1)
+	if (VID_PlatformGetGLAttribute (SDL_GL_STENCIL_SIZE, out_stencilbits) == -1)
 		*out_stencilbits = 0;
 }
 
@@ -794,9 +867,9 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fu
 	/* z-buffer depth */
 	depthbits = 24;
 	stencilbits = 8;
-	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, depthbits);
-	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, stencilbits);
-	SDL_GL_SetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
+	VID_PlatformSetGLAttribute (SDL_GL_DEPTH_SIZE, depthbits);
+	VID_PlatformSetGLAttribute (SDL_GL_STENCIL_SIZE, stencilbits);
+	VID_PlatformSetGLAttribute (SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, 1);
 
 	if (!VID_ApplyWindowMode (width, height, refreshrate, fullscreen))
 		return false;
@@ -808,7 +881,7 @@ static qboolean VID_SetMode (int width, int height, int refreshrate, qboolean fu
 #endif
 	{
 		int srgb_capable = 0;
-		if (SDL_GL_GetAttribute(SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, &srgb_capable) == 0)
+		if (VID_PlatformGetGLAttribute (SDL_GL_FRAMEBUFFER_SRGB_CAPABLE, &srgb_capable) == 0)
 			vid_framebuffer_srgb_capable = (srgb_capable != 0);
 		else
 			vid_framebuffer_srgb_capable = false;
@@ -856,7 +929,7 @@ static void VID_ApplyVSync (void)
 		Con_SafePrintf ("VSync interval %d too high, clamping to %d\n", abs(interval), MAX_INTERVAL);
 		interval = interval < 0 ? -MAX_INTERVAL : MAX_INTERVAL;
 	}
-	if (SDL_GL_SetSwapInterval (interval) != 0)
+	if (!VID_SetSwapInterval (interval))
 	{
 		if (interval == 0)
 			Con_SafePrintf ("Could not disable vsync\n");
@@ -1395,11 +1468,11 @@ static void GL_CheckExtensions (void)
 		GL_InitFunctions (gl_arb_bindless_texture_functions, false)
 	;
 
-	gl_clipcontrol_able =
-		!COM_CheckParm ("-noclipcontrol") &&
-		GL_FindExtension ("GL_ARB_clip_control") &&
-		GL_InitFunctions (gl_arb_clip_control_functions, false)
-	;
+		gl_clipcontrol_able =
+			COM_CheckParm ("-forceclipcontrol") &&
+			GL_FindExtension ("GL_ARB_clip_control") &&
+			GL_InitFunctions (gl_arb_clip_control_functions, false)
+		;
 }
 
 /*
@@ -1784,9 +1857,8 @@ void GL_BeginRendering (int *x, int *y, int *width, int *height)
 		{
 			int w = 0, h = 0;
 			draw_context = window;
-			SDL_GL_GetDrawableSize (window, &w, &h);
-			if (w <= 0 || h <= 0)
-				SDL_GetWindowSize (window, &w, &h);
+			(void)window;
+			VID_GetDrawableSize (&w, &h);
 
 			if (w > 0 && h > 0 && (w != vid.width || h != vid.height))
 			{
@@ -1942,7 +2014,7 @@ void	VID_Shutdown (void)
 		Lightgrid_Shutdown ();
 		VID_FreeMouseCursors();
 		GL_Backend_SetProcAddressLoader (NULL);
-		SDL_GL_DeleteContext(gl_context);
+		VID_PlatformDeleteGLContext (gl_context);
 		gl_context = NULL;
 		SDL_DestroyWindow(draw_context);
 		draw_context = NULL;

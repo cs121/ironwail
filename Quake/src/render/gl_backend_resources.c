@@ -65,6 +65,8 @@ void GL_Backend_ResetResources (void)
 
 static unsigned short GLBackend_RegisterResourceInternal (render_backend_resource_type_t type, render_backend_resource_slot_t slot, gl_backend_resource_key_t key, render_backend_resource_lifetime_t lifetime, unsigned native_id)
 {
+	/* REF_GL_PRIVATE / TODO_RESOURCE_BOUNDARY:
+	 * `native_id` is a backend-local native object handle (GL in ref_gl). */
 	unsigned short opaque_id;
 	int index;
 

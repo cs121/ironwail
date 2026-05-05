@@ -76,5 +76,9 @@ void LOG_Init (quakeparms_t *parms);
 void LOG_Close (void);
 void Con_DebugLog (const char *msg);
 
+int Con_GetCurrentLine (void);
+int Con_GetTotalLines (void);
+size_t Con_CopyLine (int line, char *dst, size_t dstsize);
+
 #endif	/* __CONSOLE_H */
 

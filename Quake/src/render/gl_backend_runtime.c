@@ -6,6 +6,8 @@ static gl_proc_address_loader_t s_gl_proc_loader = NULL;
 
 static struct gl_backend_state_cache_s
 {
+	/* REF_GL_PASS_EXECUTION:
+	 * Backend-local GL state cache used to enforce pass baseline transitions. */
 	qboolean viewport_valid;
 	GLint viewport[4];
 	qboolean color_mask_valid;
@@ -158,4 +160,3 @@ void *GL_Backend_GetProcAddress (const char *name)
 		return NULL;
 	return s_gl_proc_loader (name);
 }
-

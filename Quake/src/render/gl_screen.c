@@ -1961,6 +1961,8 @@ void SCR_ScreenShot_f (void)
 		scr_skipupdate = oldskip;
 	}
 
+	/* TODO_RESOURCE_BOUNDARY / LEGACY_GL_HANDLE:
+	 * Screenshot path still performs direct GL readback in this unit. */
 	glPixelStorei (GL_PACK_ALIGNMENT, 1);/* for widths that aren't a multiple of 4 */
 	glReadPixels (glx, gly, glwidth, glheight, GL_RGB, GL_UNSIGNED_BYTE, buffer);
 
@@ -2196,10 +2198,18 @@ johnfitz -- modified to use glwidth/glheight instead of vid.width/vid.height
 */
 void SCR_TileClear (void)
 {
+	static int tileclear_log_count = 0;
 	//ericw -- added check for glsl gamma. TODO: remove this ugly optimization?
 	if (scr_tileclear_updates >= vid.numpages && !gl_clear.value && vid_gamma.value == 1)
 		return;
 	scr_tileclear_updates++;
+	if (developer.value != 0.f && tileclear_log_count < 128)
+	{
+		Con_Printf ("scr tileclear: vrect=(%d,%d %dx%d) gl=(%d,%d) sb_lines=%d viewsize=%.1f\n",
+			r_refdef.vrect.x, r_refdef.vrect.y, r_refdef.vrect.width, r_refdef.vrect.height,
+			glwidth, glheight, sb_lines, scr_viewsize.value);
+		tileclear_log_count++;
+	}
 
 	if (r_refdef.vrect.x > 0)
 	{

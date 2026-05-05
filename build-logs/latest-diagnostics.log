@@ -1,21 +1,21 @@
 ==========================================
 Build + Deploy Ironwail (Release x64)
 ==========================================
-[INFO] Repo-Basis: C:\Quake\source\ironwail\
-[INFO] Build-Log: C:\Quake\source\ironwail\build-logs\latest-build.log
-[INFO] Diagnose-Log: C:\Quake\source\ironwail\build-logs\latest-diagnostics.log
-[INFO] Arbeitsverzeichnis: C:\Quake\source\ironwail
+[INFO] Repo-Basis: C:\Projects\ironwail\
+[INFO] Build-Log: C:\Projects\ironwail\build-logs\latest-build.log
+[INFO] Diagnose-Log: C:\Projects\ironwail\build-logs\latest-diagnostics.log
+[INFO] Arbeitsverzeichnis: C:\Projects\ironwail
 [INFO] Solution-Datei gefunden: Windows\VisualStudio\ironwail.sln
 [INFO] Projektdatei gefunden: Windows\VisualStudio\ironwail.vcxproj
 [INFO] Sammle Diagnosedaten...
 ==== Environment ====
-DATE=04.05.2026
-TIME= 2:25:44,33
-CD=C:\Quake\source\ironwail
+DATE=05.05.2026
+TIME=22:25:34,90
+CD=C:\Projects\ironwail
 PROCESSOR_ARCHITECTURE=AMD64
 VisualStudioVersion=
 VSINSTALLDIR=
-PATH=C:\Program Files\ImageMagick-7.1.2-Q16-HDRI;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\Microsoft VS Code\bin;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\ACE Studio;C:\Program Files\Git\cmd;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Program Files\Calibre2\;C:\Program Files\Meld\;C:\Program Files\KTX-Software\bin;C:\Program Files\nodejs\;C:\Program Files\GitHub CLI\;C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR;C:\Program Files\dotnet\;C:\Users\schmi\.local\bin;$($env:PATH);C:\Tools\potrace;C:\Users\schmi\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\schmi\AppData\Local\Python\bin;C:\Users\schmi\AppData\Local\Python\pythoncore-3.14-64\Scripts;C:\Users\schmi\AppData\Roaming\npm;C:\Users\schmi\AppData\Local\Programs\Antigravity\bin;C:\Users\schmi\.dotnet\tools
+PATH=C:\Users\schmi\.codex\tmp\arg0\codex-arg03958f7;C:\Program Files\ImageMagick-7.1.2-Q16-HDRI;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\Microsoft VS Code\bin;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\ACE Studio;C:\Program Files\Git\cmd;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Program Files\Calibre2\;C:\Program Files\Meld\;C:\Program Files\KTX-Software\bin;C:\Program Files\nodejs\;C:\Program Files\GitHub CLI\;C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR;C:\Program Files\dotnet\;C:\Users\schmi\.local\bin;$($env:PATH);C:\Tools\potrace;C:\Users\schmi\AppData\Local\Programs\Microsoft VS Code\bin;C:\Users\schmi\AppData\Local\Python\bin;C:\Users\schmi\AppData\Local\Python\pythoncore-3.14-64\Scripts;C:\Users\schmi\AppData\Roaming\npm;C:\Users\schmi\AppData\Local\Programs\Antigravity\bin;C:\Users\schmi\.dotnet\tools;C:\Users\schmi\AppData\Local\OpenAI\Codex\bin;C:\Program Files\WindowsApps\OpenAI.Codex_26.429.3425.0_x64__2p2nqsd0c76g0\app\resources
 
 ==== Toolset hints from Windows\VisualStudio\ironwail.vcxproj ====
 25:    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>

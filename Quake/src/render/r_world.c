@@ -44,6 +44,8 @@ extern GLuint gl_bmodel_ibo;
 extern size_t gl_bmodel_ibo_size;
 extern GLuint gl_bmodel_indirect_buffer;
 extern size_t gl_bmodel_indirect_buffer_size;
+extern bmodel_draw_indirect_t *gl_bmodel_indirect_cmds_cpu;
+extern size_t gl_bmodel_indirect_cmd_count;
 extern GLuint gl_bmodel_surf_buffer;
 extern GLuint gl_bmodel_marksurf_buffer;
 extern GLuint gl_bmodel_marksurf_buffer_size;
@@ -78,6 +80,14 @@ byte *SV_FatPVS (vec3_t org, qmodel_t *worldmodel);
 
 static inline qboolean R_ValidPtr (const void *ptr);
 static qboolean R_ValidateTextureTables (const qmodel_t *model);
+/* TODO_RESOURCE_BOUNDARY / PHASE3_BOUNDARY_CANDIDATE:
+ * r_world still consumes legacy GL handles directly. Keep leakage localized via
+ * small helper wrappers until a later pass-boundary cleanup can move ownership
+ * behind backend-neutral resource refs. */
+static inline void R_WorldBindSSBO (GLuint slot, GLuint buffer, GLintptr offset, GLsizeiptr size);
+static inline void R_WorldBindUBO (GLuint slot, GLuint buffer, GLintptr offset, GLsizeiptr size);
+static void R_WorldSetupBModelVertexLayout (void);
+static inline GLuint64 R_WorldBindlessHandleOrFallback (const gltexture_t *tex, const gltexture_t *fallback);
 
 static qboolean R_BrushModelHasTextureTables (const qmodel_t *model)
 {
@@ -86,6 +96,38 @@ static qboolean R_BrushModelHasTextureTables (const qmodel_t *model)
 		&& model->numtextures > 0
 		&& model->textures
 		&& model->usedtextures;
+}
+
+static inline void R_WorldBindSSBO (GLuint slot, GLuint buffer, GLintptr offset, GLsizeiptr size)
+{
+	/* LEGACY_GL_HANDLE: direct GLuint buffer ids remain transitional in r_world. */
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, slot, buffer, offset, size);
+}
+
+static inline void R_WorldBindUBO (GLuint slot, GLuint buffer, GLintptr offset, GLsizeiptr size)
+{
+	/* LEGACY_GL_HANDLE: direct GLuint buffer ids remain transitional in r_world. */
+	GL_BindBufferRange (GL_UNIFORM_BUFFER, slot, buffer, offset, size);
+}
+
+static void R_WorldSetupBModelVertexLayout (void)
+{
+	/* REF_GL_PRIVATE: vertex attrib layout is GL-specific and intentionally local. */
+	GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, pos));
+	GL_VertexAttribPointerFunc (1, 4, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, st));
+	GL_VertexAttribPointerFunc (2, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lmofs));
+	GL_VertexAttribIPointerFunc (3, 4, GL_UNSIGNED_BYTE, sizeof (glvert_t), (void *) offsetof (glvert_t, styles));
+	GL_VertexAttribPointerFunc (4, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, normal));
+	GL_VertexAttribPointerFunc (5, 4, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, tangent));
+	GL_VertexAttribPointerFunc (6, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lightgrid));
+	GL_VertexAttribPointerFunc (7, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, skyvisibility));
+}
+
+static inline GLuint64 R_WorldBindlessHandleOrFallback (const gltexture_t *tex, const gltexture_t *fallback)
+{
+	/* LEGACY_GL_HANDLE: bindless GLuint64 stays local in r_world until later split. */
+	const gltexture_t *resolved = tex ? tex : fallback;
+	return TexMgr_GetBindlessHandle (resolved);
 }
 
 static qboolean R_IsKnownBrushEntityModel (const entity_t *ent)
@@ -115,8 +157,16 @@ static texture_t *R_GetUsedTexture (const qmodel_t *model, int used_index, int *
 	static int last_bad_texnum_frame = -1;
 	texture_t *tex;
 
-	if (!model || !model->usedtextures || !model->textures)
+	if (!model || !model->textures)
 		return NULL;
+	if (!model->usedtextures)
+	{
+		if (used_index < 0 || used_index >= model->numtextures)
+			return NULL;
+		if (out_texnum)
+			*out_texnum = used_index;
+		return model->textures[used_index];
+	}
 	if (!R_ValidateTextureTables (model))
 		return NULL;
 
@@ -302,18 +352,18 @@ static void R_MarkVisSurfaces (byte *vis, GLuint cull_flags, qboolean oldskyleaf
 	vissize = (vissize + VIS_ALIGN_MASK) & ~VIS_ALIGN_MASK; // round up
 
 	GL_UseProgram (glprogs.clear_indirect);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, gl_bmodel_indirect_buffer, 0, cl.worldmodel->texofs[TEXTYPE_COUNT] * sizeof(bmodel_draw_indirect_t));
+	R_WorldBindSSBO (1, gl_bmodel_indirect_buffer, 0, cl.worldmodel->texofs[TEXTYPE_COUNT] * sizeof(bmodel_draw_indirect_t));
 	R_Backend_Dispatch ((unsigned)((cl.worldmodel->texofs[TEXTYPE_COUNT] + 63) / 64), 1u, 1u);
 	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_SHADER_STORAGE);
 
 	GL_UseProgram (glprogs.cull_mark);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 2, gl_bmodel_ibo, 0, gl_bmodel_ibo_size);
+	R_WorldBindSSBO (2, gl_bmodel_ibo, 0, gl_bmodel_ibo_size);
 	GL_Upload (GL_SHADER_STORAGE_BUFFER, vis, vissize, &buf, &ofs);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 3, buf, (GLintptr)ofs, vissize);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 4, gl_bmodel_marksurf_buffer, 0, gl_bmodel_marksurf_buffer_size);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 5, gl_bmodel_surf_buffer, 0, cl.worldmodel->numsurfaces * sizeof(bmodel_gpu_surf_t));
+	R_WorldBindSSBO (3, buf, (GLintptr)ofs, vissize);
+	R_WorldBindSSBO (4, gl_bmodel_marksurf_buffer, 0, gl_bmodel_marksurf_buffer_size);
+	R_WorldBindSSBO (5, gl_bmodel_surf_buffer, 0, cl.worldmodel->numsurfaces * sizeof(bmodel_gpu_surf_t));
 	GL_Upload (GL_UNIFORM_BUFFER, &frame, sizeof(frame), &buf, &ofs);
-	GL_BindBufferRange (GL_UNIFORM_BUFFER, 1, buf, (GLintptr)ofs, sizeof(frame));
+	R_WorldBindUBO (1, buf, (GLintptr)ofs, sizeof(frame));
 
 	R_Backend_Dispatch ((unsigned)((nummark + 63) / 64), 1u, 1u);
 	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_COMMAND | R_BACKEND_BARRIER_SHADER_STORAGE | R_BACKEND_BARRIER_ELEMENT_ARRAY);
@@ -754,19 +804,34 @@ static void R_FlushBModelCalls (void)
 	GLuint	cmdbuf, buf;
 	GLbyte	*ofs;
 	size_t	dstcmdofs;
+	bmodel_draw_indirect_t *cmds;
+	size_t cmd_bytes;
+	int i;
 
 	if (!num_bmodel_calls)
 		return;
 
-	GL_ReserveDeviceMemory (GL_DRAW_INDIRECT_BUFFER, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls, &cmdbuf, &dstcmdofs);
-
-	GL_UseProgram (glprogs.gather_indirect);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 5, gl_bmodel_indirect_buffer, 0, gl_bmodel_indirect_buffer_size);
-	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 6, cmdbuf, dstcmdofs, sizeof (bmodel_draw_indirect_t) * num_bmodel_calls);
-	GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_call_remap, sizeof (bmodel_call_remap[0]) * num_bmodel_calls, &buf, &ofs);
-	GL_BindBufferRange  (GL_SHADER_STORAGE_BUFFER, 7, buf, (GLintptr)ofs, sizeof (bmodel_call_remap[0]) * num_bmodel_calls);
-	R_Backend_Dispatch ((unsigned)((num_bmodel_calls + 63) / 64), 1u, 1u);
-	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_COMMAND);
+	cmd_bytes = sizeof (bmodel_draw_indirect_t) * (size_t)num_bmodel_calls;
+	GL_ReserveDeviceMemory (GL_DRAW_INDIRECT_BUFFER, cmd_bytes, &cmdbuf, &dstcmdofs);
+	cmds = (bmodel_draw_indirect_t *) q_malloc (cmd_bytes);
+	if (!cmds)
+		Sys_Error ("R_FlushBModelCalls: out of memory (%d draw cmds)", num_bmodel_calls);
+	for (i = 0; i < num_bmodel_calls; ++i)
+	{
+		const int src = bmodel_call_remap[i].src;
+		const int packed = bmodel_call_remap[i].inst;
+		const int first_instance = packed / MAX_BMODEL_INSTANCES;
+		const int num_instances = (packed % MAX_BMODEL_INSTANCES) + 1;
+		if (src < 0 || (size_t)src >= gl_bmodel_indirect_cmd_count || !gl_bmodel_indirect_cmds_cpu)
+			Sys_Error ("R_FlushBModelCalls: invalid bmodel command index %d (count=%u)\n",
+				src, (unsigned)gl_bmodel_indirect_cmd_count);
+		cmds[i] = gl_bmodel_indirect_cmds_cpu[src];
+		cmds[i].baseInstance = (GLuint)first_instance;
+		cmds[i].instanceCount = (GLuint)num_instances;
+	}
+	GL_Upload (GL_DRAW_INDIRECT_BUFFER, cmds, cmd_bytes, &cmdbuf, &ofs);
+	dstcmdofs = (size_t)ofs;
+	q_free (cmds);
 
 	GL_UseProgram (bmodel_batch_program);
 	if (R_IsWorldLightingProgram (bmodel_batch_program))
@@ -778,27 +843,18 @@ static void R_FlushBModelCalls (void)
 	GL_BindBuffer (GL_ELEMENT_ARRAY_BUFFER, gl_bmodel_ibo);
 	GL_BindBuffer (GL_ARRAY_BUFFER, gl_bmodel_vbo);
 	GL_BindBuffer (GL_DRAW_INDIRECT_BUFFER, cmdbuf);
-	GL_VertexAttribPointerFunc (0, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, pos));
-	GL_VertexAttribPointerFunc (1, 4, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, st));
-	GL_VertexAttribPointerFunc (2, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lmofs));
-	GL_VertexAttribIPointerFunc (3, 4, GL_UNSIGNED_BYTE, sizeof (glvert_t), (void *) offsetof (glvert_t, styles));
-	GL_VertexAttribPointerFunc (4, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, normal));
-	GL_VertexAttribPointerFunc (5, 4, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, tangent));
-	GL_VertexAttribPointerFunc (6, 3, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, lightgrid));
-	GL_VertexAttribPointerFunc (7, 1, GL_FLOAT, GL_FALSE, sizeof (glvert_t), (void *) offsetof (glvert_t, skyvisibility));
+	R_WorldSetupBModelVertexLayout ();
 
 	if (gl_bindless_able)
 	{
 		GL_Upload (GL_SHADER_STORAGE_BUFFER, bmodel_calls.bindless.params, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls, &buf, &ofs);
-		GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls);
+		R_WorldBindSSBO (1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bindless.params[0]) * num_bmodel_calls);
 		R_Backend_MultiDrawIndexedIndirect (R_BACKEND_PRIMITIVE_TRIANGLES, R_BACKEND_INDEX_TYPE_UINT32, (intptr_t)dstcmdofs, num_bmodel_calls, sizeof (bmodel_draw_indirect_t));
 	}
 	else
 	{
-		int i;
-
 		GL_Upload (GL_SHADER_STORAGE_BUFFER, &bmodel_calls.bound.params, sizeof (bmodel_calls.bound.params[0]) * num_bmodel_calls, &buf, &ofs);
-		GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bound.params[0]) * num_bmodel_calls);
+		R_WorldBindSSBO (1, buf, (GLintptr)ofs, sizeof (bmodel_calls.bound.params[0]) * num_bmodel_calls);
 
 		for (i = 0; i < num_bmodel_calls; i++)
 		{
@@ -957,11 +1013,11 @@ static void R_AddBModelCall (int index, int first_instance, int num_instances, t
 		call->stage_color[1] = 1.f;
 		call->stage_color[2] = 1.f;
 		call->stage_color[3] = 1.f;
-		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
-		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
-		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
-		call->normal_map = greytexture->bindless_handle;
-		call->specular_map = whitetexture->bindless_handle;
+		call->texture = R_WorldBindlessHandleOrFallback (tx, greytexture);
+		call->fullbright = R_WorldBindlessHandleOrFallback (fb, blacktexture);
+		call->emissive = R_WorldBindlessHandleOrFallback (em, blacktexture);
+		call->normal_map = R_WorldBindlessHandleOrFallback (NULL, greytexture);
+		call->specular_map = R_WorldBindlessHandleOrFallback (NULL, whitetexture);
 		call->padding[0] = 0;
 		call->padding[1] = 0;
 	}
@@ -1039,11 +1095,11 @@ static void R_AddBModelCallWithTextures (int index, int first_instance, int num_
 		call->stage_color[1] = stage_color ? stage_color[1] : 1.f;
 		call->stage_color[2] = stage_color ? stage_color[2] : 1.f;
 		call->stage_color[3] = stage_color ? stage_color[3] : 1.f;
-		call->texture = tx ? tx->bindless_handle : greytexture->bindless_handle;
-		call->fullbright = fb ? fb->bindless_handle : blacktexture->bindless_handle;
-		call->emissive = em ? em->bindless_handle : blacktexture->bindless_handle;
-		call->normal_map = nm ? nm->bindless_handle : greytexture->bindless_handle;
-		call->specular_map = sm ? sm->bindless_handle : whitetexture->bindless_handle;
+		call->texture = R_WorldBindlessHandleOrFallback (tx, greytexture);
+		call->fullbright = R_WorldBindlessHandleOrFallback (fb, blacktexture);
+		call->emissive = R_WorldBindlessHandleOrFallback (em, blacktexture);
+		call->normal_map = R_WorldBindlessHandleOrFallback (nm, greytexture);
+		call->specular_map = R_WorldBindlessHandleOrFallback (sm, whitetexture);
 		call->padding[0] = 0;
 		call->padding[1] = 0;
 	}
@@ -1804,6 +1860,7 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
         GLbyte *ofs;
         textype_t texbegin, texend;
         qboolean oit;
+        qboolean warned_world_solid_fallback = false;
 
 	/* Dynamic-light receiver contract for brush/world-side categories:
 	 *   category              dynamic dlight pass
@@ -1893,13 +1950,21 @@ static void R_DrawBrushModels_Real (entity_t **ents, int count, brushpass_t pass
 	{
 		entity_t *ent = ents[i];
 		qmodel_t *model = R_GetBrushEntityModel (ent);
+		int jbegin, jend;
 		if (!R_IsKnownBrushEntityModel (ent))
 			continue;
 		if (!model)
 			continue;
 		if (pass == BP_GODRAYS && !R_BrushModelHasTextureTables (model))
 			continue;
-		if (model->texofs[texend] - model->texofs[texbegin] > 0)
+		jbegin = model->texofs[texbegin];
+		jend = model->texofs[texend];
+		if (pass == BP_SOLID && ent == &cl_entities[0] && jend <= jbegin)
+		{
+			jbegin = model->texofs[0];
+			jend = model->texofs[TEXTYPE_COUNT];
+		}
+		if (jend - jbegin > 0)
 			R_InitBModelInstance (&bmodel_instances[totalinst++], ent);
 	}
 
@@ -1977,7 +2042,9 @@ else if (pass == BP_SKYCUBEMAP)
 		qboolean isstatic = PTR_IN_RANGE (e, cl_static_entities, cl_static_entities + MAX_STATIC_ENTITIES);
 		qboolean zfix = !isworld && !isstatic;
 		int frame = isworld ? 0 : e->frame;
-		int numtex = model->texofs[texend] - model->texofs[texbegin];
+		int jbegin = model->texofs[texbegin];
+		int jend = model->texofs[texend];
+		int numtex = jend - jbegin;
 
 		if (model->texofs[TEXTYPE_COUNT] < 0
 			|| model->texofs[TEXTYPE_COUNT] > model->numtextures
@@ -1990,6 +2057,19 @@ else if (pass == BP_SKYCUBEMAP)
 			continue;
 		}
 
+		if (pass == BP_SOLID && isworld && numtex <= 0)
+		{
+			jbegin = model->texofs[0];
+			jend = model->texofs[TEXTYPE_COUNT];
+			numtex = jend - jbegin;
+			if (!warned_world_solid_fallback)
+			{
+				warned_world_solid_fallback = true;
+				Con_DWarning ("R_DrawBrushModels: world opaque texture range empty, using full-table fallback (%d..%d)\n",
+					jbegin, jend);
+			}
+		}
+
 		if (!numtex)
 			continue;
 
@@ -1998,10 +2078,19 @@ else if (pass == BP_SKYCUBEMAP)
 			qmodel_t *next_model = R_GetBrushEntityModel (ents[i]);
 			if (!ents[i] || next_model != model)
 				break;
-			numinst += (next_model->texofs[texend] - next_model->texofs[texbegin]) > 0;
+			{
+				int next_begin = next_model->texofs[texbegin];
+				int next_end = next_model->texofs[texend];
+				if (pass == BP_SOLID && ents[i] == &cl_entities[0] && next_end <= next_begin)
+				{
+					next_begin = next_model->texofs[0];
+					next_end = next_model->texofs[TEXTYPE_COUNT];
+				}
+				numinst += (next_end - next_begin) > 0;
+			}
 		}
 
-		for (j = model->texofs[texbegin]; j < model->texofs[texend]; j++)
+		for (j = jbegin; j < jend; j++)
 		{
 			int texnum = -1;
 			texture_t *t = R_GetUsedTexture (model, j, &texnum);

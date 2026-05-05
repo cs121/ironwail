@@ -1,4 +1,0 @@
-{
-  "workspace:followup": "{\"items\":{},\"failed\":{},\"paused\":{\"ses_265183e76ffekVifRma9HaDRMU\":true},\"edit\":{}}",
-  "workspace:model-selection": "{\"session\":{\"ses_265183e76ffekVifRma9HaDRMU\":{\"agent\":\"build\",\"model\":{\"providerID\":\"openai\",\"modelID\":\"gpt-5.4-mini\"},\"variant\":null}}}"
-}

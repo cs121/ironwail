@@ -3,9 +3,10 @@
 #include "renderer_plugin.h"
 #include "renderer_host_bridge.h"
 #include "render_dispatch.h"
-#include "glquake.h"    /* GL-LEAK (B-01/B-08): glstate, GLS_* state bitmask constants, GLuint type.
-                            * Phase 3 target: replace glstate with backend-neutral state tracker.
-                            * Phase 5 target: remove include entirely. */
+
+/* Keep this unit renderer-neutral: do not add direct GL header dependencies.
+ * GL implementations belong to ref_gl-specific compilation units.
+ * R_BACKEND_MUST_REMAIN_GL_FREE */
 
 enum
 {
@@ -44,6 +45,7 @@ static qboolean s_ref_gl_plugin_candidate_found = false;
 static qboolean s_ref_gl_plugin_loaded = false;
 static qboolean s_ref_gl_plugin_load_failed = false;
 static qboolean s_renderer_plugins_scanned = false;
+static qboolean s_allow_external_renderer_plugins = false;
 static int s_missing_resource_warn_frame[R_BACKEND_RESOURCE_SLOT_COUNT];
 static void *s_plugin_libs[R_BACKEND_MAX_PLUGIN_LIBS];
 static int s_plugin_lib_count = 0;
@@ -129,8 +131,10 @@ static const iw_renderer_plugin_pipeline_services_t s_plugin_pipeline_services =
 	R_Backend_Host_GetPipelineMetadata
 };
 
-cvar_t r_backend = { "r_backend", "ref_gl", CVAR_ARCHIVE };
-cvar_t r_backend_api = { "r_backend_api", "ref_gl", CVAR_ARCHIVE };
+cvar_t r_backend = { "r_backend", "gl", CVAR_ARCHIVE };
+cvar_t r_backend_api = { "r_backend_api", "gl", CVAR_ARCHIVE };
+extern int r_framecount;
+extern cvar_t r_framegraph_debug;
 extern cvar_t r_refgl_debug;
 
 extern cvar_t r_refgl_log_init;
@@ -144,6 +148,7 @@ extern cvar_t r_ref_enable_postfx;
 extern cvar_t r_ref_enable_shadows;
 extern cvar_t r_ref_enable_fog;
 extern cvar_t r_ref_enable_lighting;
+extern qboolean IW_RendererBuiltinGL_RegisterInternal (const iw_renderer_plugin_host_api_t *host_api);
 
 /*
 ================
@@ -754,6 +759,27 @@ static qboolean R_Backend_IsExternalRendererRequest (const char *name)
 		|| !q_strcasecmp (name, s_ref_vk_plugin_filename)
 		|| !q_strcasecmp (name, "ref_dx12")
 		|| !q_strcasecmp (name, s_ref_dx12_plugin_filename);
+}
+
+static qboolean R_Backend_ShouldAttemptPluginLoad (const char *plugin_filename)
+{
+	const qboolean allow_experimental =
+		(COM_CheckParm ("-allow_experimental_renderers") > 0)
+		|| (COM_CheckParm ("-allow_vk_dx12_plugins") > 0);
+
+	if (!plugin_filename || !plugin_filename[0])
+		return false;
+
+	if (!allow_experimental
+		&& (!q_strcasecmp (plugin_filename, s_ref_vk_plugin_filename)
+			|| !q_strcasecmp (plugin_filename, s_ref_dx12_plugin_filename)))
+	{
+		Con_Warning ("Skipping experimental renderer plugin '%s' (use -allow_experimental_renderers to enable).\n",
+			plugin_filename);
+		return false;
+	}
+
+	return true;
 }
 
 static const char *R_Backend_CanonicalNameToApi (const char *backend_name)
@@ -1416,6 +1442,8 @@ static void R_Backend_LoadRendererPlugins (void)
 			++plugin_candidates;
 			if (!q_strcasecmp (find->name, s_ref_gl_plugin_filename))
 				s_ref_gl_plugin_candidate_found = true;
+			if (!R_Backend_ShouldAttemptPluginLoad (find->name))
+				continue;
 			if (R_Backend_LoadPluginFromPath (plugin_path))
 			{
 				++plugins_loaded;
@@ -1484,6 +1512,13 @@ static void R_Backend_Changed_f (cvar_t *var)
 	if (!var || s_applying_backend_cvar)
 		return;
 
+	if (!s_allow_external_renderer_plugins && R_Backend_IsExternalRendererRequest (var->string))
+	{
+		Con_Warning ("External renderer backend '%s' is disabled (use -use_ref_gl_plugin to enable).\n", var->string);
+		R_Backend_ApplySelectionToCvar ();
+		return;
+	}
+
 	if (!s_renderer_plugins_scanned && R_Backend_IsExternalRendererRequest (var->string))
 		R_Backend_LoadRendererPlugins ();
 
@@ -1503,6 +1538,13 @@ static void R_Backend_ApiChanged_f (cvar_t *var)
 
 	if (!var || s_applying_backend_api_cvar)
 		return;
+
+	if (!s_allow_external_renderer_plugins && R_Backend_IsExternalRendererRequest (var->string))
+	{
+		Con_Warning ("External renderer API '%s' is disabled (use -use_ref_gl_plugin to enable).\n", var->string);
+		R_Backend_ApplySelectionToCvar ();
+		return;
+	}
 
 	if (!s_renderer_plugins_scanned && R_Backend_IsExternalRendererRequest (var->string))
 		R_Backend_LoadRendererPlugins ();
@@ -1651,7 +1693,10 @@ static const IRenderBackend s_vulkan_stub_backend = {
 	R_VulkanStub_NeedsSceneEffects,
 	R_VulkanStub_NeedsPostprocess,
 	R_VulkanStub_PopulateFrameGraphResources,
-	R_VulkanStub_GetSceneSampleCount
+	R_VulkanStub_GetSceneSampleCount,
+	NULL,
+	NULL,
+	NULL
 };
 
 static void R_Backend_VulkanStatus_f (void)
@@ -1757,7 +1802,10 @@ static const IRenderBackend s_dx12_stub_backend = {
 	R_VulkanStub_NeedsSceneEffects,
 	R_VulkanStub_NeedsPostprocess,
 	R_VulkanStub_PopulateFrameGraphResources,
-	R_VulkanStub_GetSceneSampleCount
+	R_VulkanStub_GetSceneSampleCount,
+	NULL,
+	NULL,
+	NULL
 };
 
 static void R_Backend_DX12Status_f (void)
@@ -1959,10 +2007,17 @@ qboolean R_Backend_Select (const char *backend_name)
 
 void R_Backend_Init (void)
 {
+	iw_renderer_plugin_host_api_t host_api;
+	const qboolean legacy_gl_requested = (COM_CheckParm ("-legacy_gl") > 0);
+	const qboolean external_plugins_requested =
+		(COM_CheckParm ("-use_ref_gl_plugin") > 0)
+		|| (COM_CheckParm ("-renderer_plugins") > 0);
+
 	if (s_backend_initialized)
 		return;
 
 	s_backend_initialized = true;
+	s_allow_external_renderer_plugins = external_plugins_requested;
 	RenderDispatch_Init ();
 	memset (&s_last_populated_resources, 0, sizeof (s_last_populated_resources));
 	s_last_populated_resources_valid = false;
@@ -2005,9 +2060,23 @@ void R_Backend_Init (void)
 
 	R_Backend_Register (&s_vulkan_stub_backend);
 	R_Backend_Register (&s_dx12_stub_backend);
-	/* OBSOLETE (Phase 6): internal builtin OpenGL renderer registration path.
-	 * External renderer plugins are now authoritative; ref_gl is the default. */
-	R_Backend_LoadRendererPlugins ();
+
+	if (external_plugins_requested)
+	{
+		R_Backend_LoadRendererPlugins ();
+	}
+	else
+	{
+		Con_Warning ("Renderer plugin loading disabled by default for stability; using internal OpenGL renderer path.\n");
+		Con_Warning ("Use -use_ref_gl_plugin to re-enable external renderer plugin loading.\n");
+	}
+
+	if (legacy_gl_requested || !external_plugins_requested || !s_ref_gl_plugin_loaded)
+	{
+		R_Backend_FillPluginHostApi (&host_api);
+		if (!IW_RendererBuiltinGL_RegisterInternal (&host_api))
+			Sys_Error ("Failed to register internal OpenGL renderer backend.\n");
+	}
 
 	if (!R_Backend_HasRegisteredName ("OpenGL"))
 	{

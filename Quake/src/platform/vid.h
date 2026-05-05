@@ -94,6 +94,9 @@ typedef enum
 } mousecursor_t;
 
 void		*VID_GetWindow (void);
+void		VID_GetDrawableSize (int *width, int *height);
+void		VID_SwapBuffers (void);
+qboolean	VID_SetSwapInterval (int interval);
 qboolean	VID_HasMouseOrInputFocus (void);
 qboolean	VID_IsMinimized (void);
 qboolean	VID_EnsureGLContextCurrent (void);

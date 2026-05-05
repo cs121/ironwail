@@ -1,25 +1,32 @@
 MSBuild-Version 18.5.4+cb4e32d21 für .NET Framework
 
-  ironwail.vcxproj -> C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exe
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libFLAC-8.dll
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libmad-0.dll
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libmikmod-3.dll
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libmpg123-0.dll
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libogg-0.dll
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libopus-0.dll
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libopusfile-0.dll
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libvorbis-0.dll
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libvorbisfile-3.dll
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\codecs\x64\libxmp.dll
+  r_backend.c
+     Bibliothek "C:\Projects\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.lib" und Objekt "C:\Projects\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exp" werden erstellt.
+  Code wird generiert.
+  65 of 4651 functions ( 1.4%) were compiled, the rest were copied from previous compilation.
+    0 functions were new in current compilation
+    120 functions had inline decision re-evaluated but remain unchanged
+  Codegenerierung ist abgeschlossen.
+  ironwail.vcxproj -> C:\Projects\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ironwail.exe
+  C:\Projects\ironwail\Windows\VisualStudio\\..\codecs\x64\libFLAC-8.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\codecs\x64\libmad-0.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\codecs\x64\libmikmod-3.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\codecs\x64\libmpg123-0.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\codecs\x64\libogg-0.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\codecs\x64\libopus-0.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\codecs\x64\libopusfile-0.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\codecs\x64\libvorbis-0.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\codecs\x64\libvorbisfile-3.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\codecs\x64\libxmp.dll
          10 Datei(en) kopiert.
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\SDL2\lib64\SDL2.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\SDL2\lib64\SDL2.dll
           1 Datei(en) kopiert.
-  C:\Quake\source\ironwail\Windows\VisualStudio\\..\curl\lib\x64\libcurl.dll
+  C:\Projects\ironwail\Windows\VisualStudio\\..\curl\lib\x64\libcurl.dll
           1 Datei(en) kopiert.
-  C:\Quake\source\ironwail\Windows\VisualStudio\..\zlib\x64\zlib1.dll
+  C:\Projects\ironwail\Windows\VisualStudio\..\zlib\x64\zlib1.dll
           1 Datei(en) kopiert.
   ref_vk_plugin.c
-     Bibliothek "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_vk.lib" und Objekt "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_vk.exp" werden erstellt.
+     Bibliothek "C:\Projects\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_vk.lib" und Objekt "C:\Projects\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_vk.exp" werden erstellt.
   ref_dx12_plugin.c
-     Bibliothek "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_dx12.lib" und Objekt "C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_dx12.exp" werden erstellt.
-  ref_gl.vcxproj -> C:\Quake\source\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_gl.dll
+     Bibliothek "C:\Projects\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_dx12.lib" und Objekt "C:\Projects\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_dx12.exp" werden erstellt.
+  ref_gl.vcxproj -> C:\Projects\ironwail\Windows\VisualStudio\Build-ironwail\bin\x64\Release\ref_gl.dll

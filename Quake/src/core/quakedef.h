@@ -287,6 +287,7 @@ typedef struct quakeparms_s
 #include "world.h"
 
 #include "image.h"	//johnfitz
+#include "texture_handles.h"
 #include "gl_texmgr.h"	//johnfitz
 #include "input.h"
 #include "keys.h"

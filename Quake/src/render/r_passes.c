@@ -18,6 +18,9 @@ static int s_storeprev_skip_log_frame = -1;
 	FG_PASS_BASELINE_RESET_DEPTH | \
 	FG_PASS_BASELINE_RESET_CULL | \
 	FG_PASS_BASELINE_RESET_PROGRAM_BINDINGS)
+/* TODO_PASS_BOUNDARY:
+ * r_passes declares WHAT each pass needs and produces.
+ * Pass execution details (GL state/FBOs/bindings/clears) stay backend-owned. */
 
 static qboolean R_FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
 {
@@ -251,6 +254,9 @@ static const RenderPassDesc s_scene_framegraph_pass = {
 	.name = "Render scene",
 	/* Shadow depth is sampled opportunistically by runtime/backend shadow code;
 	 * keep scene pass framegraph reads strict to always-bound resources only. */
+	/* LEGACY_IMPLICIT_STATE:
+	 * Transitional render units (r_world/r_alias/r_part) still rely on backend-
+	 * established GL baselines and global renderer state. */
 	.reads = RENDER_RES_DECALS,
 	.writes = RENDER_RES_SCENE_COLOR | RENDER_RES_SCENE_DEPTH | RENDER_RES_VELOCITY,
 	.side_effects = 0,
@@ -275,6 +281,7 @@ static const RenderPassDesc s_warp_resolve_framegraph_pass = {
 	.output_target = FG_PASS_OUTPUT_AUTO_WARP,
 	.viewport_mode = FG_PASS_VIEWPORT_VIEW_RECT,
 	.enabled = NULL,
+	/* REF_GL_PASS_EXECUTION: resolve/blit path implemented in backend callback. */
 	.execute = R_Pass_WarpResolve,
 	.color_attachments = s_warp_color_attachments,
 	.num_color_attachments = 1,
@@ -304,6 +311,7 @@ static const RenderPassDesc s_postprocess_framegraph_pass = {
 	.output_target = FG_PASS_OUTPUT_BACKBUFFER,
 	.viewport_mode = FG_PASS_VIEWPORT_FULL_WINDOW,
 	.enabled = R_FG_PassWhenPostprocessEnabled,
+	/* TODO_STATE_BASELINE: postprocess depends on deterministic baseline + output binding. */
 	.execute = R_Pass_PostProcess,
 	.color_attachments = s_postprocess_color_attachments,
 	.num_color_attachments = 1,

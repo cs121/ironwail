@@ -28,6 +28,9 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "gl_texmgr.h"
 #include "image.h"
 
+/* LEGACY_GL_HANDLE / PHASE3_BOUNDARY_CANDIDATE:
+ * Transitional native texture id exposed in this unit for LUT management.
+ * Long-term target: opaque backend resource handle + resolve/upload service. */
 static GLuint r_postfx_lut_tex;
 static int r_postfx_lut_size;
 

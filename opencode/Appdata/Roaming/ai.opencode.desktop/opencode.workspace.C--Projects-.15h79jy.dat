@@ -1,4 +1,0 @@
-{
-  "workspace:model-selection": "{\"session\":{\"ses_26fabc691ffeZjYYbl5DVcy0d2\":{\"agent\":\"build\",\"model\":{\"modelID\":\"big-pickle\",\"providerID\":\"opencode\"},\"variant\":null}}}",
-  "workspace:followup": "{\"items\":{},\"failed\":{},\"paused\":{\"ses_26fabc691ffeZjYYbl5DVcy0d2\":true},\"edit\":{}}"
-}

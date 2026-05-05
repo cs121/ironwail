@@ -104,6 +104,26 @@ qboolean TexMgr_IsReady (void)
 	return free_gltextures != NULL || active_gltextures != NULL;
 }
 
+GLuint TexMgr_GetNativeHandle (const gltexture_t *glt)
+{
+	return glt ? glt->texnum : 0u;
+}
+
+GLenum TexMgr_GetTarget (const gltexture_t *glt)
+{
+	return glt ? glt->target : 0;
+}
+
+GLuint64 TexMgr_GetBindlessHandle (const gltexture_t *glt)
+{
+	return glt ? glt->bindless_handle : 0u;
+}
+
+GLenum TexMgr_GetInternalFormat (const gltexture_t *glt)
+{
+	return glt ? glt->internal_format : 0;
+}
+
 static qboolean TexMgr_PoolPointerValid (const gltexture_t *ptr)
 {
 	return ptr && gltextures_pool_start && gltextures_pool_end &&

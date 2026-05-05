@@ -1010,6 +1010,12 @@ static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
 
 	if (!GLBackend_RequireFramePlan (ctx, "Warp/resolve"))
 		return;
+	if (!ctx->frame_plan->needs_scene_effects)
+	{
+		if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+			Con_DPrintf ("ref_gl: skip FG pass Warp/resolve (run_scene_effects=0)\n");
+		return;
+	}
 	frameplan_needs_postprocess = ctx->frame_plan->needs_postprocess;
 
 	resources = GLBackend_GetPassResourcesStrict (ctx, "Warp/resolve");
@@ -1037,6 +1043,7 @@ static void GLBackend_PassWarpResolve (RenderPassContext *ctx)
 
 static void GLBackend_PassPostProcess (RenderPassContext *ctx)
 {
+	static int postprocess_log_count = 0;
 	if (!GLBackend_RequireFramePlan (ctx, "Postprocess"))
 		return;
 
@@ -1047,6 +1054,13 @@ static void GLBackend_PassPostProcess (RenderPassContext *ctx)
 			Con_DPrintf ("ref_gl: skipping backend Postprocess callback (run_postprocess=0)\n");
 		}
 		return;
+	}
+	if (developer.value != 0.f && postprocess_log_count < 32)
+	{
+		Con_Printf ("ref_gl pass postprocess: run=1 scenefx=%d composite_written=%d\n",
+			ctx->frame_plan->needs_scene_effects ? 1 : 0,
+			ctx->composite_written_this_frame ? 1 : 0);
+		postprocess_log_count++;
 	}
 
 	const RenderGraphResourceHandle *resources = GLBackend_GetPassResourcesStrict (ctx, "Postprocess");
@@ -1068,6 +1082,8 @@ static void GLBackend_PassPostProcess (RenderPassContext *ctx)
 	input.scene_size.scale = scene_size.scene_scale;
 	input.scene_size.resolution_ratio = scene_size.resolution_ratio;
 	input.composite_written_this_frame = ctx ? ctx->composite_written_this_frame : false;
+	if (ctx && ctx->frame_plan && !ctx->frame_plan->needs_scene_effects)
+		input.composite_written_this_frame = true;
 	if (!input.composite_written_this_frame && GLBackend_ShouldLogPasses ())
 		Con_DPrintf ("ref_gl: postprocess running without composite_written flag (fallback path)\n");
 	if (r_ref_enable_postfx.value == 0.f && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f))
@@ -1239,6 +1255,8 @@ static void GLBackend_ApplyFrameGraphBaseline (unsigned baseline_bits)
 {
 	unsigned state_bits = glstate;
 	qboolean apply_pipeline_state = false;
+	/* REF_GL_PASS_EXECUTION:
+	 * Backend owns concrete state baselines for declarative framegraph passes. */
 
 	if ((baseline_bits & FG_PASS_BASELINE_RESET_BLEND) != 0u)
 	{

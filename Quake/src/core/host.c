@@ -28,6 +28,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "bgmusic.h"
 #include "steam.h"
 #include "render_dispatch.h"
+#include "quakelab_api.h"
 #include <setjmp.h>
 
 /*
@@ -1381,6 +1382,7 @@ void _Host_Frame (double time)
 	Cbuf_Execute ();
 
 	NET_Poll();
+	QuakeLabAPI_Frame ();
 
 	if (cl.sendprespawn)
 	{
@@ -1582,6 +1584,7 @@ void Host_Init (void)
 	PR_Init ();
 	Mod_Init ();
 	NET_Init ();
+	QuakeLabAPI_Init ();
 	SV_Init ();
 
 	Con_Printf ("Exe: " __TIME__ " " __DATE__ " (%s %d-bit)\n", SDL_GetPlatform (), (int)sizeof(void*)*8);
@@ -1686,6 +1689,7 @@ void Host_Shutdown(void)
 
 	Host_ShutdownSave ();
 	Host_WriteConfiguration ();
+	QuakeLabAPI_Shutdown ();
 
 // stop downloads before shutting down networking
         Modlist_ShutDown ();
