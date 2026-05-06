@@ -485,6 +485,7 @@ static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, 
 	for (i = 0; i < rl_frame_light_count; ++i)
 	{
 		const rl_light_t *src = &rl_frame_lights[i];
+		dlight_t *source_dl = rl_frame_light_sources[i];
 		gpulight_t *dst;
 		float energy;
 		R_PPdlights_RecordConsumerConsidered (consumer, src->source_id);
@@ -495,6 +496,20 @@ static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, 
 			continue;
 		}
 		if ((src->flags & RL_LIGHT_SURFACE_CONTRIB) == 0u)
+		{
+			R_PPdlights_RecordConsumerReject (consumer, src->source_id, RL_REJECT_NON_CONTRIB);
+			continue;
+		}
+		/*
+		 * World forward dlight pass: ignore one-frame default transients.
+		 * These come from short-lived effect flags (e.g. EF_BRIGHTLIGHT/DIMLIGHT)
+		 * and can stamp tiny overbright blobs on world surfaces.
+		 */
+		if (consumer == RL_CONSUMER_WORLD
+			&& source_dl
+			&& source_dl->type == DLIGHT_DEFAULT
+			&& source_dl->kind == DL_TRANSIENT
+			&& (source_dl->die - cl.time) <= 0.002f)
 		{
 			R_PPdlights_RecordConsumerReject (consumer, src->source_id, RL_REJECT_NON_CONTRIB);
 			continue;
@@ -513,7 +528,7 @@ static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, 
 		dst->color[1] = src->color[1] * src->intensity;
 		dst->color[2] = src->color[2] * src->intensity;
 		dst->minlight = 0.f;
-		out_sources[count] = rl_frame_light_sources[i];
+		out_sources[count] = source_dl;
 		energy = dst->color[0] * 0.2126f + dst->color[1] * 0.7152f + dst->color[2] * 0.0722f;
 		R_PPdlights_RecordConsumerAccept (consumer, src->source_id, energy);
 		count++;
