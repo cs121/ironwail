@@ -1364,7 +1364,7 @@ static qboolean R_Backend_LoadPluginFromPath (const char *path)
 	}
 
 	Con_Printf ("Renderer plugin loaded: %s (%s)\n", plugin_name, path);
-	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 		Con_DPrintf ("R_Backend_LoadPluginFromPath: registered plugin '%s'\n", plugin_name);
 	R_Backend_RecordPluginLibrary (lib);
 	return true;
@@ -2142,7 +2142,7 @@ void R_Backend_Init (void)
 			R_Backend_ApplySelectionToCvar ();
 	}
 
-	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 	{
 		Con_DPrintf ("R_Backend_Init: active backend='%s' api='%s' registered=%d plugins_loaded=%d\n",
 			s_active_backend && s_active_backend->name ? s_active_backend->name : "<none>",
@@ -2178,7 +2178,7 @@ void R_Backend_SwapBuffers (void)
 
 void R_Backend_Shutdown (void)
 {
-	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 	{
 		Con_DPrintf ("R_Backend_Shutdown: active backend='%s' plugins=%d\n",
 			s_active_backend && s_active_backend->name ? s_active_backend->name : "<none>",
@@ -2221,7 +2221,7 @@ void R_Backend_OnResize (int width, int height)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
 
-	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 		Con_DPrintf ("R_Backend_OnResize: %dx%d backend='%s'\n",
 			width, height,
 			backend && backend->name ? backend->name : "<none>");
@@ -2256,7 +2256,7 @@ void R_Backend_BeginFrame (void)
 	 * frame-indexed backend state monotonic by syncing to host_framecount. */
 	if (host_framecount > r_framecount)
 		r_framecount = host_framecount;
-	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 		Con_DPrintf ("R_Backend_BeginFrame: frame=%d backend='%s'\n",
 			r_framecount,
 			backend && backend->name ? backend->name : "<none>");
@@ -2275,7 +2275,7 @@ void R_Backend_EndFrame (void)
 	const IRenderBackend *backend = R_GetRenderBackend ();
 	if (backend && backend->end_frame)
 		backend->end_frame ();
-	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 		Con_DPrintf ("R_Backend_EndFrame: frame=%d backend='%s'\n",
 			r_framecount,
 			backend && backend->name ? backend->name : "<none>");
@@ -2288,7 +2288,7 @@ void R_Backend_EndFrame (void)
 void R_Backend_Present (void)
 {
 	const IRenderBackend *backend = R_GetRenderBackend ();
-	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 		Con_DPrintf ("R_Backend_Present: frame=%d backend='%s'\n",
 			r_framecount,
 			backend && backend->name ? backend->name : "<none>");

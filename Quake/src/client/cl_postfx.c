@@ -501,7 +501,7 @@ void CL_PostFX_GetState (postfx_state_t *out_state)
 		out_state->emissive_boost = q_max (0.f, out_state->emissive_boost);
 	}
 
-	if (r_postfx_debug.value > 0.f)
+	if (r_postfx_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_RENDER)))
 	{
 		static int last_printed = -1;
 		int now_seconds = (int)floor (cl.time);
@@ -511,7 +511,7 @@ void CL_PostFX_GetState (postfx_state_t *out_state)
 			for (i = 0; i < POSTFX_MAX_EVENTS; ++i)
 				if (postfx_events[i].active)
 					active_count++;
-				Con_Printf ("PostFX: exposure %.2f bloom %.2f vignette %.2f desat %.2f lut %d/%.2f fog %.2f events %d\n",
+				DBG_INFO (DBG_CH_RENDER, "PostFX: exposure %.2f bloom %.2f vignette %.2f desat %.2f lut %d/%.2f fog %.2f events %d\n",
 					out_state->exposure_add_stops,
 					out_state->bloom_boost,
 					out_state->vignette,

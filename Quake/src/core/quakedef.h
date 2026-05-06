@@ -273,6 +273,7 @@ typedef struct quakeparms_s
 #include "server.h"
 
 #include "console.h"
+#include "debug_core.h"
 #include "wad.h"
 #include "vid.h"
 #include "screen.h"

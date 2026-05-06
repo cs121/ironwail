@@ -96,7 +96,7 @@ static char iwm_current_state[64];
 
 static qboolean CL_IWMusic_DebugEnabled (void)
 {
-	return cl_iwmusic_debug.value > 0;
+	return cl_iwmusic_debug.value > 0 || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_AUDIO));
 }
 
 static void CL_IWMusic_DPrintf (const char *fmt, ...)

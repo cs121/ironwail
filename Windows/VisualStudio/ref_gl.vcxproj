@@ -198,6 +198,7 @@
   <ItemGroup>
     <ClCompile Include="..\..\Quake\src\render\ref_gl_plugin.c" />
     <ClCompile Include="..\..\Quake\src\render\ref_gl_bridge_stubs.c" />
+    <ClCompile Include="..\..\Quake\src\core\debug_core.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_backend.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_backend_runtime.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_backend_resources.c" />

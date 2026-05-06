@@ -362,6 +362,7 @@ gltexture_t *R_LoadKTX2Texture(const char *name, const uint8_t *data, size_t siz
     KTX2_FreeDecodedImage(&decoded);
 
     Con_DPrintf("Texture %s: %s, %s\n", name, srgb ? "sRGB" : "linear", srgb ? "GL_SRGB8_ALPHA8" : "GL_RGBA8");
+    DBG_VERBOSE(DBG_CH_TEXTURE, "KTX2 uploaded '%s' %dx%d mips=%d %s", name, tex->width, tex->height, tex->mipmap, srgb ? "sRGB" : "linear");
     KTX2_LogInfo("Finished uploading KTX2 texture '%s' (%dx%d, mips=%d)", name, tex->width, tex->height, tex->mipmap);
     return tex;
 }
@@ -385,6 +386,7 @@ void KTX2_LogError(const char *fmt, ...)
     va_start(argptr, fmt);
     q_vsnprintf(msg, sizeof(msg), fmt, argptr);
     Con_Printf("KTX2-ERROR: %s\n", msg);
+    DBG_ERROR(DBG_CH_TEXTURE, "KTX2: %s", msg);
     va_end(argptr);
 }
 

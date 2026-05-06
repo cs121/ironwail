@@ -555,7 +555,7 @@ static qboolean Bot_AddClient (int requested_team)
 	Bot_BroadcastClientInfo (clientnum);
 	Bot_UpdateCountCvar ();
 
-	if (bot_debug.value)
+	if (bot_debug.value || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BOT)))
 		Con_Printf ("Bot: added %s (slot %d team %d)\n", client->name, clientnum + 1, team);
 
 	return true;
@@ -641,7 +641,7 @@ static void Bot_CheckNavReload (void)
 
 	g_bot_nav_enabled_cache = want_nav;
 
-	if (bot_debug.value)
+	if (bot_debug.value || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BOT)))
 		Con_Printf ("Bot: nav2 %s\n", want_nav ? "enabled" : "disabled");
 }
 

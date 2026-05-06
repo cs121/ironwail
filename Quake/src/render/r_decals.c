@@ -943,7 +943,7 @@ static void R_DecalDebugLogSpawn (qboolean spawned, const char *reason, const ch
 	int leaf_index = -1;
 	int leaf_marks = 0;
 
-	if (!r_decals_debug.value)
+	if (!(r_decals_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_RENDER))))
 		return;
 
 	if (leaf && cl.worldmodel && cl.worldmodel->leafs)
@@ -1663,7 +1663,8 @@ static void R_DecalsDebugPrintFrameStats (void)
 {
 	int culled_total;
 
-	if (r_decals_debug.value < 2)
+	if (!(r_decals_debug.value >= 2.f
+		|| (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_RENDER) && DBG_GetLevel () >= DBG_LEVEL_VERBOSE)))
 		return;
 	if (cl.time < decal_stats_last_print + 0.5)
 		return;

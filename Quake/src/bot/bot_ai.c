@@ -594,7 +594,7 @@ void BotAI_OnMapSpawn (void)
 		BotAI_AddRoamPoint (fallback);
 	}
 
-	if (bot_think_debug.value)
+	if (bot_think_debug.value || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BOT)))
 		Con_Printf ("BotAI: collected %d roam points, %d item candidates\n", g_roam_count, g_item_candidate_count);
 }
 
@@ -2081,7 +2081,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		return;
 	}
 
-	if (bot_nav_debug.value)
+	if (bot_nav_debug.value || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BOT)))
 		BotNav_DebugDraw ();
 
 	no_combat_ammo = !BotCombat_HasAnyRangedAmmo (self);
@@ -2711,7 +2711,7 @@ void BotAI_BuildCommand (bot_state_t *bot, client_t *client, usercmd_t *outcmd, 
 		}
 	}
 
-		if (bot_think_debug.value && bot->next_debug_time <= qcvm->time)
+		if ((bot_think_debug.value || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BOT))) && bot->next_debug_time <= qcvm->time)
 		{
 			const char *enemy_name = "none";
 			if (bot->enemy)

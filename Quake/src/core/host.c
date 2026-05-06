@@ -1571,6 +1571,7 @@ void Host_Init (void)
 	Cmd_Init ();
 	LOG_Init (host_parms);
 	Cvar_Init (); //johnfitz
+	DBG_Init ();
 	COM_Init ();
 	COM_InitFilesystem ();
 	Host_InitLocal ();

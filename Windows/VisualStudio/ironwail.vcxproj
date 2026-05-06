@@ -257,6 +257,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile Include="..\..\Quake\src\core\cmd.c" />
     <ClCompile Include="..\..\Quake\src\core\common.c" />
     <ClCompile Include="..\..\Quake\src\core\console.c" />
+    <ClCompile Include="..\..\Quake\src\core\debug_core.c" />
     <ClCompile Include="..\..\Quake\src\core\crc.c" />
     <ClCompile Include="..\..\Quake\src\core\cvar.c" />
     <ClCompile Include="..\..\Quake\src\core\quakelab_api.c" />
@@ -427,6 +428,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClInclude Include="..\..\Quake\src\client\client.h" />
     <ClInclude Include="..\..\Quake\src\core\cmd.h" />
     <ClInclude Include="..\..\Quake\src\core\common.h" />
+    <ClInclude Include="..\..\Quake\src\core\debug_core.h" />
     <ClInclude Include="..\..\Quake\src\core\console.h" />
     <ClInclude Include="..\..\Quake\src\core\quakelab_api.h" />
     <ClInclude Include="..\..\Quake\src\core\crc.h" />

@@ -63,7 +63,7 @@ static int myDriverLevel;
 extern qboolean m_return_onerror;
 extern char m_return_reason[32];
 
-#define DGRAM_DEBUG(...) do { if (net_dgram_debug.value) Con_DPrintf(__VA_ARGS__); } while (0)
+#define DGRAM_DEBUG(...) do { if (net_dgram_debug.value || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_NET))) Con_DPrintf(__VA_ARGS__); } while (0)
 
 
 static char *StrAddr (struct qsockaddr *addr)

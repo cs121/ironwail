@@ -24,7 +24,7 @@ static int s_storeprev_skip_log_frame = -1;
 
 static qboolean R_FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
 {
-	const qboolean log_skips = (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f);
+	const qboolean log_skips = (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)));
 	static qboolean shadow_enabled_diag_once = false;
 
 	if (!shadow_enabled_diag_once)
@@ -60,7 +60,7 @@ static qboolean R_FG_PassWhenPostprocessEnabled (const RenderPassContext *ctx)
 	const qboolean enabled = ctx && ctx->frame_plan
 		&& ctx->frame_plan->run_postprocess;
 
-	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 		&& s_postfx_skip_log_frame != r_framecount)
 	{
 		Con_DPrintf ("ref_gl: skip FG pass Postprocess (run_postprocess=0)\n");
@@ -74,7 +74,7 @@ static qboolean R_FG_PassWhenViewmodelEnabled (const RenderPassContext *ctx)
 {
 	const qboolean enabled = ctx && ctx->frame_plan && ctx->frame_plan->run_viewmodel;
 
-	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 		&& s_viewmodel_skip_log_frame != r_framecount)
 	{
 		Con_DPrintf ("ref_gl: skip FG pass Overlay viewmodel (run_viewmodel=0)\n");
@@ -88,7 +88,7 @@ static qboolean R_FG_PassWhenPolyblendEnabled (const RenderPassContext *ctx)
 {
 	const qboolean enabled = ctx && ctx->frame_plan && ctx->frame_plan->run_polyblend;
 
-	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 		&& s_polyblend_skip_log_frame != r_framecount)
 	{
 		Con_DPrintf ("ref_gl: skip FG pass Overlay polyblend (run_polyblend=0)\n");
@@ -102,7 +102,7 @@ static qboolean R_FG_PassWhenStorePrevEnabled (const RenderPassContext *ctx)
 {
 	const qboolean enabled = ctx && ctx->frame_plan && ctx->frame_plan->run_store_prev;
 
-	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f)
+	if (!enabled && (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 		&& s_storeprev_skip_log_frame != r_framecount)
 	{
 		Con_DPrintf ("ref_gl: skip FG pass Store previous state (run_store_prev=0)\n");

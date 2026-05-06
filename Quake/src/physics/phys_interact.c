@@ -138,7 +138,7 @@ static void PhysInteract_ClearBodySlot (int entnum)
 
 static qboolean PhysInteract_DebugEnabled (void)
 {
-	return sv_phys_debug.value > 0.f || developer.value > 0.f;
+	return sv_phys_debug.value > 0.f || developer.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_PHYSICS));
 }
 
 static qboolean PhysInteract_EnsureStorage (void)

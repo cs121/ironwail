@@ -67,7 +67,7 @@ static void R_PostFX_DestroyLUTTexture (void)
 {
 	if (r_postfx_lut_tex)
 	{
-		if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+		if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 			Con_DPrintf ("ref_gl: R_PostFX_DestroyLUTTexture tex=%u size=%d\n", (unsigned)r_postfx_lut_tex, r_postfx_lut_size);
 		GL_DeleteNativeTexture (r_postfx_lut_tex);
 		r_postfx_lut_tex = 0;
@@ -114,7 +114,7 @@ static void R_PostFX_ReloadLUTs (void)
 	if (r_postfx_lut.value <= 0.f)
 		return;
 
-	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 		Con_DPrintf ("ref_gl: R_PostFX_ReloadLUTs begin\n");
 
 	for (i = 1; i < PFX_LUT_COUNT; ++i)
@@ -185,7 +185,7 @@ static void R_PostFX_ReloadLUTs (void)
 	q_free(lut_storage);
 	r_postfx_lut_size = size;
 
-	if (r_refgl_validate_lifetime.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_validate_lifetime.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 		Con_DPrintf ("ref_gl: R_PostFX_ReloadLUTs done tex=%u size=%d\n", (unsigned)r_postfx_lut_tex, r_postfx_lut_size);
 }
 

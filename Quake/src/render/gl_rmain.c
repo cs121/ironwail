@@ -1212,7 +1212,9 @@ static qboolean R_DoFEnabled (void)
 
 qboolean R_SSAO_EnabledEffective (void)
 {
-	return (r_ssao.value > 0.f && r_ssao_intensity.value > 0.f) || r_ssao_debug.value > 0.f;
+	return (r_ssao.value > 0.f && r_ssao_intensity.value > 0.f)
+		|| r_ssao_debug.value > 0.f
+		|| (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_RENDER));
 }
 
 qboolean R_PostFX_DoFEnabledEffective (void)
@@ -2163,7 +2165,10 @@ static void GL_LogSSAODepthInfo (GLuint depth_tex, GLuint ao_tex, int ssao_width
 
 static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float view_max_x, float view_max_y)
 {
-	if ((r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f) && r_ssao_debug.value <= 0.f)
+	const qboolean ssao_debug_enabled = (r_ssao_debug.value > 0.f)
+		|| (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_RENDER));
+
+	if ((r_ssao.value <= 0.f || r_ssao_intensity.value <= 0.f) && !ssao_debug_enabled)
 		return 0;
 	if (!glprogs.ssao || !framebufs.ssao.noise_tex
 		|| (!framebufs.scene.depth_stencil_tex && !framebufs.composite.depth_stencil_tex))

@@ -61,6 +61,12 @@ static qboolean s_cycle_warning_emitted = false;
 static int s_pass_baseline_autobind_warn_frame = -1;
 static int s_frameplan_log_frame = -1;
 
+static qboolean FG_PassDebugEnabled (void)
+{
+	return r_framegraph_pass_debug.value > 0.f
+		|| (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_FRAMEGRAPH) && DBG_GetLevel () >= DBG_LEVEL_VERBOSE);
+}
+
 static qboolean FG_AutobindEnabled (void)
 {
 	const float value = Cvar_VariableValue ("r_framegraph_autobind");
@@ -307,7 +313,7 @@ static void FG_DebugPrintPassInfo (const RenderPassDesc *pass, const RenderPassC
 	unsigned output_target = FG_PASS_OUTPUT_KEEP;
 	unsigned viewport_mode = FG_PASS_VIEWPORT_KEEP;
 
-	if (!pass || r_framegraph_pass_debug.value <= 0.f)
+	if (!pass || !FG_PassDebugEnabled ())
 		return;
 
 	FG_FormatResourceBits (pass->reads, reads_buf, sizeof (reads_buf));
@@ -315,7 +321,7 @@ static void FG_DebugPrintPassInfo (const RenderPassDesc *pass, const RenderPassC
 	FG_FormatSideEffectBits (pass->side_effects, sidefx_buf, sizeof (sidefx_buf));
 	FG_ResolvePassOutputAndViewport (pass, ctx, &output_target, &viewport_mode);
 
-	Con_DPrintf ("FrameGraph pass: name='%s' reads=%s writes=%s sidefx=%s output_target=%s viewport_mode=%s\n",
+	DBG_VERBOSE (DBG_CH_FRAMEGRAPH, "FrameGraph pass: name='%s' reads=%s writes=%s sidefx=%s output_target=%s viewport_mode=%s\n",
 		pass->name ? pass->name : "<unnamed>",
 		reads_buf,
 		writes_buf,
@@ -328,7 +334,7 @@ static void FG_DebugPrintPassInfo (const RenderPassDesc *pass, const RenderPassC
 		unsigned i;
 		for (i = 0; i < pass->num_color_attachments; ++i)
 		{
-			Con_DPrintf ("FrameGraph pass: name='%s' color_attachment[%u] resource=%s load=%s store=%s\n",
+			DBG_VERBOSE (DBG_CH_FRAMEGRAPH, "FrameGraph pass: name='%s' color_attachment[%u] resource=%s load=%s store=%s\n",
 				pass->name ? pass->name : "<unnamed>",
 				i,
 				FG_GetResourceBitName (pass->color_attachments[i].resource_bit),
@@ -339,7 +345,7 @@ static void FG_DebugPrintPassInfo (const RenderPassDesc *pass, const RenderPassC
 
 	if (pass->depth_attachment)
 	{
-		Con_DPrintf ("FrameGraph pass: name='%s' depth_attachment resource=%s load=%s store=%s\n",
+		DBG_VERBOSE (DBG_CH_FRAMEGRAPH, "FrameGraph pass: name='%s' depth_attachment resource=%s load=%s store=%s\n",
 			pass->name ? pass->name : "<unnamed>",
 			FG_GetResourceBitName (pass->depth_attachment->resource_bit),
 			FG_GetLoadOpName (pass->depth_attachment->load_op),
@@ -351,7 +357,7 @@ static void FG_DebugPrintResolvedSlots (const RenderPassDesc *pass, const Render
 {
 	unsigned bit;
 
-	if (!pass || !ctx || !ctx->resources || r_framegraph_pass_debug.value <= 0.f)
+	if (!pass || !ctx || !ctx->resources || !FG_PassDebugEnabled ())
 		return;
 
 	for (bit = 1u; bit != 0; bit <<= 1)
@@ -365,7 +371,7 @@ static void FG_DebugPrintResolvedSlots (const RenderPassDesc *pass, const Render
 			continue;
 
 		resolved = R_FrameGraph_ResolveResourceBySlot (ctx->resources, slot);
-		Con_DPrintf ("FrameGraph pass: name='%s' slot_resolve resource=%s slot=%d resolved=%u access=%s%s\n",
+		DBG_VERBOSE (DBG_CH_FRAMEGRAPH, "FrameGraph pass: name='%s' slot_resolve resource=%s slot=%d resolved=%u access=%s%s\n",
 			pass->name ? pass->name : "<unnamed>",
 			FG_GetResourceBitName (bit),
 			(int)slot,
@@ -492,9 +498,9 @@ static void FG_EmitPassBarriers (const RenderPassDesc *pass, RenderPassContext *
 		barriers[barrier_count].resource = resource_ref;
 		barriers[barrier_count].before = before_state;
 		barriers[barrier_count].after = desired_state;
-		if (r_framegraph_debug.value > 0.f)
+		if (r_framegraph_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 		{
-			Con_DPrintf ("FrameGraph barrier: pass='%s' resource='%s' %s -> %s\n",
+			DBG_VERBOSE(DBG_CH_FRAMEGRAPH, "FrameGraph barrier: pass='%s' resource='%s' %s -> %s",
 				pass->name ? pass->name : "<unnamed>",
 				FG_GetResourceBitName (bit),
 				FG_GetResourceStateName (before_state),
@@ -542,7 +548,7 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 			continue;
 		if (!FG_PassHasAttachmentForBit (pass_desc, bit))
 		{
-			if (emit_warning || r_framegraph_debug.value > 0.f)
+			if (emit_warning || r_framegraph_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 			{
 				Con_Warning ("FrameGraph: pass '%s' writes '%s' without declaring it as pass attachment\n",
 					pass_desc->name ? pass_desc->name : "<unnamed>",
@@ -583,7 +589,7 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 			if ((pass_desc->reads & resource_bit) != 0u
 				&& pass_desc->color_attachments[i].load_op == R_BACKEND_LOAD_OP_DONT_CARE)
 			{
-				if (emit_warning || r_framegraph_debug.value > 0.f)
+				if (emit_warning || r_framegraph_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 					Con_Warning ("FrameGraph: pass '%s' color attachment[%u] reads and writes '%s' but load_op is DONT_CARE\n",
 						pass_desc->name ? pass_desc->name : "<unnamed>",
 						i,
@@ -621,7 +627,7 @@ static qboolean FG_ValidatePassResourceDecls (const RenderPassDesc *pass_desc, q
 		if ((pass_desc->reads & resource_bit) != 0u
 			&& pass_desc->depth_attachment->load_op == R_BACKEND_LOAD_OP_DONT_CARE)
 		{
-			if (emit_warning || r_framegraph_debug.value > 0.f)
+			if (emit_warning || r_framegraph_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 				Con_Warning ("FrameGraph: pass '%s' depth attachment reads and writes '%s' but load_op is DONT_CARE\n",
 					pass_desc->name ? pass_desc->name : "<unnamed>",
 					FG_GetResourceBitName (resource_bit));
@@ -816,7 +822,7 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 				{
 					if (pass_a->side_effects != 0)
 					{
-						if (r_framegraph_debug.value > 0.f)
+						if (r_framegraph_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 						{
 							char sidefx_buf[96];
 							FG_FormatSideEffectBits (pass_a->side_effects, sidefx_buf, sizeof (sidefx_buf));
@@ -830,7 +836,7 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 					}
 					else
 					{
-						if (r_framegraph_debug.value > 0.f)
+						if (r_framegraph_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 						{
 							char sidefx_buf[96];
 							FG_FormatSideEffectBits (pass_b->side_effects, sidefx_buf, sizeof (sidefx_buf));
@@ -886,7 +892,7 @@ static void FG_SortRuntimePassesTopologically (int first_pass, int pass_count)
 
 		if (ready < 0)
 		{
-			if (r_framegraph_debug.value > 0.f
+			if ((r_framegraph_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 				&& (!s_cycle_warning_emitted || s_cycle_warning_signature != cycle_signature))
 			{
 				Con_Warning ("FrameGraph: pass dependency cycle detected (including sidefx ordering), keeping registration order (further identical warnings suppressed)\n");
@@ -970,7 +976,7 @@ static unsigned long long FG_BuildActivePassMask (const RenderPassContext *ctx, 
 		if (pass->side_effects)
 		{
 			if ((pass->writes & needed_resources) == 0u
-				&& r_framegraph_debug.value > 0.f)
+				&& (r_framegraph_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH))))
 			{
 				char sidefx_buf[96];
 				char needed_buf[128];
@@ -1002,7 +1008,7 @@ static void FG_DebugPrintPrunedPasses (unsigned long long active_mask, int first
 
 	if (r_gl_state_validate.value < 2.f)
 		return;
-	if (r_framegraph_debug.value <= 0.f)
+	if (r_framegraph_debug.value <= 0.f && !(debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 		return;
 	if (pass_count < 0)
 		pass_count = 0;
@@ -1048,7 +1054,7 @@ static void FG_MaybePrintStats (void)
 	double gpu_channels[FG_PASS_STATS_COUNT];
 	int i;
 
-	if (r_framegraph_debug.value <= 0.f)
+	if (r_framegraph_debug.value <= 0.f && !(debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
 		return;
 	if (r_speeds.value < 3.f)
 		return;
@@ -1369,7 +1375,8 @@ void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan)
 	caps = R_Backend_GetCaps ();
 	out_plan->run_gpu_timers = (caps && caps->supports_timestamps);
 
-	if (r_framegraph_debug.value > 0.f && s_frameplan_log_frame != host_framecount)
+	if ((r_framegraph_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH)))
+		&& s_frameplan_log_frame != host_framecount)
 	{
 		s_frameplan_log_frame = host_framecount;
 		Con_DPrintf ("frameplan: scenefx=%d postfx=%d run_shadow=%d run_post=%d\n",
@@ -1483,7 +1490,9 @@ void R_FrameGraph_RenderView (void)
 
 	/* Setup-stage passes run before plan build so frame state is current. */
 	setup_pass_count = FG_MoveSetupStagePassesToFront ();
-	if (setup_pass_count == 0 && r_gl_state_validate.value > 0.f && r_framegraph_debug.value > 0.f)
+	if (setup_pass_count == 0
+		&& r_gl_state_validate.value > 0.f
+		&& (r_framegraph_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_FRAMEGRAPH))))
 		Con_DPrintf ("FrameGraph: no setup-stage pass registered\n");
 	FG_SortRuntimePassesTopologically (0, setup_pass_count);
 

@@ -178,6 +178,17 @@ static void Q3P_PRT_Log (q3p_prt_parser_t *parser, int level, const char *fmt, .
 	Con_Printf ("%s", message);
 }
 
+static int Q3P_DebugLevelFromChannels (void)
+{
+	if (debug_enable.value == 0.f || !DBG_ChannelEnabled (DBG_CH_RENDER))
+		return 0;
+	if (DBG_GetLevel () >= DBG_LEVEL_TRACE)
+		return 3;
+	if (DBG_GetLevel () >= DBG_LEVEL_VERBOSE)
+		return 2;
+	return 1;
+}
+
 static void Q3P_PRT_Warn (q3p_prt_parser_t *parser, int level, const char *fmt, ...)
 {
 	char message[1024];
@@ -537,7 +548,7 @@ static void Q3P_LoadEffectDefs (void)
 	int i;
 
 	memset (&parser, 0, sizeof (parser));
-	parser.debug_level = q_max (0, (int)r_particles_prt_debug.value);
+	parser.debug_level = q_max (q_max (0, (int)r_particles_prt_debug.value), Q3P_DebugLevelFromChannels ());
 	start_time = Sys_DoubleTime ();
 
 	memset (q3p_effect_defs, 0, sizeof (q3p_effect_defs));

@@ -29,6 +29,11 @@ typedef struct skyvis_grid_s {
  * BSPX payload and keeps the new scalar visibility data zero-safe. */
 static skyvis_grid_t r_skyvis_grid;
 
+static qboolean R_SkyVis_DebugEnabled (void)
+{
+	return r_skyvis_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_RENDER));
+}
+
 cvar_t r_skyvis = { "r_skyvis", "1", CVAR_ARCHIVE };
 cvar_t r_skyvis_debug = { "r_skyvis_debug", "0", CVAR_NONE };
 /* Compatibility note: -1 keeps legacy r_sun_visibility tuning but routes it
@@ -259,8 +264,9 @@ static void R_SkyVis_InitGeneratedGrid (skyvis_grid_t *grid, const qmodel_t *wor
 		spacing[1] *= 2.f;
 		spacing[2] *= 2.f;
 		grid->used_lightgrid_header = false;
-		if (r_skyvis_debug.value > 0.f)
-			Con_Printf ("r_skyvis: increasing spacing to %.0f %.0f %.0f to cap grid size\n", spacing[0], spacing[1], spacing[2]);
+		if (R_SkyVis_DebugEnabled ())
+			DBG_INFO (DBG_CH_RENDER, "r_skyvis: increasing spacing to %.0f %.0f %.0f to cap grid size\n",
+				spacing[0], spacing[1], spacing[2]);
 	}
 
 	VectorCopy (mins, grid->mins);
@@ -341,8 +347,8 @@ void R_SkyVis_NewMap (void)
 	R_SkyVis_LogStats (&r_skyvis_grid);
 	if (!valid_cells || r_skyvis_grid.average_visibility <= 0.f)
 		Con_Warning ("r_skyvis: generated all-zero visibility, unified skylight fallback is zero\n");
-	else if (r_skyvis_debug.value > 0.f)
-		Con_Printf ("r_skyvis: legacy global sky/fill attenuation replaced by sky-visibility skylight\n");
+	else if (R_SkyVis_DebugEnabled ())
+		DBG_INFO (DBG_CH_RENDER, "r_skyvis: legacy global sky/fill attenuation replaced by sky-visibility skylight\n");
 }
 
 qboolean R_SkyVis_Active (void)

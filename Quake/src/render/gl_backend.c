@@ -67,7 +67,7 @@ extern cvar_t r_ref_enable_lighting;
 
 static qboolean GLBackend_ShouldLogPasses (void)
 {
-	return (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f);
+	return (r_refgl_log_passes.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)));
 }
 
 static qboolean GLBackend_LogOncePerFrame (int *last_frame)
@@ -110,11 +110,14 @@ void REFGL_StatsLogSummary (void)
 		ref_gl_stats.buffers_alive, ref_gl_stats.buffers_created, ref_gl_stats.buffers_destroyed,
 		ref_gl_stats.programs_alive, ref_gl_stats.programs_created, ref_gl_stats.programs_destroyed,
 		ref_gl_stats.gl_errors_detected, ref_gl_stats.frames_rendered);
+	DBG_VERBOSE(DBG_CH_BACKEND, "ref_gl resources: tex=%d fbo=%d buf=%d prog=%d gl_err=%d frames=%d",
+		ref_gl_stats.textures_alive, ref_gl_stats.fbos_alive, ref_gl_stats.buffers_alive,
+		ref_gl_stats.programs_alive, ref_gl_stats.gl_errors_detected, ref_gl_stats.frames_rendered);
 }
 
 static void REFGL_StatsPeriodicLog (void)
 {
-	if (r_refgl_log_resources.value == 0.f)
+	if (r_refgl_log_resources.value == 0.f && !(debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
 		return;
 	if (s_stats_log_frame < 0 || r_framecount - s_stats_log_frame >= 120)
 	{

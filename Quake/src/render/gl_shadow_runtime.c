@@ -5,6 +5,8 @@
 #include "gl_shadow_runtime.h"
 #include "r_resources_gl.h"
 
+#include "r_shadow_debug.h"
+
 #include <float.h>
 #include <math.h>
 
@@ -342,7 +344,7 @@ void R_Shadow_UpdateSunMatrix (shadow_runtime_t *state)
 		state->sun_split_dist[c] = far_dist;
 	}
 
-	if (r_shadow_log.value > 1.f && (r_framecount % 60) == 0)
+	if (SHADOW_LOG_VERBOSE_ENABLED() && (r_framecount % 60) == 0)
 	{
 		Con_Printf ("Shadow sun cascades: count=%d mode=%d lambda=%.2f dist=%.1f splits=(%.2f %.2f %.2f)\n",
 			cascade_count,
@@ -470,7 +472,7 @@ void R_Shadow_CreateFrameBuffers (void)
 	int sun_size = R_Shadow_ClampMapSize (r_shadow_sun_size.value);
 	int dlight_size = R_Shadow_ClampMapSize (r_shadow_dlight_size.value);
 
-	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_SHADOW)))
 		Con_DPrintf ("ref_gl: R_Shadow_CreateFrameBuffers sun=%d dlight=%d\n", sun_size, dlight_size);
 
 	framebufs.shadow.sun_depth_tex = 0;
@@ -516,13 +518,14 @@ void R_Shadow_CreateFrameBuffers (void)
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 	{
 		Con_Warning ("Shadow sun framebuffer incomplete (0x%X), disabling sun+dlight shadows.\n", status);
+		DBG_ERROR(DBG_CH_SHADOW, "Shadow sun framebuffer incomplete (0x%X), disabling sun+dlight shadows.", status);
 		GL_DeleteFramebuffersFunc (1, &framebufs.shadow.sun_fbo);
 		GL_DeleteNativeTexture (framebufs.shadow.sun_depth_tex);
 		framebufs.shadow.sun_fbo = 0;
 		framebufs.shadow.sun_depth_tex = 0;
 		return;
 	}
-	if (r_shadow_log.value > 0.f)
+	if (SHADOW_LOG_ENABLED())
 		Con_Printf ("Shadow: sun depth array created (%dx%d, cascades=%d)\n",
 			sun_size, sun_size, SHADOW_SUN_CASCADE_MAX);
 
@@ -552,6 +555,7 @@ void R_Shadow_CreateFrameBuffers (void)
 	if (status != GL_FRAMEBUFFER_COMPLETE)
 	{
 		Con_Warning ("Shadow dlight framebuffer incomplete (0x%X), disabling dlight shadows (sun shadows stay enabled).\n", status);
+		DBG_ERROR(DBG_CH_SHADOW, "Shadow dlight framebuffer incomplete (0x%X), disabling dlight shadows (sun shadows stay enabled).", status);
 		framebufs.shadow.dlight_fbo = 0;
 		GL_DeleteNativeTexture (framebufs.shadow.dlight_depth_tex);
 		framebufs.shadow.dlight_depth_tex = 0;
@@ -559,14 +563,14 @@ void R_Shadow_CreateFrameBuffers (void)
 		GL_ResourceRegistry_RegisterSlot (R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);
 		return;
 	}
-	if (r_shadow_log.value > 0.f)
+	if (SHADOW_LOG_ENABLED())
 		Con_Printf ("Shadow: dlight cube-array atlas created (%dx%d, layers=%d)\n",
 			dlight_size, dlight_size, SHADOW_DLIGHT_MAX * SHADOW_DLIGHT_FACES);
 
 	framebufs.shadow.available = true;
 	GL_ResourceRegistry_RegisterSlot (R_BACKEND_RESOURCE_SLOT_SHADOW_SUN_DEPTH);
 
-	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_SHADOW)))
 		Con_DPrintf ("ref_gl: R_Shadow_CreateFrameBuffers done sun_fbo=%u dlight_fbo=%u\n",
 			(unsigned)framebufs.shadow.sun_fbo,
 			(unsigned)framebufs.shadow.dlight_fbo);
@@ -575,7 +579,7 @@ void R_Shadow_CreateFrameBuffers (void)
 void R_Shadow_DeleteFrameBuffers (void)
 {
 	/* TODO_RESOURCE_BOUNDARY: keep shadow resource destruction centralized here. */
-	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_log_resources.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_SHADOW)))
 		Con_DPrintf ("ref_gl: R_Shadow_DeleteFrameBuffers sun_fbo=%u dlight_fbo=%u\n",
 			(unsigned)framebufs.shadow.sun_fbo,
 			(unsigned)framebufs.shadow.dlight_fbo);
@@ -636,7 +640,7 @@ void R_Shadow_ReconcileResources (void)
 	else
 		retry_after_frame = 0;
 
-	if (r_refgl_validate_fbo.value != 0.f || r_refgl_debug.value != 0.f)
+	if (r_refgl_validate_fbo.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_SHADOW)))
 		Con_DPrintf ("ref_gl: R_Shadow_ReconcileResources want=%d have=%d retry_after=%d\n",
 			want_shadows ? 1 : 0,
 			have_any_resources ? 1 : 0,
@@ -1059,7 +1063,7 @@ static void R_RenderSunShadowMap (void)
 		R_Shadow_FilterDrawContext (&r_shadow_draw_ctx, &pass_ctx, NULL,
 			use_frustum_cull ? r_shadow_state.sun_frustum[cascade] : NULL);
 		ctx = &pass_ctx;
-		if (r_shadow_log.value > 1.f)
+		if (SHADOW_LOG_VERBOSE_ENABLED())
 		{
 			Con_Printf ("Shadow sun c%d: src(b=%d a=%d) -> culled(b=%d a=%d) frustum=%d\n",
 				cascade,
@@ -1126,7 +1130,7 @@ static void R_RenderDLightShadowMaps (void)
 				use_sphere_cull ? &sphere : NULL,
 				use_frustum_cull ? r_shadow_state.dlight_frustum[slot][face] : NULL);
 			ctx = &pass_ctx;
-			if (r_shadow_log.value > 1.f)
+			if (SHADOW_LOG_VERBOSE_ENABLED())
 			{
 				Con_Printf ("Shadow dl s%d f%d: src(b=%d a=%d) -> culled(b=%d a=%d) sphere=%d frustum=%d\n",
 					slot, face,
@@ -1185,8 +1189,8 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 	qboolean have_query_api = false;
 	qboolean log_now = false;
 
-	log_now = (r_shadow_log.value > 1.f)
-		|| (r_shadow_log.value > 0.f && r_framecount >= r_shadow_log_last_frame + 60);
+	log_now = (r_shadow_log.value > 1.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_SHADOW)))
+		|| ((r_shadow_log.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_SHADOW))) && r_framecount >= r_shadow_log_last_frame + 60);
 	if (!r_shadow_diag_once)
 	{
 		r_shadow_diag_once = true;

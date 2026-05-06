@@ -41,6 +41,12 @@ static float BotCombat_Noise01 (uint32_t seed)
 	return (float) (seed & 0xffffU) / 65535.f;
 }
 
+static qboolean BotCombat_AimDebugEnabled (void)
+{
+	return bot_aim_debug.value >= 2.f
+		|| (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_BOT) && DBG_GetLevel () >= DBG_LEVEL_VERBOSE);
+}
+
 qboolean BotCombat_HasAmmoForWeapon (edict_t *self, int weapon)
 {
 	if (!self)
@@ -256,9 +262,10 @@ void BotCombat_ComputeAim (bot_state_t *bot, edict_t *self, edict_t *enemy, vec3
 	base_angles[ROLL] = 0.f;
 	VectorCopy (base_angles, out_angles);
 
-	if (bot_aim_debug.value >= 2.f && bot->next_debug_time < qcvm->time)
+	if (BotCombat_AimDebugEnabled () && bot->next_debug_time < qcvm->time)
 	{
-		Con_Printf ("BotAim: %s dist=%0.0f pitch=%0.1f yaw=%0.1f\n", bot->name, dist, out_angles[PITCH], out_angles[YAW]);
+		DBG_VERBOSE (DBG_CH_BOT, "BotAim: %s dist=%0.0f pitch=%0.1f yaw=%0.1f\n",
+			bot->name, dist, out_angles[PITCH], out_angles[YAW]);
 		bot->next_debug_time = qcvm->time + 1.0;
 	}
 }

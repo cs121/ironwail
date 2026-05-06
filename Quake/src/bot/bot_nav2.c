@@ -1,6 +1,8 @@
 #include "quakedef.h"
 #include "bot_nav2.h"
 
+extern cvar_t bot_nav_debug;
+
 #define BOT_NAV_MAX_NODES 8192
 #define BOT_NAV_MAX_LINKS 65536
 #define BOT_NAV_MAX_TRAVERSALS 65536
@@ -94,6 +96,11 @@ typedef struct bot_nav_graph_s
 } bot_nav_graph_t;
 
 static bot_nav_graph_t g_bot_nav;
+
+static qboolean BotNav_DebugEnabled (void)
+{
+	return bot_nav_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_BOT));
+}
 
 extern cvar_t bot_nav_debug;
 
@@ -431,7 +438,7 @@ void BotNav_LoadForMap (const char *mapname)
 	}
 	if (!data)
 	{
-		if (bot_nav_debug.value)
+		if (BotNav_DebugEnabled ())
 			Con_Printf ("BotNav: no nav2 found for %s\n", mapname);
 		return;
 	}
@@ -607,7 +614,7 @@ void BotNav_LoadForMap (const char *mapname)
 cleanup:
 	if (!success)
 	{
-		if (bot_nav_debug.value)
+		if (BotNav_DebugEnabled ())
 			Con_Printf ("BotNav: failed to load strict NAV2 %s\n", loaded_path);
 		BotNav_ResetGraph ();
 	}
@@ -717,7 +724,7 @@ qboolean BotNav_FindPath (int start_node, int goal_node, bot_path_t *out_path)
 	if ((unsigned int) start_node >= (unsigned int) g_bot_nav.node_count || (unsigned int) goal_node >= (unsigned int) g_bot_nav.node_count)
 		return false;
 
-	collect_debug_stats = bot_nav_debug.value != 0.f;
+	collect_debug_stats = BotNav_DebugEnabled ();
 	if (collect_debug_stats)
 		++g_bot_nav.debug_search_calls;
 
@@ -821,7 +828,7 @@ void BotNav_DebugDraw (void)
 {
 	static double next_log_time;
 
-	if (!bot_nav_debug.value)
+	if (!BotNav_DebugEnabled ())
 		return;
 	if (realtime < next_log_time)
 		return;

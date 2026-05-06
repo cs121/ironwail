@@ -1121,8 +1121,12 @@ void SCR_DrawParticleDebug (void)
 	int y = 25 - 8;
 	int i;
 	const char *overdraw;
+	const qboolean debug_enabled = (r_particles_debug.value > 0.f)
+		|| (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_RENDER));
+	const qboolean verbose_enabled = (r_particles_debug.value >= 2.f)
+		|| (debug_enable.value != 0.f && DBG_ChannelEnabled (DBG_CH_RENDER) && DBG_GetLevel () >= DBG_LEVEL_VERBOSE);
 
-	if (r_particles_debug.value <= 0.f)
+	if (!debug_enabled)
 		return;
 
 	R_GetParticleDebugStats (&stats);
@@ -1134,7 +1138,7 @@ void SCR_DrawParticleDebug (void)
 		overdraw = "high";
 
 	GL_SetCanvas (CANVAS_BOTTOMLEFT);
-	Draw_Fill (x, y * 8, 44 * 8, ((int)r_particles_debug.value >= 2 ? 9 : 6) * 8, 0, 0.5f);
+	Draw_Fill (x, y * 8, 44 * 8, (verbose_enabled ? 9 : 6) * 8, 0, 0.5f);
 
 	q_snprintf (str, sizeof (str), "particles debug");
 	Draw_String (x, (y++) * 8 - x, str);
@@ -1154,7 +1158,7 @@ void SCR_DrawParticleDebug (void)
 		q_snprintf (str + strlen (str), sizeof (str) - strlen (str), " %d", stats.bucket_legacy[i]);
 	Draw_String (x, (y++) * 8 - x, str);
 
-	if ((int)r_particles_debug.value >= 2)
+	if (verbose_enabled)
 	{
 		if (stats.has_bounds)
 		{

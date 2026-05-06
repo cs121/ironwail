@@ -166,7 +166,7 @@ static void S_SoundInfo_f (void)
 	Con_Printf("%5d static_voices\n", stats.active_static_voices);
 	Con_Printf("%5u dropped_voices\n", stats.dropped_voices);
 	Con_Printf("%8.3f last_mix_ms\n", stats.last_mix_time_ms);
-	if (snd_debug.value > 0.f)
+	if (snd_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_AUDIO)))
 	{
 		int bus_counts[SOUND_BUS_COUNT] = {0};
 		int i;
@@ -1066,7 +1066,7 @@ audio_voice_handle_t Audio_PlayDefById (sound_def_id_t id, const audio_play_para
 	if (def->max_instances > 0 && SND_CountActiveDefInstances (def->id) >= def->max_instances)
 	{
 		snd_metrics.dropped_voices++;
-		if (snd_debug.value > 0.f)
+		if (snd_debug.value > 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_AUDIO)))
 			Con_DWarning ("sound def '%s' hit max_instances %d\n", def->name, def->max_instances);
 		return 0;
 	}
@@ -1664,7 +1664,7 @@ void S_Update (vec3_t origin, vec3_t forward, vec3_t right, vec3_t up)
 //
 // debugging output
 //
-	if (snd_show.value)
+	if (snd_show.value || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_AUDIO)))
 	{
 		total = 0;
 		ch = snd_channels;
