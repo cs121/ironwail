@@ -1,6 +1,7 @@
 #include "quakedef.h"
 
 #include "r_framegraph.h"
+#include "r_shadow_debug.h"
 
 extern int r_framecount;
 extern cvar_t r_refgl_log_passes;
@@ -31,8 +32,10 @@ static qboolean R_FG_PassWhenShadowEnabled (const RenderPassContext *ctx)
 	{
 		extern cvar_t r_ref_enable_shadows;
 		extern cvar_t r_shadow;
+		extern cvar_t r_shadow_log;
 		shadow_enabled_diag_once = true;
-		Con_Printf ("Shadow FG enabled diag: plan=%d run_shadowmaps=%d r_ref_enable_shadows=%.2f r_shadow=%.2f\n",
+		if (SHADOW_LOG_ENABLED())
+			Con_Printf ("Shadow FG enabled diag: plan=%d run_shadowmaps=%d r_ref_enable_shadows=%.2f r_shadow=%.2f\n",
 			ctx && ctx->frame_plan ? 1 : 0,
 			(ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps) ? 1 : 0,
 			r_ref_enable_shadows.value,
@@ -145,10 +148,12 @@ void R_Pass_SetupView (RenderPassContext *ctx)
 void R_Pass_RenderShadowMaps (RenderPassContext *ctx)
 {
 	static qboolean shadow_pass_fg_diag_once = false;
+	extern cvar_t r_shadow_log;
 	if (!shadow_pass_fg_diag_once)
 	{
 		shadow_pass_fg_diag_once = true;
-		Con_Printf ("Shadow FG diag: pass execute run_shadowmaps=%d\n",
+		if (SHADOW_LOG_ENABLED())
+			Con_Printf ("Shadow FG diag: pass execute run_shadowmaps=%d\n",
 			(ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps) ? 1 : 0);
 	}
 	R_Pass_RunBackendCallback (ctx, "Shadow maps",
@@ -248,7 +253,7 @@ static const RenderPassDesc s_shadowmaps_framegraph_pass = {
 	.name = "Shadow maps",
 	.reads = RENDER_RES_NONE,
 	.writes = RENDER_RES_SHADOW_SUN_DEPTH,
-	.side_effects = 0,
+	.side_effects = FG_SIDEFX_GLOBAL_STATE,
 	.baseline_bits = FG_PASS_BASELINE_DETERMINISTIC_STATE,
 	.output_target = FG_PASS_OUTPUT_KEEP,
 	.viewport_mode = FG_PASS_VIEWPORT_KEEP,

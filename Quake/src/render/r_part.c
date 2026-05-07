@@ -50,8 +50,8 @@ cvar_t	r_particles_collision = {"r_particles_collision", "1", CVAR_ARCHIVE};
 cvar_t	r_particles_spawn_max = { "r_particles_spawn_max", "2048", CVAR_ARCHIVE};
 cvar_t	r_particles_gpu_sim = { "r_particles_gpu_sim", "0", CVAR_ARCHIVE};
 cvar_t	r_particles_gpu_cullsort = { "r_particles_gpu_cullsort", "0", CVAR_ARCHIVE};
-cvar_t	r_particles_debug = { "r_particles_debug", "0", CVAR_ARCHIVE};
-cvar_t	r_particles_prt_debug = { "r_particles_prt_debug", "0", CVAR_ARCHIVE};
+cvar_t	r_particles_debug = { "r_particles_debug", "0", CVAR_NONE};
+cvar_t	r_particles_prt_debug = { "r_particles_prt_debug", "0", CVAR_NONE};
 
 
 static int r_particles_debug_legacy_buckets[8];

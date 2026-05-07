@@ -144,10 +144,10 @@ static const material_keyword_def_t mat_material_keyword_table[] =
 static qboolean mat_material_keyword_seen[countof (mat_material_keyword_table)];
 
 cvar_t r_materials = { "r_materials", "1", CVAR_ARCHIVE };
-cvar_t r_material_debug = { "r_material_debug", "0", CVAR_ARCHIVE };
-cvar_t r_tcgen_debug = { "r_tcgen_debug", "0", CVAR_ARCHIVE };
+cvar_t r_material_debug = { "r_material_debug", "0", CVAR_NONE };
+cvar_t r_tcgen_debug = { "r_tcgen_debug", "0", CVAR_NONE };
 cvar_t r_sun_visibility = { "r_sun_visibility", "0.35", CVAR_ARCHIVE };
-cvar_t r_material_debug_parse = { "r_material_debug_parse", "0", CVAR_ARCHIVE };
+cvar_t r_material_debug_parse = { "r_material_debug_parse", "0", CVAR_NONE };
 cvar_t r_particles_material_strict = { "r_particles_material_strict", "0", CVAR_ARCHIVE };
 static cvar_t r_reloadmaterials = { "r_reloadmaterials", "0", CVAR_NONE };
 static cvar_t r_material_fuzz = { "r_material_fuzz", "0", CVAR_NONE };

@@ -1194,13 +1194,14 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 	if (!r_shadow_diag_once)
 	{
 		r_shadow_diag_once = true;
-		Con_Printf ("Shadow diag: r_shadow=%.2f r_ref_enable_shadows=%.2f r_shadow_dlight=%.2f r_shadow_log=%.2f world=%d drawworld=%d\n",
-			r_shadow.value,
-			r_ref_enable_shadows.value,
-			r_shadow_dlight.value,
-			r_shadow_log.value,
-			cl.worldmodel ? 1 : 0,
-			r_drawworld_cheatsafe ? 1 : 0);
+		if (SHADOW_LOG_ENABLED())
+			Con_Printf ("Shadow diag: r_shadow=%.2f r_ref_enable_shadows=%.2f r_shadow_dlight=%.2f r_shadow_log=%.2f world=%d drawworld=%d\n",
+				r_shadow.value,
+				r_ref_enable_shadows.value,
+				r_shadow_dlight.value,
+				r_shadow_log.value,
+				cl.worldmodel ? 1 : 0,
+				r_drawworld_cheatsafe ? 1 : 0);
 	}
 
 	R_Shadow_ResetRuntime (&r_shadow_state);

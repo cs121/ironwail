@@ -3,6 +3,7 @@
 #include "gl_backend.h"
 #include "r_ssao.h"
 #include "r_postfx.h"
+#include "r_shadow_debug.h"
 
 #include "r_framegraph.h"
 #include "renderer_plugin.h"
@@ -943,7 +944,8 @@ static void GLBackend_PassShadowMaps (RenderPassContext *ctx)
 	if (!shadow_pass_diag_once)
 	{
 		shadow_pass_diag_once = true;
-		Con_Printf ("Shadow backend diag: entered callback run_shadowmaps=%d r_ref_enable_shadows=%.2f\n",
+		if (SHADOW_LOG_ENABLED())
+			Con_Printf ("Shadow backend diag: entered callback run_shadowmaps=%d r_ref_enable_shadows=%.2f\n",
 			(ctx && ctx->frame_plan && ctx->frame_plan->run_shadowmaps) ? 1 : 0,
 			r_ref_enable_shadows.value);
 	}

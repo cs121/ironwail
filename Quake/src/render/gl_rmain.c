@@ -219,10 +219,12 @@ static qboolean R_BuildLightTileLists (void)
 		const float max_x = ndc_x + extent_x;
 		const float min_y = ndc_y - extent_y;
 		const float max_y = ndc_y + extent_y;
-		const float tile_fx0 = CLAMP (0.f, (min_x * 0.5f + 0.5f) * LIGHT_TILES_X, (float)(LIGHT_TILES_X - 1));
-		const float tile_fx1 = CLAMP (0.f, (max_x * 0.5f + 0.5f) * LIGHT_TILES_X, (float)(LIGHT_TILES_X - 1));
-		const float tile_fy0 = CLAMP (0.f, (min_y * 0.5f + 0.5f) * LIGHT_TILES_Y, (float)(LIGHT_TILES_Y - 1));
-		const float tile_fy1 = CLAMP (0.f, (max_y * 0.5f + 0.5f) * LIGHT_TILES_Y, (float)(LIGHT_TILES_Y - 1));
+		/* Keep tiled-light coverage conservative: slight XY/Z expansion avoids
+		 * visible block cutoffs from projection/raster quantization at tile borders. */
+		const float tile_fx0 = CLAMP (0.f, (min_x * 0.5f + 0.5f) * LIGHT_TILES_X - 1.f, (float)(LIGHT_TILES_X - 1));
+		const float tile_fx1 = CLAMP (0.f, (max_x * 0.5f + 0.5f) * LIGHT_TILES_X + 1.f, (float)(LIGHT_TILES_X - 1));
+		const float tile_fy0 = CLAMP (0.f, (min_y * 0.5f + 0.5f) * LIGHT_TILES_Y - 1.f, (float)(LIGHT_TILES_Y - 1));
+		const float tile_fy1 = CLAMP (0.f, (max_y * 0.5f + 0.5f) * LIGHT_TILES_Y + 1.f, (float)(LIGHT_TILES_Y - 1));
 		light_tile_light_range_t *range = &light_ranges[i];
 
 		if (clip_w <= 1e-5f || depth_far <= 1e-5f)
@@ -232,8 +234,8 @@ static qboolean R_BuildLightTileLists (void)
 		range->tx1 = (unsigned char)tile_fx1;
 		range->ty0 = (unsigned char)tile_fy0;
 		range->ty1 = (unsigned char)tile_fy1;
-		range->tz0 = (unsigned char)R_LightTileCoordFromDepth (depth_near);
-		range->tz1 = (unsigned char)R_LightTileCoordFromDepth (q_max (depth_far, depth_near));
+		range->tz0 = (unsigned char)q_max (0, R_LightTileCoordFromDepth (depth_near) - 1);
+		range->tz1 = (unsigned char)q_min (LIGHT_TILES_Z - 1, R_LightTileCoordFromDepth (q_max (depth_far, depth_near)) + 1);
 		range->valid = true;
 
 		for (tz = range->tz0; tz <= range->tz1; ++tz)
@@ -519,13 +521,13 @@ cvar_t	r_lightingdir = { "r_lightingdir", "0", CVAR_ARCHIVE };
 cvar_t	r_rgblighting_enable = { "r_rgblighting_enable", "1", CVAR_ARCHIVE };
 cvar_t	r_srgb_textures = { "r_srgb_textures", "1", CVAR_ARCHIVE };
 cvar_t	r_srgb_framebuffer = { "r_srgb_framebuffer", "1", CVAR_ARCHIVE };
-cvar_t	r_debug_colorspace = { "r_debug_colorspace", "0", CVAR_ARCHIVE };
-cvar_t	r_lighting_debug_view = { "r_lighting_debug_view", "0", CVAR_ARCHIVE };
+cvar_t	r_debug_colorspace = { "r_debug_colorspace", "0", CVAR_NONE };
+cvar_t	r_lighting_debug_view = { "r_lighting_debug_view", "0", CVAR_NONE };
 cvar_t	r_color_midtone = { "r_color_midtone", "1.0", CVAR_ARCHIVE };
 cvar_t	r_color_contrast = { "r_color_contrast", "1.0", CVAR_ARCHIVE };
 cvar_t	r_color_saturation = { "r_color_saturation", "1.05", CVAR_ARCHIVE };
 cvar_t	r_lightmap_colorspace = { "r_lightmap_colorspace", "srgb", CVAR_ARCHIVE };
-cvar_t	r_lightmap_colorspace_debug = { "r_lightmap_colorspace_debug", "0", CVAR_ARCHIVE };
+cvar_t	r_lightmap_colorspace_debug = { "r_lightmap_colorspace_debug", "0", CVAR_NONE };
 cvar_t	r_wateralpha = { "r_wateralpha","1",CVAR_ARCHIVE };
 cvar_t	r_litwater = { "r_litwater","1",CVAR_NONE };
 cvar_t	r_dynamic = { "r_dynamic","1",CVAR_ARCHIVE };
@@ -537,7 +539,7 @@ cvar_t	r_quality = { "r_quality", "high", CVAR_ARCHIVE };
 cvar_t  r_shadow = { "r_shadow", "1", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun = { "r_shadow_sun", "1", CVAR_ARCHIVE };
 cvar_t  r_shadow_dlight = { "r_shadow_dlight", "1", CVAR_ARCHIVE };
-cvar_t  r_shadow_dlight_max = { "r_shadow_dlight_max", "4", CVAR_ARCHIVE };
+cvar_t  r_shadow_dlight_max = { "r_shadow_dlight_max", "8", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun_size = { "r_shadow_sun_size", "2048", CVAR_ARCHIVE };
 cvar_t  r_shadow_dlight_size = { "r_shadow_dlight_size", "512", CVAR_ARCHIVE };
 cvar_t  r_shadow_sun_distance = { "r_shadow_sun_distance", "1200", CVAR_ARCHIVE };
@@ -560,7 +562,7 @@ cvar_t  r_shadow_cull_backface = { "r_shadow_cull_backface", "0", CVAR_ARCHIVE }
 cvar_t  r_shadow_cull_frustum = { "r_shadow_cull_frustum", "1", CVAR_ARCHIVE };
 cvar_t  r_shadow_cull_sphere = { "r_shadow_cull_sphere", "1", CVAR_ARCHIVE };
 cvar_t  r_shadow_debug = { "r_shadow_debug", "0", CVAR_NONE };
-cvar_t  r_shadow_log = { "r_shadow_log", "0", CVAR_ARCHIVE };
+cvar_t  r_shadow_log = { "r_shadow_log", "0", CVAR_NONE };
 cvar_t  r_rimlight = { "r_rimlight", "1", CVAR_ARCHIVE };
 cvar_t  r_rimlight_world = { "r_rimlight_world", "1", CVAR_ARCHIVE };
 cvar_t  r_rimlight_models = { "r_rimlight_models", "1", CVAR_ARCHIVE };
@@ -671,8 +673,8 @@ cvar_t	r_ssao_blur_sigma = { "r_ssao_blur_sigma", "2.0", CVAR_ARCHIVE };
 cvar_t	r_ssao_blur_bilateral = { "r_ssao_blur_bilateral", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_halfres = { "r_ssao_halfres", "1", CVAR_ARCHIVE };
 // r_ssao_debug modes: 0 off, 1 raw AO, 2 AO*fog, 3 fog factor, 4 depth raw, 5 view-space Z, 6 view-space position, 7 normals, 8 noise, 9 sample hit ratio, 10 AO raw, 11 blur debug, 12 AO mask, 13 fog transmittance+source, 14 fog-damped AO.
-cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_ARCHIVE };
-cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_ARCHIVE };
+cvar_t	r_ssao_debug = { "r_ssao_debug", "0", CVAR_NONE };
+cvar_t	r_ssao_debug_far = { "r_ssao_debug_far", "4096", CVAR_NONE };
 cvar_t	r_ssao_reversedz_mode = { "r_ssao_reversedz_mode", "0", CVAR_ARCHIVE };
 cvar_t	r_ssao_noise = { "r_ssao_noise", "1", CVAR_ARCHIVE };
 cvar_t	r_ssao_noise_mode = { "r_ssao_noise_mode", "1", CVAR_ARCHIVE };
@@ -708,8 +710,8 @@ cvar_t	r_godrays_weight = { "r_godrays_weight", "0.015", CVAR_ARCHIVE };
 cvar_t	r_godrays_decay = { "r_godrays_decay", "0.97", CVAR_ARCHIVE };
 cvar_t	r_godrays_exposure = { "r_godrays_exposure", "1.0", CVAR_ARCHIVE };
 cvar_t	r_godrays_threshold = { "r_godrays_threshold", "0.0", CVAR_ARCHIVE };
-cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_ARCHIVE };
-cvar_t	r_godrays_debug_source = { "r_godrays_debug_source", "0", CVAR_ARCHIVE };
+cvar_t	r_godrays_debug = { "r_godrays_debug", "0", CVAR_NONE };
+cvar_t	r_godrays_debug_source = { "r_godrays_debug_source", "0", CVAR_NONE };
 cvar_t	r_godrays_vol_pow = { "r_godrays_vol_pow", "1.0", CVAR_ARCHIVE };
 
 cvar_t	r_vignette = { "r_vignette", "0.15", CVAR_ARCHIVE };
@@ -1633,7 +1635,7 @@ void GL_CreateFrameBuffers (void)
 		int width = framebufs.ssao.width[i];
 		int height = framebufs.ssao.height[i];
 		const char *suffix = (i == 0) ? "full" : "half";
-		framebufs.ssao.ao_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_NEAREST, va ("ssao %s", suffix));
+		framebufs.ssao.ao_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_LINEAR, va ("ssao %s", suffix));
 		framebufs.ssao.blur_tex[i] = GL_CreateTexture2D (ssao_format, width, height, GL_NEAREST, va ("ssao blur %s", suffix));
 		framebufs.ssao.ao_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.ao_tex[i], 0, 0, va ("ssao fbo %s", suffix));
 		framebufs.ssao.blur_fbo[i] = GL_CreateSimpleFBO (GL_TEXTURE_2D, framebufs.ssao.blur_tex[i], 0, 0, va ("ssao blur fbo %s", suffix));
@@ -2229,7 +2231,7 @@ static GLuint GL_GenerateSSAOTexture (float view_min_x, float view_min_y, float 
 	float debug_mode = (float)debug_mode_ssao;
 	float debug_far = q_max (0.1f, r_ssao_debug_far.value);
 	float noise_enabled = (r_ssao_noise.value > 0.f) ? 1.f : 0.f;
-	float noise_seed = (r_ssao_freeze_noise.value > 0.f) ? 0.f : (float)r_framecount;
+	float noise_seed = (r_ssao_freeze_noise.value > 0.f) ? 0.f : fmodf ((float)r_framecount * 1.618033988749895f, 1.0f);
 	int noise_mode = (int)Q_rint (r_ssao_noise_mode.value);
 	float noise_scale = R_SSAO_SanitizeValue (r_ssao_noise_scale.value, 1.f, 0.1f, 64.f);
 	noise_mode = CLAMP (0, noise_mode, 2);

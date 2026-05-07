@@ -110,7 +110,7 @@ extern cvar_t r_color_midtone;
 extern cvar_t r_color_contrast;
 extern cvar_t r_viewmodel_light_boost;
 extern cvar_t r_viewmodel_minlight;
-cvar_t r_refgl_debug = { "r_refgl_debug", "0", CVAR_ARCHIVE };
+cvar_t r_refgl_debug = { "r_refgl_debug", "0", CVAR_NONE };
 cvar_t r_refgl_log_init = { "r_refgl_log_init", "0", CVAR_NONE };
 cvar_t r_refgl_log_passes = { "r_refgl_log_passes", "0", CVAR_NONE };
 cvar_t r_refgl_log_resources = { "r_refgl_log_resources", "0", CVAR_NONE };
