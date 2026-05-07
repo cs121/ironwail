@@ -183,7 +183,7 @@ const int ALIAS_FLAG_NO_MOTION_BLUR = 1;
 const int ALIAS_FLAG_VIEWMODEL = 2;
 const int ALIAS_FLAG_LIGHTNING = 4;
 const int ALIAS_FLAG_ROTATE = 8;
-const int SHADOW_DLIGHT_MAX = 4;
+const int SHADOW_DLIGHT_MAX = 8;
 const int SHADOW_LIGHT_MAX = 64;
 
 #if MODE == 2

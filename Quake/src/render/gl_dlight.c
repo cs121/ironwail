@@ -26,7 +26,7 @@ void R_DrawDLightPass (void)
 	dlight_t *saved_sources[DLIGHT_GPU_MAX] = {0};
 	int pp_count;
 	const float world_scale = 1.f;
-	const float luma_clamp = 1.f;
+	const float luma_clamp = 4.f;
 	const float soft_knee = 1.f;
 
 	/*
@@ -57,7 +57,8 @@ void R_DrawDLightPass (void)
 
 	GL_BeginGroup ("Dynamic lights (additive)");
 
-	r_framedata.dlight_params[2] = 1.f;
+	/* dlight_params.z controls tiled-light list usage in world_dlight.frag.
+	 * R_UploadFrameData owns that flag; don't override it here. */
 	r_framedata.dlight_params[3] = 0.f;
 	R_UploadFrameData ();
 

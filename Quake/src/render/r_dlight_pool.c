@@ -452,11 +452,19 @@ const dlight_t *const *DLightPool_GetActiveList (int *count)
 int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_t *viewleaf,
 		dlight_t **out, int out_max)
 {
-	(void)viewleaf;
+	byte *pvs = NULL;
 
 	dlight_pool.time = time;
 	VectorCopy (vieworg, dlight_pool.last_vieworg);
 	dlight_pool.has_vieworg = true;
+
+	if (viewleaf && cl.worldmodel)
+	{
+		if (viewleaf->contents == CONTENTS_SOLID || viewleaf->contents == CONTENTS_SKY)
+			pvs = Mod_NoVisPVS (cl.worldmodel);
+		else
+			pvs = Mod_LeafPVS ((mleaf_t *)viewleaf, cl.worldmodel);
+	}
 
 	if (!out || out_max <= 0)
 	{
@@ -518,6 +526,17 @@ int DLightPool_CollectForRender (double time, const vec3_t vieworg, const mleaf_
 
 			if (dl->color[0] <= 0.f && dl->color[1] <= 0.f && dl->color[2] <= 0.f)
 				continue;
+
+			if (pvs)
+			{
+				mleaf_t *dl_leaf = Mod_PointInLeaf (dl->origin, cl.worldmodel);
+				if (dl_leaf)
+				{
+					int leafnum = (int)(dl_leaf - cl.worldmodel->leafs);
+					if (!(pvs[leafnum >> 3] & (1 << (leafnum & 7))))
+						continue;
+				}
+			}
 
 			dl->last_score = DLightPool_ScoreLight (dl, time, vieworg);
 

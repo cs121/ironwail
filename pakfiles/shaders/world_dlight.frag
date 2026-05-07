@@ -222,7 +222,10 @@ void main()
 	vec3 rim_dlight_accum = vec3(0.0);
 	float debug_attenuation = 0.0;
 	float debug_affected_count = 0.0;
-	uvec3 tile_coord = ComputeLightTileCoord(in_coord, in_depth);
+	// Keep tile-z lookup in the same space as CPU tile building (linear view depth).
+	// Using interpolated clip.w can split tiles along triangle edges.
+	float view_depth = max(-(View * vec4(in_pos, 1.0)).z, 1e-6);
+	uvec3 tile_coord = ComputeLightTileCoord(in_coord, view_depth);
 	uint tile_index = tile_coord.z * uint(LIGHT_TILES_X * LIGHT_TILES_Y) + tile_coord.y * uint(LIGHT_TILES_X) + tile_coord.x;
 	bool use_tile_lists = (DLightParams.z > 0.5);
 	if (NumLights > 0u)

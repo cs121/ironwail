@@ -511,8 +511,8 @@ void main()
 
 	float viewZ       = viewPos.x;
 	float maxDistance = max(u_fogParams.x, 1.0);
-	if (viewZ > maxDistance)
-		ao = 1.0;
+	float distFade   = 1.0 - smoothstep(maxDistance * 0.6, maxDistance, viewZ);
+	ao = mix(1.0, ao, distFade);
 
 	// FIX: Fog damping is handled exclusively by postprocess.frag.
 	// ssao.frag previously also applied fog damping (via aoFogWeight / mix), which

@@ -1,7 +1,7 @@
 #ifndef FRAME_UNIFORMS_GLSL
 #define FRAME_UNIFORMS_GLSL
 
-#define SHADOW_DLIGHT_MAX 4
+#define SHADOW_DLIGHT_MAX 8
 
 layout(std140, binding=0) uniform FrameDataUBO
 {

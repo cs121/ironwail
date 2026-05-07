@@ -102,7 +102,7 @@ static quality_binding_t r_quality_bindings[] = {
 	{ &r_shadow, { "0", "1", "1", "1" } },
 	{ &r_shadow_sun, { "0", "1", "1", "1" } },
 	{ &r_shadow_dlight, { "0", "0", "1", "1" } },
-	{ &r_shadow_dlight_max, { "0", "2", "4", "4" } },
+	{ &r_shadow_dlight_max, { "0", "2", "4", "8" } },
 	{ &r_shadow_sun_size, { "0", "1024", "2048", "4096" } },
 	{ &r_shadow_dlight_size, { "0", "256", "512", "1024" } },
 	{ &r_shadow_sun_distance, { "900", "1200", "1400", "1600" } },

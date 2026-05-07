@@ -486,7 +486,7 @@ typedef struct gpulight_s {
 
 #define DLIGHT_GPU_MAX 64
 
-#define SHADOW_DLIGHT_MAX 4
+#define SHADOW_DLIGHT_MAX 8
 
 typedef struct gpulightbuffer_s {
 	float		lightstyles[MAX_LIGHTSTYLES * 2];
