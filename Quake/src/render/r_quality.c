@@ -80,6 +80,9 @@ extern cvar_t r_lightmap16f;
 extern cvar_t r_rgblighting_enable;
 extern cvar_t r_lightingdir;
 extern cvar_t r_srgb_framebuffer;
+extern cvar_t r_dynamic;
+extern cvar_t r_caustics;
+extern cvar_t r_ref_enable_lighting;
 
 typedef enum r_quality_preset_e
 {
@@ -137,7 +140,7 @@ static quality_binding_t r_quality_bindings[] = {
 	{ &r_ssao_max_distance, { "768", "1024", "1280", "1536" } },
 	{ &r_ssao_fog_strength, { "0.75", "0.9", "1.0", "1.1" } },
 	{ &r_ssao_fog_power, { "0.8", "0.9", "1.0", "1.1" } },
-	{ &r_bloom, { "0.75", "1.5", "3.0", "3.5" } },
+	{ &r_bloom, { "0", "1.5", "3.0", "3.5" } },
 	{ &r_bloom_threshold, { "1.25", "1.1", "1.0", "0.95" } },
 	{ &r_bloom_knee, { "0.15", "0.25", "0.30", "0.40" } },
 	{ &r_bloom_quality, { "0", "1", "1", "2" } },
@@ -156,7 +159,7 @@ static quality_binding_t r_quality_bindings[] = {
 	{ &r_exposure_bias, { "0.95", "1.0", "1.0", "1.05" } },
 	{ &r_exposure_speed_up, { "0.4", "0.5", "0.6", "0.7" } },
 	{ &r_exposure_speed_down, { "0.2", "0.25", "0.3", "0.35" } },
-	{ &r_postfx, { "1", "1", "1", "1" } },
+	{ &r_postfx, { "0", "1", "1", "1" } },
 	{ &r_postfx_lut, { "0", "1", "1", "1" } },
 	{ &r_postfx_underwater, { "0", "1", "1", "1" } },
 	{ &r_postfx_damage, { "1", "1", "1", "1" } },
@@ -167,7 +170,10 @@ static quality_binding_t r_quality_bindings[] = {
 	{ &r_lightmap16f, { "0", "1", "1", "1" } },
 	{ &r_rgblighting_enable, { "1", "1", "1", "1" } },
 	{ &r_lightingdir, { "0", "0", "0", "1" } },
-	{ &r_srgb_framebuffer, { "1", "1", "1", "1" } }
+	{ &r_srgb_framebuffer, { "1", "1", "1", "1" } },
+	{ &r_dynamic, { "0", "1", "1", "1" } },
+	{ &r_caustics, { "0", "1", "1", "1" } },
+	{ &r_ref_enable_lighting, { "0", "1", "1", "1" } }
 };
 
 static qboolean r_quality_initialized = false;

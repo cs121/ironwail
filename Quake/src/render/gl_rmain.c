@@ -4668,8 +4668,12 @@ void R_UploadFrameData (void)
 	GLbyte* ofs;
 	size_t	size;
 	qboolean tile_ready;
+	qboolean build_light_tiles;
 
-	tile_ready = R_BuildLightTileLists ();
+	build_light_tiles = (r_ref_enable_lighting.value != 0.f
+		&& r_dynamic.value > 0.f
+		&& r_framedata.numlights > 0);
+	tile_ready = build_light_tiles ? R_BuildLightTileLists () : false;
 	if (tile_ready)
 	{
 		/* Keep correctness first by forcing the global per-light loop. */
