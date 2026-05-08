@@ -137,6 +137,8 @@ layout(location=25) uniform vec4 DamageDVParams0; // x: trauma, y: time, z: unus
 layout(location=26) uniform vec4 DamageDirParams; // xy: damage dir in view space (screen), z: dir strength, w: unused
 layout(location=27) uniform vec4 DRSParams; // x: sharpen amount, y: resolution ratio, zw: unused
 layout(location=28) uniform vec4 SceneParams; // xy: inv scene size, zw: scene size
+layout(location=29) uniform vec4 Film35Params0; // x: enable, y: strength, z: weave px, w: rgb px
+layout(location=30) uniform vec4 Film35Params1; // x: speed, y: color variation, z: grain, w: apply hud
 
 const int MOTION_MAX_SAMPLES = 64;
 const float OPAQUE_ALPHA_THRESHOLD = 0.999;
@@ -231,16 +233,21 @@ float FogTransmittanceFromGlobalFog(float depth)
 
 float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDepth)
 {
-        vec2 ssaoSize = max(SceneParams.zw, vec2(1.0));
+        vec2 ssaoSize = max(vec2(textureSize(SSAOTexture, 0)), vec2(1.0));
         vec2 colorSize = vec2(textureSize(GammaTexture, 0));
+        vec2 aoViewMin = floor(ViewRect.xy * ssaoSize);
+        vec2 aoViewMax = max(aoViewMin, ceil(ViewRect.zw * ssaoSize) - vec2(1.0));
         if (all(lessThan(abs(ssaoSize - colorSize), vec2(0.5))))
-                return texture(SSAOTexture, uv).r;
+        {
+                vec2 clampedUv = clamp(uv, ViewRect.xy, ViewRect.zw);
+                return texture(SSAOTexture, clampedUv).r;
+        }
 
         bool upscaleNearest = SSAOParams.z > 0.5;
         if (upscaleNearest)
         {
                 vec2 ssaoCoord = uv * ssaoSize;
-                ivec2 ssaoPixel = ivec2(clamp(floor(ssaoCoord), vec2(0.0), ssaoSize - vec2(1.0)));
+                ivec2 ssaoPixel = ivec2(clamp(floor(ssaoCoord), aoViewMin, aoViewMax));
                 return texelFetch(SSAOTexture, ssaoPixel, 0).r;
         }
 
@@ -257,7 +264,7 @@ float SampleSSAO(vec2 uv, DepthSamplingInfo info, float centerDepth, bool useDep
                 for (int x = 0; x <= 1; ++x)
                 {
                         vec2 offset = vec2(float(x), float(y));
-                        vec2 aoTexel = clamp(base + offset, vec2(0.0), ssaoSize - vec2(1.0));
+                        vec2 aoTexel = clamp(base + offset, aoViewMin, aoViewMax);
                         vec2 aoUV = (aoTexel + 0.5) / ssaoSize;
                         float weight = (x == 0 ? (1.0 - frac.x) : frac.x) * (y == 0 ? (1.0 - frac.y) : frac.y);
                         if (useDepth && info.valid)
@@ -379,6 +386,83 @@ vec3 ApplyDRSSharpen(vec3 color, vec2 uv, vec2 invTexSize)
         vec3 n3 = texture(GammaTexture, uv + vec2(0.0,  invTexSize.y)).rgb;
         vec3 laplacian = (n0 + n1 + n2 + n3) * 0.25 - color;
         return max(color - laplacian * scale, vec3(0.0));
+}
+
+vec3 ApplyFilm35(vec3 mapped, vec2 uv, vec2 invTexSize, vec2 viewMin, vec2 viewMax, float viewModelMask, int materialMask)
+{
+	float enabled = Film35Params0.x;
+	float strength = clamp(Film35Params0.y, 0.0, 1.0);
+	if (enabled <= 0.5 || strength <= 1e-4)
+		return mapped;
+
+	bool applyHud = Film35Params1.w > 0.5;
+	bool isOverlay = ((materialMask & 2) != 0) || viewModelMask > 0.5;
+	if (!applyHud && isOverlay)
+		return mapped;
+
+	float weavePx = clamp(Film35Params0.z, 0.0, 2.0);
+	float rgbPx = clamp(Film35Params0.w, 0.0, 2.0);
+	float speed = clamp(Film35Params1.x, 0.0, 4.0);
+	float colorVariation = clamp(Film35Params1.y, 0.0, 1.0);
+	float grainStrength = clamp(Film35Params1.z, 0.0, 0.05);
+	float time = Time * speed;
+	float effect = strength;
+
+	vec2 baseWeave = vec2(
+		sin(time * 1.00 + 0.3) + 0.35 * sin(time * 2.17 + 1.7),
+		cos(time * 0.83 + 2.1) + 0.25 * sin(time * 1.61 + 4.2));
+	float baseLen = length(baseWeave);
+	if (baseLen > 1e-5)
+		baseWeave *= (weavePx * effect) / baseLen;
+	else
+		baseWeave = vec2(0.0);
+
+	vec2 rOffPx = baseWeave + vec2(cos(time + 0.0), sin(time + 0.0)) * rgbPx * effect;
+	vec2 gOffPx = baseWeave + vec2(cos(time + 2.094), sin(time + 2.094)) * rgbPx * effect * 0.45;
+	vec2 bOffPx = baseWeave + vec2(cos(time + 4.188), sin(time + 4.188)) * rgbPx * effect;
+	rOffPx = clamp(rOffPx, vec2(-2.0), vec2(2.0));
+	gOffPx = clamp(gOffPx, vec2(-2.0), vec2(2.0));
+	bOffPx = clamp(bOffPx, vec2(-2.0), vec2(2.0));
+
+	vec2 rUv = clamp(uv + rOffPx * invTexSize, viewMin, viewMax);
+	vec2 gUv = clamp(uv + gOffPx * invTexSize, viewMin, viewMax);
+	vec2 bUv = clamp(uv + bOffPx * invTexSize, viewMin, viewMax);
+
+	vec3 sampled;
+	sampled.r = texture(GammaTexture, rUv).r;
+	sampled.g = texture(GammaTexture, gUv).g;
+	sampled.b = texture(GammaTexture, bUv).b;
+
+	/* Keep the film35 registration luma-stable and low-amplitude to avoid visible ghost images. */
+	float sampledLuma = dot(sampled, vec3(0.2126, 0.7152, 0.0722));
+	float baseLuma = dot(mapped, vec3(0.2126, 0.7152, 0.0722));
+	if (sampledLuma > 1e-5)
+		sampled *= baseLuma / sampledLuma;
+	else
+		sampled = mapped;
+	sampled = clamp(sampled, vec3(0.0), vec3(1.0));
+	{
+		float regMix = clamp(rgbPx * effect * 0.12, 0.0, 0.08);
+		sampled = mix(mapped, sampled, regMix);
+	}
+	vec3 col = sampled;
+
+	float colorAmt = colorVariation * effect;
+	vec3 gain = vec3(1.006, 1.000, 0.994);
+	vec3 gamma = vec3(0.997, 1.000, 1.004);
+	col = pow(max(col, vec3(0.0)), gamma);
+	col *= mix(vec3(1.0), gain, colorAmt);
+	float luma = dot(col, vec3(0.2126, 0.7152, 0.0722));
+	float mid = smoothstep(0.15, 0.85, luma) * (1.0 - smoothstep(0.75, 1.0, luma));
+	col += mid * vec3(0.003, 0.001, -0.002) * colorAmt;
+
+	if (grainStrength > 1e-5)
+	{
+		float n = whitenoise01(floor(gl_FragCoord.xy) + vec2(float(NumLights & 255u), Time * 60.0));
+		col += (n - 0.5) * grainStrength * effect;
+	}
+
+	return clamp(col, vec3(0.0), vec3(1.0));
 }
 
 void main()
@@ -770,6 +854,7 @@ void main()
                         mapped = mix(mapped, boosted, clamp(damageTint * directional, 0.0, 1.0));
                 }
         }
+        mapped = ApplyFilm35(mapped, uv, invTexSize, viewMin, viewMax, viewModelMask, materialMask);
         if (outputSrgb > 0.5)
                 mapped = LinearToSRGB(mapped);
         mapped = ApplyDRSSharpen(mapped, uv, invTexSize);

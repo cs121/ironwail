@@ -936,6 +936,25 @@ static FUNC_PRINTF(2,3) GLuint GL_CreateComputeProgram (const char *path, const 
         return program;
 }
 
+static FUNC_PRINTF(2,3) GLuint GL_CreateOptionalComputeProgram (const char *path, const char *name, ...)
+{
+        GLenum type = GL_COMPUTE_SHADER;
+        va_list argptr;
+        GLuint program;
+
+        if (!COM_FileExists (path, NULL))
+        {
+                Con_DPrintf ("Optional shader missing, disabling feature: %s\n", path);
+                return 0;
+        }
+
+        va_start (argptr, name);
+        program = GL_CreateProgramFromFiles (1, &path, &type, name, argptr);
+        va_end (argptr);
+
+        return program;
+}
+
 typedef struct shader_build_state_s
 {
 	glprogs_t progs;
@@ -1215,6 +1234,7 @@ void GL_CreateShaders (void)
         glprogs.q3p_sim = GL_CreateComputeProgram (GLSL_PATH("q3p_sim.comp"), "q3p simulate");
         glprogs.q3p_cull_key = GL_CreateComputeProgram (GLSL_PATH("q3p_cull_key.comp"), "q3p cull/key");
         glprogs.gpu_bitonic_pairs = GL_CreateComputeProgram (GLSL_PATH("gpu_bitonic_pairs.comp"), "gpu bitonic pairs");
+        glprogs.light_tile_build = GL_CreateOptionalComputeProgram (GLSL_PATH("light_tile_build.comp"), "light tile build");
         for (mode = 0; mode < 3; mode++)
                 glprogs.palette_init[mode] = GL_CreateComputeProgram (GLSL_PATH("palette_init.comp"), "palette init|MODE %d", mode);
         glprogs.palette_postprocess = GL_CreateComputeProgram (GLSL_PATH("palette_postprocess.comp"), "palette postprocess");

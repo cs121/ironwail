@@ -122,6 +122,7 @@ cvar_t r_ref_enable_postfx = { "r_ref_enable_postfx", "1", CVAR_ARCHIVE };
 cvar_t r_ref_enable_shadows = { "r_ref_enable_shadows", "1", CVAR_ARCHIVE };
 cvar_t r_ref_enable_fog = { "r_ref_enable_fog", "1", CVAR_ARCHIVE };
 cvar_t r_ref_enable_lighting = { "r_ref_enable_lighting", "1", CVAR_ARCHIVE };
+cvar_t r_dlight_tiled = { "r_dlight_tiled", "0", CVAR_ARCHIVE };
 
 static void ClearAllStates (void);
 static void GL_Init (void);

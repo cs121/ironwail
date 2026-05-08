@@ -792,6 +792,7 @@ typedef struct glprogs_s {
 		GLuint		q3p_sim;
 		GLuint		q3p_cull_key;
 		GLuint		gpu_bitonic_pairs;
+	GLuint		light_tile_build;
 		GLuint		palette_init[3];	// [metric:naive/riemersma/oklab]
 		GLuint		palette_postprocess;
 	} glprogs_t;

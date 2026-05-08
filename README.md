@@ -23,6 +23,23 @@ On most maps performance is indeed not much of a concern on a modern system. In 
 - capped framerate when no map is loaded
 - ability to run the game from a folder containing Unicode characters
 
+## Optional film35 postfx
+Subtle 80s-inspired 35mm print emulation can be enabled in postprocess:
+- `r_film35_enable` (`0`): master enable/disable (default off, original look preserved)
+- `r_film35_strength` (`0.35`): global intensity
+- `r_film35_weave_px` (`0.35`): gate weave in pixel space
+- `r_film35_rgb_px` (`0.25`): per-channel registration drift in pixel space
+- `r_film35_speed` (`0.22`): weave/drift animation speed
+- `r_film35_color_variation` (`0.20`): subtle channel/midtone color variation
+- `r_film35_grain` (`0.015`): fine luminance grain amount
+- `r_film35_apply_hud` (`0`): keep HUD/UI untouched by default
+
+Recommended subtle range:
+- `r_film35_strength 0.25-0.45`
+- `r_film35_weave_px 0.20-0.50`
+- `r_film35_rgb_px 0.10-0.35`
+- `r_film35_grain 0.005-0.025`
+
 ## System requirements
 
 | | Minimum GPU | Recommended GPU |

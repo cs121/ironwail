@@ -116,6 +116,7 @@ static entity_t *r_shadow_filtered_alias_ents[MAX_VISEDICTS];
 static int r_shadow_log_last_frame = -1024;
 static int r_shadow_profile_last_frame = -1024;
 static qboolean r_shadow_diag_once = false;
+static qboolean r_shadow_no_active_maps_logged = false;
 
 static void R_Shadow_BuildSplitRatios (int cascade_count, float sun_dist, float out_ratio[SHADOW_SUN_CASCADE_MAX])
 {
@@ -172,6 +173,13 @@ qboolean R_Shadow_SunEnabled (void)
 qboolean R_Shadow_DlightEnabled (void)
 {
 	return R_Shadow_Enabled () && r_shadow_dlight.value > 0.f && r_framedata.numlights > 0;
+}
+
+qboolean R_Shadow_HasFramegraphResources (void)
+{
+	return framebufs.shadow.available
+		&& framebufs.shadow.sun_fbo != 0
+		&& framebufs.shadow.sun_depth_tex != 0;
 }
 
 void R_Shadow_NormalizeSettings (void)
@@ -1244,7 +1252,8 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 		R_Shadow_UpdateDlightMatrices (&r_shadow_state);
 	if (!want_sun_shadow && !want_dlight_shadows)
 	{
-		if (log_now)
+		if (log_now && !r_shadow_no_active_maps_logged)
+		{
 			Con_Printf ("Shadow skip: no active maps (sun_en=%d sun_res=%d dl_en=%d numlights=%d selected=%d dl_res=%d)\n",
 				R_Shadow_SunEnabled () ? 1 : 0,
 				(framebufs.shadow.sun_fbo && framebufs.shadow.sun_depth_tex) ? 1 : 0,
@@ -1252,8 +1261,11 @@ void R_Shadow_RenderMaps (entity_t **shadow_visedicts, int numshadowedicts)
 				(int)r_framedata.numlights,
 				r_shadow_state.num_dlights,
 				(framebufs.shadow.dlight_fbo && framebufs.shadow.dlight_depth_tex) ? 1 : 0);
+			r_shadow_no_active_maps_logged = true;
+		}
 		return;
 	}
+	r_shadow_no_active_maps_logged = false;
 	marked_for_shadow = (r_shadow_draw_ctx.brush_count > 0);
 
 	have_query_api = (GL_GenQueriesFunc && GL_BeginQueryFunc && GL_EndQueryFunc

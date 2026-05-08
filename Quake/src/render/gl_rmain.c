@@ -49,6 +49,7 @@ extern cvar_t r_refgl_validate_fbo;
 extern cvar_t r_ref_enable_postfx;
 extern cvar_t r_ref_enable_fog;
 extern cvar_t r_ref_enable_lighting;
+extern cvar_t r_dlight_tiled;
 
 #ifdef RENDERER_PLUGIN_BUILD
 #define IW_PARSE_FSCANF fscanf_s
@@ -155,12 +156,64 @@ typedef struct light_tile_entry_s
 #define LIGHT_TILE_COUNT (LIGHT_TILES_X * LIGHT_TILES_Y * LIGHT_TILES_Z)
 #define LIGHT_TILE_INDEX_CAPACITY (LIGHT_TILE_COUNT * 8)
 
+#define LIGHT_TILE_MAX_LIGHTS_PER_TILE 16
+#define LIGHT_TILE_GPU_INDEX_CAPACITY (LIGHT_TILE_COUNT * LIGHT_TILE_MAX_LIGHTS_PER_TILE)
+
 static light_tile_entry_t r_light_tiles[LIGHT_TILE_COUNT];
 static unsigned int r_light_tile_indices[LIGHT_TILE_INDEX_CAPACITY];
 static int r_light_tile_index_count = 0;
 static int r_light_tile_used_count = 0;
 static float r_light_tile_avg_lights = 0.f;
 static qboolean r_light_tile_ready = false;
+
+static GLuint r_light_tile_gpu_ssbo_tiles = 0;
+static GLuint r_light_tile_gpu_ssbo_indices = 0;
+static GLuint r_light_tile_gpu_ssbo_atomic = 0;
+static int r_light_tile_gpu_capacity = 0;
+
+static void R_LightTileGPUEnsureBuffers (void)
+{
+	const int tile_bytes = (int)(LIGHT_TILE_COUNT * sizeof (unsigned int) * 2);
+	const int index_bytes = (int)(LIGHT_TILE_GPU_INDEX_CAPACITY * sizeof (unsigned int));
+	const int atomic_bytes = (int)sizeof (unsigned int);
+
+	if (r_light_tile_gpu_ssbo_tiles)
+		return;
+
+	GL_GenBuffersFunc (1, &r_light_tile_gpu_ssbo_tiles);
+	GL_GenBuffersFunc (1, &r_light_tile_gpu_ssbo_indices);
+	GL_GenBuffersFunc (1, &r_light_tile_gpu_ssbo_atomic);
+
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_light_tile_gpu_ssbo_tiles);
+	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, tile_bytes, NULL, GL_DYNAMIC_DRAW);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_light_tile_gpu_ssbo_indices);
+	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, index_bytes, NULL, GL_DYNAMIC_DRAW);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_light_tile_gpu_ssbo_atomic);
+	GL_BufferDataFunc (GL_SHADER_STORAGE_BUFFER, atomic_bytes, NULL, GL_DYNAMIC_DRAW);
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, 0);
+
+	r_light_tile_gpu_capacity = index_bytes;
+}
+
+static void R_LightTileGPUDeleteBuffers (void)
+{
+	if (r_light_tile_gpu_ssbo_tiles)
+	{
+		GL_DeleteBuffersFunc (1, &r_light_tile_gpu_ssbo_tiles);
+		r_light_tile_gpu_ssbo_tiles = 0;
+	}
+	if (r_light_tile_gpu_ssbo_indices)
+	{
+		GL_DeleteBuffersFunc (1, &r_light_tile_gpu_ssbo_indices);
+		r_light_tile_gpu_ssbo_indices = 0;
+	}
+	if (r_light_tile_gpu_ssbo_atomic)
+	{
+		GL_DeleteBuffersFunc (1, &r_light_tile_gpu_ssbo_atomic);
+		r_light_tile_gpu_ssbo_atomic = 0;
+	}
+	r_light_tile_gpu_capacity = 0;
+}
 
 static int R_LightTileIndex (int tx, int ty, int tz)
 {
@@ -174,21 +227,20 @@ static int R_LightTileCoordFromDepth (float depth)
 	return (int)tzf;
 }
 
-static qboolean R_BuildLightTileLists (void)
+static qboolean R_BuildLightTileListsCPU (void)
 {
 	typedef struct light_tile_light_range_s
 	{
 		unsigned char tx0, tx1, ty0, ty1, tz0, tz1;
 		qboolean valid;
 	} light_tile_light_range_t;
-	light_tile_light_range_t light_ranges[DLIGHT_GPU_MAX];
-	unsigned int tile_counts[LIGHT_TILE_COUNT];
-	unsigned int tile_offsets[LIGHT_TILE_COUNT];
+	static light_tile_light_range_t light_ranges[DLIGHT_GPU_MAX];
+	static unsigned int tile_counts[LIGHT_TILE_COUNT];
+	static unsigned int tile_offsets[LIGHT_TILE_COUNT];
 	unsigned int running = 0;
 	int i, tx, ty, tz;
 
 	memset (r_light_tiles, 0, sizeof (r_light_tiles));
-	memset (r_light_tile_indices, 0, sizeof (r_light_tile_indices));
 	memset (light_ranges, 0, sizeof (light_ranges));
 	memset (tile_counts, 0, sizeof (tile_counts));
 	memset (tile_offsets, 0, sizeof (tile_offsets));
@@ -204,31 +256,35 @@ static qboolean R_BuildLightTileLists (void)
 	{
 		const gpulight_t *l = &r_lightbuffer.lights[i];
 		const float radius = q_max (l->radius, 1.f);
-		const float clip_x = r_matviewproj[0] * l->pos[0] + r_matviewproj[4] * l->pos[1] + r_matviewproj[8] * l->pos[2] + r_matviewproj[12];
-		const float clip_y = r_matviewproj[1] * l->pos[0] + r_matviewproj[5] * l->pos[1] + r_matviewproj[9] * l->pos[2] + r_matviewproj[13];
 		const float clip_w = r_matviewproj[3] * l->pos[0] + r_matviewproj[7] * l->pos[1] + r_matviewproj[11] * l->pos[2] + r_matviewproj[15];
 		const float view_z = r_matview[2] * l->pos[0] + r_matview[6] * l->pos[1] + r_matview[10] * l->pos[2] + r_matview[14];
 		const float view_depth = -view_z;
 		const float depth_near = q_max (view_depth - radius, 1e-4f);
 		const float depth_far = view_depth + radius;
-		const float ndc_x = clip_x / q_max (fabsf (clip_w), 1e-6f);
-		const float ndc_y = clip_y / q_max (fabsf (clip_w), 1e-6f);
-		const float extent_x = fabsf (r_matproj[0]) * radius / depth_near;
-		const float extent_y = fabsf (r_matproj[5]) * radius / depth_near;
-		const float min_x = ndc_x - extent_x;
-		const float max_x = ndc_x + extent_x;
-		const float min_y = ndc_y - extent_y;
-		const float max_y = ndc_y + extent_y;
-		/* Keep tiled-light coverage conservative: slight XY/Z expansion avoids
-		 * visible block cutoffs from projection/raster quantization at tile borders. */
-		const float tile_fx0 = CLAMP (0.f, (min_x * 0.5f + 0.5f) * LIGHT_TILES_X - 1.f, (float)(LIGHT_TILES_X - 1));
-		const float tile_fx1 = CLAMP (0.f, (max_x * 0.5f + 0.5f) * LIGHT_TILES_X + 1.f, (float)(LIGHT_TILES_X - 1));
-		const float tile_fy0 = CLAMP (0.f, (min_y * 0.5f + 0.5f) * LIGHT_TILES_Y - 1.f, (float)(LIGHT_TILES_Y - 1));
-		const float tile_fy1 = CLAMP (0.f, (max_y * 0.5f + 0.5f) * LIGHT_TILES_Y + 1.f, (float)(LIGHT_TILES_Y - 1));
 		light_tile_light_range_t *range = &light_ranges[i];
+		float clip_x, clip_y, ndc_x, ndc_y, extent_x, extent_y;
+		float min_x, max_x, min_y, max_y;
+		float tile_fx0, tile_fx1, tile_fy0, tile_fy1;
 
 		if (clip_w <= 1e-5f || depth_far <= 1e-5f)
 			continue;
+
+		clip_x = r_matviewproj[0] * l->pos[0] + r_matviewproj[4] * l->pos[1] + r_matviewproj[8] * l->pos[2] + r_matviewproj[12];
+		clip_y = r_matviewproj[1] * l->pos[0] + r_matviewproj[5] * l->pos[1] + r_matviewproj[9] * l->pos[2] + r_matviewproj[13];
+		ndc_x = clip_x / q_max (fabsf (clip_w), 1e-6f);
+		ndc_y = clip_y / q_max (fabsf (clip_w), 1e-6f);
+		extent_x = fabsf (r_matproj[0]) * radius / depth_near;
+		extent_y = fabsf (r_matproj[5]) * radius / depth_near;
+		min_x = ndc_x - extent_x;
+		max_x = ndc_x + extent_x;
+		min_y = ndc_y - extent_y;
+		max_y = ndc_y + extent_y;
+		/* Keep tiled-light coverage conservative: slight XY/Z expansion avoids
+		 * visible block cutoffs from projection/raster quantization at tile borders. */
+		tile_fx0 = CLAMP (0.f, (min_x * 0.5f + 0.5f) * LIGHT_TILES_X - 1.f, (float)(LIGHT_TILES_X - 1));
+		tile_fx1 = CLAMP (0.f, (max_x * 0.5f + 0.5f) * LIGHT_TILES_X + 1.f, (float)(LIGHT_TILES_X - 1));
+		tile_fy0 = CLAMP (0.f, (min_y * 0.5f + 0.5f) * LIGHT_TILES_Y - 1.f, (float)(LIGHT_TILES_Y - 1));
+		tile_fy1 = CLAMP (0.f, (max_y * 0.5f + 0.5f) * LIGHT_TILES_Y + 1.f, (float)(LIGHT_TILES_Y - 1));
 
 		range->tx0 = (unsigned char)tile_fx0;
 		range->tx1 = (unsigned char)tile_fx1;
@@ -241,7 +297,11 @@ static qboolean R_BuildLightTileLists (void)
 		for (tz = range->tz0; tz <= range->tz1; ++tz)
 			for (ty = range->ty0; ty <= range->ty1; ++ty)
 				for (tx = range->tx0; tx <= range->tx1; ++tx)
-					tile_counts[R_LightTileIndex (tx, ty, tz)]++;
+				{
+					const int tile = R_LightTileIndex (tx, ty, tz);
+					if (tile_counts[tile] < LIGHT_TILE_MAX_LIGHTS_PER_TILE)
+						tile_counts[tile]++;
+				}
 	}
 
 	for (i = 0; i < LIGHT_TILE_COUNT; ++i)
@@ -269,8 +329,11 @@ static qboolean R_BuildLightTileLists (void)
 				for (tx = range->tx0; tx <= range->tx1; ++tx)
 				{
 					const int tile = R_LightTileIndex (tx, ty, tz);
-					const unsigned int write_index = tile_offsets[tile]++;
-					r_light_tile_indices[write_index] = (unsigned int)i;
+					if (tile_offsets[tile] - r_light_tiles[tile].offset < (unsigned int)r_light_tiles[tile].count)
+					{
+						const unsigned int write_index = tile_offsets[tile]++;
+						r_light_tile_indices[write_index] = (unsigned int)i;
+					}
 				}
 	}
 
@@ -283,6 +346,52 @@ static qboolean R_BuildLightTileLists (void)
 	r_light_tile_avg_lights = (float)r_light_tile_index_count / (float)LIGHT_TILE_COUNT;
 	r_light_tile_ready = true;
 
+	return true;
+}
+
+static qboolean R_BuildLightTileListsGPU (void)
+{
+	const unsigned int zero = 0;
+
+	if (!glprogs.light_tile_build)
+		return false;
+
+	R_LightTileGPUEnsureBuffers ();
+
+	r_light_tile_index_count = 0;
+	r_light_tile_used_count = 0;
+	r_light_tile_avg_lights = 0.f;
+	r_light_tile_ready = false;
+
+	if (r_framedata.numlights == 0)
+		return false;
+
+	GL_BindBuffer (GL_SHADER_STORAGE_BUFFER, r_light_tile_gpu_ssbo_atomic);
+	GL_BufferSubDataFunc (GL_SHADER_STORAGE_BUFFER, 0, sizeof (zero), &zero);
+
+	GL_UseProgram (glprogs.light_tile_build);
+	{
+		GLuint light_buf;
+		GLbyte *light_ofs;
+		size_t light_size = sizeof (r_lightbuffer.lightstyles) + sizeof (r_lightbuffer.lights[0]) * q_max (r_framedata.numlights, 1);
+		GL_Upload (GL_SHADER_STORAGE_BUFFER, &r_lightbuffer, light_size, &light_buf, &light_ofs);
+		GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, light_buf, (GLintptr)light_ofs, light_size);
+	}
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 9, r_light_tile_gpu_ssbo_tiles, 0, LIGHT_TILE_COUNT * sizeof (unsigned int) * 2);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 10, r_light_tile_gpu_ssbo_indices, 0, r_light_tile_gpu_capacity);
+	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 11, r_light_tile_gpu_ssbo_atomic, 0, sizeof (unsigned int));
+
+	{
+		GLuint ubo_buf;
+		GLbyte *ubo_ofs;
+		GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &ubo_buf, &ubo_ofs);
+		GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, ubo_buf, (GLintptr)ubo_ofs, sizeof (r_framedata));
+	}
+
+	R_Backend_Dispatch (LIGHT_TILE_COUNT, 1u, 1u);
+	R_Backend_MemoryBarrier (R_BACKEND_BARRIER_SHADER_STORAGE);
+
+	r_light_tile_ready = true;
 	return true;
 }
 
@@ -651,6 +760,14 @@ cvar_t	r_postfx_lut_strength_powerup = { "r_postfx_lut_strength_powerup", "0.6",
 cvar_t	r_postfx_lut_strength_underwater = { "r_postfx_lut_strength_underwater", "0.5", CVAR_ARCHIVE };
 cvar_t	r_postfx_lut_debug_id = { "r_postfx_lut_debug_id", "0", CVAR_NONE };
 cvar_t	r_postfx_debug = { "r_postfx_debug", "0", CVAR_NONE };
+cvar_t	r_film35_enable = { "r_film35_enable", "0", CVAR_ARCHIVE };
+cvar_t	r_film35_strength = { "r_film35_strength", "0.35", CVAR_ARCHIVE };
+cvar_t	r_film35_weave_px = { "r_film35_weave_px", "0.35", CVAR_ARCHIVE };
+cvar_t	r_film35_rgb_px = { "r_film35_rgb_px", "0.25", CVAR_ARCHIVE };
+cvar_t	r_film35_speed = { "r_film35_speed", "0.22", CVAR_ARCHIVE };
+cvar_t	r_film35_color_variation = { "r_film35_color_variation", "0.20", CVAR_ARCHIVE };
+cvar_t	r_film35_grain = { "r_film35_grain", "0.015", CVAR_ARCHIVE };
+cvar_t	r_film35_apply_hud = { "r_film35_apply_hud", "0", CVAR_ARCHIVE };
 cvar_t	r_caustics = { "r_caustics", "1", CVAR_ARCHIVE };
 cvar_t	r_caustics_water = { "r_caustics_water", "1", CVAR_ARCHIVE };
 cvar_t	r_caustics_lava = { "r_caustics_lava", "1", CVAR_ARCHIVE };
@@ -3711,6 +3828,28 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 		(float)q_max (1, scene_size->width),
 		(float)q_max (1, scene_size->height));
 	{
+		float film35_enabled = (r_film35_enable.value > 0.f) ? 1.f : 0.f;
+		float film35_strength = CLAMP (0.f, r_film35_strength.value, 1.f);
+		float film35_weave_px = CLAMP (0.f, r_film35_weave_px.value, 2.f);
+		float film35_rgb_px = CLAMP (0.f, r_film35_rgb_px.value, 2.f);
+		float film35_speed = CLAMP (0.f, r_film35_speed.value, 4.f);
+		float film35_color_variation = CLAMP (0.f, r_film35_color_variation.value, 1.f);
+		float film35_grain = CLAMP (0.f, r_film35_grain.value, 0.05f);
+		float film35_apply_hud = (r_film35_apply_hud.value > 0.f) ? 1.f : 0.f;
+		if (film35_enabled <= 0.f)
+		{
+			film35_strength = 0.f;
+			film35_weave_px = 0.f;
+			film35_rgb_px = 0.f;
+			film35_speed = 0.f;
+			film35_color_variation = 0.f;
+			film35_grain = 0.f;
+			film35_apply_hud = 0.f;
+		}
+		GL_Uniform4fFunc (29, film35_enabled, film35_strength, film35_weave_px, film35_rgb_px);
+		GL_Uniform4fFunc (30, film35_speed, film35_color_variation, film35_grain, film35_apply_hud);
+	}
+	{
 		GLint godrays_params_loc = GL_GetUniformLocationFunc ? GL_GetUniformLocationFunc (glprogs.postprocess[variant], "GodraysParams") : -1;
 		if (godrays_params_loc >= 0)
 			GL_Uniform4fFunc (godrays_params_loc, godrays_texture ? 1.f : 0.f, godrays_debug, godrays_debug_source, 0.f);
@@ -4415,7 +4554,7 @@ static qboolean GL_NeedsPostprocess_Internal (void)
 		return true;
 	if (r_lighting_debug_view.value > 0.f)
 		return true;
-	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_color_contrast.value != 1.f || saturation != 1.f || r_color_midtone.value != 1.f || GL_ShouldApplyMotionBlur ())
+	if (r_tonemap.value > 0.f || r_bloom.value > 0.f || r_color_contrast.value != 1.f || saturation != 1.f || r_color_midtone.value != 1.f || GL_ShouldApplyMotionBlur () || r_film35_enable.value > 0.f)
 		return true;
 	if (r_srgb_framebuffer.value <= 0.f)
 		return true;
@@ -4669,16 +4808,28 @@ void R_UploadFrameData (void)
 	size_t	size;
 	qboolean tile_ready;
 	qboolean build_light_tiles;
+	qboolean use_gpu_tiles;
 
-	build_light_tiles = (r_ref_enable_lighting.value != 0.f
+	build_light_tiles = (r_dlight_tiled.value != 0.f
+		&& r_ref_enable_lighting.value != 0.f
 		&& r_dynamic.value > 0.f
 		&& r_framedata.numlights > 0);
-	tile_ready = build_light_tiles ? R_BuildLightTileLists () : false;
-	if (tile_ready)
+	use_gpu_tiles = (r_dlight_tiled.value >= 2.f && glprogs.light_tile_build != 0);
+
+	if (build_light_tiles && use_gpu_tiles)
 	{
-		/* Keep correctness first by forcing the global per-light loop. */
-		tile_ready = false;
+		tile_ready = R_BuildLightTileListsGPU ();
+		r_framedata.dlight_params[2] = tile_ready ? 1.f : 0.f;
+
+		if (!tile_ready)
+		{
+			GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
+			GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
+		}
+		return;
 	}
+
+	tile_ready = build_light_tiles ? R_BuildLightTileListsCPU () : false;
 	r_framedata.dlight_params[2] = tile_ready ? 1.f : 0.f;
 
 	size = sizeof (r_lightbuffer.lightstyles) + sizeof (r_lightbuffer.lights[0]) * q_max (r_framedata.numlights, 1); // avoid zero-length array

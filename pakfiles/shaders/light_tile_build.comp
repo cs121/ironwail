@@ -1,0 +1,181 @@
+layout(local_size_x=64) in;
+
+#define LIGHT_TILES_X 32
+#define LIGHT_TILES_Y 16
+#define LIGHT_TILES_Z 32
+#define LIGHT_TILE_COUNT (LIGHT_TILES_X * LIGHT_TILES_Y * LIGHT_TILES_Z)
+#define LIGHT_TILE_MAX_PER_TILE 16
+#define LIGHT_TILE_INDEX_CAPACITY (LIGHT_TILE_COUNT * LIGHT_TILE_MAX_PER_TILE)
+#define MAX_LIGHTS 64
+
+struct Light
+{
+	vec3 origin;
+	float radius;
+	vec3 color;
+	float minlight;
+};
+
+layout(std140, binding=0) uniform FrameDataUBO
+{
+	mat4 ViewProj;
+	mat4 PrevViewProj;
+	mat4 View;
+	vec4 Fog;
+	vec4 SkyFog;
+	vec3 WindDir;
+	float WindPhase;
+	float ScreenDither;
+	float TextureDither;
+	float Overbright;
+	float _Pad0;
+	vec3 EyePos;
+	float Time;
+	vec3 PrevEyePos;
+	float DeltaTime;
+	float ZLogScale;
+	float ZLogBias;
+	float _PadZ0;
+	float _PadZ1;
+	vec4 LightmapParams;
+	vec4 LightgridParams;
+	vec4 DLightParams;
+	vec4 ColorSpaceParams;
+	vec4 ShaderParams;
+	vec4 SunDirEnabled;
+	vec4 SunColorIntensity;
+	vec4 SkyVisTint;
+	vec4 CausticsParams0;
+	vec4 CausticsParams1;
+	uint NumLights;
+	uint PrevFrameValid;
+	uint _Pad1;
+	uint _Pad2;
+};
+
+layout(std430, binding=0) restrict readonly buffer LightBuffer
+{
+	vec2 LightStyles[64];
+	Light Lights[];
+};
+
+layout(std430, binding=9) restrict writeonly buffer LightTileBuffer
+{
+	uvec2 LightTileRanges[];
+};
+
+layout(std430, binding=10) restrict buffer LightTileIndexBuffer
+{
+	uint LightTileIndices[];
+};
+
+layout(std430, binding=11) restrict buffer AtomicCounterBuffer
+{
+	uint global_index_counter;
+};
+
+shared uint local_indices[MAX_LIGHTS];
+shared uint local_count;
+
+uint TileIndex(uint tx, uint ty, uint tz)
+{
+	return tz * (LIGHT_TILES_X * LIGHT_TILES_Y) + ty * LIGHT_TILES_X + tx;
+}
+
+uint TileZFromDepth(float depth)
+{
+	float z = max(depth, 1e-6);
+	float tzf = clamp(log2(z) * ZLogScale + ZLogBias, 0.0, float(LIGHT_TILES_Z - 1));
+	return uint(tzf);
+}
+
+void main()
+{
+	uint tile_id = gl_WorkGroupID.x;
+	if (tile_id >= uint(LIGHT_TILE_COUNT))
+		return;
+
+	uint tz = tile_id / (LIGHT_TILES_X * LIGHT_TILES_Y);
+	uint rem = tile_id - tz * (LIGHT_TILES_X * LIGHT_TILES_Y);
+	uint ty = rem / LIGHT_TILES_X;
+	uint tx = rem - ty * LIGHT_TILES_X;
+
+	uint local_id = gl_LocalInvocationID.x;
+
+	if (local_id == 0u)
+		local_count = 0u;
+
+	barrier();
+
+	uint num_lights = min(NumLights, uint(MAX_LIGHTS));
+	for (uint li = local_id; li < num_lights; li += gl_WorkGroupSize.x)
+	{
+		Light l = Lights[li];
+		float radius = max(l.radius, 1e-4);
+
+		float view_z = View[2].x * l.origin.x + View[2].y * l.origin.y + View[2].z * l.origin.z + View[2].w;
+		float view_depth = -view_z;
+		float depth_near = max(view_depth - radius, 1e-4);
+		float depth_far = view_depth + radius;
+
+		float clip_w = ViewProj[3].x * l.origin.x + ViewProj[3].y * l.origin.y + ViewProj[3].z * l.origin.z + ViewProj[3].w;
+		if (clip_w <= 1e-5 || depth_far <= 1e-5)
+			continue;
+
+		uint tz0 = max(int(TileZFromDepth(depth_near)) - 1, 0);
+		uint tz1 = min(TileZFromDepth(max(depth_far, depth_near)) + 1, uint(LIGHT_TILES_Z - 1));
+		if (tz < tz0 || tz > tz1)
+			continue;
+
+		float clip_x = ViewProj[0].x * l.origin.x + ViewProj[0].y * l.origin.y + ViewProj[0].z * l.origin.z + ViewProj[0].w;
+		float clip_y = ViewProj[1].x * l.origin.x + ViewProj[1].y * l.origin.y + ViewProj[1].z * l.origin.z + ViewProj[1].w;
+
+		float ndc_x = clip_x / max(abs(clip_w), 1e-6);
+		float ndc_y = clip_y / max(abs(clip_w), 1e-6);
+
+		float proj_00 = ViewProj[0].x;
+		float proj_11 = ViewProj[1].y;
+		float extent_x = abs(proj_00) * radius / depth_near;
+		float extent_y = abs(proj_11) * radius / depth_near;
+		float min_x = ndc_x - extent_x;
+		float max_x = ndc_x + extent_x;
+		float min_y = ndc_y - extent_y;
+		float max_y = ndc_y + extent_y;
+
+		float tile_fx0 = clamp((min_x * 0.5 + 0.5) * float(LIGHT_TILES_X) - 1.0, 0.0, float(LIGHT_TILES_X - 1));
+		float tile_fx1 = clamp((max_x * 0.5 + 0.5) * float(LIGHT_TILES_X) + 1.0, 0.0, float(LIGHT_TILES_X - 1));
+		float tile_fy0 = clamp((min_y * 0.5 + 0.5) * float(LIGHT_TILES_Y) - 1.0, 0.0, float(LIGHT_TILES_Y - 1));
+		float tile_fy1 = clamp((max_y * 0.5 + 0.5) * float(LIGHT_TILES_Y) + 1.0, 0.0, float(LIGHT_TILES_Y - 1));
+
+		uint ltx0 = uint(tile_fx0);
+		uint ltx1 = uint(tile_fx1);
+		uint lty0 = uint(tile_fy0);
+		uint lty1 = uint(tile_fy1);
+
+		if (tx < ltx0 || tx > ltx1 || ty < lty0 || ty > lty1)
+			continue;
+
+		uint slot = atomicAdd(local_count, 1u);
+		if (slot < uint(LIGHT_TILE_MAX_PER_TILE))
+			local_indices[slot] = li;
+	}
+
+	barrier();
+
+	uint count = min(local_count, uint(LIGHT_TILE_MAX_PER_TILE));
+
+	uint offset = 0u;
+	if (count > 0u)
+		offset = atomicAdd(global_index_counter, count);
+
+	if (count > 0u)
+	{
+		LightTileRanges[tile_id] = uvec2(offset, count);
+		for (uint j = 0u; j < count; j++)
+			LightTileIndices[offset + j] = local_indices[j];
+	}
+	else
+	{
+		LightTileRanges[tile_id] = uvec2(0u, 0u);
+	}
+}

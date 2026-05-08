@@ -148,6 +148,7 @@ extern cvar_t r_ref_enable_postfx;
 extern cvar_t r_ref_enable_shadows;
 extern cvar_t r_ref_enable_fog;
 extern cvar_t r_ref_enable_lighting;
+extern cvar_t r_dlight_tiled;
 extern qboolean IW_RendererBuiltinGL_RegisterInternal (const iw_renderer_plugin_host_api_t *host_api);
 
 /*
@@ -2040,6 +2041,7 @@ void R_Backend_Init (void)
 	Cvar_RegisterVariable (&r_ref_enable_shadows);
 	Cvar_RegisterVariable (&r_ref_enable_fog);
 	Cvar_RegisterVariable (&r_ref_enable_lighting);
+	Cvar_RegisterVariable (&r_dlight_tiled);
 	Cvar_SetCallback (&r_backend, R_Backend_Changed_f);
 	Cvar_SetCallback (&r_backend_api, R_Backend_ApiChanged_f);
 	if (!s_backend_audit_cmd_registered)

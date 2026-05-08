@@ -28,6 +28,7 @@ typedef struct shadow_runtime_s
 qboolean R_Shadow_Enabled (void);
 qboolean R_Shadow_SunEnabled (void);
 qboolean R_Shadow_DlightEnabled (void);
+qboolean R_Shadow_HasFramegraphResources (void);
 
 void R_Shadow_NormalizeSettings (void);
 void R_Shadow_ResetRuntime (shadow_runtime_t *state);

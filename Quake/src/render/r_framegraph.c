@@ -13,6 +13,7 @@ extern cvar_t r_speeds;
 extern cvar_t r_ref_enable_postfx;
 extern cvar_t r_srgb_framebuffer;
 qboolean R_Shadow_Enabled (void);
+qboolean R_Shadow_HasFramegraphResources (void);
 
 void R_RegisterFrameGraphPasses (void);
 
@@ -1367,7 +1368,7 @@ void R_FrameGraph_BuildRenderFramePlan (RenderFramePlan *out_plan)
 	 * ensure postprocess runs to apply output transfer/tonemap. */
 	if (r_ref_enable_postfx.value != 0.f && r_srgb_framebuffer.value <= 0.f)
 		out_plan->needs_postprocess = true;
-	out_plan->run_shadowmaps = R_Shadow_Enabled ();
+	out_plan->run_shadowmaps = R_Shadow_Enabled () && R_Shadow_HasFramegraphResources ();
 	out_plan->run_postprocess = out_plan->needs_postprocess;
 	out_plan->run_viewmodel = true;
 	out_plan->run_polyblend = true;
