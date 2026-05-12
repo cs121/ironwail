@@ -1,6 +1,9 @@
 /*
  * Renderer-neutral texture handle declarations for core-facing headers.
  * Native GL texture IDs remain ref_gl-private.
+ * Phase 2 note: render_texture_handle_t is the intended destination for
+ * frontend-visible texture references, but gltexture_t has not been fully
+ * migrated and remains the public legacy bridge.
  */
 
 #ifndef RENDER_TEXTURE_HANDLES_H

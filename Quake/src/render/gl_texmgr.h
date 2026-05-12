@@ -23,6 +23,10 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define _GL_TEXMAN_H
 
 //gl_texmgr.h -- fitzquake's texture manager. manages opengl texture images
+// Phase 2: gltexture_t is a Legacy-GL-Bridge, not the final frontend texture API.
+// Long-term frontend code should see only render_texture_handle_t; native GL
+// target/texnum/bindless/internal_format data must stay in the GL backend or
+// a GL resource layer.
 
 typedef enum
 {
@@ -54,10 +58,10 @@ typedef struct gltexture_s {
 //managed by texture manager
 	/* LEGACY_GL_HANDLE / REF_GL_PRIVATE:
 	 * These native GL fields are intentionally still visible during migration.
-	 * Phase-3 goal is inventory + accessor candidates, not full opacity yet. */
-	GLenum			target;
-	GLuint			texnum;
-	GLuint64		bindless_handle;
+	 * Phase-2 goal is inventory + adapter candidates, not full opacity yet. */
+	GLenum			target;			// backend-specific GL texture target
+	GLuint			texnum;			// backend-specific GL texture object name
+	GLuint64		bindless_handle;	// backend-specific GL bindless handle
 	struct gltexture_s	*next;
 	qmodel_t		*owner;
 //managed by image loading
@@ -78,8 +82,13 @@ typedef struct gltexture_s {
 //used for rendering
 	int			visframe; //matches r_framecount if texture was bound this frame
 	int			mipmap; //number of mip levels uploaded (0 = unknown)
-	GLenum		internal_format; //GL internal format used for upload
+	GLenum		internal_format; //backend-specific GL internal format used for upload
 } gltexture_t;
+
+/* PHASE2_LEGACY_GL_BRIDGE:
+ * gltexture_t remains public only as a transitional bridge. Do not add new
+ * frontend dependencies on native GL fields; prefer render_texture_handle_t for
+ * new neutral paths and keep native GL data behind backend/resource adapters. */
 
 /* PHASE3_BOUNDARY_CANDIDATE:
  * Candidate accessor split for future opaque migration:

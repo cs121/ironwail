@@ -194,37 +194,55 @@ static void R_Backend_WrapperAudit_f (void)
 ================
 R_Backend_MigrationAudit_f
 
-Text-only Phase 1 migration audit. Keep this conservative: it names known
+Text-only Phase 2 migration audit. Keep this conservative: it names known
 OpenGL coupling points without changing renderer selection or draw paths.
 ================
 */
 static void R_Backend_MigrationAudit_f (void)
 {
-	Con_Printf ("Renderer backend migration audit (Phase 1):\n");
-	Con_Printf ("  Core-Level:\n");
-	Con_Printf ("    - Quake/src/core/quakedef.h includes SDL_opengl.h.\n");
-	Con_Printf ("    - Quake/src/core/quakedef.h includes gl_model.h.\n");
-	Con_Printf ("    - Quake/src/core/quakedef.h includes gl_texmgr.h.\n");
-	Con_Printf ("    - Quake/src/core/model_types.h is currently a shim over gl_model.h.\n");
-	Con_Printf ("  Public GL Texture Leak:\n");
-	Con_Printf ("    - Quake/src/render/gl_texmgr.h exposes GLenum/GLuint/GLuint64 in gltexture_t.\n");
-	Con_Printf ("    - texture_handles.h exists, but gltexture_t remains the bridge type.\n");
-	Con_Printf ("  Legacy GL Orchestrator:\n");
-	Con_Printf ("    - Quake/src/render/gl_rmain.c owns R_RenderView, FBOs, PostFX, SSAO, Bloom, Godrays, and readbacks.\n");
-	Con_Printf ("  Framegraph/Legacy:\n");
-	Con_Printf ("    - Framegraph is declarative, but pass execution still calls legacy/GL callbacks.\n");
-	Con_Printf ("    - r_world/r_alias/r_part still rely on GL state baselines.\n");
-	Con_Printf ("  Shader Leak:\n");
+	Con_Printf ("Renderer backend migration audit (Phase 2):\n");
+	Con_Printf ("  Core/Header-Leaks:\n");
+	Con_Printf ("    - quakedef.h includes SDL_opengl.h.\n");
+	Con_Printf ("    - quakedef.h includes gl_model.h.\n");
+	Con_Printf ("    - quakedef.h includes gl_texmgr.h.\n");
+	Con_Printf ("    - model_types.h is currently only a shim to gl_model.h.\n");
+	Con_Printf ("    - render/frontend files still include glquake.h directly.\n");
+	Con_Printf ("  Frontend files with GL header dependency:\n");
+	Con_Printf ("    - r_world.c\n");
+	Con_Printf ("    - r_alias.c\n");
+	Con_Printf ("    - r_brush.c\n");
+	Con_Printf ("    - r_sprite.c\n");
+	Con_Printf ("    - r_part.c\n");
+	Con_Printf ("    - r_part_q3p.c\n");
+	Con_Printf ("    - r_decals.c\n");
+	Con_Printf ("    - r_postfx.c\n");
+	Con_Printf ("  Resource-Leaks:\n");
+	Con_Printf ("    - gltexture_t exposes GLenum target.\n");
+	Con_Printf ("    - gltexture_t exposes GLuint texnum.\n");
+	Con_Printf ("    - gltexture_t exposes GLuint64 bindless_handle.\n");
+	Con_Printf ("    - gltexture_t exposes GLenum internal_format.\n");
+	Con_Printf ("    - texture_handles.h exists but gltexture_t remains public bridge.\n");
+	Con_Printf ("  Shader-Leaks:\n");
 	Con_Printf ("    - glprogs_t stores GLuint program IDs.\n");
-	Con_Printf ("    - Shader metadata currently treats shader_id effectively as a GL program handle.\n");
-	Con_Printf ("  Resource Leak:\n");
-	Con_Printf ("    - Framegraph resource slots are still resolved to GL-native IDs.\n");
+	Con_Printf ("    - shader_id is still effectively GL program handle in GL backend.\n");
+	Con_Printf ("  Framegraph-Leaks:\n");
+	Con_Printf ("    - framegraph is declarative.\n");
+	Con_Printf ("    - pass execution still calls legacy/GL backend callbacks.\n");
+	Con_Printf ("    - FBO lifetime is not owned by generic framegraph yet.\n");
+	Con_Printf ("  gltexture_t usage inventory (static Phase 2 snapshot):\n");
+	Con_Printf ("    - A Safe frontend reference: pointer/reference-only use in r_alias.c, r_brush.c, r_sprite.c, r_part_q3p.c, r_decals.c, and portions of r_world.c.\n");
+	Con_Printf ("    - B Native GL access: direct target/texnum/internal_format/bindless_handle access remains concentrated in gl_texmgr.c, gl_rmain.c/r_postfx.c, r_world.c, and backend resource glue.\n");
+	Con_Printf ("    - C Upload/lifetime: TexMgr_NewTexture/TexMgr_LoadImage*/TexMgr_ReloadImage/TexMgr_FreeTexture and GL_DeleteTexture remain GL texture lifetime owners.\n");
+	Con_Printf ("    - D Material/model binding: world, alias skins, sprites, particles, decals, UI/HUD, and postfx still bind through gltexture_t.\n");
+	Con_Printf ("  First neutral texture-handle candidate:\n");
+	Con_Printf ("    - Preferred: PostFX LUT, then isolated UI/2D texture adapter.\n");
+	Con_Printf ("    - Avoid first: world textures, alias skins, shadows, and FBO attachments.\n");
 	Con_Printf ("  Policy:\n");
 	Con_Printf ("    - r_backend=%s r_backend_api=%s r_backend_allow_builtin_gl=%s.\n",
 		r_backend.string ? r_backend.string : "<null>",
 		r_backend_api.string ? r_backend_api.string : "<null>",
 		r_backend_allow_builtin_gl.string ? r_backend_allow_builtin_gl.string : "<null>");
-	Con_Printf ("    - Vulkan/DX12 remain stub/blocklisted for activation in Phase 1.\n");
+	Con_Printf ("    - Vulkan/DX12 remain stub/blocklisted for activation in Phase 2.\n");
 }
 
 /*
