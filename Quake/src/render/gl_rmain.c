@@ -765,6 +765,7 @@ cvar_t	r_postfx_lut_strength_powerup = { "r_postfx_lut_strength_powerup", "0.6",
 cvar_t	r_postfx_lut_strength_underwater = { "r_postfx_lut_strength_underwater", "0.5", CVAR_ARCHIVE };
 cvar_t	r_postfx_lut_debug_id = { "r_postfx_lut_debug_id", "0", CVAR_NONE };
 cvar_t	r_renderer_texture_handle_test = { "r_renderer_texture_handle_test", "0", CVAR_NONE };
+cvar_t	r_renderer_texture_handle_test2 = { "r_renderer_texture_handle_test2", "0", CVAR_NONE };
 cvar_t	r_postfx_debug = { "r_postfx_debug", "0", CVAR_NONE };
 cvar_t	r_film35_enable = { "r_film35_enable", "0", CVAR_ARCHIVE };
 cvar_t	r_film35_strength = { "r_film35_strength", "0.35", CVAR_ARCHIVE };
