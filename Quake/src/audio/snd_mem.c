@@ -156,9 +156,7 @@ static void S_LoadSoundDecodeJob (void *userdata)
 	byte *src;
 	byte *dst;
 
-	SDL_LockMutex (wavinfo_mutex);
 	job->info = GetWavinfo (job->name, job->file_data, (int) job->file_len);
-	SDL_UnlockMutex (wavinfo_mutex);
 
 	if (job->info.channels != 1 || (job->info.width != 1 && job->info.width != 2))
 	{
@@ -511,7 +509,7 @@ static void DumpChunks (void)
 GetWavinfo
 ============
 */
-wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
+static wavinfo_t S_GetWavinfoUnlocked (const char *name, byte *wav, int wavlength)
 {
 	wavinfo_t	info;
 	int	i;
@@ -686,6 +684,19 @@ wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
 
 	info.dataofs = data_p - wav;
 	TexMgr_Trace ("GetWavinfo: end");
+
+	return info;
+}
+
+wavinfo_t GetWavinfo (const char *name, byte *wav, int wavlength)
+{
+	wavinfo_t info;
+
+	if (wavinfo_mutex)
+		SDL_LockMutex (wavinfo_mutex);
+	info = S_GetWavinfoUnlocked (name, wav, wavlength);
+	if (wavinfo_mutex)
+		SDL_UnlockMutex (wavinfo_mutex);
 
 	return info;
 }

@@ -672,6 +672,13 @@ static qboolean FS_IdSetInsertLocked (fs_idset_t *set, unsigned int id)
 		probes++;
 	}
 
+	if (tombstone != (size_t)-1)
+	{
+		set->keys[tombstone] = id;
+		set->count++;
+		return true;
+	}
+
 	return false;
 }
 
@@ -809,6 +816,14 @@ static qboolean FS_CancelSetInsertLocked (unsigned int id, unsigned int generati
 		}
 		idx = (idx + 1) & (fs_cancel_set.capacity - 1);
 		probes++;
+	}
+
+	if (tombstone != (size_t)-1)
+	{
+		fs_cancel_set.keys[tombstone] = id;
+		fs_cancel_set.generations[tombstone] = generation;
+		fs_cancel_set.count++;
+		return true;
 	}
 	return false;
 }

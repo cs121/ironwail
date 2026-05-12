@@ -75,6 +75,11 @@ static phys_interact_body_t		*phys_bodies;
 static int						*phys_active_indices;
 static int						phys_capacity;
 static int						phys_active_count;
+static int						phys_field_physics = -1;
+static int						phys_field_mass = -1;
+static int						phys_field_friction = -1;
+static int						phys_field_restitution = -1;
+static int						phys_field_phys_type = -1;
 
 // Optional high spawnflag for opt-in map usage without conflicting with stock bits.
 #define SPAWNFLAG_PHYS_INTERACT	(1u << 24)
@@ -203,6 +208,40 @@ static qboolean PhysInteract_ClassnameAllowsPhysics (const char *classname)
 	return false;
 }
 
+static void PhysInteract_CacheFieldOffsets (void)
+{
+	phys_field_physics = ED_FindFieldOffset ("physics");
+	phys_field_mass = ED_FindFieldOffset ("mass");
+	phys_field_friction = ED_FindFieldOffset ("friction");
+	phys_field_restitution = ED_FindFieldOffset ("restitution");
+	phys_field_phys_type = ED_FindFieldOffset ("phys_type");
+}
+
+static float PhysInteract_GetFloatField (edict_t *ent, int fieldofs)
+{
+	eval_t *val;
+
+	if (fieldofs < 0)
+		return 0.f;
+
+	val = GetEdictFieldValue (ent, fieldofs);
+	return val ? val->_float : 0.f;
+}
+
+static const char *PhysInteract_GetStringField (edict_t *ent, int fieldofs)
+{
+	eval_t *val;
+
+	if (fieldofs < 0)
+		return "";
+
+	val = GetEdictFieldValue (ent, fieldofs);
+	if (!val || !val->string)
+		return "";
+
+	return PR_GetString (val->string);
+}
+
 static void PhysInteract_ApplyTypePreset (const char *phys_type, float *mass, float *friction, float *restitution)
 {
 	if (!phys_type || !phys_type[0])
@@ -250,6 +289,20 @@ static qboolean PhysInteract_IsMovetypeSupported (const edict_t *ent)
 	}
 }
 
+static qboolean PhysInteract_IsEntitySimulatable (const edict_t *ent)
+{
+	if (!PhysInteract_IsMovetypeSupported (ent))
+		return false;
+
+	if ((int)ent->v.solid != SOLID_BBOX && (int)ent->v.solid != SOLID_SLIDEBOX)
+		return false;
+
+	if (ent->v.mins[0] == ent->v.maxs[0] && ent->v.mins[1] == ent->v.maxs[1] && ent->v.mins[2] == ent->v.maxs[2])
+		return false;
+
+	return true;
+}
+
 static qboolean PhysInteract_ShouldOptIn (edict_t *ent, int entnum)
 {
 	phys_interact_authored_t *auth;
@@ -261,6 +314,9 @@ static qboolean PhysInteract_ShouldOptIn (edict_t *ent, int entnum)
 
 	if (auth->physics_set)
 		return auth->physics_enabled;
+
+	if (PhysInteract_GetFloatField (ent, phys_field_physics) != 0.f)
+		return true;
 
 	classname = PR_GetString (ent->v.classname);
 	spawnflags = (int)ent->v.spawnflags;
@@ -394,15 +450,10 @@ static qboolean PhysInteract_InitBodyForEntity (edict_t *ent, int entnum)
 	float mass;
 	float friction;
 	float restitution;
+	const char *field_phys_type;
 	const char *classname;
 
-	if (!PhysInteract_IsMovetypeSupported (ent))
-		return false;
-
-	if ((int)ent->v.solid != SOLID_BBOX && (int)ent->v.solid != SOLID_SLIDEBOX)
-		return false;
-
-	if (ent->v.mins[0] == ent->v.maxs[0] && ent->v.mins[1] == ent->v.maxs[1] && ent->v.mins[2] == ent->v.maxs[2])
+	if (!PhysInteract_IsEntitySimulatable (ent))
 		return false;
 
 	body = &phys_bodies[entnum];
@@ -416,13 +467,25 @@ static qboolean PhysInteract_InitBodyForEntity (edict_t *ent, int entnum)
 
 	if (auth->phys_type_set)
 		PhysInteract_ApplyTypePreset (auth->phys_type, &mass, &friction, &restitution);
+	else
+	{
+		field_phys_type = PhysInteract_GetStringField (ent, phys_field_phys_type);
+		if (field_phys_type[0])
+			PhysInteract_ApplyTypePreset (field_phys_type, &mass, &friction, &restitution);
+	}
 
 	if (auth->mass_set)
 		mass = auth->mass;
+	else if (PhysInteract_GetFloatField (ent, phys_field_mass) != 0.f)
+		mass = PhysInteract_GetFloatField (ent, phys_field_mass);
 	if (auth->friction_set)
 		friction = auth->friction;
+	else if (PhysInteract_GetFloatField (ent, phys_field_friction) != 0.f)
+		friction = PhysInteract_GetFloatField (ent, phys_field_friction);
 	if (auth->restitution_set)
 		restitution = auth->restitution;
+	else if (PhysInteract_GetFloatField (ent, phys_field_restitution) != 0.f)
+		restitution = PhysInteract_GetFloatField (ent, phys_field_restitution);
 
 	mass = PhysInteract_Clamp (mass, 1.f, 500.f);
 	friction = PhysInteract_Clamp (friction, 0.f, 4.f);
@@ -479,9 +542,9 @@ static edict_t *PhysInteract_SpawnTestPropAt (const vec3_t origin, float mass)
 	ent->v.movetype = MOVETYPE_TOSS;
 	ent->v.flags = (int)ent->v.flags & ~FL_ONGROUND;
 	ent->v.classname = PR_SetEngineString ("physics_prop");
-	SV_LinkEdict (ent, true);
 
 	entnum = NUM_FOR_EDICT (ent);
+	PhysInteract_OnEntitySpawned (ent);
 	if (entnum > 0 && entnum < phys_capacity)
 	{
 		phys_authored[entnum].physics_set = true;
@@ -490,7 +553,7 @@ static edict_t *PhysInteract_SpawnTestPropAt (const vec3_t origin, float mass)
 		phys_authored[entnum].mass = PhysInteract_Clamp (mass, 1.f, 500.f);
 	}
 
-	PhysInteract_OnEntitySpawned (ent);
+	SV_LinkEdict (ent, false);
 	return ent;
 }
 
@@ -940,10 +1003,11 @@ static void PhysInteract_SimulateBody (edict_t *ent, phys_interact_body_t *body,
 		}
 		else
 		{
+			edict_t *support_ent = ground_ent ? ground_ent : qcvm->edicts;
 			VectorCopy (vec3_origin, body->velocity);
 			VectorCopy (vec3_origin, ent->v.velocity);
 			ent->v.flags = (int)ent->v.flags | FL_ONGROUND;
-			ent->v.groundentity = EDICT_TO_PROG (ground_ent);
+			ent->v.groundentity = EDICT_TO_PROG (support_ent);
 			SV_LinkEdict (ent, true);
 			return;
 		}
@@ -1061,6 +1125,8 @@ void PhysInteract_Shutdown (void)
 
 void PhysInteract_OnServerSpawned (void)
 {
+	PhysInteract_CacheFieldOffsets ();
+
 	if (!PhysInteract_EnsureStorage ())
 		return;
 
@@ -1191,7 +1257,7 @@ qboolean PhysInteract_ShouldHandleEntity (edict_t *ent, int entnum)
 	if (!PhysInteract_ShouldOptIn (ent, entnum))
 		return false;
 
-	if (!PhysInteract_IsMovetypeSupported (ent))
+	if (!PhysInteract_IsEntitySimulatable (ent))
 		return false;
 
 	return true;
