@@ -40,6 +40,7 @@ render_backend_runtime_status_t R_Backend_GetRuntimeStatusForName (const char *b
 const char *R_Backend_GetRuntimeStatusLabel (render_backend_runtime_status_t status);
 qboolean R_Backend_GetMilestonesForName (const char *backend_name, RenderBackendMilestones *out_milestones);
 extern cvar_t r_renderer_texture_handle_test;
+extern cvar_t r_renderer_texture_handle_test2;
 
 void R_Backend_QuerySurfaceInfo (RenderBackendSurfaceInfo *out_info);
 const char *R_Backend_ResourceSlotName (render_backend_resource_slot_t slot);

@@ -143,6 +143,7 @@ cvar_t r_backend_allow_builtin_gl = { "r_backend_allow_builtin_gl", "1", CVAR_AR
 cvar_t r_backend_debug = { "r_backend_debug", "0", CVAR_NONE };
 cvar_t r_renderer_migration_debug = { "r_renderer_migration_debug", "0", CVAR_NONE };
 extern cvar_t r_renderer_texture_handle_test;
+extern cvar_t r_renderer_texture_handle_test2;
 extern int r_framecount;
 extern cvar_t r_framegraph_debug;
 extern cvar_t r_refgl_debug;
@@ -244,7 +245,15 @@ static void R_Backend_MigrationAudit_f (void)
 	Con_Printf ("    - native GL ownership: GL resource/backend only\n");
 	Con_Printf ("    - migrated scope: exactly one isolated texture path\n");
 	Con_Printf ("    - Avoided: world textures, alias skins, shadows, and FBO attachments.\n");
-	Con_Printf ("  Known Phase-3 leaks left in place:\n");
+	Con_Printf ("  Phase 4 texture handle test:\n");
+	Con_Printf ("    - available: yes\n");
+	Con_Printf ("    - selected candidate: WinQuake menu background 2D texture\n");
+	Con_Printf ("    - cvar: r_renderer_texture_handle_test2\n");
+	Con_Printf ("    - default path: legacy\n");
+	Con_Printf ("    - fallback: enabled\n");
+	Con_Printf ("    - native GL ownership: GL resource/backend only\n");
+	Con_Printf ("    - migrated scope: exactly one second isolated texture path\n");
+	Con_Printf ("  Known Phase-3/4 leaks left in place:\n");
 	Con_Printf ("    - quakedef.h GL leak.\n");
 	Con_Printf ("    - gltexture_t public bridge.\n");
 	Con_Printf ("    - gl_rmain.c legacy GL orchestration.\n");
@@ -255,7 +264,7 @@ static void R_Backend_MigrationAudit_f (void)
 		r_backend.string ? r_backend.string : "<null>",
 		r_backend_api.string ? r_backend_api.string : "<null>",
 		r_backend_allow_builtin_gl.string ? r_backend_allow_builtin_gl.string : "<null>");
-	Con_Printf ("    - Vulkan/DX12 remain stub/blocklisted for activation in Phase 3.\n");
+	Con_Printf ("    - Vulkan/DX12 remain stub/blocklisted for activation in Phase 4.\n");
 }
 
 /*
@@ -2193,6 +2202,7 @@ void R_Backend_Init (void)
 	Cvar_RegisterVariable (&r_backend_debug);
 	Cvar_RegisterVariable (&r_renderer_migration_debug);
 	Cvar_RegisterVariable (&r_renderer_texture_handle_test);
+	Cvar_RegisterVariable (&r_renderer_texture_handle_test2);
 	Cvar_RegisterVariable (&r_refgl_debug);
 	Cvar_RegisterVariable (&r_refgl_log_init);
 	Cvar_RegisterVariable (&r_refgl_log_passes);

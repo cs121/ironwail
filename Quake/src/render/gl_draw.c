@@ -26,6 +26,8 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "render_dispatch.h"
 #include "glquake.h"
+#include "r_backend.h"
+#include "r_resources_gl.h"
 
 #if defined(IW_RENDERER_HOST_FRONTEND) && !defined(RENDERER_PLUGIN_BUILD)
 #define Draw_PicFromWad2 GL_Draw_PicFromWad2
@@ -163,6 +165,29 @@ static guivertex_t batchtri_verts[6 * MAX_BATCH_QUADS];
 static GLushort batchindices[6 * MAX_BATCH_QUADS];
 static qboolean draw_initialized = false;
 
+#ifndef RENDERER_PLUGIN_BUILD
+extern cvar_t r_backend_debug;
+extern cvar_t r_renderer_migration_debug;
+#endif
+
+static qboolean Draw_TextureHandleDebugEnabled (void)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	return false;
+#else
+	return r_renderer_migration_debug.value != 0.f || r_backend_debug.value != 0.f;
+#endif
+}
+
+static qboolean Draw_TextureHandleTest2Enabled (void)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	return false;
+#else
+	return r_renderer_texture_handle_test2.value != 0.f;
+#endif
+}
+
 glcanvas_t glcanvas;
 
 //==============================================================================
@@ -201,6 +226,7 @@ byte		scrap_texels[SCRAP_ATLAS_WIDTH*SCRAP_ATLAS_HEIGHT];
 qboolean	scrap_dirty;
 gltexture_t	*scrap_texture; //johnfitz
 gltexture_t	*winquakemenubg;
+static render_texture_handle_t winquakemenubg_handle = RENDER_TEXTURE_HANDLE_INVALID;
 
 
 /*
@@ -589,6 +615,9 @@ static void Draw_CreateWinQuakeMenuBgTex (void)
 		(byte*)winquakemenubg_pixels, "", (src_offset_t)winquakemenubg_pixels,
 		TEXPREF_ALPHA | TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP
 	);
+	winquakemenubg_handle = R_TextureHandle_FromLegacyGLTexture (winquakemenubg);
+	if (!R_TextureHandle_IsValid (winquakemenubg_handle) && Draw_TextureHandleDebugEnabled ())
+		Con_DPrintf ("R_TextureHandle: WinQuake menu background handle registration failed; legacy path remains available\n");
 	TexMgr_Trace ("Draw_CreateWinQuakeMenuBgTex: end");
 }
 
@@ -698,7 +727,25 @@ void Draw_Flush (void)
 		R_Backend_SetDynamicState (&dynamic_state);
 	}
 	TexMgr_Trace ("Draw_Flush: before texture bind");
-	GL_Bind (GL_TEXTURE0, glcanvas.texture);
+	if (Draw_TextureHandleTest2Enabled () && glcanvas.texture == winquakemenubg)
+	{
+		if (!R_TextureHandle_IsValid (winquakemenubg_handle))
+		{
+			if (Draw_TextureHandleDebugEnabled ())
+				Con_DPrintf ("R_TextureHandle: WinQuake menu background handle invalid; falling back to legacy GL texture bind\n");
+			GL_Bind (GL_TEXTURE0, glcanvas.texture);
+		}
+		else if (!GL_Backend_BindTextureHandle ((unsigned)GL_TEXTURE0, winquakemenubg_handle, (unsigned)GL_TEXTURE_2D))
+		{
+			if (Draw_TextureHandleDebugEnabled ())
+				Con_DPrintf ("R_Migration: WinQuake menu background texture handle path failed; falling back to legacy GL texture bind\n");
+			GL_Bind (GL_TEXTURE0, glcanvas.texture);
+		}
+	}
+	else
+	{
+		GL_Bind (GL_TEXTURE0, glcanvas.texture);
+	}
 	TexMgr_Trace ("Draw_Flush: after texture bind");
 
 	for (int i = 0; i < numbatchquads; ++i)
