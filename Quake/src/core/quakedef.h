@@ -284,12 +284,11 @@ typedef struct quakeparms_s
 #include "q_sound.h"
 #include "client.h"
 
-#include "gl_model.h"
+#include "model_types.h"
 #include "world.h"
 
 #include "image.h"	//johnfitz
 #include "texture_handles.h"
-#include "gl_texmgr.h"	//johnfitz
 #include "input.h"
 #include "keys.h"
 #include "menu.h"

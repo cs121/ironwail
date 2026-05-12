@@ -594,6 +594,14 @@ void R_TranslatePlayerSkin (int playernum);
 void R_TranslateNewPlayerSkin (int playernum); //johnfitz -- this handles cases when the actual texture changes
 
 void R_UploadFrameData (void);
+extern float r_prev_matviewproj[16];
+extern vec3_t r_prev_vieworg;
+extern double r_prev_frame_time;
+extern qboolean r_prev_frame_valid;
+extern float r_motionblur_shutter_scale_filtered;
+extern qboolean r_motionblur_shutter_scale_valid;
+extern qboolean r_frame_rendered_this_update;
+extern viewmedium_t r_view_medium;
 void R_StorePrevFrameState (void);
 void R_CaptureSSAOFogHandoffState (void);
 void R_MarkFrameRenderedThisUpdate (void);
@@ -760,6 +768,7 @@ typedef struct glprogs_s {
 	GLuint		bloom_extract;
 	GLuint		bloom_blur;
 	GLuint		bloom_combine;
+	GLuint		anamorphic_streak;
 	GLuint		ssao;
 	GLuint		ssao_blur;
 	GLuint		godrays_mask;
@@ -851,6 +860,15 @@ typedef struct glframebufs_s {
 		int			height[BLOOM_MAX_LEVELS];
 		int			levels;
 	}				bloom;
+
+	struct {
+		GLuint		extract_tex;
+		GLuint		tex;
+		GLuint		extract_fbo;
+		GLuint		fbo;
+		int			width;
+		int			height;
+	}				anamorphic;
 
 	struct {
 		GLuint		source_tex;
@@ -968,6 +986,10 @@ void GL_AddGarbageBuffer (GLuint handle);
 
 qboolean GL_NeedsSceneEffects (void);
 qboolean GL_NeedsPostprocess (void);
+float GL_ConsoleVisibility (void);
+qboolean GL_ShouldApplyMotionBlur (void);
+qboolean R_GodraysMediumEnabled (void);
+void R_GetFramePlanDecisions (qboolean *out_needs_scene_effects, qboolean *out_needs_postprocess);
 void GL_PostProcess (const r_postprocess_input_t *input);
 
 typedef struct scene_size_info_s
@@ -996,6 +1018,20 @@ void R_ResetDRSState (void);
 void R_GetSceneTexelSize (float *out_inv_w, float *out_inv_h);
 void R_GetOutputTexelSize (float *out_inv_w, float *out_inv_h);
 int R_GetSceneResizeGeneration (void);
+qboolean R_ConsumeSceneResizePendingInvalidation (void);
+int R_GetDesiredSceneSampleCount (void);
+void R_GetSceneRenderTargetAllocationSize (int native_w, int native_h, int scene_w, int scene_h, int *out_alloc_w, int *out_alloc_h);
+void R_InvalidateTemporalHistoryOnSceneResize (void);
+void R_EnsureRenderTargetSampleState (void);
+void R_UpdateDynamicResolutionScale (void);
+void GL_PostProcessFallback (void);
+float GL_UpdateAutoExposure (void);
+float GL_ComputeEffectiveBloomIntensity (float bloom_base, float bloom_boost);
+qboolean GL_PostFXBloomBoostActive (void);
+void GL_SetFramebufferSRGB (qboolean enable);
+qboolean GL_UseSRGBFramebuffer (void);
+void GL_AutoExposureInitPBOs (void);
+void GL_AutoExposureDeletePBOs (void);
 float R_GetViewZNear (void);
 float R_GetViewZFar (void);
 

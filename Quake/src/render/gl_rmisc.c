@@ -143,6 +143,23 @@ extern cvar_t r_film35_speed;
 extern cvar_t r_film35_color_variation;
 extern cvar_t r_film35_grain;
 extern cvar_t r_film35_apply_hud;
+extern cvar_t r_anamorphic_enable;
+extern cvar_t r_anamorphic_intensity;
+extern cvar_t r_anamorphic_threshold;
+extern cvar_t r_anamorphic_width;
+extern cvar_t r_anamorphic_resolution;
+extern cvar_t r_anamorphic_taps;
+extern cvar_t r_anamorphic_chroma;
+extern cvar_t r_anamorphic_ghosts;
+extern cvar_t r_anamorphic_ghost_intensity;
+extern cvar_t r_anamorphic_dirt;
+extern cvar_t r_anamorphic_debug;
+extern cvar_t r_anamorphic_tint_r;
+extern cvar_t r_anamorphic_tint_g;
+extern cvar_t r_anamorphic_tint_b;
+extern cvar_t r_anamorphic_soften_y;
+extern cvar_t r_anamorphic_clamp;
+extern cvar_t r_anamorphic_apply_hud;
 extern void TexMgr_SRGBTextures_f (cvar_t *var);
 extern void TexMgr_LightmapColorspace_f (cvar_t *var);
 extern void TexMgr_LightmapLinearCompat_f (cvar_t *var);
@@ -678,6 +695,23 @@ Cvar_RegisterVariable (&r_tonemap_black_lift_strength);
 	Cvar_RegisterVariable (&r_film35_color_variation);
 	Cvar_RegisterVariable (&r_film35_grain);
 	Cvar_RegisterVariable (&r_film35_apply_hud);
+	Cvar_RegisterVariable (&r_anamorphic_enable);
+	Cvar_RegisterVariable (&r_anamorphic_intensity);
+	Cvar_RegisterVariable (&r_anamorphic_threshold);
+	Cvar_RegisterVariable (&r_anamorphic_width);
+	Cvar_RegisterVariable (&r_anamorphic_resolution);
+	Cvar_RegisterVariable (&r_anamorphic_taps);
+	Cvar_RegisterVariable (&r_anamorphic_chroma);
+	Cvar_RegisterVariable (&r_anamorphic_ghosts);
+	Cvar_RegisterVariable (&r_anamorphic_ghost_intensity);
+	Cvar_RegisterVariable (&r_anamorphic_dirt);
+	Cvar_RegisterVariable (&r_anamorphic_debug);
+	Cvar_RegisterVariable (&r_anamorphic_tint_r);
+	Cvar_RegisterVariable (&r_anamorphic_tint_g);
+	Cvar_RegisterVariable (&r_anamorphic_tint_b);
+	Cvar_RegisterVariable (&r_anamorphic_soften_y);
+	Cvar_RegisterVariable (&r_anamorphic_clamp);
+	Cvar_RegisterVariable (&r_anamorphic_apply_hud);
 	/* CVar owners: r_postfx* in r_postfx.c, r_ssao* in r_ssao.c, r_godray* and r_godrays* in r_godrays.c. */
 	R_PostFX_RegisterCvars ();
 	R_SSAO_RegisterCvars ();
@@ -993,6 +1027,135 @@ static qboolean R_Sun_IsRenderable (const sun_t *s)
 	return (s->color[0] > 0.f || s->color[1] > 0.f || s->color[2] > 0.f);
 }
 
+static void R_LogMapEnvironmentAppend (char *report, size_t reportsize, const char *key, const char *value)
+{
+	char token[512];
+
+	if (!report || !reportsize || !key || !value || !value[0])
+		return;
+
+	q_snprintf (token, sizeof (token), " %s=\"%s\"", key, value);
+	q_strlcat (report, token, reportsize);
+}
+
+static void R_LogMapEnvironment (void)
+{
+	char key[128], value[4096];
+	char sky[4096] = "";
+	char sun_mangle[4096] = "";
+	char sunlight[4096] = "";
+	char sunlight_color[4096] = "";
+	char fog[4096] = "";
+	char skyfog[4096] = "";
+	char wateralpha[4096] = "";
+	char telealpha[4096] = "";
+	char slimealpha[4096] = "";
+	char report[2048] = "Map env:";
+	const char *data;
+
+	if (!cl.worldmodel || !cl.worldmodel->entities)
+		return;
+
+	data = COM_Parse (cl.worldmodel->entities);
+	if (!data || com_token[0] != '{')
+		return;
+
+	while (1)
+	{
+		data = COM_Parse (data);
+		if (!data)
+			return;
+		if (com_token[0] == '}')
+			break;
+		if (com_token[0] == '_')
+			q_strlcpy (key, com_token + 1, sizeof (key));
+		else
+			q_strlcpy (key, com_token, sizeof (key));
+		while (key[0] && key[strlen (key) - 1] == ' ')
+			key[strlen (key) - 1] = 0;
+
+		data = COM_ParseEx (data, CPE_ALLOWTRUNC);
+		if (!data)
+			return;
+		q_strlcpy (value, com_token, sizeof (value));
+
+		if (!strcmp ("sky", key) || !strcmp ("skyname", key) || !strcmp ("qlsky", key))
+		{
+			if (!sky[0])
+				q_strlcpy (sky, value, sizeof (sky));
+			continue;
+		}
+
+		if (!strcmp ("sun_mangle", key))
+		{
+			if (!sun_mangle[0])
+				q_strlcpy (sun_mangle, value, sizeof (sun_mangle));
+			continue;
+		}
+
+		if (!strcmp ("sunlight", key) || !strcmp ("sunlight2", key))
+		{
+			if (!sunlight[0])
+				q_strlcpy (sunlight, value, sizeof (sunlight));
+			continue;
+		}
+
+		if (!strcmp ("sunlight_color", key) || !strcmp ("sun_color", key) || !strcmp ("suncolour", key))
+		{
+			if (!sunlight_color[0])
+				q_strlcpy (sunlight_color, value, sizeof (sunlight_color));
+			continue;
+		}
+
+		if (!strcmp ("fog", key))
+		{
+			if (!fog[0])
+				q_strlcpy (fog, value, sizeof (fog));
+			continue;
+		}
+
+		if (!strcmp ("skyfog", key))
+		{
+			if (!skyfog[0])
+				q_strlcpy (skyfog, value, sizeof (skyfog));
+			continue;
+		}
+
+		if (!strcmp ("wateralpha", key))
+		{
+			if (!wateralpha[0])
+				q_strlcpy (wateralpha, value, sizeof (wateralpha));
+			continue;
+		}
+
+		if (!strcmp ("telealpha", key))
+		{
+			if (!telealpha[0])
+				q_strlcpy (telealpha, value, sizeof (telealpha));
+			continue;
+		}
+
+		if (!strcmp ("slimealpha", key))
+		{
+			if (!slimealpha[0])
+				q_strlcpy (slimealpha, value, sizeof (slimealpha));
+			continue;
+		}
+	}
+
+	R_LogMapEnvironmentAppend (report, sizeof (report), "sky", sky);
+	R_LogMapEnvironmentAppend (report, sizeof (report), "sun_mangle", sun_mangle);
+	R_LogMapEnvironmentAppend (report, sizeof (report), "sunlight", sunlight);
+	R_LogMapEnvironmentAppend (report, sizeof (report), "sunlight_color", sunlight_color);
+	R_LogMapEnvironmentAppend (report, sizeof (report), "fog", fog);
+	R_LogMapEnvironmentAppend (report, sizeof (report), "skyfog", skyfog);
+	R_LogMapEnvironmentAppend (report, sizeof (report), "wateralpha", wateralpha);
+	R_LogMapEnvironmentAppend (report, sizeof (report), "telealpha", telealpha);
+	R_LogMapEnvironmentAppend (report, sizeof (report), "slimealpha", slimealpha);
+
+	Con_Printf ("%s\n", report);
+}
+
 static qboolean R_Sun_HasExplicitWorldspawnKeys (void)
 {
 	return r_worldspawn_sun_presence.dir_defined
@@ -1146,6 +1309,7 @@ void R_NewMap (void)
         Fog_NewMap (); //johnfitz -- global fog in worldspawn
 	R_ParseWorldspawn (); //ericw -- wateralpha, telealpha, slimealpha in worldspawn
 	R_Sun_UpdateFromWorld ();
+	R_LogMapEnvironment ();
 	R_ParseDlightEntities (); // persistent dlights from BSP entities
 
 	// Load pointfile if map has no vis data and either developer mode is on or the game was started from a map editing tool

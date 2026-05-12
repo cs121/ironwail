@@ -24,6 +24,12 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "quakedef.h"
 #include "glquake.h"
 
+#ifdef RENDERER_PLUGIN_BUILD
+#define IW_PARSE_SSCANF sscanf_s
+#else
+#define IW_PARSE_SSCANF q_sscanf
+#endif
+
 //==============================================================================
 //
 //  GLOBAL FOG
@@ -47,6 +53,43 @@ static float fade_time; //duration of fade
 static float fade_done; //time when fade will be done
 
 extern float skyfog;
+
+static qboolean Fog_ParseWorldspawnFogValue (const char *value, float *density, float *red, float *green, float *blue)
+{
+	float d = DEFAULT_DENSITY;
+	float r = DEFAULT_GRAY;
+	float g = DEFAULT_GRAY;
+	float b = DEFAULT_GRAY;
+	int count;
+
+	if (!value || !density || !red || !green || !blue)
+		return false;
+
+	count = IW_PARSE_SSCANF (value, "%f %f %f %f", &d, &r, &g, &b);
+	if (count == 1)
+	{
+		*density = d;
+		return true;
+	}
+	if (count == 3)
+	{
+		*density = DEFAULT_DENSITY;
+		*red = d;
+		*green = r;
+		*blue = g;
+		return true;
+	}
+	if (count == 4)
+	{
+		*density = d;
+		*red = r;
+		*green = g;
+		*blue = b;
+		return true;
+	}
+
+	return false;
+}
 
 /*
 =============
@@ -187,7 +230,9 @@ called at map load
 */
 void Fog_ParseWorldspawn (void)
 {
-	/* Keep legacy state initialized to "no fog"; worldspawn parsing stays disabled. */
+	char key[128], value[4096];
+	const char *data;
+
 	fog_density = DEFAULT_DENSITY;
 	fog_red = DEFAULT_GRAY;
 	fog_green = DEFAULT_GRAY;
@@ -200,6 +245,44 @@ void Fog_ParseWorldspawn (void)
 
 	fade_time = 0.0;
 	fade_done = 0.0;
+
+	if (!cl.worldmodel || !cl.worldmodel->entities)
+		return;
+
+	data = COM_Parse (cl.worldmodel->entities);
+	if (!data || com_token[0] != '{')
+		return;
+
+	while (1)
+	{
+		data = COM_Parse (data);
+		if (!data)
+			return;
+		if (com_token[0] == '}')
+			break;
+		if (com_token[0] == '_')
+			q_strlcpy (key, com_token + 1, sizeof (key));
+		else
+			q_strlcpy (key, com_token, sizeof (key));
+		while (key[0] && key[strlen (key) - 1] == ' ')
+			key[strlen (key) - 1] = 0;
+		data = COM_ParseEx (data, CPE_ALLOWTRUNC);
+		if (!data)
+			return;
+		q_strlcpy (value, com_token, sizeof (value));
+
+		if (!strcmp ("fog", key))
+			Fog_ParseWorldspawnFogValue (value, &fog_density, &fog_red, &fog_green, &fog_blue);
+	}
+
+	fog_density = q_max (0.f, fog_density);
+	fog_red = CLAMP (0.f, fog_red, 1.f);
+	fog_green = CLAMP (0.f, fog_green, 1.f);
+	fog_blue = CLAMP (0.f, fog_blue, 1.f);
+	old_density = fog_density;
+	old_red = fog_red;
+	old_green = fog_green;
+	old_blue = fog_blue;
 }
 
 /*

@@ -46,6 +46,9 @@ static void Mod_LoadAliasModel (qmodel_t *mod, void *buffer);
 static void Mod_LoadMD5MeshModel (qmodel_t *mod, const char *buffer);
 static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash);
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize);
+static qboolean Mod_WorldspawnHasEnvironmentKeys (qmodel_t *mod);
+static char *Mod_FindWorldspawnClosingBrace (char *entities);
+static void Mod_InjectWorldspawnEnvironmentDefaults (qmodel_t *mod);
 static qboolean Mod_IsInlineSubmodel (const qmodel_t *mod);
 static qboolean Mod_IsExternalBrushModel (const qmodel_t *mod);
 static qboolean Mod_ShouldSkipBrushExtras (const qmodel_t *mod);
@@ -805,10 +808,7 @@ static void Q1BSPX_LogUsage(const char *modelname)
         int i;
 
         if (!loadmodel || !loadmodel->bspx_entries_count || !bspx_lump_usage_count)
-        {
-                Con_Printf("%s: no BSPX lumps present\n", modelname);
                 return;
-        }
 	Con_Printf("%s BSPX lumps:\n", modelname);
 	for (i = 0; i < bspx_lump_usage_count; i++)
 	{
@@ -2314,6 +2314,7 @@ _load_embedded:
 	}
 	loadmodel->entities = (char *) Hunk_AllocNameNoFill ( l->filelen, loadname);
 	memcpy (loadmodel->entities, mod_base + l->fileofs, l->filelen);
+	Mod_InjectWorldspawnEnvironmentDefaults (loadmodel);
 }
 
 static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *value, size_t valuesize)
@@ -2356,6 +2357,93 @@ static qboolean Mod_ParseWorldspawnKey (qmodel_t *mod, const char *key, char *va
 		if (!data)
 			return false;
 	}
+}
+
+static qboolean Mod_WorldspawnHasEnvironmentKeys (qmodel_t *mod)
+{
+	char value[4096];
+
+	if (!mod || !mod->entities)
+		return false;
+
+	return Mod_ParseWorldspawnKey (mod, "sun_mangle", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "sunlight", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "sunlight2", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "sunlight_color", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "sun_color", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "suncolour", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "sky", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "skyname", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "qlsky", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "fog", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "skyfog", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "wateralpha", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "telealpha", value, sizeof (value))
+		|| Mod_ParseWorldspawnKey (mod, "slimealpha", value, sizeof (value));
+}
+
+static char *Mod_FindWorldspawnClosingBrace (char *entities)
+{
+	qboolean in_quote = false;
+	int depth = 0;
+
+	if (!entities)
+		return NULL;
+
+	for (char *p = entities; *p; ++p)
+	{
+		if (*p == '"' && (p == entities || p[-1] != '\\'))
+			in_quote = !in_quote;
+		if (in_quote)
+			continue;
+		if (*p == '{')
+		{
+			depth++;
+			continue;
+		}
+		if (*p == '}' && depth > 0)
+		{
+			if (depth == 1)
+				return p;
+			depth--;
+		}
+	}
+
+	return NULL;
+}
+
+static void Mod_InjectWorldspawnEnvironmentDefaults (qmodel_t *mod)
+{
+	static const char defaults[] =
+		"\n"
+		"\"sun_mangle\" \"45 225 0\"\n"
+		"\"sunlight\" \"1\"\n"
+		"\"sunlight_color\" \"1 1 1\"\n"
+		"\"fog\" \"0 0.3 0.3 0.3\"\n"
+		"\"skyfog\" \"0.5\"\n";
+	char *insert_at, *new_entities;
+	size_t oldlen, newlen, defaultlen, prefixlen, suffixlen;
+
+	if (!mod || !mod->entities)
+		return;
+	if (Mod_WorldspawnHasEnvironmentKeys (mod))
+		return;
+
+	insert_at = Mod_FindWorldspawnClosingBrace (mod->entities);
+	if (!insert_at)
+		return;
+
+	oldlen = strlen (mod->entities);
+	defaultlen = sizeof (defaults) - 1;
+	prefixlen = (size_t) (insert_at - mod->entities);
+	suffixlen = oldlen - prefixlen;
+	newlen = oldlen + defaultlen + 1;
+
+	new_entities = (char *) Hunk_AllocNameNoFill ((int) newlen, loadname);
+	memcpy (new_entities, mod->entities, prefixlen);
+	memcpy (new_entities + prefixlen, defaults, defaultlen);
+	memcpy (new_entities + prefixlen + defaultlen, insert_at, suffixlen + 1);
+	mod->entities = new_entities;
 }
 
 

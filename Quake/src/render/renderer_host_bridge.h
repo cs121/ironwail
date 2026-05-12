@@ -20,11 +20,11 @@ struct mousecursor_s;
 
 typedef struct cvar_s cvar_t;
 typedef struct cache_user_s cache_user_t;
-typedef struct qmodel_s qmodel_t;
-typedef struct mleaf_s mleaf_t;
 typedef struct entity_s entity_t;
 typedef struct qcvm_s qcvm_t;
-#ifndef GL_MODEL_H
+#ifndef CORE_MODEL_TYPES_H
+typedef struct qmodel_s qmodel_t;
+typedef struct mleaf_s mleaf_t;
 typedef struct hull_s hull_t;
 #endif
 #ifndef _QUAKE_WORLD_H
@@ -57,27 +57,19 @@ typedef struct viddef_s viddef_t;
 #ifndef _QUAKE_RENDER_H
 typedef struct refdef_s refdef_t;
 #endif
+#ifndef _CLIENT_H_
 typedef struct dlight_s dlight_t;
+#endif
+#ifndef GLQUAKE_H
 typedef struct particle_debug_stats_s particle_debug_stats_t;
+#endif
+#ifndef _QUAKE_SCREEN_H
 typedef struct glcanvas_s glcanvas_t;
+#endif
 
 struct mplane_s;
 struct mnode_s;
 struct texture_s;
-struct material_s;
-struct mat_texmatrix_s;
-struct mat_wave_s;
-struct cmd_function_s;
-struct postfx_state_s;
-struct lightgrid_s;
-struct gpulightbuffer_s;
-struct rl_light_s;
-struct gpuframedata_s;
-struct r_ssao_fog_state_s;
-struct bc7enc_compress_block_params_s;
-typedef struct mplane_s mplane_t;
-typedef struct mnode_s mnode_t;
-typedef struct texture_s texture_t;
 typedef struct material_s material_t;
 typedef struct mat_texmatrix_s mat_texmatrix_t;
 typedef struct mat_wave_s mat_wave_t;
@@ -89,6 +81,12 @@ typedef struct rl_light_s rl_light_t;
 typedef struct gpuframedata_s gpuframedata_t;
 typedef struct r_ssao_fog_state_s r_ssao_fog_state_t;
 typedef struct bc7enc_compress_block_params_s bc7enc_compress_block_params_t;
+
+#ifndef CORE_MODEL_TYPES_H
+typedef struct mplane_s mplane_t;
+typedef struct mnode_s mnode_t;
+typedef struct texture_s texture_t;
+#endif
 
 #ifndef _QUAKE_KEYS_H
 typedef enum {key_game, key_console, key_message, key_menu} keydest_t;

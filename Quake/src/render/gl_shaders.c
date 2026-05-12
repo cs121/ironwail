@@ -1163,6 +1163,7 @@ void GL_CreateShaders (void)
 	glprogs.bloom_extract = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_extract.frag"), "bloom extract");
 	glprogs.bloom_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_blur.frag"), "bloom blur");
 	glprogs.bloom_combine = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("bloom_combine.frag"), "bloom combine");
+	glprogs.anamorphic_streak = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("anamorphic_streak.frag"), "anamorphic streak");
 	glprogs.ssao = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao.frag"), "ssao");
 	glprogs.ssao_blur = GL_CreateProgram (GLSL_PATH("postprocess.vert"), GLSL_PATH("ssao_blur.frag"), "ssao blur");
 	for (mode = 0; mode < 2; mode++)
