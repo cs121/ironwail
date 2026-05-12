@@ -260,6 +260,8 @@ typedef struct render_pass_context_s RenderPassContext;
 typedef struct i_render_backend_s
 {
 	const char *name;
+
+	/* Lifecycle: init/shutdown/context/present/resize ownership. */
 	qboolean (*context_init)(void *window_handle);
 	void (*context_shutdown)(void);
 	void (*swap_buffers)(void);
@@ -267,15 +269,27 @@ typedef struct i_render_backend_s
 	void (*shutdown)(void);
 	void (*on_resize)(int width, int height);
 	qboolean (*can_activate)(qboolean runtime_switch);
+
+	/* Frame: per-frame backend bookends. */
 	void (*begin_frame)(void);
 	void (*end_frame)(void);
 	void (*present)(void);
+
+	/* Pass: explicit framegraph pass boundaries and resource barriers. */
 	void (*begin_pass_ex)(const RenderBackendPassDesc *pass_desc);
 	void (*end_pass_ex)(void);
 	void (*resource_barrier)(const RenderGraphResourceHandle *resources, const RenderBackendResourceBarrier *barriers, unsigned count);
+
+	/* Draw/Dispatch: API-neutral pipeline, descriptor, draw, compute, and sync hooks. */
 	void (*bind_pipeline)(const RenderBackendPipelineDesc *pipeline);
 	void (*set_dynamic_state)(const RenderBackendDynamicState *dynamic_state);
 	void (*bind_descriptors)(const RenderBackendDescriptorBinding *bindings, unsigned count);
+
+	/*
+	 * Legacy Bridge: callbacks below still assume current GL/legacy renderer
+	 * state baselines in Phase 1. They are intentionally documented as bridge
+	 * surface, not as a final API-neutral renderer contract.
+	 */
 	void (*pass_setup_view)(RenderPassContext *ctx);
 	void (*pass_shadowmaps)(RenderPassContext *ctx);
 	void (*pass_render_scene)(RenderPassContext *ctx);
@@ -319,6 +333,17 @@ typedef struct i_render_backend_s
 	unsigned (*get_active_shader_id)(void);
 	qboolean (*query_shader_metadata)(unsigned shader_id, const char **out_debug_name, const char **out_entry_point, const char **out_stage, unsigned *out_permutation_key);
 	void (*apply_framegraph_baseline)(unsigned baseline_bits);
+
+	/*
+	 * TODO Future API-neutral resource model:
+	 * - Texture
+	 * - Buffer
+	 * - Sampler
+	 * - ImageView
+	 * - RenderTarget
+	 * - Pipeline
+	 * - DescriptorSet
+	 */
 } IRenderBackend;
 
 #endif
