@@ -113,12 +113,14 @@ void main()
 		Light l = Lights[li];
 		float radius = max(l.radius, 1e-4);
 
-		float view_z = View[2].x * l.origin.x + View[2].y * l.origin.y + View[2].z * l.origin.z + View[2].w;
-		float view_depth = -view_z;
+		vec4 world_pos = vec4(l.origin, 1.0);
+		vec4 view_pos = View * world_pos;
+		vec4 clip_pos = ViewProj * world_pos;
+		float view_depth = -view_pos.z;
 		float depth_near = max(view_depth - radius, 1e-4);
 		float depth_far = view_depth + radius;
 
-		float clip_w = ViewProj[3].x * l.origin.x + ViewProj[3].y * l.origin.y + ViewProj[3].z * l.origin.z + ViewProj[3].w;
+		float clip_w = clip_pos.w;
 		if (clip_w <= 1e-5 || depth_far <= 1e-5)
 			continue;
 
@@ -127,14 +129,11 @@ void main()
 		if (tz < tz0 || tz > tz1)
 			continue;
 
-		float clip_x = ViewProj[0].x * l.origin.x + ViewProj[0].y * l.origin.y + ViewProj[0].z * l.origin.z + ViewProj[0].w;
-		float clip_y = ViewProj[1].x * l.origin.x + ViewProj[1].y * l.origin.y + ViewProj[1].z * l.origin.z + ViewProj[1].w;
+		float ndc_x = clip_pos.x / max(abs(clip_w), 1e-6);
+		float ndc_y = clip_pos.y / max(abs(clip_w), 1e-6);
 
-		float ndc_x = clip_x / max(abs(clip_w), 1e-6);
-		float ndc_y = clip_y / max(abs(clip_w), 1e-6);
-
-		float proj_00 = ViewProj[0].x;
-		float proj_11 = ViewProj[1].y;
+		float proj_00 = length(vec3(ViewProj[0].x, ViewProj[1].x, ViewProj[2].x));
+		float proj_11 = length(vec3(ViewProj[0].y, ViewProj[1].y, ViewProj[2].y));
 		float extent_x = abs(proj_00) * radius / depth_near;
 		float extent_y = abs(proj_11) * radius / depth_near;
 		float min_x = ndc_x - extent_x;

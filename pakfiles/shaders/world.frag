@@ -935,9 +935,9 @@ void main()
 				const float core_exp = 2.0;
 				float core          = 1.0 + core_boost * pow(max(nc, 0.0), core_exp);
 				vec3  light_dir     = light_vec * inv_surface_dist;
-				float ndotl         = max(dot(surface_normal, light_dir), 0.0);
 				float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, l.radius);
-				vec3  light_contrib = attenuation * falloff * core * ndotl * shadow * l.color * dynamic_light_noise;
+				// Brush dlights are radial surface contributions; normals must not clip them.
+				vec3  light_contrib = attenuation * falloff * core * shadow * l.color * dynamic_light_noise;
 
 				// FIX: Shadow-Term fuer dieses DLight berechnen.
 				// War faelschlicherweise entfernt - keine DLight-Schatten in world.frag.

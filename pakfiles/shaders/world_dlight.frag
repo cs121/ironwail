@@ -233,7 +233,6 @@ void main()
 		const float core_boost       = 0.55;  // extra brightness at light core
 		const float core_exp         = 2.0;   // core shaping exponent, keeps edge falloff intact
 		const float knee             = 0.0;  // hook: soft-knee compression (0=off)
-		const float ndotl_mix        = 1.0;  // hook: 0=flat, 1=full Lambert
 		const float saturation_chop  = 0.0;  // hook: desaturate dynamic light (0=off)
 		uint light_begin = 0u;
 		uint light_end = NumLights;
@@ -262,9 +261,6 @@ void main()
 			if (rad - surface_dist < minlight)
 				continue;
 
-			// Hoist light_dir once — reused for NdotL, specular, and rim
-			vec3 light_dir = (surface_dist > 0.0) ? (to_light / surface_dist) : vec3(0.0, 0.0, 1.0);
-
 			float normalized_dist = surface_dist / max(rad, 1e-4);
 			float x = clamp(1.0 - normalized_dist, 0.0, 1.0);
 			float minlight_norm = minlight / max(rad, 1e-4);
@@ -276,20 +272,17 @@ void main()
 			// knee==0 → shaped == core_intensity (no division overhead on most compilers)
 			float shaped = (knee > 0.0) ? (core_intensity / (core_intensity + knee)) : core_intensity;
 
-			// Standard Lambert term: bright only on the light-facing side.
-			float ndotl_raw = max(dot(surface_normal, light_dir), 0.0);
-			float ndotl = mix(1.0, ndotl_raw, ndotl_mix);
-
+			// Brush dlights are radial surface contributions; normals must not clip them.
 			float shadow = SampleDLightShadow(int(light_index), in_pos, l.origin, rad);
-			vec3 light_contrib = shaped * ndotl * shadow * l.color;
+			vec3 light_contrib = shaped * shadow * l.color;
 			dynamic_light += light_contrib;
 			dynamic_light_legacy += intensity * shadow * l.color;
 			debug_attenuation += attenuation;
 			debug_affected_count += 1.0;
 			if (rim_factor > 1e-5 && RimLightParams1.w > 0.0)
 			{
+				vec3 light_dir = (surface_dist > 0.0) ? (to_light / surface_dist) : vec3(0.0, 0.0, 1.0);
 				float rim_shadow = (RimLightParams0.w > 0.5) ? shadow : 1.0;
-				// Reuse hoisted light_dir — no redundant division
 				float backlight = mix(0.35, 1.0, max(dot(-surface_normal, light_dir), 0.0));
 				rim_dlight_accum += shaped * rim_shadow * l.color * backlight;
 			}

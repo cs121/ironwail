@@ -31,6 +31,14 @@ static rl_source_summary_t rl_source_summaries[RL_FRAME_LIGHTS_MAX];
 static int rl_source_summary_count = 0;
 static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, gpulightbuffer_t *out_buffer, dlight_t **out_sources, int max_lights);
 
+static qboolean R_PPdlights_IsLocalPlayerTransient (const dlight_t *dl)
+{
+	return dl
+		&& dl->kind == DL_TRANSIENT
+		&& cl.viewentity > 0
+		&& dl->key == cl.viewentity;
+}
+
 static qboolean R_PPdlights_IsFrustumCulled (const vec3_t origin, float radius)
 {
 	int i;
@@ -527,6 +535,17 @@ static int R_PPdlights_BuildGpuLightsForConsumer (rl_light_consumer_t consumer, 
 		dst->color[0] = src->color[0] * src->intensity;
 		dst->color[1] = src->color[1] * src->intensity;
 		dst->color[2] = src->color[2] * src->intensity;
+		/*
+		 * Local weapon lights should still kick the nearby world, but a full
+		 * close-range point light stamps brush-shaped hard edges around the view.
+		 */
+		if (consumer == RL_CONSUMER_WORLD && R_PPdlights_IsLocalPlayerTransient (source_dl))
+		{
+			dst->radius = q_min (dst->radius, 144.f);
+			dst->color[0] *= 0.45f;
+			dst->color[1] *= 0.45f;
+			dst->color[2] *= 0.45f;
+		}
 		dst->minlight = 0.f;
 		out_sources[count] = source_dl;
 		energy = dst->color[0] * 0.2126f + dst->color[1] * 0.7152f + dst->color[2] * 0.0722f;

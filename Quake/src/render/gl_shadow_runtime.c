@@ -258,6 +258,17 @@ void R_Shadow_SelectDlights (shadow_runtime_t *state)
 
 		VectorSubtract (l->pos, r_refdef.vieworg, to_light);
 		dist = VectorLength (to_light);
+
+		/*
+		 * The local weapon light is a camera effect. Do not let it own a point
+		 * shadow slot; the world pass keeps only a capped, unshadowed kick.
+		 */
+		if (sources[i]
+			&& sources[i]->kind == DL_TRANSIENT
+			&& cl.viewentity > 0
+			&& sources[i]->key == cl.viewentity)
+			continue;
+
 		luminance = l->color[0] * 0.299f + l->color[1] * 0.587f + l->color[2] * 0.114f;
 		score = l->radius * (0.35f + luminance) / (1.f + dist * 0.0025f);
 

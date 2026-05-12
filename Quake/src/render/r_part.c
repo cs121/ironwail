@@ -549,7 +549,7 @@ static GLubyte R_ParticleLitByte (GLubyte value, float light)
 {
 	const float clamped_light = CLAMP (0.f, light, 4.f);
 	/* Keep particle source hue readable; apply incoming light as a gentle tint. */
-	const float soft_light = CLAMP (0.75f, 1.f + (clamped_light - 1.f) * 0.35f, 2.0f);
+	const float soft_light = CLAMP (0.75f, 1.f + (clamped_light - 1.f) * 0.18f, 1.25f);
 	return (GLubyte)CLAMP (0.f, floorf ((float)value * soft_light + 0.5f), 255.f);
 }
 

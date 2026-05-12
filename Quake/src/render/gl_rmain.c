@@ -4815,11 +4815,8 @@ void R_UploadFrameData (void)
 		tile_ready = R_BuildLightTileListsGPU ();
 		r_framedata.dlight_params[2] = tile_ready ? 1.f : 0.f;
 
-		if (!tile_ready)
-		{
-			GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
-			GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
-		}
+		GL_Upload (GL_UNIFORM_BUFFER, &r_framedata, sizeof (r_framedata), &buf, &ofs);
+		GL_BindBufferRange (GL_UNIFORM_BUFFER, 0, buf, (GLintptr)ofs, sizeof (r_framedata));
 		return;
 	}
 
