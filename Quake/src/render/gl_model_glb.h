@@ -16,6 +16,13 @@ See the GNU General Public License for more details.
 #ifndef GL_MODEL_GLB_H
 #define GL_MODEL_GLB_H
 
+/*
+ * GLB/glTF models are decoded into IQM-style alias surfaces. Each glTF
+ * primitive becomes one surface so material ranges render independently.
+ * World/brush replacements intentionally remain render-only model assets here:
+ * BSP visibility, collision, submodels, and lightmaps continue to come from
+ * the owning BSP until a native GLB world backend exists.
+ */
 void Mod_LoadGLBModel (qmodel_t *mod, void *buffer);
 void R_DrawGLBModels (entity_t **ents, int count);
 void R_DrawGLBModels_ShowTris (entity_t **ents, int count);
