@@ -63,6 +63,7 @@ typedef struct glb_bufferview_s
 
 typedef struct glb_primitive_s
 {
+	int mesh_index;
 	int position_accessor;
 	int normal_accessor;
 	int uv0_accessor;
@@ -76,7 +77,18 @@ typedef struct glb_material_s
 {
 	float base_color_factor[4];
 	int base_color_texture_index;
+	int metallic_roughness_texture_index;
+	int normal_texture_index;
+	int occlusion_texture_index;
+	int emissive_texture_index;
+	float metallic_factor;
+	float roughness_factor;
+	float emissive_factor[3];
+	int alpha_mode;
+	float alpha_cutoff;
+	qboolean double_sided;
 	int has_texture;
+	int has_emissive_texture;
 } glb_material_t;
 
 typedef struct glb_texture_s
@@ -88,9 +100,19 @@ typedef struct glb_image_s
 {
 	char uri[256];
 	int buffer_view;
+	char mime_type[64];
 	int has_uri;
 	int has_buffer_view;
 } glb_image_t;
+
+typedef struct glb_buffer_s
+{
+	char uri[MAX_QPATH];
+	int byte_length;
+	const byte *data;
+	int size;
+	qboolean owned;
+} glb_buffer_t;
 
 #define MAX_GLB_ACCESSORS 256
 #define MAX_GLB_BUFFERVIEWS 256
@@ -98,6 +120,7 @@ typedef struct glb_image_s
 #define MAX_GLB_MATERIALS 64
 #define MAX_GLB_TEXTURES 64
 #define MAX_GLB_IMAGES 64
+#define MAX_GLB_BUFFERS 16
 
 typedef struct glb_data_s
 {
@@ -118,6 +141,9 @@ typedef struct glb_data_s
 
 	glb_image_t images[MAX_GLB_IMAGES];
 	int num_images;
+
+	glb_buffer_t buffers[MAX_GLB_BUFFERS];
+	int num_buffers;
 
 	const byte *bin_data;
 	int bin_size;
@@ -463,6 +489,24 @@ static void glb_parse_primitive (glb_data_t *data)
 	}
 }
 
+static int glb_parse_texture_info (void)
+{
+	int index = -1;
+	glb_json_expect_char ('{');
+	while (!glb_json_error && !glb_json_match_char ('}'))
+	{
+		char key[64];
+		if (!glb_json_parse_object_key (key, sizeof (key)))
+			break;
+		if (!strcmp (key, "index"))
+			index = glb_json_parse_int ();
+		else
+			glb_json_skip_value ();
+		glb_json_match_char (',');
+	}
+	return index;
+}
+
 static void glb_parse_pbr (glb_material_t *mat)
 {
 	glb_json_expect_char ('{');
@@ -485,22 +529,15 @@ static void glb_parse_pbr (glb_material_t *mat)
 		}
 		else if (!strcmp (key, "baseColorTexture"))
 		{
-			glb_json_expect_char ('{');
-			while (!glb_json_error && !glb_json_match_char ('}'))
-			{
-				char tk[64];
-				if (!glb_json_parse_object_key (tk, sizeof (tk)))
-					break;
-				if (!strcmp (tk, "index"))
-				{
-					mat->base_color_texture_index = glb_json_parse_int ();
-					mat->has_texture = 1;
-				}
-				else
-					glb_json_skip_value ();
-				glb_json_match_char (',');
-			}
+			mat->base_color_texture_index = glb_parse_texture_info ();
+			mat->has_texture = (mat->base_color_texture_index >= 0);
 		}
+		else if (!strcmp (key, "metallicRoughnessTexture"))
+			mat->metallic_roughness_texture_index = glb_parse_texture_info ();
+		else if (!strcmp (key, "metallicFactor"))
+			mat->metallic_factor = (float)glb_json_parse_number ();
+		else if (!strcmp (key, "roughnessFactor"))
+			mat->roughness_factor = (float)glb_json_parse_number ();
 		else
 			glb_json_skip_value ();
 
@@ -517,6 +554,17 @@ static void glb_parse_material (glb_data_t *data)
 	mat->base_color_factor[2] = 1.f;
 	mat->base_color_factor[3] = 1.f;
 	mat->base_color_texture_index = -1;
+	mat->metallic_roughness_texture_index = -1;
+	mat->normal_texture_index = -1;
+	mat->occlusion_texture_index = -1;
+	mat->emissive_texture_index = -1;
+	mat->metallic_factor = 1.f;
+	mat->roughness_factor = 1.f;
+	mat->emissive_factor[0] = 0.f;
+	mat->emissive_factor[1] = 0.f;
+	mat->emissive_factor[2] = 0.f;
+	mat->alpha_mode = 0;
+	mat->alpha_cutoff = 0.5f;
 
 	glb_json_expect_char ('{');
 	while (!glb_json_error && !glb_json_match_char ('}'))
@@ -526,6 +574,44 @@ static void glb_parse_material (glb_data_t *data)
 			break;
 		if (!strcmp (key, "pbrMetallicRoughness"))
 			glb_parse_pbr (mat);
+		else if (!strcmp (key, "normalTexture"))
+			mat->normal_texture_index = glb_parse_texture_info ();
+		else if (!strcmp (key, "occlusionTexture"))
+			mat->occlusion_texture_index = glb_parse_texture_info ();
+		else if (!strcmp (key, "emissiveTexture"))
+		{
+			mat->emissive_texture_index = glb_parse_texture_info ();
+			mat->has_emissive_texture = (mat->emissive_texture_index >= 0);
+		}
+		else if (!strcmp (key, "emissiveFactor"))
+		{
+			glb_json_expect_char ('[');
+			mat->emissive_factor[0] = (float)glb_json_parse_number ();
+			glb_json_expect_char (',');
+			mat->emissive_factor[1] = (float)glb_json_parse_number ();
+			glb_json_expect_char (',');
+			mat->emissive_factor[2] = (float)glb_json_parse_number ();
+			glb_json_match_char (']');
+		}
+		else if (!strcmp (key, "alphaMode"))
+		{
+			char mode[32];
+			glb_json_parse_string_buf (mode, sizeof (mode));
+			mat->alpha_mode = !strcmp (mode, "MASK") ? 1 : (!strcmp (mode, "BLEND") ? 2 : 0);
+		}
+		else if (!strcmp (key, "alphaCutoff"))
+			mat->alpha_cutoff = (float)glb_json_parse_number ();
+		else if (!strcmp (key, "doubleSided"))
+		{
+			char v[8];
+			glb_json_parse_string_buf (v, sizeof (v));
+			if (!v[0])
+			{
+				glb_json_skip_whitespace ();
+				mat->double_sided = glb_json_pos + 4 <= glb_json_size && !memcmp (glb_json + glb_json_pos, "true", 4);
+				glb_json_skip_value ();
+			}
+		}
 		else
 			glb_json_skip_value ();
 
@@ -576,9 +662,33 @@ static void glb_parse_image (glb_data_t *data)
 			img->buffer_view = glb_json_parse_int ();
 			img->has_buffer_view = 1;
 		}
+		else if (!strcmp (key, "mimeType"))
+			glb_json_parse_string_buf (img->mime_type, sizeof (img->mime_type));
 		else
 			glb_json_skip_value ();
 
+		glb_json_match_char (',');
+	}
+}
+
+
+static void glb_parse_buffer (glb_data_t *data)
+{
+	glb_buffer_t *buffer = &data->buffers[data->num_buffers];
+	memset (buffer, 0, sizeof (*buffer));
+
+	glb_json_expect_char ('{');
+	while (!glb_json_error && !glb_json_match_char ('}'))
+	{
+		char key[64];
+		if (!glb_json_parse_object_key (key, sizeof (key)))
+			break;
+		if (!strcmp (key, "uri"))
+			glb_json_parse_string_buf (buffer->uri, sizeof (buffer->uri));
+		else if (!strcmp (key, "byteLength"))
+			buffer->byte_length = glb_json_parse_int ();
+		else
+			glb_json_skip_value ();
 		glb_json_match_char (',');
 	}
 }
@@ -592,13 +702,28 @@ static qboolean glb_parse_json (glb_data_t *data)
 		if (!glb_json_parse_object_key (key, sizeof (key)))
 			break;
 
-		if (!strcmp (key, "meshes"))
+		if (!strcmp (key, "buffers"))
+		{
+			glb_json_expect_char ('[');
+			while (!glb_json_error && !glb_json_match_char (']'))
+			{
+				if (data->num_buffers < MAX_GLB_BUFFERS)
+				{
+					glb_parse_buffer (data);
+					data->num_buffers++;
+				}
+				else
+					glb_json_skip_value ();
+				glb_json_match_char (',');
+			}
+		}
+		else if (!strcmp (key, "meshes"))
 		{
 			glb_json_expect_char ('[');
 			data->num_meshes = 0;
 			while (!glb_json_error && !glb_json_match_char (']'))
 			{
-				data->num_meshes++;
+				int mesh_index = data->num_meshes++;
 				glb_json_expect_char ('{');
 				while (!glb_json_error && !glb_json_match_char ('}'))
 				{
@@ -613,6 +738,7 @@ static qboolean glb_parse_json (glb_data_t *data)
 							if (data->num_primitives < MAX_GLB_PRIMITIVES)
 							{
 								glb_parse_primitive (data);
+								data->primitives[data->num_primitives].mesh_index = mesh_index;
 								data->num_primitives++;
 							}
 							else
@@ -757,7 +883,13 @@ static const byte *glb_get_accessor_data (const glb_data_t *data, const glb_acce
 	if (acc->buffer_view < 0 || acc->buffer_view >= data->num_bufferviews)
 		return NULL;
 	const glb_bufferview_t *bv = &data->bufferviews[acc->buffer_view];
-	if (bv->buffer != 0)
+	const byte *buffer_data;
+	int buffer_size;
+	if (bv->buffer < 0 || bv->buffer >= data->num_buffers)
+		return NULL;
+	buffer_data = data->buffers[bv->buffer].data;
+	buffer_size = data->buffers[bv->buffer].size;
+	if (!buffer_data || buffer_size <= 0)
 		return NULL;
 	int comp_size = glb_parse_component_size (acc->component_type);
 	if (!comp_size)
@@ -771,12 +903,12 @@ static const byte *glb_get_accessor_data (const glb_data_t *data, const glb_acce
 	if (bv->byte_offset < 0 || acc->byte_offset < 0 || bv->byte_length < 0)
 		return NULL;
 	total = (long long)bv->byte_offset + (long long)acc->byte_offset;
-	if (total < 0 || total >= data->bin_size)
+	if (total < 0 || total >= buffer_size)
 		return NULL;
 	if (acc->count > 0)
 	{
 		long long last_end = total + (long long)(acc->count - 1) * stride + elem_size;
-		if (last_end > data->bin_size)
+		if (last_end > buffer_size)
 			return NULL;
 		if ((long long)acc->byte_offset + (long long)(acc->count - 1) * stride + elem_size > bv->byte_length)
 			return NULL;
@@ -785,7 +917,7 @@ static const byte *glb_get_accessor_data (const glb_data_t *data, const glb_acce
 	{
 		*out_stride = stride;
 	}
-	return data->bin_data + (int)total;
+	return buffer_data + (int)total;
 }
 
 static qboolean glb_uri_is_safe (const char *uri)
@@ -799,15 +931,88 @@ static qboolean glb_uri_is_safe (const char *uri)
 	return true;
 }
 
-static gltexture_t *glb_load_texture (qmodel_t *mod, const glb_data_t *data, int material_index)
+static void glb_build_relative_path (const char *model_name, const char *uri, char *out, size_t outsize)
 {
-	const glb_material_t *mat = NULL;
-	if (material_index >= 0 && material_index < data->num_materials)
-		mat = &data->materials[material_index];
+	char modelpath[MAX_QPATH];
+	const char *slash;
 
-	if (mat && mat->has_texture && mat->base_color_texture_index >= 0 && mat->base_color_texture_index < data->num_textures)
+	COM_StripExtension (model_name, modelpath, sizeof (modelpath));
+	slash = strrchr (modelpath, '/');
+	if (slash)
 	{
-		const glb_texture_t *tex = &data->textures[mat->base_color_texture_index];
+		int dirlen = (int)(slash - modelpath + 1);
+		q_snprintf (out, outsize, "%.*s%s", dirlen, modelpath, uri);
+	}
+	else
+		q_snprintf (out, outsize, "%s", uri);
+}
+
+static void glb_free_owned_buffers (glb_data_t *data)
+{
+	int i;
+	for (i = 0; i < data->num_buffers; i++)
+	{
+		if (data->buffers[i].owned && data->buffers[i].data)
+			q_free ((void *)data->buffers[i].data);
+		data->buffers[i].data = NULL;
+		data->buffers[i].size = 0;
+		data->buffers[i].owned = false;
+	}
+}
+
+static qboolean glb_load_external_buffers (qmodel_t *mod, glb_data_t *data)
+{
+	int i;
+	for (i = 0; i < data->num_buffers; i++)
+	{
+		glb_buffer_t *buffer = &data->buffers[i];
+		if (buffer->data)
+			continue;
+		if (!buffer->uri[0])
+		{
+			Con_Warning ("GLB: buffer %d has no binary payload in %s\n", i, mod->name);
+			return false;
+		}
+		if (!glb_uri_is_safe (buffer->uri))
+		{
+			Con_Warning ("GLB: unsafe buffer uri '%s' ignored for %s\n", buffer->uri, mod->name);
+			return false;
+		}
+		if (!strncmp (buffer->uri, "data:", 5))
+		{
+			Con_Warning ("GLB: data URI buffers are not supported for %s\n", mod->name);
+			return false;
+		}
+		{
+			char path[MAX_QPATH];
+			byte *loaded;
+			glb_build_relative_path (mod->name, buffer->uri, path, sizeof (path));
+			loaded = COM_LoadMallocFile (path, NULL);
+			if (!loaded || com_filesize <= 0)
+			{
+				if (loaded) q_free (loaded);
+				Con_Warning ("GLB: could not load external buffer '%s' for %s\n", buffer->uri, mod->name);
+				return false;
+			}
+			if (buffer->byte_length > 0 && com_filesize < buffer->byte_length)
+			{
+				Con_Warning ("GLB: external buffer '%s' is shorter than declared for %s\n", buffer->uri, mod->name);
+				q_free (loaded);
+				return false;
+			}
+			buffer->data = loaded;
+			buffer->size = (int)com_filesize;
+			buffer->owned = true;
+		}
+	}
+	return true;
+}
+
+static gltexture_t *glb_load_texture_index (qmodel_t *mod, const glb_data_t *data, int texture_index, const char *usage)
+{
+	if (texture_index >= 0 && texture_index < data->num_textures)
+	{
+		const glb_texture_t *tex = &data->textures[texture_index];
 		if (tex->source_index >= 0 && tex->source_index < data->num_images)
 		{
 			const glb_image_t *img = &data->images[tex->source_index];
@@ -861,11 +1066,48 @@ static gltexture_t *glb_load_texture (qmodel_t *mod, const glb_data_t *data, int
 			}
 			else if (img->has_buffer_view && img->buffer_view >= 0 && img->buffer_view < data->num_bufferviews)
 			{
-				Con_Warning ("GLB: embedded bufferView textures not supported for %s\n", mod->name);
+				const glb_bufferview_t *bv = &data->bufferviews[img->buffer_view];
+				if (bv->buffer >= 0 && bv->buffer < data->num_buffers && data->buffers[bv->buffer].data &&
+					bv->byte_offset >= 0 && bv->byte_length > 0 && bv->byte_offset + bv->byte_length <= data->buffers[bv->buffer].size)
+				{
+					int fwidth, fheight;
+					enum srcformat fmt = SRC_RGBA;
+					char texname[MAX_QPATH];
+					const byte *imgdata_src = data->buffers[bv->buffer].data + bv->byte_offset;
+					byte *imgdata;
+					q_snprintf (texname, sizeof (texname), "%s:%s:%d", mod->name, usage ? usage : "image", tex->source_index);
+					imgdata = Image_LoadImageBuffer (texname, imgdata_src, bv->byte_length, &fwidth, &fheight, &fmt);
+					if (imgdata)
+					{
+						gltexture_t *gltex = TexMgr_LoadImage (mod, texname, fwidth, fheight, fmt, imgdata, texname, 0, TEXPREF_ALPHA | TEXPREF_NOBRIGHT | TEXPREF_MIPMAP);
+						q_free (imgdata);
+						return gltex;
+					}
+				}
 			}
 		}
 	}
 
+	return NULL;
+}
+
+static gltexture_t *glb_load_texture (qmodel_t *mod, const glb_data_t *data, int material_index)
+{
+	const glb_material_t *mat = NULL;
+	if (material_index >= 0 && material_index < data->num_materials)
+		mat = &data->materials[material_index];
+	if (mat && mat->has_texture)
+		return glb_load_texture_index (mod, data, mat->base_color_texture_index, "baseColor");
+	return NULL;
+}
+
+static gltexture_t *glb_load_emissive_texture (qmodel_t *mod, const glb_data_t *data, int material_index)
+{
+	const glb_material_t *mat = NULL;
+	if (material_index >= 0 && material_index < data->num_materials)
+		mat = &data->materials[material_index];
+	if (mat && mat->has_emissive_texture)
+		return glb_load_texture_index (mod, data, mat->emissive_texture_index, "emissive");
 	return NULL;
 }
 
@@ -913,6 +1155,10 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 	unsigned int magic, version, total_length;
 	int start, end, total;
 	aliashdr_t *outhdr;
+	aliashdr_t *surf;
+	size_t hdrsize;
+	int valid_primitives = 0;
+	int surface_index = 0;
 	boneinfo_t *outbones;
 	bonepose_t *outposes;
 	iqmvert_t *poutvert;
@@ -934,70 +1180,73 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 	const byte *buf = (const byte *)buffer;
 	const unsigned int file_size = (unsigned int)com_filesize;
 
-	if (file_size < 12)
+	if (file_size <= 0)
 	{
 		Con_Warning ("GLB: buffer too small for %s\n", mod->name);
 		return;
 	}
 
-	magic = (unsigned int)(buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24));
-	if (magic != GLB_MAGIC)
-	{
-		Con_Warning ("GLB: bad magic 0x%08X for %s\n", magic, mod->name);
-		return;
-	}
-
-	memcpy (&version, buf + 4, 4);
-	memcpy (&total_length, buf + 8, 4);
-
-	if (version != 2)
-	{
-		Con_Warning ("GLB: unsupported version %u for %s (only version 2)\n", version, mod->name);
-		return;
-	}
-
-	if (total_length < 20)
-	{
-		Con_Warning ("GLB: file too small (%u bytes) for %s\n", total_length, mod->name);
-		return;
-	}
-	if (total_length > file_size)
-	{
-		Con_Warning ("GLB: declared length %u exceeds file size %u for %s\n", total_length, file_size, mod->name);
-		return;
-	}
-
-	int offset = 12;
+	int offset = 0;
 	const byte *json_data = NULL;
 	int json_size = 0;
 	const byte *bin_data = NULL;
 	int bin_size = 0;
 
-	while (offset + 8 <= (int)total_length)
+	magic = (file_size >= 4) ? (unsigned int)(buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24)) : 0;
+	if (magic == GLB_MAGIC)
 	{
-		unsigned int chunk_length, chunk_type;
-		memcpy (&chunk_length, buf + offset, 4);
-		memcpy (&chunk_type, buf + offset + 4, 4);
-		offset += 8;
+		memcpy (&version, buf + 4, 4);
+		memcpy (&total_length, buf + 8, 4);
 
-		if (offset + (int)chunk_length > (int)total_length)
+		if (version != 2)
 		{
-			Con_Warning ("GLB: chunk overflows file for %s\n", mod->name);
+			Con_Warning ("GLB: unsupported version %u for %s (only version 2)\n", version, mod->name);
 			return;
 		}
 
-		if (chunk_type == GLB_JSON_CHUNK && !json_data)
+		if (total_length < 20)
 		{
-			json_data = buf + offset;
-			json_size = chunk_length;
+			Con_Warning ("GLB: file too small (%u bytes) for %s\n", total_length, mod->name);
+			return;
 		}
-		else if (chunk_type == GLB_BIN_CHUNK && !bin_data)
+		if (total_length > file_size)
 		{
-			bin_data = buf + offset;
-			bin_size = chunk_length;
+			Con_Warning ("GLB: declared length %u exceeds file size %u for %s\n", total_length, file_size, mod->name);
+			return;
 		}
 
-		offset += chunk_length;
+		offset = 12;
+		while (offset + 8 <= (int)total_length)
+		{
+			unsigned int chunk_length, chunk_type;
+			memcpy (&chunk_length, buf + offset, 4);
+			memcpy (&chunk_type, buf + offset + 4, 4);
+			offset += 8;
+
+			if (offset + (int)chunk_length > (int)total_length)
+			{
+				Con_Warning ("GLB: chunk overflows file for %s\n", mod->name);
+				return;
+			}
+
+			if (chunk_type == GLB_JSON_CHUNK && !json_data)
+			{
+				json_data = buf + offset;
+				json_size = chunk_length;
+			}
+			else if (chunk_type == GLB_BIN_CHUNK && !bin_data)
+			{
+				bin_data = buf + offset;
+				bin_size = chunk_length;
+			}
+
+			offset += chunk_length;
+		}
+	}
+	else
+	{
+		json_data = buf;
+		json_size = (int)file_size;
 	}
 
 	if (!json_data || json_size <= 0)
@@ -1021,9 +1270,24 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 		return;
 	}
 
+	if (bin_data)
+	{
+		if (gbldata.num_buffers == 0)
+			gbldata.num_buffers = 1;
+		gbldata.buffers[0].data = bin_data;
+		gbldata.buffers[0].size = bin_size;
+	}
+
+	if (!glb_load_external_buffers (mod, &gbldata))
+	{
+		glb_free_owned_buffers (&gbldata);
+		return;
+	}
+
 	if (gbldata.num_primitives == 0)
 	{
 		Con_Warning ("GLB: no primitives found in %s\n", mod->name);
+		glb_free_owned_buffers (&gbldata);
 		return;
 	}
 
@@ -1055,6 +1319,7 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 			continue;
 		}
 		glb_accessor_t *acc = &gbldata.accessors[p->position_accessor];
+		valid_primitives++;
 		total_verts += acc->count;
 		if (p->indices_accessor >= 0 && p->indices_accessor < gbldata.num_accessors)
 			total_indexes += gbldata.accessors[p->indices_accessor].count;
@@ -1065,40 +1330,22 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 	if (total_verts == 0 || total_indexes == 0)
 	{
 		Con_Warning ("GLB: no vertex/index data in %s\n", mod->name);
+		glb_free_owned_buffers (&gbldata);
 		return;
 	}
 
 	if (total_verts > MAXALIASVERTS)
 	{
 		Con_Warning ("GLB: too many vertices (%d > %d) in %s\n", total_verts, MAXALIASVERTS, mod->name);
+		glb_free_owned_buffers (&gbldata);
 		return;
 	}
 
 	start = Hunk_LowMark ();
 
-	{
-		size_t hdrsize = sizeof (*outhdr);
-		hdrsize += sizeof (outhdr->frames[0]) * 0;
-		outhdr = (aliashdr_t *) Hunk_Alloc (hdrsize);
-		memset (outhdr, 0, hdrsize);
-	}
-
-	outhdr->poseverttype = PV_IQM;
-	outhdr->numskins = 1;
-	outhdr->numframes = 1;
-	outhdr->synctype = ST_SYNC;
-	outhdr->numposes = 1;
-	outhdr->numbones = 1;
-	outhdr->numboneposes = 1;
-	for (j = 0; j < 3; j++)
-	{
-		outhdr->scale[j] = 1.f;
-		outhdr->scale_origin[j] = 0.f;
-		outhdr->eyeposition[j] = 0.f;
-	}
-	outhdr->flags = 0;
-	outhdr->size = 1.f;
-	outhdr->boundingradius = 0.f;
+	hdrsize = sizeof (*outhdr);
+	outhdr = (aliashdr_t *) Hunk_Alloc (hdrsize * valid_primitives);
+	memset (outhdr, 0, hdrsize * valid_primitives);
 
 	outbones = (boneinfo_t *) Hunk_Alloc (sizeof (*outbones));
 	memset (outbones, 0, sizeof (*outbones));
@@ -1107,56 +1354,43 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 	outbones->inverse.mat[0] = 1.f;
 	outbones->inverse.mat[5] = 1.f;
 	outbones->inverse.mat[10] = 1.f;
-	outhdr->boneinfo = (byte *)outbones - (byte *)outhdr;
 
 	outposes = (bonepose_t *) Hunk_Alloc (sizeof (*outposes));
 	memset (outposes, 0, sizeof (*outposes));
 	outposes->mat[0] = 1.f;
 	outposes->mat[5] = 1.f;
 	outposes->mat[10] = 1.f;
-	outhdr->boneposedata = (byte *)outposes - (byte *)outhdr;
 
-	outhdr->frames[0].firstpose = 0;
-	outhdr->frames[0].numposes = 1;
-	outhdr->frames[0].interval = 0.1f;
-
-	int first_prim_mat = (gbldata.num_primitives > 0) ? gbldata.primitives[0].material_index : -1;
-	gltexture_t *tex = glb_load_texture (mod, &gbldata, first_prim_mat);
-	if (tex)
+	for (i = 0; i < valid_primitives; i++)
 	{
-		for (j = 0; j < 4; j++)
+		surf = (aliashdr_t *)((byte *)outhdr + hdrsize * i);
+		if (i + 1 < valid_primitives)
+			surf->nextsurface = hdrsize;
+		surf->poseverttype = PV_IQM;
+		surf->numskins = 1;
+		surf->numframes = 1;
+		surf->synctype = ST_SYNC;
+		surf->numposes = 1;
+		surf->numbones = 1;
+		surf->numboneposes = 1;
+		for (j = 0; j < 3; j++)
 		{
-			outhdr->gltextures[0][j] = tex;
-			outhdr->fbtextures[0][j] = NULL;
-			outhdr->emissivetextures[0][j] = NULL;
+			surf->scale[j] = 1.f;
+			surf->scale_origin[j] = 0.f;
+			surf->eyeposition[j] = 0.f;
 		}
-		outhdr->skinwidth = tex->width;
-		outhdr->skinheight = tex->height;
-		GLB_DebugPrintf ("  texture: %s (%dx%d)\n", tex->name, tex->width, tex->height);
-	}
-	else
-	{
-		extern gltexture_t *greytexture;
-		for (j = 0; j < 4; j++)
-		{
-			outhdr->gltextures[0][j] = greytexture;
-			outhdr->fbtextures[0][j] = NULL;
-			outhdr->emissivetextures[0][j] = NULL;
-		}
-		outhdr->skinwidth = 1;
-		outhdr->skinheight = 1;
-		GLB_DebugPrintf ("  texture: fallback grey\n");
+		surf->flags = 0;
+		surf->size = 1.f;
+		surf->boundingradius = 0.f;
+		surf->boneinfo = (byte *)outbones - (byte *)surf;
+		surf->boneposedata = (byte *)outposes - (byte *)surf;
+		surf->frames[0].firstpose = 0;
+		surf->frames[0].numposes = 1;
+		surf->frames[0].interval = 0.1f;
 	}
 
 	poutvert = (iqmvert_t *) Hunk_Alloc (sizeof (*poutvert) * total_verts);
 	poutindexes = (unsigned short *) Hunk_Alloc (sizeof (*poutindexes) * total_indexes);
-
-	outhdr->vertexes = (byte *)poutvert - (byte *)outhdr;
-	outhdr->numverts_vbo = total_verts;
-	outhdr->numverts = total_verts;
-	outhdr->indexes = (byte *)poutindexes - (byte *)outhdr;
-	outhdr->numindexes = total_indexes;
-	outhdr->numtris = total_indexes / 3;
 
 	all_positions = (float (*)[3]) q_calloc (total_verts, sizeof (float) * 3);
 	all_normals = (float (*)[3]) q_calloc (total_verts, sizeof (float) * 3);
@@ -1171,6 +1405,7 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 		if (all_uvs) q_free (all_uvs);
 		if (has_normal_per_prim) q_free (has_normal_per_prim);
 		Hunk_FreeToLowMark (start);
+		glb_free_owned_buffers (&gbldata);
 		return;
 	}
 
@@ -1201,6 +1436,39 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 		}
 
 		int nverts = pos_acc->count;
+		int prim_index_count = (p->indices_accessor >= 0 && p->indices_accessor < gbldata.num_accessors) ? gbldata.accessors[p->indices_accessor].count : nverts;
+		int prim_vert_offset = vert_offset;
+		int prim_idx_offset = idx_offset;
+		gltexture_t *base_tex, *emissive_tex;
+		extern gltexture_t *greytexture;
+
+		if (surface_index >= valid_primitives)
+			break;
+		surf = (aliashdr_t *)((byte *)outhdr + hdrsize * surface_index);
+		surf->vertexes = (byte *)(poutvert + prim_vert_offset) - (byte *)surf;
+		surf->numverts_vbo = nverts;
+		surf->numverts = nverts;
+		surf->indexes = (byte *)(poutindexes + prim_idx_offset) - (byte *)surf;
+		surf->numindexes = prim_index_count;
+		surf->numtris = prim_index_count / 3;
+
+		base_tex = glb_load_texture (mod, &gbldata, p->material_index);
+		emissive_tex = glb_load_emissive_texture (mod, &gbldata, p->material_index);
+		if (!base_tex)
+			base_tex = greytexture;
+		for (j = 0; j < 4; j++)
+		{
+			surf->gltextures[0][j] = base_tex;
+			surf->fbtextures[0][j] = NULL;
+			surf->emissivetextures[0][j] = emissive_tex;
+		}
+		surf->skinwidth = base_tex ? base_tex->width : 1;
+		surf->skinheight = base_tex ? base_tex->height : 1;
+		GLB_DebugPrintf ("  primitive %d material %d texture: %s (%dx%d)\n", i, p->material_index,
+			base_tex ? base_tex->name : "<none>", surf->skinwidth, surf->skinheight);
+
+		if (prim_index_count <= 0 || prim_index_count % 3)
+			Con_Warning ("GLB: primitive %d index count %d is not a triangle list in %s\n", i, prim_index_count, mod->name);
 
 		if (p->normal_accessor >= 0 && p->normal_accessor < gbldata.num_accessors)
 		{
@@ -1243,7 +1511,7 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 			const byte *idx_data = glb_get_accessor_data (&gbldata, idx_acc, &idx_stride);
 			if (idx_data)
 			{
-				if (idx_offset + idx_acc->count > outhdr->numindexes)
+				if (idx_offset + idx_acc->count > total_indexes)
 				{
 					Con_Warning ("GLB: index buffer overflow in primitive %d for %s\n", i, mod->name);
 					continue;
@@ -1259,7 +1527,7 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 							Con_Warning ("GLB: out-of-range index %u (verts=%d) in %s\n", idx, nverts, mod->name);
 							idx = 0;
 						}
-						poutindexes[idx_offset + j] = vert_offset + idx;
+						poutindexes[idx_offset + j] = idx;
 					}
 					idx_offset += idx_acc->count;
 				}
@@ -1274,7 +1542,7 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 							Con_Warning ("GLB: out-of-range index %u (verts=%d) in %s\n", idx, nverts, mod->name);
 							idx = 0;
 						}
-						poutindexes[idx_offset + j] = vert_offset + (unsigned short)idx;
+						poutindexes[idx_offset + j] = (unsigned short)idx;
 					}
 					idx_offset += idx_acc->count;
 				}
@@ -1288,7 +1556,7 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 							Con_Warning ("GLB: out-of-range index %u (verts=%d) in %s\n", idx, nverts, mod->name);
 							idx = 0;
 						}
-						poutindexes[idx_offset + j] = vert_offset + (unsigned short)idx;
+						poutindexes[idx_offset + j] = (unsigned short)idx;
 					}
 					idx_offset += idx_acc->count;
 				}
@@ -1300,17 +1568,20 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 		}
 		else
 		{
-			if (idx_offset + nverts > outhdr->numindexes)
+			if (idx_offset + nverts > total_indexes)
 			{
 				Con_Warning ("GLB: generated index buffer overflow in primitive %d for %s\n", i, mod->name);
 				continue;
 			}
 			for (j = 0; j < nverts; j++)
-				poutindexes[idx_offset + j] = vert_offset + j;
+				poutindexes[idx_offset + j] = j;
 			idx_offset += nverts;
 		}
 
+		surf->numindexes = idx_offset - prim_idx_offset;
+		surf->numtris = surf->numindexes / 3;
 		vert_offset += nverts;
+		surface_index++;
 	}
 
 	total_verts = vert_offset;
@@ -1323,12 +1594,9 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 		q_free (all_normals);
 		q_free (all_uvs);
 		q_free (has_normal_per_prim);
+		glb_free_owned_buffers (&gbldata);
 		return;
 	}
-	outhdr->numverts_vbo = total_verts;
-	outhdr->numverts = total_verts;
-	outhdr->numindexes = total_indexes;
-	outhdr->numtris = total_indexes / 3;
 
 	for (i = 0; i < gbldata.num_primitives; i++)
 	{
@@ -1354,7 +1622,15 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 		for (i = 0; i < gbldata.num_primitives; i++)
 			if (!has_normal_per_prim[i]) need_generate = 1;
 		if (need_generate)
-			glb_compute_normals (all_normals, all_positions, total_verts, poutindexes, total_indexes);
+		{
+			for (surf = outhdr; surf; surf = surf->nextsurface ? (aliashdr_t *)((byte *)surf + surf->nextsurface) : NULL)
+			{
+				int voff = (int)(((iqmvert_t *)((byte *)surf + surf->vertexes)) - poutvert);
+				unsigned short *idx = (unsigned short *)((byte *)surf + surf->indexes);
+				if (voff >= 0 && voff + surf->numverts <= total_verts)
+					glb_compute_normals (all_normals + voff, all_positions + voff, surf->numverts, idx, surf->numindexes);
+			}
+		}
 	}
 
 	for (j = 0; j < total_verts; j++)
@@ -1386,7 +1662,13 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 		float (*tangent_arr)[4] = (float (*)[4]) q_calloc (total_verts, sizeof (float) * 4);
 		if (tangent_arr)
 		{
-			GLMesh_BuildTangents (tangent_arr, all_positions, all_normals, all_uvs, total_verts, poutindexes, total_indexes);
+			for (surf = outhdr; surf; surf = surf->nextsurface ? (aliashdr_t *)((byte *)surf + surf->nextsurface) : NULL)
+			{
+				int voff = (int)(((iqmvert_t *)((byte *)surf + surf->vertexes)) - poutvert);
+				unsigned short *idx = (unsigned short *)((byte *)surf + surf->indexes);
+				if (voff >= 0 && voff + surf->numverts <= total_verts)
+					GLMesh_BuildTangents (tangent_arr + voff, all_positions + voff, all_normals + voff, all_uvs + voff, surf->numverts, idx, surf->numindexes);
+			}
 			for (j = 0; j < total_verts; j++)
 			{
 				poutvert[j].tangent[0] = (int8_t) CLAMP (-127, (int)(tangent_arr[j][0] * 127.f), 127);
@@ -1455,11 +1737,13 @@ void Mod_LoadGLBModel (qmodel_t *mod, void *buffer)
 	if (!mod->cache.data)
 	{
 		Hunk_FreeToLowMark (start);
+		glb_free_owned_buffers (&gbldata);
 		return;
 	}
 	memcpy (mod->cache.data, outhdr, total);
 
 	Hunk_FreeToLowMark (start);
+	glb_free_owned_buffers (&gbldata);
 
 	GLB_DebugPrintf ("GLB: %s loaded OK\n", mod->name);
 }

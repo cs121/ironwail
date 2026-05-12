@@ -96,6 +96,29 @@ static inline int Buf_GetC(stdio_buffer_t *buf)
 	return buf->buffer[buf->pos++];
 }
 
+byte *Image_LoadImageBuffer (const char *name, const byte *buffer, int size, int *width, int *height, enum srcformat *fmt)
+{
+	byte *data, *hunkdata;
+	int numbytes;
+
+	if (!buffer || size <= 0)
+		return NULL;
+
+	data = stbi_load_from_memory (buffer, size, width, height, NULL, 4);
+	if (!data)
+	{
+		Con_Warning ("couldn't load embedded image %s (%s)\n", name ? name : "<unnamed>", stbi_failure_reason ());
+		return NULL;
+	}
+
+	numbytes = (*width) * (*height) * 4;
+	hunkdata = (byte *) Hunk_AllocNameNoFill (numbytes, name ? name : "embedded");
+	memcpy (hunkdata, data, numbytes);
+	q_free (data);
+	*fmt = SRC_RGBA;
+	return hunkdata;
+}
+
 /*
 ============
 Image_LoadImage

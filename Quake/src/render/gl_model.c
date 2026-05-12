@@ -504,7 +504,10 @@ static qmodel_t *Mod_LoadModel (qmodel_t *mod, qboolean crash)
 		break;
 
 	default:
-		Mod_LoadBrushModel (mod, buf);
+		if (COM_HasExtension (mod->name, ".gltf"))
+			Mod_LoadGLBModel (mod, buf);
+		else
+			Mod_LoadBrushModel (mod, buf);
 		break;
 	}
 
