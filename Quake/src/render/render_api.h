@@ -335,14 +335,23 @@ typedef struct i_render_backend_s
 	void (*apply_framegraph_baseline)(unsigned baseline_bits);
 
 	/*
-	 * TODO Future API-neutral resource model:
-	 * - Texture
-	 * - Buffer
-	 * - Sampler
-	 * - ImageView
-	 * - RenderTarget
-	 * - Pipeline
-	 * - DescriptorSet
+	 * Phase 2 note: this interface still contains legacy bridge callbacks
+	 * above. They intentionally preserve the current GL-backed pass execution
+	 * while future API-neutral resource work is planned.
+	 *
+	 * Current shader_id/resource IDs may still map to native GL objects inside
+	 * the GL backend. Future backends must not expose native GLuint/GLenum (or
+	 * equivalent API-native object names) to frontend code.
+	 *
+	 * TODO Future API-neutral resource create/usage descriptions (comments only;
+	 * no ABI added in Phase 2):
+	 * - R_TextureCreateDesc: dimensions, format, usage, mip levels, array/cube.
+	 * - R_BufferCreateDesc: size, usage, memory/update policy.
+	 * - R_SamplerDesc: filter, wrap, anisotropy, compare mode.
+	 * - R_ImageViewDesc: resource, format override, subresource range.
+	 * - R_RenderTargetDesc: color/depth attachments, load/store, samples.
+	 * - R_PipelineDesc: shaders, vertex input, raster/depth/blend state.
+	 * - R_DescriptorSetDesc: resource bindings grouped by pipeline layout.
 	 */
 } IRenderBackend;
 
