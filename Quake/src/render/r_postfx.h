@@ -22,11 +22,13 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #define R_POSTFX_H
 
 #include "cl_postfx.h"
+#include "texture_handles.h"
 
 void R_PostFX_Init (void);
 void R_PostFX_RegisterCvars (void);
 void R_PostFX_GetState (postfx_state_t *out_state);
 unsigned R_PostFX_GetLUTTexture (void);
+render_texture_handle_t R_PostFX_GetLUTTextureHandle (void);
 int R_PostFX_GetLUTSize (void);
 qboolean R_PostFX_DoFEnabledEffective (void);
 qboolean R_PostFX_GodraysPreviewEnabledEffective (void);

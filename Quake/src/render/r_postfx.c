@@ -23,6 +23,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "glquake.h"
 #include "gl_backend.h"
 #include "r_framegraph.h"
+#include "r_resources_gl.h"
 #include "r_postfx.h"
 #include "cl_postfx.h"
 #include "gl_texmgr.h"
@@ -32,6 +33,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
  * Transitional native texture id exposed in this unit for LUT management.
  * Long-term target: opaque backend resource handle + resolve/upload service. */
 static GLuint r_postfx_lut_tex;
+static render_texture_handle_t r_postfx_lut_handle = RENDER_TEXTURE_HANDLE_INVALID;
 static int r_postfx_lut_size;
 
 static void R_PostFX_ReloadLUTs (void);
@@ -50,6 +52,10 @@ extern cvar_t r_postfx_debug;
 extern cvar_t r_refgl_debug;
 extern cvar_t r_refgl_log_resources;
 extern cvar_t r_refgl_validate_lifetime;
+#ifndef RENDERER_PLUGIN_BUILD
+extern cvar_t r_backend_debug;
+extern cvar_t r_renderer_migration_debug;
+#endif
 
 static const char *const postfx_lut_files[PFX_LUT_COUNT] =
 {
@@ -63,6 +69,15 @@ static const char *const postfx_lut_files[PFX_LUT_COUNT] =
 	"gfx/lut/quad"
 };
 
+static qboolean R_PostFX_TextureHandleDebugEnabled (void)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	return false;
+#else
+	return r_renderer_migration_debug.value != 0.f || r_backend_debug.value != 0.f;
+#endif
+}
+
 static void R_PostFX_DestroyLUTTexture (void)
 {
 	if (r_postfx_lut_tex)
@@ -72,6 +87,7 @@ static void R_PostFX_DestroyLUTTexture (void)
 		GL_DeleteNativeTexture (r_postfx_lut_tex);
 		r_postfx_lut_tex = 0;
 	}
+	r_postfx_lut_handle = R_TextureHandle_Invalid ();
 	r_postfx_lut_size = 0;
 }
 
@@ -181,6 +197,9 @@ static void R_PostFX_ReloadLUTs (void)
 	}
 	R_Backend_ConfigurePostFXLUTTexture (r_postfx_lut_tex);
 	GL_Backend_UploadPostFXLUTData (r_postfx_lut_tex, lut_storage, size * size, size, PFX_LUT_COUNT);
+	r_postfx_lut_handle = GL_Backend_TextureHandleFromNativeTexture ((unsigned)GL_TEXTURE_2D_ARRAY, (unsigned)r_postfx_lut_tex);
+	if (!R_TextureHandle_IsValid (r_postfx_lut_handle) && R_PostFX_TextureHandleDebugEnabled ())
+		Con_DPrintf ("R_TextureHandle: PostFX LUT native handle registration failed; legacy path remains available\n");
 
 	q_free(lut_storage);
 	r_postfx_lut_size = size;
@@ -223,6 +242,11 @@ void R_PostFX_GetState (postfx_state_t *out_state)
 unsigned R_PostFX_GetLUTTexture (void)
 {
 	return (unsigned)r_postfx_lut_tex;
+}
+
+render_texture_handle_t R_PostFX_GetLUTTextureHandle (void)
+{
+	return r_postfx_lut_handle;
 }
 
 int R_PostFX_GetLUTSize (void)

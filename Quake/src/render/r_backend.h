@@ -39,6 +39,8 @@ typedef struct render_backend_milestones_s
 render_backend_runtime_status_t R_Backend_GetRuntimeStatusForName (const char *backend_name);
 const char *R_Backend_GetRuntimeStatusLabel (render_backend_runtime_status_t status);
 qboolean R_Backend_GetMilestonesForName (const char *backend_name, RenderBackendMilestones *out_milestones);
+extern cvar_t r_renderer_texture_handle_test;
+
 void R_Backend_QuerySurfaceInfo (RenderBackendSurfaceInfo *out_info);
 const char *R_Backend_ResourceSlotName (render_backend_resource_slot_t slot);
 qboolean R_Backend_GetFrameGraphResourceBinding (unsigned resource_bit, render_backend_resource_slot_t *out_slot, qboolean *out_requires_backend_resource);
