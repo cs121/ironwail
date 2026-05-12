@@ -142,6 +142,7 @@ cvar_t r_backend_api = { "r_backend_api", "gl", CVAR_ARCHIVE };
 cvar_t r_backend_allow_builtin_gl = { "r_backend_allow_builtin_gl", "1", CVAR_ARCHIVE };
 cvar_t r_backend_debug = { "r_backend_debug", "0", CVAR_NONE };
 cvar_t r_renderer_migration_debug = { "r_renderer_migration_debug", "0", CVAR_NONE };
+extern cvar_t r_renderer_texture_handle_test;
 extern int r_framecount;
 extern cvar_t r_framegraph_debug;
 extern cvar_t r_refgl_debug;
@@ -194,13 +195,13 @@ static void R_Backend_WrapperAudit_f (void)
 ================
 R_Backend_MigrationAudit_f
 
-Text-only Phase 2 migration audit. Keep this conservative: it names known
+Text-only Phase 3 migration audit. Keep this conservative: it names known
 OpenGL coupling points without changing renderer selection or draw paths.
 ================
 */
 static void R_Backend_MigrationAudit_f (void)
 {
-	Con_Printf ("Renderer backend migration audit (Phase 2):\n");
+	Con_Printf ("Renderer backend migration audit (Phase 3):\n");
 	Con_Printf ("  Core/Header-Leaks:\n");
 	Con_Printf ("    - quakedef.h includes SDL_opengl.h.\n");
 	Con_Printf ("    - quakedef.h includes gl_model.h.\n");
@@ -234,15 +235,27 @@ static void R_Backend_MigrationAudit_f (void)
 	Con_Printf ("    - B Native GL access: direct target/texnum/internal_format/bindless_handle access remains concentrated in gl_texmgr.c, gl_rmain.c/r_postfx.c, r_world.c, and backend resource glue.\n");
 	Con_Printf ("    - C Upload/lifetime: TexMgr_NewTexture/TexMgr_LoadImage*/TexMgr_ReloadImage/TexMgr_FreeTexture and GL_DeleteTexture remain GL texture lifetime owners.\n");
 	Con_Printf ("    - D Material/model binding: world, alias skins, sprites, particles, decals, UI/HUD, and postfx still bind through gltexture_t.\n");
-	Con_Printf ("  First neutral texture-handle candidate:\n");
-	Con_Printf ("    - Preferred: PostFX LUT, then isolated UI/2D texture adapter.\n");
-	Con_Printf ("    - Avoid first: world textures, alias skins, shadows, and FBO attachments.\n");
+	Con_Printf ("  Phase 3 texture handle test:\n");
+	Con_Printf ("    - Phase 3 texture handle test available: yes\n");
+	Con_Printf ("    - selected candidate: PostFX LUT\n");
+	Con_Printf ("    - cvar: r_renderer_texture_handle_test\n");
+	Con_Printf ("    - default path: legacy\n");
+	Con_Printf ("    - fallback: enabled\n");
+	Con_Printf ("    - native GL ownership: GL resource/backend only\n");
+	Con_Printf ("    - migrated scope: exactly one isolated texture path\n");
+	Con_Printf ("    - Avoided: world textures, alias skins, shadows, and FBO attachments.\n");
+	Con_Printf ("  Known Phase-3 leaks left in place:\n");
+	Con_Printf ("    - quakedef.h GL leak.\n");
+	Con_Printf ("    - gltexture_t public bridge.\n");
+	Con_Printf ("    - gl_rmain.c legacy GL orchestration.\n");
+	Con_Printf ("    - glprogs_t GLuint programs.\n");
+	Con_Printf ("    - framegraph legacy pass execution.\n");
 	Con_Printf ("  Policy:\n");
 	Con_Printf ("    - r_backend=%s r_backend_api=%s r_backend_allow_builtin_gl=%s.\n",
 		r_backend.string ? r_backend.string : "<null>",
 		r_backend_api.string ? r_backend_api.string : "<null>",
 		r_backend_allow_builtin_gl.string ? r_backend_allow_builtin_gl.string : "<null>");
-	Con_Printf ("    - Vulkan/DX12 remain stub/blocklisted for activation in Phase 2.\n");
+	Con_Printf ("    - Vulkan/DX12 remain stub/blocklisted for activation in Phase 3.\n");
 }
 
 /*
@@ -2179,6 +2192,7 @@ void R_Backend_Init (void)
 	Cvar_RegisterVariable (&r_backend_allow_builtin_gl);
 	Cvar_RegisterVariable (&r_backend_debug);
 	Cvar_RegisterVariable (&r_renderer_migration_debug);
+	Cvar_RegisterVariable (&r_renderer_texture_handle_test);
 	Cvar_RegisterVariable (&r_refgl_debug);
 	Cvar_RegisterVariable (&r_refgl_log_init);
 	Cvar_RegisterVariable (&r_refgl_log_passes);

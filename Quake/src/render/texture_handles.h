@@ -31,4 +31,17 @@ typedef uintptr_t src_offset_t;
 struct gltexture_s;
 typedef struct gltexture_s gltexture_t;
 
+static inline qboolean R_TextureHandle_IsValid (render_texture_handle_t h)
+{
+	return h != RENDER_TEXTURE_HANDLE_INVALID;
+}
+
+static inline render_texture_handle_t R_TextureHandle_Invalid (void)
+{
+	return RENDER_TEXTURE_HANDLE_INVALID;
+}
+
+render_texture_handle_t R_TextureHandle_FromLegacyGLTexture (gltexture_t *tex);
+gltexture_t *R_TextureHandle_ResolveLegacyGLTexture (render_texture_handle_t h);
+
 #endif /* RENDER_TEXTURE_HANDLES_H */

@@ -26,6 +26,7 @@ Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
 #include "cl_postfx.h"
 #include "r_postfx.h"
 #include "r_framegraph.h"
+#include "r_backend.h"
 #include "r_godrays.h"
 #include "r_skyvis.h"
 #include "r_ssao.h"
@@ -45,6 +46,10 @@ extern cvar_t r_refgl_debug;
 extern cvar_t r_refgl_log_init;
 extern cvar_t r_refgl_log_passes;
 extern cvar_t r_refgl_log_resources;
+#ifndef RENDERER_PLUGIN_BUILD
+extern cvar_t r_backend_debug;
+extern cvar_t r_renderer_migration_debug;
+#endif
 extern cvar_t r_refgl_validate_fbo;
 extern cvar_t r_ref_enable_postfx;
 extern cvar_t r_ref_enable_fog;
@@ -759,6 +764,7 @@ cvar_t	r_postfx_lut = { "r_postfx_lut", "1", CVAR_ARCHIVE };
 cvar_t	r_postfx_lut_strength_powerup = { "r_postfx_lut_strength_powerup", "0.6", CVAR_ARCHIVE };
 cvar_t	r_postfx_lut_strength_underwater = { "r_postfx_lut_strength_underwater", "0.5", CVAR_ARCHIVE };
 cvar_t	r_postfx_lut_debug_id = { "r_postfx_lut_debug_id", "0", CVAR_NONE };
+cvar_t	r_renderer_texture_handle_test = { "r_renderer_texture_handle_test", "0", CVAR_NONE };
 cvar_t	r_postfx_debug = { "r_postfx_debug", "0", CVAR_NONE };
 cvar_t	r_film35_enable = { "r_film35_enable", "0", CVAR_ARCHIVE };
 cvar_t	r_film35_strength = { "r_film35_strength", "0.35", CVAR_ARCHIVE };
@@ -3354,6 +3360,16 @@ static qboolean GL_PostFXBloomBoostActive (void)
 	return state.bloom_boost > 0.f;
 }
 
+
+static qboolean GL_RendererMigrationDebugEnabled (void)
+{
+#ifdef RENDERER_PLUGIN_BUILD
+	return false;
+#else
+	return r_renderer_migration_debug.value != 0.f || r_backend_debug.value != 0.f;
+#endif
+}
+
 static GLuint R_ResolveCriticalResourceOrLegacyFallback (const RenderGraphResourceHandle *resources,
 	render_backend_resource_slot_t slot, const char *usage_tag, GLuint legacy_value, const char *legacy_label)
 {
@@ -3758,7 +3774,24 @@ void GL_PostProcess (const r_postprocess_input_t *input)
 	GL_BindNative (GL_TEXTURE6, GL_TEXTURE_2D, godrays_mask);
 	GL_BindNative (GL_TEXTURE7, GL_TEXTURE_2D, godrays_source);
 	GL_BindNative (GL_TEXTURE8, GL_TEXTURE_2D, ssao_texture);
-	GL_BindNative (GL_TEXTURE9, GL_TEXTURE_2D_ARRAY, R_PostFX_GetLUTTexture ());
+	if (r_renderer_texture_handle_test.value != 0.f)
+	{
+		render_texture_handle_t postfx_lut_handle = R_PostFX_GetLUTTextureHandle ();
+		if (!GL_Backend_BindTextureHandle ((unsigned)GL_TEXTURE9, postfx_lut_handle, (unsigned)GL_TEXTURE_2D_ARRAY))
+		{
+			if (GL_RendererMigrationDebugEnabled ())
+				Con_DPrintf ("R_Migration: PostFX LUT texture handle path failed; falling back to legacy GL texture id\n");
+			GL_BindNative (GL_TEXTURE9, GL_TEXTURE_2D_ARRAY, R_PostFX_GetLUTTexture ());
+		}
+		else if (GL_RendererMigrationDebugEnabled ())
+		{
+			Con_DPrintf ("R_Migration: PostFX LUT texture handle path bound handle %u\n", (unsigned)postfx_lut_handle);
+		}
+	}
+	else
+	{
+		GL_BindNative (GL_TEXTURE9, GL_TEXTURE_2D_ARRAY, R_PostFX_GetLUTTexture ());
+	}
 	GL_BindNative (GL_TEXTURE10, GL_TEXTURE_2D, 0);
 	GL_BindBufferRange (GL_SHADER_STORAGE_BUFFER, 0, gl_palette_buffer[palidx], 0, 256 * sizeof (GLuint));
 	{
