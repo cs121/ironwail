@@ -39,12 +39,18 @@ static qboolean s_applying_backend_cvar = false;
 static qboolean s_applying_backend_api_cvar = false;
 static qboolean s_backend_active = false;
 static qboolean s_backend_audit_cmd_registered = false;
+static qboolean s_backend_migration_audit_cmd_registered = false;
 static qboolean s_backend_vulkan_status_cmd_registered = false;
 static qboolean s_backend_dx12_status_cmd_registered = false;
 static qboolean s_ref_gl_plugin_candidate_found = false;
 static qboolean s_ref_gl_plugin_loaded = false;
 static qboolean s_ref_gl_plugin_load_failed = false;
 static qboolean s_renderer_plugins_scanned = false;
+static qboolean s_builtin_gl_registered = false;
+static unsigned int s_last_plugin_abi_major = 0u;
+static unsigned int s_last_plugin_abi_minor = 0u;
+static unsigned int s_ref_gl_plugin_abi_major = 0u;
+static unsigned int s_ref_gl_plugin_abi_minor = 0u;
 static qboolean s_allow_external_renderer_plugins = false;
 static int s_missing_resource_warn_frame[R_BACKEND_RESOURCE_SLOT_COUNT];
 static void *s_plugin_libs[R_BACKEND_MAX_PLUGIN_LIBS];
@@ -133,6 +139,9 @@ static const iw_renderer_plugin_pipeline_services_t s_plugin_pipeline_services =
 
 cvar_t r_backend = { "r_backend", "gl", CVAR_ARCHIVE };
 cvar_t r_backend_api = { "r_backend_api", "gl", CVAR_ARCHIVE };
+cvar_t r_backend_allow_builtin_gl = { "r_backend_allow_builtin_gl", "1", CVAR_ARCHIVE };
+cvar_t r_backend_debug = { "r_backend_debug", "0", CVAR_NONE };
+cvar_t r_renderer_migration_debug = { "r_renderer_migration_debug", "0", CVAR_NONE };
 extern int r_framecount;
 extern cvar_t r_framegraph_debug;
 extern cvar_t r_refgl_debug;
@@ -151,6 +160,18 @@ extern cvar_t r_ref_enable_lighting;
 extern cvar_t r_dlight_tiled;
 extern qboolean IW_RendererBuiltinGL_RegisterInternal (const iw_renderer_plugin_host_api_t *host_api);
 
+static qboolean R_Backend_DebugEnabled (void)
+{
+	return r_backend_debug.value != 0.f
+		|| r_refgl_debug.value != 0.f
+		|| (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND));
+}
+
+static qboolean R_Backend_MigrationDebugEnabled (void)
+{
+	return r_renderer_migration_debug.value != 0.f || R_Backend_DebugEnabled ();
+}
+
 /*
 ================
 R_Backend_WrapperAudit_f
@@ -166,7 +187,44 @@ static void R_Backend_WrapperAudit_f (void)
 	Con_Printf ("  P1: direct glDraw*/GL_Draw* draw-path migration complete (dedicated backend files only; non-draw utility calls like glDrawPixels remain explicitly scoped)\n");
 	Con_Printf ("  P2: bind-time texture/program glue in legacy passes (move to descriptor sets + explicit pipeline binding)\n");
 	Con_Printf ("  P3: optional compute/dispatch paths (already abstracted via R_Backend_Dispatch where available)\n");
-	Con_Printf ("  note: internal builtin OpenGL registration path is obsolete; external ref_gl renderer is the default runtime path.\n");
+	Con_Printf ("  note: internal builtin OpenGL remains the default-safe fallback while external ref_gl migration continues.\n");
+}
+
+/*
+================
+R_Backend_MigrationAudit_f
+
+Text-only Phase 1 migration audit. Keep this conservative: it names known
+OpenGL coupling points without changing renderer selection or draw paths.
+================
+*/
+static void R_Backend_MigrationAudit_f (void)
+{
+	Con_Printf ("Renderer backend migration audit (Phase 1):\n");
+	Con_Printf ("  Core-Level:\n");
+	Con_Printf ("    - Quake/src/core/quakedef.h includes SDL_opengl.h.\n");
+	Con_Printf ("    - Quake/src/core/quakedef.h includes gl_model.h.\n");
+	Con_Printf ("    - Quake/src/core/quakedef.h includes gl_texmgr.h.\n");
+	Con_Printf ("    - Quake/src/core/model_types.h is currently a shim over gl_model.h.\n");
+	Con_Printf ("  Public GL Texture Leak:\n");
+	Con_Printf ("    - Quake/src/render/gl_texmgr.h exposes GLenum/GLuint/GLuint64 in gltexture_t.\n");
+	Con_Printf ("    - texture_handles.h exists, but gltexture_t remains the bridge type.\n");
+	Con_Printf ("  Legacy GL Orchestrator:\n");
+	Con_Printf ("    - Quake/src/render/gl_rmain.c owns R_RenderView, FBOs, PostFX, SSAO, Bloom, Godrays, and readbacks.\n");
+	Con_Printf ("  Framegraph/Legacy:\n");
+	Con_Printf ("    - Framegraph is declarative, but pass execution still calls legacy/GL callbacks.\n");
+	Con_Printf ("    - r_world/r_alias/r_part still rely on GL state baselines.\n");
+	Con_Printf ("  Shader Leak:\n");
+	Con_Printf ("    - glprogs_t stores GLuint program IDs.\n");
+	Con_Printf ("    - Shader metadata currently treats shader_id effectively as a GL program handle.\n");
+	Con_Printf ("  Resource Leak:\n");
+	Con_Printf ("    - Framegraph resource slots are still resolved to GL-native IDs.\n");
+	Con_Printf ("  Policy:\n");
+	Con_Printf ("    - r_backend=%s r_backend_api=%s r_backend_allow_builtin_gl=%s.\n",
+		r_backend.string ? r_backend.string : "<null>",
+		r_backend_api.string ? r_backend_api.string : "<null>",
+		r_backend_allow_builtin_gl.string ? r_backend_allow_builtin_gl.string : "<null>");
+	Con_Printf ("    - Vulkan/DX12 remain stub/blocklisted for activation in Phase 1.\n");
 }
 
 /*
@@ -827,6 +885,60 @@ const char *R_Backend_GetRuntimeStatusLabel (render_backend_runtime_status_t sta
 	}
 }
 
+static const char *R_Backend_GetRuntimeClassLabel (const IRenderBackend *backend)
+{
+	if (!backend)
+		return "none";
+	if (R_Backend_GetRuntimeStatusForBackend (backend) == R_BACKEND_RUNTIME_STUB)
+		return "stub";
+	if (backend->name && !q_strcasecmp (backend->name, "OpenGL"))
+	{
+		if (s_builtin_gl_registered && backend == s_gl_backend)
+			return "builtin";
+		if (s_ref_gl_plugin_loaded)
+			return "external plugin";
+	}
+	return s_plugin_lib_count > 0 ? "external plugin" : "builtin";
+}
+
+static void R_Backend_PrintStartupDiagnostics (const char *requested_backend, qboolean external_plugins_requested)
+{
+	const char *active_name = (s_active_backend && s_active_backend->name) ? s_active_backend->name : "<none>";
+
+	if (R_Backend_DebugEnabled () || r_renderer_migration_debug.value != 0.f)
+	{
+		Con_Printf ("R_Backend: requested backend='%s' active='%s' api='%s' runtime='%s'.\n",
+			requested_backend ? requested_backend : "<null>",
+			active_name,
+			r_backend_api.string ? r_backend_api.string : "<null>",
+			R_Backend_GetRuntimeClassLabel (s_active_backend));
+		Con_Printf ("R_Backend: external_plugins requested=%s scanned=%s libs_loaded=%d ref_gl_found=%s ref_gl_loaded=%s builtin_gl_allowed=%s builtin_gl_used=%s.\n",
+			external_plugins_requested ? "yes" : "no",
+			s_renderer_plugins_scanned ? "yes" : "no",
+			s_plugin_lib_count,
+			s_ref_gl_plugin_candidate_found ? "yes" : "no",
+			s_ref_gl_plugin_loaded ? "yes" : "no",
+			r_backend_allow_builtin_gl.value != 0.f ? "yes" : "no",
+			(s_builtin_gl_registered && s_active_backend == s_gl_backend) ? "yes" : "no");
+		Con_Printf ("R_Backend: plugin ABI host=%u.%u last=%u.%u ref_gl=%u.%u.\n",
+			IW_RENDERER_PLUGIN_ABI_MAJOR,
+			IW_RENDERER_PLUGIN_ABI_MINOR,
+			s_last_plugin_abi_major,
+			s_last_plugin_abi_minor,
+			s_ref_gl_plugin_abi_major,
+			s_ref_gl_plugin_abi_minor);
+	}
+
+	if (R_Backend_MigrationDebugEnabled ())
+	{
+		Con_Printf ("R_Migration: Vulkan/DX12 status: Vulkan=%s DX12=%s; stub backends are blocked from activation.\n",
+			R_Backend_GetRuntimeStatusLabel (R_Backend_GetRuntimeStatusForName ("Vulkan")),
+			R_Backend_GetRuntimeStatusLabel (R_Backend_GetRuntimeStatusForName ("DX12")));
+		Con_Printf ("R_Migration: runtime class='%s'; builtin GL fallback policy is explicit through r_backend_allow_builtin_gl.\n",
+			R_Backend_GetRuntimeClassLabel (s_active_backend));
+	}
+}
+
 qboolean R_Backend_GetMilestonesForName (const char *backend_name, RenderBackendMilestones *out_milestones)
 {
 	const IRenderBackend *backend = R_Backend_FindByName (backend_name);
@@ -1312,6 +1424,22 @@ static qboolean R_Backend_LoadPluginFromPath (const char *path)
 	}
 
 	plugin_name = (descriptor->plugin_name && descriptor->plugin_name[0]) ? descriptor->plugin_name : path;
+	s_last_plugin_abi_major = descriptor->abi_major;
+	s_last_plugin_abi_minor = descriptor->abi_minor;
+	if (!q_strcasecmp (COM_SkipPath (path), s_ref_gl_plugin_filename))
+	{
+		s_ref_gl_plugin_abi_major = descriptor->abi_major;
+		s_ref_gl_plugin_abi_minor = descriptor->abi_minor;
+	}
+	if (R_Backend_DebugEnabled ())
+	{
+		Con_Printf ("R_Backend: plugin candidate '%s' ABI=%u.%u host=%u.%u.\n",
+			plugin_name,
+			descriptor->abi_major,
+			descriptor->abi_minor,
+			IW_RENDERER_PLUGIN_ABI_MAJOR,
+			IW_RENDERER_PLUGIN_ABI_MINOR);
+	}
 	if (descriptor->abi_major != IW_RENDERER_PLUGIN_ABI_MAJOR)
 	{
 		Con_Warning (
@@ -1381,7 +1509,7 @@ static void R_Backend_LoadRendererPlugins (void)
 	int plugins_loaded = 0;
 	int plugin_candidates = 0;
 	int plugin_failed = 0;
-	const qboolean plugin_debug = (r_refgl_debug.value != 0.0f || COM_CheckParm ("-refgl_debug") > 0);
+	const qboolean plugin_debug = (R_Backend_DebugEnabled () || COM_CheckParm ("-refgl_debug") > 0);
 
 	s_ref_gl_plugin_candidate_found = false;
 	s_ref_gl_plugin_loaded = false;
@@ -2013,6 +2141,7 @@ void R_Backend_Init (void)
 	const qboolean external_plugins_requested =
 		(COM_CheckParm ("-use_ref_gl_plugin") > 0)
 		|| (COM_CheckParm ("-renderer_plugins") > 0);
+	const char *requested_backend = r_backend.string;
 
 	if (s_backend_initialized)
 		return;
@@ -2029,6 +2158,9 @@ void R_Backend_Init (void)
 	memset (s_missing_resource_warn_frame, 0xff, sizeof (s_missing_resource_warn_frame));
 	Cvar_RegisterVariable (&r_backend);
 	Cvar_RegisterVariable (&r_backend_api);
+	Cvar_RegisterVariable (&r_backend_allow_builtin_gl);
+	Cvar_RegisterVariable (&r_backend_debug);
+	Cvar_RegisterVariable (&r_renderer_migration_debug);
 	Cvar_RegisterVariable (&r_refgl_debug);
 	Cvar_RegisterVariable (&r_refgl_log_init);
 	Cvar_RegisterVariable (&r_refgl_log_passes);
@@ -2048,6 +2180,11 @@ void R_Backend_Init (void)
 	{
 		Cmd_AddCommand ("r_backend_wrapper_audit", R_Backend_WrapperAudit_f);
 		s_backend_audit_cmd_registered = true;
+	}
+	if (!s_backend_migration_audit_cmd_registered)
+	{
+		Cmd_AddCommand ("r_backend_migration_audit", R_Backend_MigrationAudit_f);
+		s_backend_migration_audit_cmd_registered = true;
 	}
 	if (!s_backend_vulkan_status_cmd_registered)
 	{
@@ -2075,9 +2212,23 @@ void R_Backend_Init (void)
 
 	if (legacy_gl_requested || !external_plugins_requested || !s_ref_gl_plugin_loaded)
 	{
-		R_Backend_FillPluginHostApi (&host_api);
-		if (!IW_RendererBuiltinGL_RegisterInternal (&host_api))
-			Sys_Error ("Failed to register internal OpenGL renderer backend.\n");
+		if (r_backend_allow_builtin_gl.value != 0.f)
+		{
+			R_Backend_FillPluginHostApi (&host_api);
+			if (!IW_RendererBuiltinGL_RegisterInternal (&host_api))
+				Sys_Error ("Failed to register internal OpenGL renderer backend.\n");
+			s_builtin_gl_registered = true;
+			if (R_Backend_MigrationDebugEnabled ())
+				Con_Printf ("R_Migration: builtin OpenGL fallback registered (r_backend_allow_builtin_gl=1).\n");
+		}
+		else
+		{
+			Con_Warning ("Builtin OpenGL fallback disabled by r_backend_allow_builtin_gl 0.\n");
+			if (!external_plugins_requested)
+				Con_Warning ("No external renderer plugin load was requested; use -use_ref_gl_plugin with ref_gl or set r_backend_allow_builtin_gl 1.\n");
+			else if (!s_ref_gl_plugin_loaded)
+				Con_Warning ("External ref_gl plugin was not loaded; builtin OpenGL fallback is disabled.\n");
+		}
 	}
 
 	if (!R_Backend_HasRegisteredName ("OpenGL"))
@@ -2144,7 +2295,7 @@ void R_Backend_Init (void)
 			R_Backend_ApplySelectionToCvar ();
 	}
 
-	if (r_refgl_log_init.value != 0.f || r_refgl_debug.value != 0.f || (debug_enable.value != 0.f && DBG_ChannelEnabled(DBG_CH_BACKEND)))
+	if (r_refgl_log_init.value != 0.f || R_Backend_DebugEnabled ())
 	{
 		Con_DPrintf ("R_Backend_Init: active backend='%s' api='%s' registered=%d plugins_loaded=%d\n",
 			s_active_backend && s_active_backend->name ? s_active_backend->name : "<none>",
@@ -2152,6 +2303,7 @@ void R_Backend_Init (void)
 			s_registered_backend_count,
 			s_plugin_lib_count);
 	}
+	R_Backend_PrintStartupDiagnostics (requested_backend, external_plugins_requested);
 
 	R_Backend_PrintApiHelp ();
 }
@@ -2203,6 +2355,11 @@ void R_Backend_Shutdown (void)
 	s_ref_gl_plugin_loaded = false;
 	s_ref_gl_plugin_load_failed = false;
 	s_renderer_plugins_scanned = false;
+	s_builtin_gl_registered = false;
+	s_last_plugin_abi_major = 0u;
+	s_last_plugin_abi_minor = 0u;
+	s_ref_gl_plugin_abi_major = 0u;
+	s_ref_gl_plugin_abi_minor = 0u;
 	s_renderer_plugin_search_dir_count = 0;
 	memset (s_renderer_plugin_search_dirs, 0, sizeof (s_renderer_plugin_search_dirs));
 	R_Backend_ClearExternalResourceRegistry ();
