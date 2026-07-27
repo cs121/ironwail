@@ -291,7 +291,7 @@ copy "$(SolutionDir)..\zlib\$(PlatformShortName)\*.dll" "$(TargetDir)"
     <ClCompile Include="..\..\Quake\src\assets\ktx2_write.c" />
     <ClCompile Include="..\..\Quake\src\platform\gl_vidsdl.c" />
     <ClCompile Include="..\..\Quake\src\render\gl_warp.c" />
-    <ClCompile Include="..\..\common\lightgrid.c" />
+    <ClCompile Include="..\..\Quake\src\render\gl_lightgrid_stub.c" />
     <ClCompile Include="..\..\Quake\src\core\host.c" />
     <ClCompile Include="..\..\Quake\src\core\host_cmd.c" />
     <ClCompile Include="..\..\Quake\src\bot\bot_main.c" />

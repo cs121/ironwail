@@ -34,7 +34,6 @@ if (WIN32)
 endif()
 
 file(GLOB_RECURSE IWAIL_SRC CONFIGURE_DEPENDS "Quake/src/*.c" "Quake/src/*.m")
-file(GLOB COMMON_SRC CONFIGURE_DEPENDS "common/*.c" "common/*.h")
 
 set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/thirdparty/bc7enc.c PROPERTIES LANGUAGE CXX)
 
@@ -64,7 +63,7 @@ elseif (PC_MAD_FOUND)
     list(REMOVE_ITEM IWAIL_SRC ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/audio/snd_mpg123.c)
 endif()
 
-add_executable(ironwail ${IWAIL_SRC} ${COMMON_SRC})
+add_executable(ironwail ${IWAIL_SRC})
 target_compile_features(ironwail PRIVATE c_std_11 cxx_std_17)
 target_include_directories(ironwail PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/assets;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/audio;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/bot;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/client;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/core;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/gamecode;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/network;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/physics;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/platform;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/render;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/server;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/thirdparty;${CMAKE_CURRENT_SOURCE_DIR}/Quake/src/ui)
 if (UNIX)

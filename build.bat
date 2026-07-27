@@ -144,10 +144,18 @@ REM ========== Renderer-Plugins (pflicht) ==========
 call :log "[4a/6] Kopiere Renderer-Plugin-DLLs..."
 call :copy_required_file "%SRC_REF_GL%" "%DST_DIR%\ref_gl.dll" "ref_gl.dll"
 if errorlevel 1 exit /b !errorlevel!
-call :copy_required_file "%SRC_REF_VK%" "%DST_DIR%\ref_vk.dll" "ref_vk.dll"
-if errorlevel 1 exit /b !errorlevel!
-call :copy_required_file "%SRC_REF_DX12%" "%DST_DIR%\ref_dx12.dll" "ref_dx12.dll"
-if errorlevel 1 exit /b !errorlevel!
+if exist "%SRC_REF_VK%" (
+  call :log "[INFO] Kopiere ref_vk.dll..."
+  copy /Y "%SRC_REF_VK%" "%DST_DIR%\ref_vk.dll" >nul
+) else (
+  call :log "[WARN] ref_vk.dll nicht gefunden - übersprungen"
+)
+if exist "%SRC_REF_DX12%" (
+  call :log "[INFO] Kopiere ref_dx12.dll..."
+  copy /Y "%SRC_REF_DX12%" "%DST_DIR%\ref_dx12.dll" >nul
+) else (
+  call :log "[WARN] ref_dx12.dll nicht gefunden - übersprungen"
+)
 
 REM ========== Runtime Assets ==========
 call :log "[5/6] Kopiere id1-Assets..."

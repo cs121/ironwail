@@ -283,7 +283,7 @@ OBJS = strlcat.o \
 	fs_searchpath.o \
 	fs_pack.o \
 	bootstrap.o \
-	../common/lightgrid.o \
+	gl_lightgrid_stub.o \
 	mat_material.o \
 	mat_material_parse.o \
         steam.o \

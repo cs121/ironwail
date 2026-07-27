@@ -6,6 +6,7 @@ Quake/*.d
 Quake/*.res
 Quake/*.exe
 Quake/ironwail
+/renderer_builtin_gl_plugin.obj
 build/
 /.vs
 /out/
